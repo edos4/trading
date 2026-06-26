@@ -17,6 +17,8 @@ from __future__ import annotations
 import asyncio
 import importlib
 import pkgutil
+from datetime import datetime, timezone
+from pathlib import Path
 
 import patterns as patterns_pkg
 from patterns.base_pattern import BasePattern, TradeSignal
@@ -32,6 +34,9 @@ from analysis.vision_checker import VisionChecker, VisionVerdict
 from config import settings
 from utils.logger import log
 
+PATTERNS_DETECTED_FILE = Path("patterns_detected.txt")
+EXCLUDED_PATTERNS = {"pattern_001_ema_crossover"}
+
 
 class MarketScanner:
     def __init__(self):
@@ -43,12 +48,14 @@ class MarketScanner:
         # self._orders   = OrderManager(self._client)
         # self._risk     = RiskGuard(self._client)
         self._patterns: list[BasePattern] = []
+        self._pattern_files: dict[str, str] = {}
         self._running  = False
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
     def start(self) -> None:
         # self._client.connect()
         self._discover_patterns()
+        self._init_patterns_detected_file()
         for p in self._patterns:
             p.on_start()
         self._running = True
@@ -98,6 +105,7 @@ class MarketScanner:
                             continue
                         signal = pattern.analyze(snapshot, self._store)
                         if signal:
+                            self._record_detection(signal)
                             await self._process_signal(signal, pattern)
 
         self._save_scan_charts(all_timeframes)
@@ -190,6 +198,26 @@ class MarketScanner:
         )
 
     # ── Pattern discovery ──────────────────────────────────────────────────────
+    def _init_patterns_detected_file(self) -> None:
+        PATTERNS_DETECTED_FILE.write_text(
+            "# Pattern detections (pattern_001_ema_crossover excluded)\n"
+            "# timestamp | pattern | file | symbol | timeframe | action | confidence\n\n",
+            encoding="utf-8",
+        )
+
+    def _record_detection(self, signal: TradeSignal) -> None:
+        if signal.pattern in EXCLUDED_PATTERNS:
+            return
+        filename = self._pattern_files.get(signal.pattern, "?")
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        line = (
+            f"{ts} | {signal.pattern} | {filename} | {signal.symbol} | "
+            f"{signal.timeframe} | {signal.action} | "
+            f"confidence={signal.confidence:.2f}\n"
+        )
+        with PATTERNS_DETECTED_FILE.open("a", encoding="utf-8") as f:
+            f.write(line)
+
     def _discover_patterns(self) -> None:
         for module_info in pkgutil.iter_modules(patterns_pkg.__path__):
             if module_info.name.startswith("pattern_"):
@@ -201,4 +229,5 @@ class MarketScanner:
                             and attr is not BasePattern):
                         instance = attr()
                         self._patterns.append(instance)
+                        self._pattern_files[instance.name] = f"patterns/{module_info.name}.py"
                         log.info(f"Scanner | Registered pattern: {instance}")

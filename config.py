@@ -28,9 +28,10 @@ class Settings(BaseSettings):
     max_open_positions: int = 8
 
     # ── Scanner ────────────────────────────────────────────────────────────
-    watchlist: str = "AAPL,MSFT,NVDA,SPY"
-    tv_screener: str = "america"
-    tv_exchange: str = "NASDAQ"
+    watchlist: str
+    tv_screener: str
+    tv_exchange: str
+    tv_exchange_overrides: str = ""
     tv_use_ta_fallback: bool = False  # unused; kept for .env compatibility
     # Daily bars to pull from TradingView screener (close[0]=today, close[1]=yesterday, …)
     tv_history_days: int = 252  # ~1 trading year
@@ -62,6 +63,20 @@ class Settings(BaseSettings):
     @property
     def symbols(self) -> list[str]:
         return [s.strip().upper() for s in self.watchlist.split(",") if s.strip()]
+
+    @property
+    def symbol_exchange_overrides(self) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for pair in self.tv_exchange_overrides.split(","):
+            pair = pair.strip()
+            if not pair or ":" not in pair:
+                continue
+            symbol, exchange = pair.split(":", 1)
+            symbol = symbol.strip().upper()
+            exchange = exchange.strip().upper()
+            if symbol and exchange:
+                out[symbol] = exchange
+        return out
 
 
 settings = Settings()
