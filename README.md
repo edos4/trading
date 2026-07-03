@@ -74,6 +74,31 @@ cp .env.example .env
 python main.py
 ```
 
+## Symbol Explorer UI
+
+Launch the native desktop UI with:
+
+```bash
+python main.py --ui
+```
+
+The UI uses `tkinter`, so it runs as a local Python desktop app on Windows,
+macOS, and Linux. It does not require a browser or web server.
+
+What it supports:
+
+- Explore top TradingView screener symbols and filter the list by ticker.
+- Click a symbol to fetch daily or weekly OHLCV history and render a
+  TradingView-style candlestick chart.
+- Run all registered pattern modules for the selected symbol/timeframe.
+  If a pattern is detected, its chart annotations are plotted on the graph
+  and the signal appears in the detected-patterns table.
+- Download the selected symbol's OHLCV data as CSV.
+- Save the current annotated chart as PNG.
+
+The UI reuses the same data, pattern, and chart-rendering code as the scanner,
+but it does not start the scan loop or place trades.
+
 ## Adding a New Pattern
 
 1. Create `patterns/pattern_00X_name.py`
@@ -114,6 +139,9 @@ trading_bot_v2/
 │
 ├── core/
 │   └── scanner.py                       # Main scan loop — ties everything together
+│
+├── ui/
+│   └── app.py                           # Native tkinter symbol explorer
 │
 └── utils/
     └── logger.py                        # Structured logging (console + files)

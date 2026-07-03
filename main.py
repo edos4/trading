@@ -1,15 +1,17 @@
 """
-main.py — Entry point. Runs the market scanner or backtester.
+main.py - Entry point. Runs the market scanner, backtester, or GUI.
 
 Usage:
     python main.py                     # Live/paper scan mode
     python main.py --backtest          # Backtest mode (top 100 symbols)
     python main.py --backtest 10       # Backtest mode (top 10 symbols)
+    python main.py --ui                # Launch the symbol explorer GUI
 
 Prerequisites:
-  - TWS or IB Gateway running locally (paper: 7497, live: 7496)
   - .env file filled in (copy from .env.example)
   - pip install -r requirements.txt
+  - Scanner/backtester only: TWS or IB Gateway running locally
+    (paper: 7497, live: 7496) - not required for --ui
 """
 
 import argparse
@@ -105,7 +107,7 @@ async def run_backtest(n_symbols: int) -> None:
 
 async def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Trading Bot — market scanner / backtester"
+        description="Trading Bot - market scanner / backtester / GUI"
     )
     parser.add_argument(
         "--backtest",
@@ -117,7 +119,19 @@ async def main() -> None:
         help="Run backtest on top N symbols (default: 100). "
         "Without --backtest, runs live/paper scan.",
     )
+    parser.add_argument(
+        "--ui",
+        action="store_true",
+        help="Launch the tkinter symbol explorer GUI instead of scanning.",
+    )
     args = parser.parse_args()
+
+    if args.ui:
+        # tkinter mainloop is blocking and not async.
+        from ui.app import run as run_ui
+
+        run_ui()
+        return
 
     if args.backtest is not None:
         await run_backtest(n_symbols=args.backtest)

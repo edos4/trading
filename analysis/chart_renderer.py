@@ -56,7 +56,7 @@ class ChartRenderer:
         """Render a TradingView-style candlestick chart and return PNG bytes."""
         return self._render_chart(
             symbol, timeframe, ohlcv_df,
-            extra_plots=extra_plots, title=title, annotations=annotations,
+            add_plots=extra_plots, title=title, annotations=annotations,
         )
 
     def render_with_ema(
@@ -105,12 +105,10 @@ class ChartRenderer:
         buf = io.BytesIO()
         style = self._tradingview_style()
 
-        fig, axes = mpf.plot(
-            df,
+        plot_kwargs = dict(
             type="candle",
             style=style,
             volume=True,
-            addplot=add_plots or None,
             figsize=(14, 8),
             panel_ratios=(4, 1),
             tight_layout=True,
@@ -126,6 +124,9 @@ class ChartRenderer:
             volume_alpha=0.55,
             ylabel="",
         )
+        if add_plots:
+            plot_kwargs["addplot"] = add_plots
+        fig, axes = mpf.plot(df, **plot_kwargs)
         self._polish_axes(axes, timeframe)
         self._format_xaxis_months(axes, df, timeframe)
         self._draw_tradingview_header(fig, axes, symbol, timeframe, df)
