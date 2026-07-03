@@ -5,7 +5,8 @@ Rules from patterns/double_top.md:
   Detection C1–C13: two swing highs (H1, H2) with bearish RSI divergence,
   valley depth, volume weakness on leg 2, and no post-H2 breach before entry.
   Entry C14: short on bar 7 after H2 OR neckline-break bar, whichever is first.
-  Exit hints on TradeSignal: take_profit 7% below neckline, stop_loss 3% above entry.
+  Exit hints on TradeSignal: take_profit 7% below neckline, trailing stop
+  3% above lowest close since entry, and a 5-bar exit after neckline break.
 """
 
 from __future__ import annotations
@@ -71,6 +72,7 @@ class DoubleTopPattern(BasePattern):
     ENTRY_BARS_AFTER_H2  = 7
     TAKE_PROFIT_BELOW_NK = 0.07      # cover 7% below neckline
     TRAILING_STOP_PCT    = 0.03      # 3% above lowest close since entry
+    EXIT_BARS_AFTER_NECK_BREAK = 5
     SWING_LOOKBACK       = 2
     MIN_BARS             = 120
     SHARES               = 25
@@ -137,10 +139,14 @@ class DoubleTopPattern(BasePattern):
                     confidence=confidence,
                     price=close,
                     qty=self.SHARES,
-                    stop_loss=round(close * (1 + self.TRAILING_STOP_PCT), 4),
                     take_profit=round(
                         setup.neckline * (1 - self.TAKE_PROFIT_BELOW_NK), 4
                     ),
+                    trailing_stop_pct=self.TRAILING_STOP_PCT,
+                    trailing_stop_mode="lowest_close",
+                    neckline=setup.neckline,
+                    neckline_break_direction="below",
+                    exit_bars_after_neckline_break=self.EXIT_BARS_AFTER_NECK_BREAK,
                     notes=(
                         f"Double top H1→H2 gap={h2_idx - h1_idx}bars | "
                         f"neckline={setup.neckline:.2f} | "
@@ -236,8 +242,13 @@ class DoubleTopPattern(BasePattern):
                 return None
             entry_idx = day7_idx
 
-        # C13: no post-H2 high breach before entry bar
-        post_h2 = ind.high.iloc[h2_idx + 1 : entry_idx]
+        # C13: cancel if any bar after H2 breaches H2 high before the neckline
+        # break. When entry is the neckline break this is h2+1..neck_break-1;
+        # when day-7 entry fires first the neckline has not broken yet by cur,
+        # so we monitor every available bar up to cur. (Checking up to entry
+        # is equivalent here because entry == min(day7, neck_break).)
+        post_h2_end = neck_break_idx if neck_break_idx is not None else cur
+        post_h2 = ind.high.iloc[h2_idx + 1 : post_h2_end]
         if not post_h2.empty and post_h2.max() > h2_high:
             return None
 

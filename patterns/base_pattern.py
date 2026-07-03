@@ -41,6 +41,11 @@ class TradeSignal:
     qty:         float           # number of shares/contracts
     stop_loss:   float | None = None
     take_profit: float | None = None
+    trailing_stop_pct: float | None = None
+    trailing_stop_mode: Literal["lowest_close", "highest_close"] | None = None
+    neckline: float | None = None
+    neckline_break_direction: Literal["below", "above"] | None = None
+    exit_bars_after_neckline_break: int | None = None
     notes:       str = ""
 
 

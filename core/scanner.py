@@ -27,6 +27,7 @@ from data.tv_client import TVClient, MarketSnapshot
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
 from analysis.chart_renderer import ChartRenderer
 from analysis.vision_checker import VisionChecker, VisionVerdict
+
 # TODO: re-enable IBKR when TWS/Gateway is available
 # from broker.ibkr_client import IBKRClient
 # from broker.order_manager import OrderManager
@@ -35,21 +36,30 @@ from config import settings
 from utils.logger import log
 
 PATTERNS_DETECTED_FILE = Path("patterns_detected.txt")
-EXCLUDED_PATTERNS = {"pattern_001_ema_crossover"}
+EXCLUDED_PATTERNS: set[str] = set()
 
 
 class MarketScanner:
-    def __init__(self):
-        self._tv       = TVClient(settings.tv_screener, settings.tv_exchange)
-        self._store    = OHLCVStore(window=max(DEFAULT_WINDOW, settings.tv_history_days))
+    def __init__(
+        self,
+        symbols: list[str] | None = None,
+        exchange_overrides: dict[str, str] | None = None,
+    ):
+        self._symbols = symbols or settings.symbols
+        self._tv = TVClient(
+            settings.tv_screener,
+            settings.tv_exchange,
+            exchange_overrides=exchange_overrides,
+        )
+        self._store = OHLCVStore(window=max(DEFAULT_WINDOW, settings.tv_history_days))
         self._renderer = ChartRenderer(save_to_disk=True)
-        self._vision   = VisionChecker()
+        self._vision = VisionChecker()
         # self._client   = IBKRClient()
         # self._orders   = OrderManager(self._client)
         # self._risk     = RiskGuard(self._client)
         self._patterns: list[BasePattern] = []
         self._pattern_files: dict[str, str] = {}
-        self._running  = False
+        self._running = False
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
     def start(self) -> None:
@@ -61,7 +71,7 @@ class MarketScanner:
         self._running = True
         log.info(
             f"Scanner started | "
-            f"symbols={settings.symbols} | "
+            f"symbols={self._symbols} | "
             f"patterns={[p.name for p in self._patterns]} | "
             f"interval={settings.scan_interval_seconds}s"
         )
@@ -85,14 +95,18 @@ class MarketScanner:
 
     # ── Scan cycle ─────────────────────────────────────────────────────────────
     async def _scan_all(self) -> None:
-        """Run one full scan across all symbols × timeframes × patterns."""
-        # Collect all unique timeframes any pattern wants
+        """Run one full scan across all symbols x timeframes x patterns."""
         all_timeframes: set[str] = set()
         for p in self._patterns:
             all_timeframes.update(p.timeframes)
 
+        log.info(
+            f"Scan | {len(self._symbols)} symbols x {len(all_timeframes)} timeframes "
+            f"({sorted(all_timeframes)}) x {len(self._patterns)} patterns"
+        )
+
         async with self._tv.mcp_session() as mcp:
-            for symbol in settings.symbols:
+            for symbol in self._symbols:
                 for timeframe in all_timeframes:
                     snapshot = await self._tv.fetch_snapshot(
                         symbol, timeframe, store=self._store, mcp_session=mcp
@@ -109,11 +123,10 @@ class MarketScanner:
                             await self._process_signal(signal, pattern)
 
         self._save_scan_charts(all_timeframes)
+        log.info("Scan complete")
 
     # ── Signal pipeline ────────────────────────────────────────────────────────
-    async def _process_signal(
-        self, signal: TradeSignal, pattern: BasePattern
-    ) -> None:
+    async def _process_signal(self, signal: TradeSignal, pattern: BasePattern) -> None:
         log.info(
             f"Signal | {signal.symbol} {signal.timeframe} | "
             f"{signal.action} | pattern={signal.pattern} | "
@@ -121,8 +134,10 @@ class MarketScanner:
         )
 
         # Step 1 — Vision confirmation (if enabled and confidence is sufficient)
-        if (settings.vision_confirmation_enabled
-                and signal.confidence >= settings.vision_min_indicator_confidence):
+        if (
+            settings.vision_confirmation_enabled
+            and signal.confidence >= settings.vision_min_indicator_confidence
+        ):
             verdict = await self._run_vision_check(signal, pattern)
             if verdict != VisionVerdict.CONFIRM:
                 log.info(
@@ -166,8 +181,10 @@ class MarketScanner:
 
     def _save_scan_charts(self, timeframes: set[str]) -> None:
         """Write PNG charts for every symbol/timeframe after each scan."""
-        for symbol in settings.symbols:
-            for timeframe in timeframes:
+        # 1W charts commented out — not needed for now
+        chart_timeframes = {tf for tf in timeframes if tf != "1W"}
+        for symbol in self._symbols:
+            for timeframe in chart_timeframes:
                 df = self._store.get_df(symbol, timeframe, min_bars=1)
                 if df is None:
                     continue
@@ -186,9 +203,7 @@ class MarketScanner:
             log.warning("Vision | No OHLCV data in store — skipping visual check")
             return VisionVerdict.UNCERTAIN
 
-        chart_png = self._renderer.render_with_ema(
-            signal.symbol, signal.timeframe, df
-        )
+        chart_png = self._renderer.render_with_ema(signal.symbol, signal.timeframe, df)
         return self._vision.check(
             chart_png=chart_png,
             pattern_name=pattern.name,
@@ -200,7 +215,7 @@ class MarketScanner:
     # ── Pattern discovery ──────────────────────────────────────────────────────
     def _init_patterns_detected_file(self) -> None:
         PATTERNS_DETECTED_FILE.write_text(
-            "# Pattern detections (pattern_001_ema_crossover excluded)\n"
+            "# Pattern detections\n"
             "# timestamp | pattern | file | symbol | timeframe | action | confidence\n\n",
             encoding="utf-8",
         )
@@ -224,10 +239,14 @@ class MarketScanner:
                 module = importlib.import_module(f"patterns.{module_info.name}")
                 for attr_name in dir(module):
                     attr = getattr(module, attr_name)
-                    if (isinstance(attr, type)
-                            and issubclass(attr, BasePattern)
-                            and attr is not BasePattern):
+                    if (
+                        isinstance(attr, type)
+                        and issubclass(attr, BasePattern)
+                        and attr is not BasePattern
+                    ):
                         instance = attr()
                         self._patterns.append(instance)
-                        self._pattern_files[instance.name] = f"patterns/{module_info.name}.py"
+                        self._pattern_files[instance.name] = (
+                            f"patterns/{module_info.name}.py"
+                        )
                         log.info(f"Scanner | Registered pattern: {instance}")

@@ -23,7 +23,7 @@ CHARTS_DIR = Path("charts")
 # Default visible range — mirrors TradingView "1Y" on daily charts
 VISIBLE_BARS: dict[str, int] = {
     "1d": 252,
-    "1W": 52,
+    "1W": 65,
     "1M": 12,
 }
 
@@ -205,8 +205,13 @@ class ChartRenderer:
         mplfinance expects Title-case columns and a DatetimeIndex.
         Synthesizes business-day dates when the store has no timestamps.
         """
-        rename = {"open": "Open", "high": "High", "low": "Low",
-                  "close": "Close", "volume": "Volume"}
+        rename = {
+            "open": "Open",
+            "high": "High",
+            "low": "Low",
+            "close": "Close",
+            "volume": "Volume",
+        }
         out = df.rename(columns=rename)
         if isinstance(out.index, pd.DatetimeIndex):
             out = ChartRenderer._normalize_session_index(out)
@@ -333,12 +338,16 @@ class ChartRenderer:
                 continue
             tick_positions.append(i)
             tick_labels.append(
-                f"{dt.strftime('%b')}\n{dt.year}" if dt.month == 1 else dt.strftime("%b")
+                f"{dt.strftime('%b')}\n{dt.year}"
+                if dt.month == 1
+                else dt.strftime("%b")
             )
             prev_key = key
 
         date_axis.set_xticks(tick_positions)
-        date_axis.set_xticklabels(tick_labels, ha="center", fontsize=8, color=TV_TEXT_DIM)
+        date_axis.set_xticklabels(
+            tick_labels, ha="center", fontsize=8, color=TV_TEXT_DIM
+        )
 
     @staticmethod
     def _draw_tradingview_header(
