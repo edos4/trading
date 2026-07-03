@@ -52,6 +52,8 @@ class BacktestTrade:
     neckline_break_bar_idx: int | None = None
     lowest_close_since_entry: float | None = None
     highest_close_since_entry: float | None = None
+    lowest_low_since_entry: float | None = None
+    highest_high_since_entry: float | None = None
     exit_reason: str = ""
 
     def __str__(self) -> str:
@@ -303,17 +305,46 @@ class Backtester:
     def _update_trailing_reference(
         position: BacktestTrade, candle: OHLCVCandle
     ) -> None:
-        """Fold the just-completed close into the trailing reference."""
-        if position.trailing_stop_mode == "lowest_close":
+        """Fold the just-completed bar into the trailing reference."""
+        mode = position.trailing_stop_mode
+        if mode == "lowest_close":
             base = position.lowest_close_since_entry
             position.lowest_close_since_entry = (
                 candle.close if base is None else min(base, candle.close)
             )
-        elif position.trailing_stop_mode == "highest_close":
+        elif mode == "highest_close":
             base = position.highest_close_since_entry
             position.highest_close_since_entry = (
                 candle.close if base is None else max(base, candle.close)
             )
+        elif mode == "lowest_low":
+            base = position.lowest_low_since_entry
+            position.lowest_low_since_entry = (
+                candle.low if base is None else min(base, candle.low)
+            )
+        elif mode == "highest_high":
+            base = position.highest_high_since_entry
+            position.highest_high_since_entry = (
+                candle.high if base is None else max(base, candle.high)
+            )
+
+    @staticmethod
+    def _trailing_stop_price(position: BacktestTrade, is_short: bool) -> float | None:
+        mode = position.trailing_stop_mode
+        pct = position.trailing_stop_pct
+        if pct is None or mode is None:
+            return None
+        if is_short:
+            ref = {
+                "lowest_close": position.lowest_close_since_entry,
+                "lowest_low": position.lowest_low_since_entry,
+            }.get(mode)
+            return None if ref is None else ref * (1 + pct)
+        ref = {
+            "highest_close": position.highest_close_since_entry,
+            "highest_high": position.highest_high_since_entry,
+        }.get(mode)
+        return None if ref is None else ref * (1 - pct)
 
     @staticmethod
     def _check_exit(
@@ -321,25 +352,23 @@ class Backtester:
     ) -> tuple[float | None, str]:
         is_short = position.action == "SELL"
 
-        # Static stop loss — direction aware.
+        # Active stop = tightest of (static stop, trailing stop). For a long
+        # the tightest is the highest stop price; for a short the lowest.
+        candidates: list[tuple[float, str]] = []
         if position.stop_loss is not None:
+            candidates.append((position.stop_loss, "stop_loss"))
+        trail = Backtester._trailing_stop_price(position, is_short)
+        if trail is not None:
+            candidates.append((trail, "trailing_stop"))
+        if candidates:
             if is_short:
-                if candle.high >= position.stop_loss:
-                    return position.stop_loss, "stop_loss"
+                eff, reason = min(candidates, key=lambda c: c[0])
+                if candle.high >= eff:
+                    return eff, reason
             else:
-                if candle.low <= position.stop_loss:
-                    return position.stop_loss, "stop_loss"
-
-        # Trailing stop — path dependent on lowest/highest close since entry.
-        if position.trailing_stop_pct is not None and position.trailing_stop_mode:
-            if is_short and position.lowest_close_since_entry is not None:
-                stop = position.lowest_close_since_entry * (1 + position.trailing_stop_pct)
-                if candle.high >= stop:
-                    return stop, "trailing_stop"
-            elif (not is_short) and position.highest_close_since_entry is not None:
-                stop = position.highest_close_since_entry * (1 - position.trailing_stop_pct)
-                if candle.low <= stop:
-                    return stop, "trailing_stop"
+                eff, reason = max(candidates, key=lambda c: c[0])
+                if candle.low <= eff:
+                    return eff, reason
 
         # Take profit — direction aware.
         if position.take_profit is not None:
@@ -389,6 +418,12 @@ class Backtester:
             ),
             highest_close_since_entry=(
                 candle.close if signal.trailing_stop_mode == "highest_close" else None
+            ),
+            lowest_low_since_entry=(
+                candle.low if signal.trailing_stop_mode == "lowest_low" else None
+            ),
+            highest_high_since_entry=(
+                candle.high if signal.trailing_stop_mode == "highest_high" else None
             ),
         )
         # Entry bar itself may be the neckline-break bar (entry via neckline break).

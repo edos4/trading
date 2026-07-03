@@ -6,4 +6,4 @@ data/__pycache__
 .venv
 logs/bot.log
 .env
-patterns_detected.txt
+patterns_detected.md

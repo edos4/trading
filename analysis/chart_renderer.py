@@ -12,6 +12,7 @@ from pathlib import Path
 from datetime import datetime
 
 import pandas as pd
+import numpy as np
 import mplfinance as mpf
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
@@ -50,10 +51,12 @@ class ChartRenderer:
         ohlcv_df: pd.DataFrame,
         extra_plots: list | None = None,
         title: str | None = None,
+        annotations: list[dict] | None = None,
     ) -> bytes:
         """Render a TradingView-style candlestick chart and return PNG bytes."""
         return self._render_chart(
-            symbol, timeframe, ohlcv_df, extra_plots=extra_plots, title=title
+            symbol, timeframe, ohlcv_df,
+            extra_plots=extra_plots, title=title, annotations=annotations,
         )
 
     def render_with_ema(
@@ -62,6 +65,7 @@ class ChartRenderer:
         timeframe: str,
         ohlcv_df: pd.DataFrame,
         ema_periods: list[int] | None = None,
+        annotations: list[dict] | None = None,
     ) -> bytes:
         """Render TradingView-style chart with EMA overlays for scan / vision review."""
         ema_periods = ema_periods or [20, 50]
@@ -77,7 +81,8 @@ class ChartRenderer:
             self._append_series_plot(add_plots, ema, color=color, width=1.0)
 
         return self._render_chart(
-            symbol, timeframe, df, add_plots=add_plots, indicators=indicators
+            symbol, timeframe, df, add_plots=add_plots,
+            indicators=indicators, annotations=annotations,
         )
 
     # ── Internal ───────────────────────────────────────────────────────────────
@@ -89,6 +94,7 @@ class ChartRenderer:
         add_plots: list | None = None,
         title: str | None = None,
         indicators: dict[str, pd.Series] | None = None,
+        annotations: list[dict] | None = None,
     ) -> bytes:
         if isinstance(ohlcv_df.index, pd.DatetimeIndex) and "Open" in ohlcv_df.columns:
             df = ohlcv_df
@@ -124,6 +130,8 @@ class ChartRenderer:
         self._format_xaxis_months(axes, df, timeframe)
         self._draw_tradingview_header(fig, axes, symbol, timeframe, df)
         self._draw_last_price_line(axes[0], df)
+        if annotations:
+            self._draw_annotations(axes[0], df, annotations)
 
         if axes[0].get_legend() is not None:
             axes[0].get_legend().remove()
@@ -425,6 +433,100 @@ class ChartRenderer:
                 boxstyle="square,pad=0.2",
             ),
             clip_on=False,
+        )
+
+    @staticmethod
+    def _date_to_x(df: pd.DataFrame, date_str: str) -> int | None:
+        """Integer x-position of a bar by ISO date, or None if not in view."""
+        idx = df.index
+        if not isinstance(idx, pd.DatetimeIndex):
+            return None
+        try:
+            ts = pd.Timestamp(date_str)
+        except (ValueError, TypeError):
+            return None
+        positions = np.where(idx.normalize() == ts.normalize())[0]
+        return int(positions[0]) if len(positions) else None
+
+    def _draw_annotations(
+        self, price_axis, df: pd.DataFrame, annotations: list[dict]
+    ) -> None:
+        """Overlay pattern markers, horizontal lines, and trend segments."""
+        for ann in annotations:
+            kind = ann.get("type")
+            if kind == "marker":
+                self._draw_marker(price_axis, df, ann)
+            elif kind == "hline":
+                self._draw_hline(price_axis, ann)
+            elif kind == "segment":
+                self._draw_segment(price_axis, df, ann)
+
+    def _draw_marker(
+        self, price_axis, df: pd.DataFrame, ann: dict
+    ) -> None:
+        x = self._date_to_x(df, ann.get("date", ""))
+        if x is None:
+            return
+        price = float(ann["price"])
+        color = ann.get("color", TV_TEXT)
+        marker = ann.get("marker", "o")
+        label = ann.get("label", "")
+        price_axis.scatter(
+            [x], [price], marker=marker, s=70,
+            color=color, edgecolors="#ffffff", linewidths=0.6, zorder=5,
+        )
+        if not label:
+            return
+        pos = ann.get("label_pos", "above")
+        offset = 8 if pos == "above" else -8
+        va = "bottom" if pos == "above" else "top"
+        price_axis.annotate(
+            label,
+            xy=(x, price),
+            xytext=(0, offset),
+            textcoords="offset points",
+            ha="center", va=va,
+            fontsize=8, fontweight="bold", color=color,
+            clip_on=True,
+        )
+
+    def _draw_hline(self, price_axis, ann: dict) -> None:
+        price = float(ann["price"])
+        color = ann.get("color", TV_TEXT_DIM)
+        style = ann.get("style", "--")
+        label = ann.get("label", "")
+        price_axis.axhline(
+            price, color=color, linestyle=style, linewidth=1.0, alpha=0.85, zorder=3,
+        )
+        if not label:
+            return
+        price_axis.annotate(
+            f" {label} ",
+            xy=(1.0, price),
+            xycoords=("axes fraction", "data"),
+            xytext=(-2, 0),
+            textcoords="offset points",
+            ha="right", va="center",
+            fontsize=7.5, color="#ffffff",
+            bbox=dict(facecolor=color, edgecolor=color, pad=1.5, boxstyle="square,pad=0.2"),
+            clip_on=False,
+        )
+
+    def _draw_segment(
+        self, price_axis, df: pd.DataFrame, ann: dict
+    ) -> None:
+        x0 = self._date_to_x(df, ann.get("start_date", ""))
+        x1 = self._date_to_x(df, ann.get("end_date", ""))
+        if x0 is None or x1 is None:
+            return
+        y0 = float(ann["start_price"])
+        y1 = float(ann["end_price"])
+        color = ann.get("color", TV_TEXT)
+        style = ann.get("style", "-")
+        width = float(ann.get("width", 1.2))
+        price_axis.plot(
+            [x0, x1], [y0, y1],
+            color=color, linestyle=style, linewidth=width, alpha=0.9, zorder=4,
         )
 
     @staticmethod

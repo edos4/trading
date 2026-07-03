@@ -20,7 +20,9 @@ Vision check runs if confidence ≥ settings.vision_min_indicator_confidence.
 
 from __future__ import annotations
 
-from patterns.base_pattern import BasePattern, TradeSignal
+from patterns.base_pattern import (
+    BasePattern, TradeSignal, ann_marker, ANN_ENTRY,
+)
 from data.tv_client import MarketSnapshot
 from data.ohlcv_store import OHLCVStore
 from analysis.indicator_engine import IndicatorEngine
@@ -141,4 +143,14 @@ class EMACrossoverPattern(BasePattern):
             price=close,
             qty=self.SHARES,
             notes=f"EMA{self.EMA_FAST}/EMA{self.EMA_SLOW} crossover | RSI={rsi_now:.1f}",
+            chart_annotations=[
+                ann_marker(
+                    date=self.bar_date(df, len(df) - 1),
+                    price=float(close),
+                    label=f"{action} · EMA cross",
+                    color=ANN_ENTRY,
+                    marker="o",
+                    label_pos="below" if action == "BUY" else "above",
+                ),
+            ],
         )

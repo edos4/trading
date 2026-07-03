@@ -52,6 +52,38 @@ class IndicatorEngine:
         rs    = gain / loss.replace(0, np.nan)
         return 100 - (100 / (1 + rs))
 
+    def rsi_wilder(self, period: int = 14) -> pd.Series:
+        """Wilder's RSI: SMA seed then recursive Wilder smoothing.
+
+        Differs from `rsi` (which uses a simple rolling mean of gains/losses).
+        Used by patterns whose locked spec calls for Wilder RSI (e.g. head &
+        shoulders).
+        """
+        close = self.close.to_numpy(dtype=float)
+        n = len(close)
+        out = np.full(n, np.nan)
+        if n <= period:
+            return pd.Series(out, index=self._df.index)
+        delta = np.diff(close)  # length n-1, delta[k] = close[k+1]-close[k]
+        gain = np.where(delta > 0, delta, 0.0)
+        loss = np.where(delta < 0, -delta, 0.0)
+        # Seed: SMA of the first `period` gains/losses (covers bars 1..period).
+        ag = np.full(n, np.nan)
+        al = np.full(n, np.nan)
+        ag[period] = gain[:period].mean()
+        al[period] = loss[:period].mean()
+        for i in range(period + 1, n):
+            ag[i] = (ag[i - 1] * (period - 1) + gain[i - 1]) / period
+            al[i] = (al[i - 1] * (period - 1) + loss[i - 1]) / period
+        with np.errstate(divide="ignore", invalid="ignore"):
+            rs = ag / np.where(al == 0, np.nan, al)
+        rsi = 100 - (100 / (1 + rs))
+        # Wilder edge cases: no losses → RSI 100; no gains → RSI 0.
+        rsi = np.where(np.isfinite(ag) & (al == 0), 100.0, rsi)
+        rsi = np.where(np.isfinite(ag) & (ag == 0) & (al > 0), 0.0, rsi)
+        out = rsi
+        return pd.Series(out, index=self._df.index)
+
     def macd(
         self, fast: int = 12, slow: int = 26, signal: int = 9
     ) -> tuple[pd.Series, pd.Series, pd.Series]:

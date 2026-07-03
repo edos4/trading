@@ -15,7 +15,10 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from patterns.base_pattern import BasePattern, TradeSignal
+from patterns.base_pattern import (
+    BasePattern, TradeSignal,
+    ann_marker, ann_hline, ANN_PEAK, ANN_TROUGH, ANN_LINE, ANN_TARGET, ANN_ENTRY,
+)
 from data.tv_client import MarketSnapshot
 from data.ohlcv_store import OHLCVStore
 from analysis.indicator_engine import IndicatorEngine
@@ -154,6 +157,14 @@ class DoubleBottomPattern(BasePattern):
                         f"L1_RSI={setup.l1_rsi:.1f} L2_RSI={setup.l2_rsi:.1f} | "
                         f"peak={setup.peak_height_pct:.1%}"
                     ),
+                    chart_annotations=[
+                        ann_marker(self.bar_date(df, l1_idx), setup.l1_low, "L1", ANN_TROUGH, "^", "below"),
+                        ann_marker(self.bar_date(df, l2_idx), setup.l2_low, "L2", ANN_TROUGH, "^", "below"),
+                        ann_marker(self.bar_date(df, setup.peak_idx), setup.neckline, "neck", ANN_PEAK, "v", "above"),
+                        ann_hline(setup.neckline, "neckline", ANN_LINE),
+                        ann_hline(setup.neckline * (1 + self.TAKE_PROFIT_ABOVE_NK), "TP", ANN_TARGET),
+                        ann_marker(self.bar_date(df, cur), close, "entry", ANN_ENTRY, "o", "below"),
+                    ],
                 )
 
         return None

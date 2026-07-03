@@ -35,7 +35,7 @@ from analysis.vision_checker import VisionChecker, VisionVerdict
 from config import settings
 from utils.logger import log
 
-PATTERNS_DETECTED_FILE = Path("patterns_detected.txt")
+PATTERNS_DETECTED_FILE = Path("patterns_detected.md")
 EXCLUDED_PATTERNS: set[str] = set()
 
 
@@ -105,6 +105,10 @@ class MarketScanner:
             f"({sorted(all_timeframes)}) x {len(self._patterns)} patterns"
         )
 
+        # Latest detected signal per (symbol, timeframe) — its annotations are
+        # drawn on the post-scan chart PNG so the pattern is easy to eyeball.
+        latest_signals: dict[tuple[str, str], TradeSignal] = {}
+
         async with self._tv.mcp_session() as mcp:
             for symbol in self._symbols:
                 for timeframe in all_timeframes:
@@ -120,9 +124,10 @@ class MarketScanner:
                         signal = pattern.analyze(snapshot, self._store)
                         if signal:
                             self._record_detection(signal)
+                            latest_signals[(symbol, timeframe)] = signal
                             await self._process_signal(signal, pattern)
 
-        self._save_scan_charts(all_timeframes)
+        self._save_scan_charts(all_timeframes, latest_signals)
         log.info("Scan complete")
 
     # ── Signal pipeline ────────────────────────────────────────────────────────
@@ -179,8 +184,17 @@ class MarketScanner:
         # elif signal.action == "CLOSE":
         #     self._orders.close_position(signal.symbol, signal.qty, signal.pattern)
 
-    def _save_scan_charts(self, timeframes: set[str]) -> None:
-        """Write PNG charts for every symbol/timeframe after each scan."""
+    def _save_scan_charts(
+        self,
+        timeframes: set[str],
+        latest_signals: dict[tuple[str, str], TradeSignal] | None = None,
+    ) -> None:
+        """Write PNG charts for every symbol/timeframe after each scan.
+
+        When a pattern was detected for a (symbol, timeframe) this scan, its
+        annotations are drawn on the PNG so the setup is easy to see/check.
+        """
+        latest_signals = latest_signals or {}
         # 1W charts commented out — not needed for now
         chart_timeframes = {tf for tf in timeframes if tf != "1W"}
         for symbol in self._symbols:
@@ -188,8 +202,12 @@ class MarketScanner:
                 df = self._store.get_df(symbol, timeframe, min_bars=1)
                 if df is None:
                     continue
+                signal = latest_signals.get((symbol, timeframe))
+                annotations = signal.chart_annotations if signal else None
                 try:
-                    self._renderer.render_with_ema(symbol, timeframe, df)
+                    self._renderer.render_with_ema(
+                        symbol, timeframe, df, annotations=annotations
+                    )
                 except Exception as exc:
                     log.warning(
                         f"Scanner | Chart render failed for {symbol} {timeframe}: {exc}"
@@ -203,7 +221,10 @@ class MarketScanner:
             log.warning("Vision | No OHLCV data in store — skipping visual check")
             return VisionVerdict.UNCERTAIN
 
-        chart_png = self._renderer.render_with_ema(signal.symbol, signal.timeframe, df)
+        chart_png = self._renderer.render_with_ema(
+            signal.symbol, signal.timeframe, df,
+            annotations=signal.chart_annotations or None,
+        )
         return self._vision.check(
             chart_png=chart_png,
             pattern_name=pattern.name,
@@ -213,10 +234,14 @@ class MarketScanner:
         )
 
     # ── Pattern discovery ──────────────────────────────────────────────────────
+    _DETECTED_TABLE_HEADER = (
+        "| timestamp | pattern | file | symbol | timeframe | action | confidence |\n"
+        "|---|---|---|---|---|---|---|\n"
+    )
+
     def _init_patterns_detected_file(self) -> None:
         PATTERNS_DETECTED_FILE.write_text(
-            "# Pattern detections\n"
-            "# timestamp | pattern | file | symbol | timeframe | action | confidence\n\n",
+            "# Pattern detections\n\n" + self._DETECTED_TABLE_HEADER,
             encoding="utf-8",
         )
 
@@ -225,13 +250,13 @@ class MarketScanner:
             return
         filename = self._pattern_files.get(signal.pattern, "?")
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        line = (
-            f"{ts} | {signal.pattern} | {filename} | {signal.symbol} | "
-            f"{signal.timeframe} | {signal.action} | "
-            f"confidence={signal.confidence:.2f}\n"
+        row = (
+            f"| {ts} | `{signal.pattern}` | {filename} | "
+            f"**{signal.symbol}** | {signal.timeframe} | "
+            f"{signal.action} | {signal.confidence:.2f} |\n"
         )
         with PATTERNS_DETECTED_FILE.open("a", encoding="utf-8") as f:
-            f.write(line)
+            f.write(row)
 
     def _discover_patterns(self) -> None:
         for module_info in pkgutil.iter_modules(patterns_pkg.__path__):
