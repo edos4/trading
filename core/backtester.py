@@ -8,6 +8,7 @@ no TradingView indicators — relies purely on IndicatorEngine-computed values.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 import pkgutil
@@ -172,35 +173,54 @@ class Backtester:
 
     def _discover_patterns(self) -> None:
         for module_info in pkgutil.iter_modules(patterns_pkg.__path__):
-            if module_info.name.startswith("pattern_"):
-                module = importlib.import_module(f"patterns.{module_info.name}")
-                for attr_name in dir(module):
-                    attr = getattr(module, attr_name)
-                    if (
-                        isinstance(attr, type)
-                        and issubclass(attr, BasePattern)
-                        and attr is not BasePattern
-                    ):
-                        instance = attr()
-                        self._patterns.append(instance)
-                        self._pattern_files[instance.name] = (
-                            f"patterns/{module_info.name}.py"
-                        )
-                        log.info(f"Backtester | Registered pattern: {instance}")
+            if module_info.name.startswith("_") or module_info.name == "base_pattern":
+                continue
+            module = importlib.import_module(f"patterns.{module_info.name}")
+            for attr_name in dir(module):
+                attr = getattr(module, attr_name)
+                if (
+                    isinstance(attr, type)
+                    and issubclass(attr, BasePattern)
+                    and attr is not BasePattern
+                ):
+                    instance = attr()
+                    self._patterns.append(instance)
+                    self._pattern_files[instance.name] = (
+                        f"patterns/{module_info.name}.py"
+                    )
+                    log.info(f"Backtester | Registered pattern: {instance}")
 
     async def run(self) -> BacktestResult:
         all_timeframes: set[str] = set()
         for p in self._patterns:
             all_timeframes.update(p.timeframes)
 
+        from tqdm import tqdm
+
+        concurrency = settings.scanner_concurrency
+        sem = asyncio.Semaphore(concurrency)
+
+        tasks = [(s, tf) for s in self._symbols for tf in sorted(all_timeframes)]
         result = BacktestResult()
 
-        for symbol in self._symbols:
-            for timeframe in sorted(all_timeframes):
-                trades, signals = self._backtest_symbol(symbol, timeframe)
-                result.trades.extend(trades)
-                result.total_signals += signals
+        pbar = tqdm(total=len(tasks), desc="Backtesting", unit="sym", ncols=80)
 
+        async def _backtest_one(symbol: str, timeframe: str):
+            async with sem:
+                trades, signals = await asyncio.to_thread(
+                    self._backtest_symbol, symbol, timeframe
+                )
+                pbar.update(1)
+                return trades, signals
+
+        for coro in asyncio.as_completed(
+            [_backtest_one(s, tf) for s, tf in tasks]
+        ):
+            trades, signals = await coro
+            result.trades.extend(trades)
+            result.total_signals += signals
+
+        pbar.close()
         return result
 
     def _backtest_symbol(

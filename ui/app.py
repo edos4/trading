@@ -46,7 +46,7 @@ def discover_patterns() -> list[BasePattern]:
     """Mirror core.scanner._discover_patterns - instantiate every pattern class."""
     found: list[BasePattern] = []
     for module_info in pkgutil.iter_modules(patterns_pkg.__path__):
-        if not module_info.name.startswith("pattern_"):
+        if module_info.name.startswith("_") or module_info.name == "base_pattern":
             continue
         try:
             module = importlib.import_module(f"patterns.{module_info.name}")
@@ -186,9 +186,15 @@ class TradingBotUI:
         info_scroll.pack(side=tk.LEFT, fill=tk.Y)
         self.tree.config(yscrollcommand=info_scroll.set)
 
-        # Status bar
+        # Status bar + progress bar
+        status_frame = ttk.Frame(self.root)
+        status_frame.pack(side=tk.BOTTOM, fill=tk.X)
         self.status_var = tk.StringVar(value="Ready.")
-        ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W).pack(side=tk.BOTTOM, fill=tk.X)
+        ttk.Label(status_frame, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.progress = ttk.Progressbar(
+            status_frame, mode="indeterminate", length=120,
+        )
+        self.progress.pack(side=tk.RIGHT, padx=(4, 0))
 
     # Symbol loading
     def _load_symbols_threaded(self) -> None:
@@ -196,6 +202,7 @@ class TradingBotUI:
             return
         self._busy = True
         self.status_var.set("Fetching symbol list from TradingView...")
+        self.progress.start(10)
         n = self.count_var.get()
         threading.Thread(target=self._load_symbols, args=(n,), daemon=True).start()
 
@@ -210,11 +217,12 @@ class TradingBotUI:
             self._safe_after(lambda: self._fail("No symbols returned by screener."))
             return
         self._symbols = sorted(rows, key=lambda x: x[0].upper())
-        self._safe_after(self._populate_list)
+        self._safe_after(lambda: self._populate_list())
 
     def _populate_list(self) -> None:
         self._apply_filter()
         self._busy = False
+        self.progress.stop()
         self.status_var.set(f"Loaded {len(self._symbols)} symbols.")
 
     def _apply_filter(self) -> None:
@@ -241,6 +249,7 @@ class TradingBotUI:
         self.header_var.set(f"{symbol} | {timeframe} | {exchange} - loading...")
         self._busy = True
         self.status_var.set(f"Loading {symbol} {timeframe}...")
+        self.progress.start(10)
         threading.Thread(
             target=self._load_symbol,
             args=(symbol, exchange, timeframe),
@@ -339,6 +348,7 @@ class TradingBotUI:
         self.status_var.set(
             f"{symbol} {timeframe}: {len(df)} bars, {len(signals)} pattern(s) detected."
         )
+        self.progress.stop()
         self._busy = False
 
     # Downloads / saves
@@ -429,6 +439,7 @@ class TradingBotUI:
 
     def _fail(self, msg: str) -> None:
         self._busy = False
+        self.progress.stop()
         self.status_var.set(msg)
         self.header_var.set("Error")
         log.warning(f"UI | {msg}")

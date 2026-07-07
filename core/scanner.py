@@ -7,10 +7,14 @@ Every SCAN_INTERVAL_SECONDS it:
   2. Pushes the new candle into OHLCVStore
   3. Runs each registered pattern's analyze() method
   4. If a signal is returned:
-       a. Checks confidence threshold
-       b. Renders a chart (if vision is enabled)
-       c. Asks Claude vision to confirm the pattern
-       d. If confirmed: runs risk checks → places order
+        a. Checks confidence threshold
+        b. Renders a chart (if vision is enabled)
+        c. Asks Claude vision to confirm the pattern
+        d. If confirmed: runs risk checks → places order
+
+Concurrency: symbols are processed in parallel across N MCP sessions
+(one session per worker, controlled by scanner_concurrency setting).
+A tqdm progress bar shows scan progress on the CLI.
 """
 
 from __future__ import annotations
@@ -95,37 +99,66 @@ class MarketScanner:
 
     # ── Scan cycle ─────────────────────────────────────────────────────────────
     async def _scan_all(self) -> None:
-        """Run one full scan across all symbols x timeframes x patterns."""
+        """Run one full scan across all symbols x timeframes x patterns.
+
+        Symbols are processed concurrently with a progress bar. Each worker
+        opens its own MCP session so there is no contention on the stdio pipe.
+        """
         all_timeframes: set[str] = set()
         for p in self._patterns:
             all_timeframes.update(p.timeframes)
 
+        concurrency = settings.scanner_concurrency
         log.info(
             f"Scan | {len(self._symbols)} symbols x {len(all_timeframes)} timeframes "
-            f"({sorted(all_timeframes)}) x {len(self._patterns)} patterns"
+            f"({sorted(all_timeframes)}) x {len(self._patterns)} patterns | "
+            f"concurrency={concurrency}"
         )
 
         # Latest detected signal per (symbol, timeframe) — its annotations are
         # drawn on the post-scan chart PNG so the pattern is easy to eyeball.
         latest_signals: dict[tuple[str, str], TradeSignal] = {}
 
-        async with self._tv.mcp_session() as mcp:
-            for symbol in self._symbols:
-                for timeframe in all_timeframes:
-                    snapshot = await self._tv.fetch_snapshot(
-                        symbol, timeframe, store=self._store, mcp_session=mcp
-                    )
-                    if snapshot is None:
-                        continue
+        from tqdm import tqdm
 
-                    for pattern in self._patterns:
-                        if timeframe not in pattern.timeframes:
+        # Fill a work queue with every symbol
+        queue: asyncio.Queue[str] = asyncio.Queue()
+        for s in self._symbols:
+            queue.put_nowait(s)
+
+        pbar = tqdm(total=len(self._symbols), desc="Scanning", unit="sym", ncols=80)
+
+        async def _worker() -> None:
+            """Each worker owns one MCP session for its entire lifetime."""
+            async with self._tv.mcp_session() as mcp:
+                while True:
+                    try:
+                        symbol = queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        return
+
+                    for timeframe in all_timeframes:
+                        snapshot = await self._tv.fetch_snapshot(
+                            symbol, timeframe,
+                            store=self._store, mcp_session=mcp,
+                        )
+                        if snapshot is None:
                             continue
-                        signal = pattern.analyze(snapshot, self._store)
-                        if signal:
-                            self._record_detection(signal)
-                            latest_signals[(symbol, timeframe)] = signal
-                            await self._process_signal(signal, pattern)
+
+                        for pattern in self._patterns:
+                            if timeframe not in pattern.timeframes:
+                                continue
+                            signal = pattern.analyze(snapshot, self._store)
+                            if signal:
+                                self._record_detection(signal)
+                                latest_signals[(symbol, timeframe)] = signal
+                                await self._process_signal(signal, pattern)
+
+                    pbar.update(1)
+
+        workers = [_worker() for _ in range(min(concurrency, len(self._symbols)))]
+        await asyncio.gather(*workers)
+        pbar.close()
 
         self._save_scan_charts(all_timeframes, latest_signals)
         log.info("Scan complete")
@@ -189,29 +222,39 @@ class MarketScanner:
         timeframes: set[str],
         latest_signals: dict[tuple[str, str], TradeSignal] | None = None,
     ) -> None:
-        """Write PNG charts for every symbol/timeframe after each scan.
+        """Write PNG charts for symbols that had a signal detected this scan.
 
-        When a pattern was detected for a (symbol, timeframe) this scan, its
-        annotations are drawn on the PNG so the setup is easy to see/check.
+        Annotations are drawn on the PNG so the setup is easy to see/check.
+        Previously this rendered every symbol, but with thousands of symbols
+        that is no longer practical — only symbols with active signals get charts.
         """
         latest_signals = latest_signals or {}
-        # 1W charts commented out — not needed for now
         chart_timeframes = {tf for tf in timeframes if tf != "1W"}
-        for symbol in self._symbols:
-            for timeframe in chart_timeframes:
-                df = self._store.get_df(symbol, timeframe, min_bars=1)
-                if df is None:
-                    continue
-                signal = latest_signals.get((symbol, timeframe))
-                annotations = signal.chart_annotations if signal else None
-                try:
-                    self._renderer.render_with_ema(
-                        symbol, timeframe, df, annotations=annotations
-                    )
-                except Exception as exc:
-                    log.warning(
-                        f"Scanner | Chart render failed for {symbol} {timeframe}: {exc}"
-                    )
+        items = [
+            (symbol, tf, sig)
+            for (symbol, tf), sig in latest_signals.items()
+            if tf in chart_timeframes
+        ]
+        if not items:
+            return
+
+        from tqdm import tqdm
+
+        for symbol, timeframe, signal in tqdm(
+            items, desc="Saving charts", unit="chart", ncols=80
+        ):
+            df = self._store.get_df(symbol, timeframe, min_bars=1)
+            if df is None:
+                continue
+            try:
+                self._renderer.render_with_ema(
+                    symbol, timeframe, df,
+                    annotations=signal.chart_annotations if signal else None,
+                )
+            except Exception as exc:
+                log.warning(
+                    f"Scanner | Chart render failed for {symbol} {timeframe}: {exc}"
+                )
 
     async def _run_vision_check(
         self, signal: TradeSignal, pattern: BasePattern
@@ -260,18 +303,19 @@ class MarketScanner:
 
     def _discover_patterns(self) -> None:
         for module_info in pkgutil.iter_modules(patterns_pkg.__path__):
-            if module_info.name.startswith("pattern_"):
-                module = importlib.import_module(f"patterns.{module_info.name}")
-                for attr_name in dir(module):
-                    attr = getattr(module, attr_name)
-                    if (
-                        isinstance(attr, type)
-                        and issubclass(attr, BasePattern)
-                        and attr is not BasePattern
-                    ):
-                        instance = attr()
-                        self._patterns.append(instance)
-                        self._pattern_files[instance.name] = (
-                            f"patterns/{module_info.name}.py"
-                        )
-                        log.info(f"Scanner | Registered pattern: {instance}")
+            if module_info.name.startswith("_") or module_info.name == "base_pattern":
+                continue
+            module = importlib.import_module(f"patterns.{module_info.name}")
+            for attr_name in dir(module):
+                attr = getattr(module, attr_name)
+                if (
+                    isinstance(attr, type)
+                    and issubclass(attr, BasePattern)
+                    and attr is not BasePattern
+                ):
+                    instance = attr()
+                    self._patterns.append(instance)
+                    self._pattern_files[instance.name] = (
+                        f"patterns/{module_info.name}.py"
+                    )
+                    log.info(f"Scanner | Registered pattern: {instance}")

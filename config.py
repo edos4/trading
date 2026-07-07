@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     # per day/week — no need to poll every minute. Once per hour is plenty
     # and keeps TradingView/API call volume low.
     scan_interval_seconds: int = 3600
+    # How many symbols to process concurrently during each scan cycle.
+    # Each concurrent worker opens its own MCP session.
+    scanner_concurrency: int = 10
 
     # ── Vision ────────────────────────────────────────────────────────────
     anthropic_api_key: str = ""
