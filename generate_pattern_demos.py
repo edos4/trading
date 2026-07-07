@@ -14,6 +14,8 @@ Run:  python generate_pattern_demos.py
 
 from __future__ import annotations
 
+import importlib
+
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,14 +26,44 @@ from data.ohlcv_store import OHLCVStore
 from data.tv_client import OHLCVCandle, MarketSnapshot
 from analysis.indicator_engine import IndicatorEngine
 from analysis.chart_renderer import ChartRenderer
-from patterns.pattern_001_ema_crossover import EMACrossoverPattern
-from patterns.pattern_002_double_top import DoubleTopPattern
-from patterns.pattern_003_double_bottom import DoubleBottomPattern
-from patterns.pattern_004_rounding_bottom import RoundingBottomPattern
-from patterns.pattern_005_rounding_top import RoundingTopPattern
-from patterns.pattern_006_upward_channel import UpwardChannelPattern
-from patterns.pattern_007_descending_channel import DescendingChannelPattern
-from patterns.pattern_008_head_and_shoulders import HeadAndShouldersPattern
+
+
+def _load_pattern_class(module_filename: str, class_name: str):
+    """Import a pattern module by its on-disk filename and fetch a class.
+
+    Pattern modules are numbered files with no "pattern_" prefix (e.g.
+    patterns/002_double_top.py), so a literal `from patterns.002_double_top
+    import ...` statement is a syntax error — module names can't start with
+    a digit. Load them the same way core/scanner.py and core/backtester.py
+    already do: via importlib, by filename string. Returns None (instead of
+    raising) if the module or class isn't found, so a missing/renamed
+    pattern only skips its own demo rather than crashing the whole script.
+    """
+    try:
+        module = importlib.import_module(f"patterns.{module_filename}")
+    except ModuleNotFoundError:
+        return None
+    return getattr(module, class_name, None)
+
+
+EMACrossoverPattern = _load_pattern_class(
+    "pattern_001_ema_crossover", "EMACrossoverPattern"
+)
+DoubleTopPattern = _load_pattern_class("002_double_top", "DoubleTopPattern")
+DoubleBottomPattern = _load_pattern_class("003_double_bottom", "DoubleBottomPattern")
+RoundingBottomPattern = _load_pattern_class(
+    "004_rounding_bottom", "RoundingBottomPattern"
+)
+RoundingTopPattern = _load_pattern_class("005_rounding_top", "RoundingTopPattern")
+UpwardChannelPattern = _load_pattern_class(
+    "006_upward_channel", "UpwardChannelPattern"
+)
+DescendingChannelPattern = _load_pattern_class(
+    "007_descending_channel", "DescendingChannelPattern"
+)
+HeadAndShouldersPattern = _load_pattern_class(
+    "008_head_and_shoulders", "HeadAndShouldersPattern"
+)
 
 DEMO_DIR = Path("pattern_demos")
 TF = "1d"
@@ -306,23 +338,33 @@ def gen_head_and_shoulders() -> tuple[np.ndarray, set, set]:
 def main() -> None:
     DEMO_DIR.mkdir(exist_ok=True)
 
+    def _demo_spec(name, cls, action, genfn, with_ema, extra):
+        if cls is None:
+            print(f"\n=== {name} ===\n  skipping — patterns/{name}.py not found")
+            return None
+        return (name, cls(), action, genfn, with_ema, extra)
+
     demos = [
-        ("pattern_001_ema_crossover", EMACrossoverPattern(), "BUY",
-         gen_ema_crossover, True, {}),
-        ("pattern_002_double_top", DoubleTopPattern(), "SELL",
-         gen_double_top, False, {"leg2": (89, 120, 400_000, 1_500_000)}),
-        ("pattern_003_double_bottom", DoubleBottomPattern(), "BUY",
-         gen_double_bottom, False, {"leg2": (89, 120, 1_500_000, 400_000)}),
-        ("pattern_004_rounding_bottom", RoundingBottomPattern(), "BUY",
-         gen_rounding_bottom, False, {}),
-        ("pattern_005_rounding_top", RoundingTopPattern(), "SELL",
-         gen_rounding_top, False, {}),
-        ("pattern_006_upward_channel", UpwardChannelPattern(), "SELL",
-         gen_upward_channel, False, {"disable_edgar": True}),
-        ("pattern_007_descending_channel", DescendingChannelPattern(), "BUY",
-         gen_descending_channel, False, {"disable_edgar": True}),
-        ("pattern_008_head_and_shoulders", HeadAndShouldersPattern(), "SELL",
-         gen_head_and_shoulders, False, {}),
+        d
+        for d in (
+            _demo_spec("pattern_001_ema_crossover", EMACrossoverPattern, "BUY",
+                       gen_ema_crossover, True, {}),
+            _demo_spec("pattern_002_double_top", DoubleTopPattern, "SELL",
+                       gen_double_top, False, {"leg2": (89, 120, 400_000, 1_500_000)}),
+            _demo_spec("pattern_003_double_bottom", DoubleBottomPattern, "BUY",
+                       gen_double_bottom, False, {"leg2": (89, 120, 1_500_000, 400_000)}),
+            _demo_spec("pattern_004_rounding_bottom", RoundingBottomPattern, "BUY",
+                       gen_rounding_bottom, False, {}),
+            _demo_spec("pattern_005_rounding_top", RoundingTopPattern, "SELL",
+                       gen_rounding_top, False, {}),
+            _demo_spec("pattern_006_upward_channel", UpwardChannelPattern, "SELL",
+                       gen_upward_channel, False, {"disable_edgar": True}),
+            _demo_spec("pattern_007_descending_channel", DescendingChannelPattern, "BUY",
+                       gen_descending_channel, False, {"disable_edgar": True}),
+            _demo_spec("pattern_008_head_and_shoulders", HeadAndShouldersPattern, "SELL",
+                       gen_head_and_shoulders, False, {}),
+        )
+        if d is not None
     ]
 
     for name, pattern, action, genfn, with_ema, extra in demos:

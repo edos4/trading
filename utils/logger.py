@@ -3,7 +3,7 @@
 from loguru import logger
 
 logger.remove()
-logger.add(
+_CONSOLE_HANDLER_ID = logger.add(
     lambda msg: print(msg, end=""),
     format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level:<8}</level> | {message}\n",
     level="INFO",
@@ -14,5 +14,16 @@ logger.add(
     retention="30 days",
     level="DEBUG",
 )
+
+
+def set_console_level(level: str | int) -> None:
+    """Dynamically change the console handler's minimum log level."""
+    logger.remove(_CONSOLE_HANDLER_ID)
+    logger.add(
+        lambda msg: print(msg, end=""),
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level:<8}</level> | {message}\n",
+        level=level,
+    )
+
 
 log = logger

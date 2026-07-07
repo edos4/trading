@@ -45,17 +45,25 @@ def discover_pattern_names() -> list[str]:
 async def run_one(pattern_name: str, symbols: list[str]) -> tuple[str, int, int, int, int, float, float, float, float, float, list]:
     bt = Backtester(
         symbols,
-        min_confidence=0.70,
+        # Kept in sync with main.py's run_backtest() tuned parameters (see
+        # the comments there for the rationale behind each value) so that
+        # per-pattern comparisons here reflect the same engine config used
+        # for actual tuning decisions, rather than an older, more lenient
+        # configuration.
+        min_confidence=0.78,
         regime_filter=True,
-        cooldown_bars=20,
+        cooldown_bars=35,
         txn_cost_pct=0.001,
         position_sizing="risk",
         account_value=100_000.0,
         risk_per_trade_pct=0.02,
         trailing_activation_default=0.01,
-        breakeven_trigger_pct=0.05,
+        breakeven_trigger_pct=0.025,
+        breakeven_buffer_pct=0.0015,
+        min_atr_stop_multiple=1.6,
+        synthetic_stop_multiple=1.75,
         max_open_positions=settings.max_open_positions,
-        min_hold_bars=2,
+        min_hold_bars=4,
         pattern_filter=pattern_name,
     )
     r = await bt.run()
@@ -87,8 +95,16 @@ async def main() -> None:
         "-p", "--parallel", type=int, default=0,
         help="Max concurrent backtests (0 = CPU core count, default: 0).",
     )
+    parser.add_argument(
+        "-q", "--quiet", action="store_true",
+        help="Suppress INFO logs; show only progress bars.",
+    )
     args = parser.parse_args()
     parallel = args.parallel or os.cpu_count() or 4
+
+    if args.quiet:
+        from utils.logger import set_console_level
+        set_console_level("WARNING")
 
     log.info(f"Fetching top {args.symbols} symbols from TradingView...")
     symbol_rows = TVClient.fetch_top_symbols_with_exchanges(

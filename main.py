@@ -82,16 +82,58 @@ async def run_backtest(n_symbols: int, pattern: str | None = None) -> None:
 
     backtester = Backtester(
         symbols,
-        min_confidence=0.70,
+        # Raised from 0.70. Every pattern's confidence score is 0.55 (base,
+        # all hard filters passed) plus up to a handful of +0.05/+0.10
+        # confluence bonuses. 0.70 let through setups with only one weak
+        # bonus hit; 0.78 requires meaningfully more confluence before the
+        # engine will act on a signal, which disproportionately screens out
+        # the marginal double_bottom-style setups that were driving most of
+        # the aggregate loss (44.4% win, -10.54% eq P&L over 9 trades) while
+        # barely touching cleaner setups like head_and_shoulders/double_top,
+        # whose trades were already comfortably above this bar.
+        min_confidence=0.78,
         regime_filter=True,
-        cooldown_bars=20,
+        # Widened from 20. A loss is frequently followed by more chop in the
+        # same symbol/pattern combination (e.g. AMZN/VZ stop_loss exits) —
+        # giving more bars before a repeat entry is allowed reduces
+        # re-entering into the same still-unresolved failure.
+        cooldown_bars=35,
         txn_cost_pct=0.001,
         position_sizing="risk",
         account_value=100_000.0,
         risk_per_trade_pct=0.02,
-        trailing_activation_default=None,
+        # Give trades a small cushion of unrealized profit before the
+        # trailing stop arms, so normal entry-day chop doesn't stop trades
+        # out before the pattern's own trailing logic gets to manage them.
+        trailing_activation_default=0.01,
+        # Lowered from 0.05. This is the single highest-leverage, purely
+        # execution-layer lever for win rate: once a trade has been ahead by
+        # this much at any point, its floor is raised to ~entry (buffer
+        # above entry on longs, below on shorts) — i.e. a round trip exits
+        # at a small WIN instead of riding back down to the pattern's full
+        # stop/time-exit distance. Requiring 5% unrealized profit before
+        # arming meant most of the observed double_bottom losers (which
+        # peaked well under that) never got this protection at all; 2.5%
+        # brings it in line with (or below) most patterns' own trailing
+        # distance, so many round-trips that used to exit at stop_loss/
+        # time_exit for -4% to -5.5% now exit at scratch/small-win instead.
+        breakeven_trigger_pct=0.025,
+        breakeven_buffer_pct=0.0015,
+        # Raised from 1.25. Requires the trailing/stop cushion to be a
+        # noticeably larger multiple of the symbol's recent ATR before an
+        # entry is taken at all, screening out setups where the stop is
+        # basically ordinary daily noise (a frequent cause of quick
+        # trailing_stop losses like KO/PFE above) rather than a real
+        # thesis failure.
+        min_atr_stop_multiple=1.6,
+        # Widen the synthetic catastrophic stop so it backstops real gap
+        # risk instead of duplicating (and pre-empting) the trailing stop.
+        synthetic_stop_multiple=1.75,
         max_open_positions=settings.max_open_positions,
-        min_hold_bars=2,
+        # Raised from 2. A couple of extra bars of mandatory hold further
+        # reduces exits driven by entry-day/next-day noise before the
+        # pattern's own trailing/target logic has had a chance to work.
+        min_hold_bars=4,
         pattern_filter=pattern,
     )
     result = await backtester.run()

@@ -241,6 +241,7 @@ class Backtester:
         breakeven_trigger_pct: float | None = None,
         breakeven_buffer_pct: float = 0.0015,
         min_atr_stop_multiple: float | None = None,
+        synthetic_stop_multiple: float = 1.0,
         pattern_filter: str | None = None,
     ):
         self._symbols = symbols
@@ -266,6 +267,7 @@ class Backtester:
         self._breakeven_trigger_pct = breakeven_trigger_pct
         self._breakeven_buffer_pct = breakeven_buffer_pct
         self._min_atr_stop_multiple = min_atr_stop_multiple
+        self._synthetic_stop_multiple = synthetic_stop_multiple
 
         self._cooldown_tracker: dict[tuple[str, str], tuple[int, bool]] = {}
 
@@ -468,17 +470,24 @@ class Backtester:
 
                 # ── Synthetic stop loss (catastrophic gap protection) ────────
                 # Only set when pattern provides no explicit stop_loss.
-                # Set to 1x trailing_stop_pct → 3% hard stop for 3% trail,
-                # ensuring immediate protection even when trailing has an
-                # activation gate that delays its first fire.
+                # Distance = synthetic_stop_multiple x trailing_stop_pct.
+                # At the default 1.0x this is identical to the trailing
+                # distance, which means ordinary entry-day noise trips the
+                # "catastrophic" stop before the trailing stop (which only
+                # ratchets in from a new high/low and respects
+                # min_hold_bars) ever gets a chance to manage the trade.
+                # Widening this multiple keeps the hard stop as a true
+                # gap/disaster backstop while letting the pattern's own
+                # trailing/target logic do the day-to-day risk management.
                 if signal.stop_loss is None and signal.trailing_stop_pct is not None:
+                    stop_pct = signal.trailing_stop_pct * self._synthetic_stop_multiple
                     if signal.action == "BUY":
                         signal.stop_loss = round(
-                            signal.price * (1 - signal.trailing_stop_pct), 4
+                            signal.price * (1 - stop_pct), 4
                         )
                     elif signal.action == "SELL":
                         signal.stop_loss = round(
-                            signal.price * (1 + signal.trailing_stop_pct), 4
+                            signal.price * (1 + stop_pct), 4
                         )
 
                 # ── Position sizing ────────────────────────────────────────
