@@ -121,9 +121,12 @@ class BacktestResult:
         returns = np.array([t.pnl_pct for t in self.trades])
         mean = returns.mean()
         std = returns.std(ddof=1)
+        # Guard against near-zero std (e.g. all trades have identical P&L)
+        if std < 1e-10:
+            return 0.0
         # Annualize using sqrt(n_trades) — each trade is an independent unit
         n = len(returns)
-        return float(mean / std * np.sqrt(n)) if std > 0 else 0.0
+        return float(mean / std * np.sqrt(n))
 
     @property
     def account_weighted_pnl_pct(self) -> float:
@@ -225,11 +228,13 @@ class Backtester:
         trailing_activation_default: float | None = None,
         max_open_positions: int = 8,
         min_hold_bars: int = 2,
+        pattern_filter: str | None = None,
     ):
         self._symbols = symbols
         self._tv = TVClient(settings.tv_screener, settings.tv_exchange)
         self._patterns: list[BasePattern] = []
         self._pattern_files: dict[str, str] = {}
+        self._pattern_filter = pattern_filter
         self._discover_patterns()
 
         self._min_confidence = min_confidence
@@ -258,6 +263,11 @@ class Backtester:
                     and attr is not BasePattern
                 ):
                     instance = attr()
+                    # Apply pattern filter: match by case-insensitive substring
+                    if self._pattern_filter is not None:
+                        filter_lower = self._pattern_filter.lower()
+                        if filter_lower not in instance.name.lower():
+                            continue
                     self._patterns.append(instance)
                     self._pattern_files[instance.name] = (
                         f"patterns/{module_info.name}.py"

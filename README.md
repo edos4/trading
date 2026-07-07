@@ -74,6 +74,50 @@ cp .env.example .env
 python main.py
 ```
 
+## Backtesting
+
+Test the strategy against historical data (no live connection needed):
+
+```bash
+# Full backtest — all patterns, top 100 symbols
+python main.py --backtest
+
+# Quick test — top 10 symbols
+python main.py --backtest 10
+
+# Single-pattern test — isolate one pattern for focused tuning
+python main.py --backtest --pattern double_top
+python main.py --backtest 10 --pattern channel
+```
+
+The `--pattern` flag does case-insensitive substring matching against registered
+pattern names (e.g. `double_top`, `head_and_shoulders`, `rounding`). Only matching
+patterns run, making it easy to evaluate individual pattern performance.
+
+Results are saved as `backtest_results_<timestamp>.txt` (summary) and `.json`
+(full trade list) in the project root.
+
+### Comparing all patterns
+
+To find which pattern has the lowest/highest win rate, run the comparison
+script — it backtests each pattern individually and prints a sorted table:
+
+```bash
+# Default: 50 symbols per pattern (fast)
+python scripts/compare_patterns.py
+
+# More symbols for better stats
+python scripts/compare_patterns.py --symbols 100
+
+# Quick sniff
+python scripts/compare_patterns.py --symbols 20
+```
+
+The table is sorted by win rate (worst first), so the weakest pattern is
+at the top. Each row shows signals, trades, win/loss counts, equal-weighted
+and account-weighted P&L, average P&L, max drawdown, and Sharpe ratio.
+A detailed trade list follows each pattern's summary.
+
 ## Symbol Explorer UI
 
 Launch the native desktop UI with:
@@ -138,10 +182,14 @@ trading_bot_v2/
 │   └── risk_guard.py                    # Pre-trade checks (size, daily loss, limits)
 │
 ├── core/
-│   └── scanner.py                       # Main scan loop — ties everything together
+│   ├── scanner.py                       # Main scan loop — ties everything together
+│   └── backtester.py                    # Historical walk-forward backtest engine
 │
 ├── ui/
 │   └── app.py                           # Native tkinter symbol explorer
+│
+├── scripts/
+│   └── compare_patterns.py             # Cross-pattern comparison backtest
 │
 └── utils/
     └── logger.py                        # Structured logging (console + files)
