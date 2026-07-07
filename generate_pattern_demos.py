@@ -44,11 +44,14 @@ def timestamps(n: int) -> list:
     return [pd.Timestamp(t).to_pydatetime() for t in idx]
 
 
-def build_candles(closes: np.ndarray, volumes: np.ndarray) -> list[OHLCVCandle]:
+def build_candles(closes: np.ndarray, volumes: np.ndarray,
+                  peak_wicks: set = (), trough_wicks: set = ()) -> list[OHLCVCandle]:
     """Build OHLCV candles from a close path.
 
-    open = previous close, high/low = body ± a small wick so that swing-high /
-    swing-low detection (lookback 2) tracks the close shape.
+    open = previous close; high/low = body ± a small wick. Bars in
+    `peak_wicks` get an extra upper wick and bars in `trough_wicks` an extra
+    lower wick so swing-high / swing-low detection (lookback 2) sees a single
+    clean structural point instead of a 2-bar equal-high cluster.
     """
     ts = timestamps(len(closes))
     candles: list[OHLCVCandle] = []
@@ -58,14 +61,28 @@ def build_candles(closes: np.ndarray, volumes: np.ndarray) -> list[OHLCVCandle]:
         c = float(c)
         body = abs(c - o)
         wick = max(0.4, body * 0.4)
-        h = max(o, c) + wick
-        l = min(o, c) - wick
+        up = 2.0 if i in peak_wicks else 0.0
+        dn = 2.0 if i in trough_wicks else 0.0
+        h = max(o, c) + wick + up
+        l = min(o, c) - wick - dn
         candles.append(OHLCVCandle(
             open=o, high=h, low=l, close=c,
             volume=float(volumes[i]), timestamp=ts[i],
         ))
         prev = c
     return candles
+
+
+def from_anchors(n: int, anchors: list[tuple[int, float]]) -> np.ndarray:
+    """Linear interpolation between (idx, value) anchors. Anchor values are
+    set once; gaps are filled strictly between, so no endpoint duplication."""
+    c = np.empty(n)
+    for (i, vi), (j, vj) in zip(anchors[:-1], anchors[1:]):
+        c[i] = vi
+        for k in range(i + 1, j):
+            c[k] = vi + (vj - vi) * (k - i) / (j - i)
+    c[anchors[-1][0]] = anchors[-1][1]
+    return c
 
 
 def up_down_vol(closes: np.ndarray, lo: int, hi: int,
@@ -157,151 +174,132 @@ def gen_ema_crossover() -> tuple[np.ndarray, np.ndarray, int]:
     raise RuntimeError("EMA crossover cross-on-last-bar not found")
 
 
-def gen_double_top() -> np.ndarray:
-    """M-pattern: strong rise to H1, pullback to valley, weaker rally to H2,
-    then decline through the neckline. Designed so analyze() fires SHORT on
-    the last bar (day-7 entry after H2)."""
-    c = np.empty(128)
-    # 0..70 strong uptrend 78 -> 124 (H1 at 70)
-    c[:71] = np.linspace(78, 124, 71)
-    # 71..92 pullback to ~106 (valley ~88)
-    c[71:93] = np.linspace(124, 106, 22)
-    # 93..120 weaker, zigzag rise to H2 (close 118 at 120) with down-bars
-    for i in range(93, 121):
-        step = (i - 93)
-        base = 106 + step * 0.43
-        if step % 3 == 2:
-            base -= 1.6
-        c[i] = base
-    c[120] = 118  # H2 close
-    # 121..127 decline through neckline (valley low ≈ 105.5)
-    c[121:128] = [116, 114, 112, 110, 108, 105, 104]
-    return c
+def zigzag_leg(c, lo, hi, v0, v1, up_amp, dn_amp):
+    """Fill c[lo:hi+1] with a choppy ramp from v0 to v1.
 
-
-def gen_double_bottom() -> np.ndarray:
-    """W-pattern: inverse of double top. Decline to L1, rally to peak, weaker
-    decline to L2 (higher low, higher RSI), then rally through neckline."""
-    c = np.empty(128)
-    # 0..70 strong downtrend 124 -> 78 (L1 at 70)
-    c[:71] = np.linspace(124, 78, 71)
-    # 71..92 rally to ~94 (peak ~88)
-    c[71:93] = np.linspace(78, 94, 22)
-    # 93..120 weaker, zigzag decline to L2 (close 84 at 120) with up-bars
-    for i in range(93, 121):
-        step = (i - 93)
-        base = 94 - step * 0.43
-        if step % 3 == 2:
-            base += 1.6
-        c[i] = base
-    c[120] = 84  # L2 close (higher low: 84 > 78)
-    # 121..127 rally through neckline (peak high ≈ 94.5)
-    c[121:128] = [86, 88, 90, 92, 93, 95, 96]
-    return c
-
-
-def gen_rounding_bottom() -> np.ndarray:
-    """Saucer: plateau at neckline, parabolic U into a late bottom, gentle
-    rise that triggers the 2-day HH+HL+RSI entry on the last bar.
-
-    Layout (200 bars, bottom at 197):
-      [0..136]  plateau at neckline = 100
-      [137..197] left half of parabola: 100 -> 70 (the cup)
-      [197..199] right half start: parabola rising (entry fires at 199)
-    The ±60 window [137..199] is a clean concave-up parabola.
+    Even steps (relative to lo) move up by `up_amp`, odd steps down by
+    `dn_amp`, on top of a linear drift from v0 to v1. The balanced up/down
+    churn keeps RSI in a moderate band (gains ≈ losses) while price still
+    trends from v0 to v1. v0 is NOT rewritten (it is set by the caller); the
+    last bar is forced to v1 so it is the leg extreme.
     """
+    span = hi - lo
+    for k in range(1, span + 1):
+        i = lo + k
+        drift = v0 + (v1 - v0) * k / span
+        step = up_amp if (k % 2 == 0) else -dn_amp
+        c[i] = drift + step
+    c[hi] = v1
+
+
+def gen_double_top() -> tuple[np.ndarray, set, set]:
+    """M-pattern with clean H1/H2 peaks and a valley. RSI dip before H1 gives
+    a real overbought reading; a choppy H2 rally keeps RSI in the 50–61 band."""
+    n = 127
+    c = from_anchors(n, [(0, 78), (56, 116), (62, 114.0), (68, 122),
+                         (69, 124.0), (70, 121), (90, 106.0)])
+    zigzag_leg(c, 90, 119, 106.0, 112.0, up_amp=0.7, dn_amp=0.5)  # H2 @119
+    tail = [110, 108, 107, 106, 105, 104, 102]  # neckline break on last bar
+    for k, v in enumerate(tail):
+        c[120 + k] = v
+    return c, {69, 119}, {90}
+
+
+def gen_double_bottom() -> tuple[np.ndarray, set, set]:
+    """W-pattern, inverse of double top."""
+    n = 127
+    c = from_anchors(n, [(0, 124), (56, 86), (62, 88.0), (68, 82),
+                         (69, 78.0), (70, 81), (90, 94.0)])
+    zigzag_leg(c, 90, 119, 94.0, 86.0, up_amp=0.5, dn_amp=0.7)  # L2 @119
+    tail = [88, 90, 92, 93, 94, 96, 98]  # neckline break on last bar
+    for k, v in enumerate(tail):
+        c[120 + k] = v
+    return c, {90}, {69, 119}
+
+
+def gen_rounding_bottom() -> tuple[np.ndarray, set, set]:
+    """Saucer: plateau at neckline, parabolic U to a late bottom, then a
+    steeper rise that fires the 2-day HH+HL entry on the last bar."""
     n = 200
     bottom = 197
-    neck = 100.0
-    bclose = 70.0
-    a = (neck - bclose) / (60 ** 2)  # parabola coefficient
+    neck, bclose = 100.0, 70.0
+    a = (neck - bclose) / (60 ** 2)
     c = np.empty(n)
     c[:137] = neck
-    for i in range(137, n):
+    for i in range(137, 198):
         c[i] = bclose + a * (i - bottom) ** 2
-    return c
+    c[198] = 71.0
+    c[199] = 72.5
+    return c, set(), {197}
 
 
-def gen_rounding_top() -> np.ndarray:
-    """Inverted saucer: plateau at floor, parabolic ∩ into a late top, gentle
-    decline that triggers the 2-day LH+LL+RSI entry on the last bar."""
+def gen_rounding_top() -> tuple[np.ndarray, set, set]:
+    """Inverted saucer: plateau at floor, parabolic ∩ to a late top with a
+    shallow dip ~7 bars before for a real overbought RSI, then decline that
+    fires the 2-day LH+LL entry on the last bar."""
     n = 200
     top = 197
+    floor, crown = 70.0, 100.0
+    a = (crown - floor) / (60 ** 2)
     c = np.empty(n)
-    floor = 70.0
-    crown = 100.0
-    depth = crown - floor
-    a = depth / (60 ** 2)
     c[:137] = floor
-    # parabolic dome: close = crown - a*(i-top)^2 for i in [top-60, top+60]
-    for i in range(top - 60, min(n, top + 60)):
-        if i < 137:
-            continue
+    for i in range(137, 198):
         c[i] = crown - a * (i - top) ** 2
-    return c
+    # shallow dip 7 bars before the top (introduces a down bar for real RSI)
+    trend = crown - a * (190 - top) ** 2
+    c[190] = trend - 0.5
+    c[198] = 99.5
+    c[199] = 98.0
+    return c, {197}, set()
 
 
-def gen_upward_channel() -> np.ndarray:
-    """Rising channel: start -> SH1 -> valley -> SH2 (higher high, lower RSI)
-    -> breakdown below the rising lower channel line on the last bar."""
-    c = np.empty(213)
-    # 0..80 rise 80 -> 100 (SH1 at 80)
-    c[:81] = np.linspace(80, 100, 81)
-    # 81..120 pullback to 92 (valley at 120)
-    c[81:121] = np.linspace(100, 92, 40)
-    # 121..180 rise 92 -> 105 (SH2 at 180) — gentler than leg 1
-    c[121:181] = np.linspace(92, 105, 60)
-    # 181..213 decline below the rising lower channel line
-    # lower line through (120, 92) slope 0.05 -> at 210 ≈ 96.5
-    c[181:213] = np.linspace(105, 93, 32)
-    # Force the 2-consec below to land on the last bar (212):
-    # lower_line(210)=96.5, (211)=96.55, (212)=96.6
-    c[209] = 97   # >= line(209)=96.45  (reset)
-    c[210] = 95   # < line(210)=96.5   (consec 1)
-    c[211] = 94   # < line(211)=96.55  (consec 2 -> entry=211)
-    c[212] = 93   # last bar (cur=212, but entry=211 -> we need entry==cur)
-    return c
+def gen_upward_channel() -> tuple[np.ndarray, set, set]:
+    """Rising channel: start → SH1 → valley → SH2 (higher high, lower RSI) →
+    breakdown below the rising lower channel line on the last bar."""
+    n = 213
+    c = from_anchors(n, [(0, 80), (73, 97), (80, 100.0),          # SH1 @80
+                         (81, 99), (140, 92.0),                    # valley @140
+                         (191, 101), (195, 99.0), (205, 102.5),    # SH2 @205
+                         (206, 100), (207, 99), (208, 98), (209, 96),
+                         (210, 91), (211, 90), (212, 89)])
+    # micro-pullback before SH1 so RSI(14) at SH1 is real (not nan)
+    for k, v in enumerate([98.5, 97.8, 98.6, 99.3, 99.8]):
+        c[75 + k] = v
+    return c, {80, 205}, {0, 140}
 
 
-def gen_descending_channel() -> np.ndarray:
-    """Falling channel: start -> SL1 -> peak -> SL2 (lower low, higher RSI)
-    -> breakout above the falling upper channel line on the last bar."""
-    c = np.empty(213)
-    # 0..80 decline 120 -> 100 (SL1 at 80)
-    c[:81] = np.linspace(120, 100, 81)
-    # 81..120 rally to 108 (peak at 120)
-    c[81:121] = np.linspace(100, 108, 40)
-    # 121..180 decline 108 -> 96 (SL2 at 180) — gentler than leg 1
-    c[121:181] = np.linspace(108, 96, 60)
-    # 181..213 rally above the falling upper channel line
-    c[181:213] = np.linspace(96, 106, 32)
-    # upper line through (120,108) slope -0.04 -> at 209≈104.44, 210≈104.4,
-    # 211≈104.36, 212≈104.32
-    c[209] = 104  # <= line(209)=104.44 (reset)
-    c[210] = 105  # > line(210)=104.4  (consec 1)
-    c[211] = 106  # > line(211)=104.36 (consec 2 -> entry=211)
-    c[212] = 107  # last bar
-    return c
+def gen_descending_channel() -> tuple[np.ndarray, set, set]:
+    """Falling channel, inverse of upward channel."""
+    n = 213
+    a = [(0, 120), (73, 103), (80, 100.0),        # SL1 @80 (rally @73 for RSI)
+         (81, 101), (140, 108.0),                  # peak @140
+         (191, 99), (195, 101.0), (205, 96.0),     # SL2 @205 (choppy, rally @195)
+         (206, 98), (207, 100), (208, 102), (209, 104),
+         (210, 106), (211, 109), (212, 110)]
+    return from_anchors(n, a), {0, 140}, {80, 205}
 
 
-def gen_head_and_shoulders() -> np.ndarray:
-    """LS -> LN -> HD -> RN -> RS, flat neckline, bearish RSI divergence,
-    neckline break on the last bar."""
-    c = np.empty(217)
-    # 0..100 rise 70 -> 100 (LS at 100, sharp rally -> high RSI)
-    c[:101] = np.linspace(70, 100, 101)
-    # 101..120 pullback 100 -> 90 (LN at 120)
-    c[101:121] = np.linspace(100, 90, 20)
-    # 121..150 rise 90 -> 120 (HD at 150, gentler -> lower RSI than LS)
-    c[121:151] = np.linspace(90, 120, 30)
-    # 151..180 pullback 120 -> 90 (RN at 180)
-    c[151:181] = np.linspace(120, 90, 30)
-    # 181..210 weak rise 90 -> 95 (RS at 210, close 95)
-    c[181:211] = np.linspace(90, 95, 30)
-    # 211..216 decline through neckline (flat at 90)
-    c[211:217] = [94, 92, 91, 90.5, 89, 88]  # close[215]=89<90, close[216]=88<90
-    # need close[214] >= 90 to reset consec: 90.5 >= 90 OK
-    return c
+def gen_head_and_shoulders() -> tuple[np.ndarray, set, set]:
+    """LS → LN → HD → RN → RS, flat neckline, bearish RSI divergence, neckline
+    break on the last bar. The RS leg uses micro-pullbacks (a 1-bar down step
+    recovered the next bar) so Wilder RSI at RS sits ≤60 without creating any
+    extra close-swing-highs (HEAD_LOOKBACK=4, strict)."""
+    n = 217
+    c = from_anchors(n, [(0, 70), (100, 100.0),        # LS @100
+                         (101, 99), (120, 90.0),        # LN @120
+                         (150, 120.0),                  # HD @150
+                         (151, 119), (180, 90.0)])      # RN @180
+    # RS leg: gentle rise 90 -> 93, then micro-pullback pattern to 95 at 210.
+    for i in range(181, 197):
+        c[i] = 90 + (93 - 90) * (i - 181) / 16
+    rs_tail = [93.0, 93.7, 93.1, 93.8, 93.2, 93.9, 93.3, 94.0,
+               93.4, 94.1, 93.5, 94.2, 93.6, 94.5]      # 197..210 (RS=94.5)
+    for k, v in enumerate(rs_tail):
+        c[197 + k] = v
+    post = [94, 92, 91, 90.5, 89, 88]                   # 211..216
+    for k, v in enumerate(post):
+        c[211 + k] = v
+    return c, set(), set()
 
 
 # ── demo runner ──────────────────────────────────────────────────────────────
@@ -332,8 +330,9 @@ def main() -> None:
         try:
             if name == "pattern_001_ema_crossover":
                 closes, vols, _ = genfn()
+                peaks, troughs = set(), set()
             else:
-                closes = genfn()
+                closes, peaks, troughs = genfn()
                 vols = np.full(len(closes), 1_000_000, dtype=float)
                 if "leg2" in extra:
                     lo, hi, uv, dv = extra["leg2"]
@@ -346,7 +345,7 @@ def main() -> None:
             pattern.V9_EARNINGS_BLACKOUT = False
 
         symbol = "DEMO"
-        candles = build_candles(closes, vols)
+        candles = build_candles(closes, vols, peaks, troughs)
         snapshot = make_snapshot(symbol, candles,
                                  rec="BUY" if action == "BUY" else "SELL")
         df, sig = run_pattern(pattern, symbol, candles, snapshot)

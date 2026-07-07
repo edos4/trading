@@ -209,7 +209,7 @@ class TradingBotUI:
         if not rows:
             self._safe_after(lambda: self._fail("No symbols returned by screener."))
             return
-        self._symbols = rows
+        self._symbols = sorted(rows, key=lambda x: x[0].upper())
         self._safe_after(self._populate_list)
 
     def _populate_list(self) -> None:
