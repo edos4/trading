@@ -2,10 +2,11 @@
 main.py - Entry point. Runs the market scanner, backtester, or GUI.
 
 Usage:
-    python main.py                     # Live/paper scan mode
-    python main.py --backtest          # Backtest mode (top 100 symbols)
-    python main.py --backtest 10       # Backtest mode (top 10 symbols)
-    python main.py --ui                # Launch the symbol explorer GUI
+    python main.py                                  # Live/paper scan mode
+    python main.py --backtest                       # Backtest all patterns (100 symbols)
+    python main.py --backtest 10                    # Backtest all patterns (10 symbols)
+    python main.py --backtest --pattern double_top  # Test one pattern only
+    python main.py --ui                             # Launch the symbol explorer GUI
 
 Prerequisites:
   - .env file filled in (copy from .env.example)
@@ -58,11 +59,12 @@ async def run_scanner(n_symbols: int = 100) -> None:
     await scanner.run()
 
 
-async def run_backtest(n_symbols: int) -> None:
+async def run_backtest(n_symbols: int, pattern: str | None = None) -> None:
     os.makedirs("logs", exist_ok=True)
 
+    title = f"BACKTEST MODE{' — ' + pattern if pattern else ''}"
     log.info("=" * 60)
-    log.info(f"  Trading Bot — BACKTEST MODE")
+    log.info(f"  Trading Bot — {title}")
     log.info(f"  Symbols:    top {n_symbols} by market cap")
     log.info("=" * 60)
 
@@ -88,6 +90,7 @@ async def run_backtest(n_symbols: int) -> None:
         trailing_activation_default=None,
         max_open_positions=settings.max_open_positions,
         min_hold_bars=2,
+        pattern_filter=pattern,
     )
     result = await backtester.run()
 
@@ -132,6 +135,15 @@ async def main() -> None:
         "Without --backtest, runs live/paper scan.",
     )
     parser.add_argument(
+        "--pattern",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help="Filter to a specific pattern (case-insensitive substring). "
+        "Use with --backtest to test one pattern in isolation. "
+        "E.g.: --backtest --pattern double_top",
+    )
+    parser.add_argument(
         "--ui",
         action="store_true",
         help="Launch the tkinter symbol explorer GUI instead of scanning.",
@@ -146,7 +158,7 @@ async def main() -> None:
         return
 
     if args.backtest is not None:
-        await run_backtest(n_symbols=args.backtest)
+        await run_backtest(n_symbols=args.backtest, pattern=args.pattern)
     else:
         await run_scanner()
 
