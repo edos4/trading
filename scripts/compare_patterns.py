@@ -52,7 +52,8 @@ async def run_one(pattern_name: str, symbols: list[str]) -> tuple[str, int, int,
         position_sizing="risk",
         account_value=100_000.0,
         risk_per_trade_pct=0.02,
-        trailing_activation_default=None,
+        trailing_activation_default=0.01,
+        breakeven_trigger_pct=0.05,
         max_open_positions=settings.max_open_positions,
         min_hold_bars=2,
         pattern_filter=pattern_name,
@@ -82,7 +83,12 @@ async def main() -> None:
         "--symbols", type=int, default=50,
         help="Number of top symbols to test (default: 50).",
     )
+    parser.add_argument(
+        "-p", "--parallel", type=int, default=0,
+        help="Max concurrent backtests (0 = CPU core count, default: 0).",
+    )
     args = parser.parse_args()
+    parallel = args.parallel or os.cpu_count() or 4
 
     log.info(f"Fetching top {args.symbols} symbols from TradingView...")
     symbol_rows = TVClient.fetch_top_symbols_with_exchanges(
@@ -96,10 +102,16 @@ async def main() -> None:
     pattern_names = discover_pattern_names()
     log.info(f"Discovered {len(pattern_names)} patterns: {pattern_names}")
 
-    rows: list = []
-    for pname in pattern_names:
-        log.info(f"\n--- Backtesting: {pname} ---")
-        rows.append(await run_one(pname, symbols))
+    sem = asyncio.Semaphore(parallel)
+
+    async def worker(pname: str) -> tuple:
+        async with sem:
+            res = await run_one(pname, symbols)
+            log.info(f"✓ {pname}  (signals={res[1]}, trades={res[2]}, win_rate={res[5]:.1%})")
+            return res
+
+    tasks = [asyncio.create_task(worker(p)) for p in pattern_names]
+    rows: list = await asyncio.gather(*tasks)
 
     # Sort by win rate (ascending — worst first)
     rows.sort(key=lambda r: r[5])

@@ -103,11 +103,14 @@ To find which pattern has the lowest/highest win rate, run the comparison
 script — it backtests each pattern individually and prints a sorted table:
 
 ```bash
-# Default: 50 symbols per pattern (fast)
+# Default: 50 symbols per pattern, parallel=CPU count (fast)
 python scripts/compare_patterns.py
 
 # More symbols for better stats
 python scripts/compare_patterns.py --symbols 100
+
+# Control concurrency — limit to N simultaneous backtests
+python scripts/compare_patterns.py -p 2
 
 # Quick sniff
 python scripts/compare_patterns.py --symbols 20

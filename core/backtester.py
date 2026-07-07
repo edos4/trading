@@ -60,8 +60,18 @@ class BacktestTrade:
     confidence: float = 0.0
     qty: float = 0.0
 
+    # Engine-level (not pattern-level) breakeven protection. Once a trade has
+    # been ahead by `breakeven_trigger_pct`, its protective floor is raised to
+    # (roughly) entry price so a full round-trip back to red exits near
+    # scratch instead of at the pattern's full stop distance. This is purely
+    # an execution/risk-management behaviour — the pattern's own stop/target/
+    # trailing values are untouched.
+    breakeven_trigger_pct: float | None = None
+    breakeven_buffer_pct: float = 0.0015
+
     _trailing_activated: bool = False
     _best_pnl_pct: float | None = None
+    _breakeven_armed: bool = False
 
     def __str__(self) -> str:
         return (
@@ -228,6 +238,9 @@ class Backtester:
         trailing_activation_default: float | None = None,
         max_open_positions: int = 8,
         min_hold_bars: int = 2,
+        breakeven_trigger_pct: float | None = None,
+        breakeven_buffer_pct: float = 0.0015,
+        min_atr_stop_multiple: float | None = None,
         pattern_filter: str | None = None,
     ):
         self._symbols = symbols
@@ -247,6 +260,12 @@ class Backtester:
         self._trailing_activation_default = trailing_activation_default
         self._max_open_positions = max_open_positions
         self._min_hold_bars = min_hold_bars
+        # ── Execution-layer, non-pattern risk controls ──────────────────────
+        # These sit on top of whatever stop/target/trailing values a pattern
+        # supplies; they never change a pattern's own signal logic.
+        self._breakeven_trigger_pct = breakeven_trigger_pct
+        self._breakeven_buffer_pct = breakeven_buffer_pct
+        self._min_atr_stop_multiple = min_atr_stop_multiple
 
         self._cooldown_tracker: dict[tuple[str, str], tuple[int, bool]] = {}
 
@@ -354,6 +373,8 @@ class Backtester:
             # Enter pending position at this bar
             if pending_entry is not None:
                 open_position = self._open_trade(pending_entry, candles[i], i)
+                open_position.breakeven_trigger_pct = self._breakeven_trigger_pct
+                open_position.breakeven_buffer_pct = self._breakeven_buffer_pct
                 pending_entry = None
                 i += 1
                 continue
@@ -416,18 +437,48 @@ class Backtester:
                             )
                             continue
 
+                # ── Volatility quality filter (ATR vs. trailing distance) ────
+                # A pattern's trailing_stop_pct is a fixed cushion (e.g. 3%).
+                # On a symbol whose normal daily range is close to or larger
+                # than that cushion, the stop is just noise — it will clip
+                # the trade on ordinary volatility rather than a real thesis
+                # failure. Require the trailing distance to be a comfortable
+                # multiple of the recent ATR before taking the trade. This is
+                # an engine-level entry filter; it does not alter any
+                # pattern's own stop/target/trailing values.
+                if (
+                    self._min_atr_stop_multiple is not None
+                    and signal.trailing_stop_pct is not None
+                ):
+                    df = store.get_df(symbol, timeframe, min_bars=1)
+                    if df is not None and len(df) >= 15:
+                        ind = IndicatorEngine(df)
+                        atr_val = float(ind.atr(14).iloc[-1])
+                        current_close = float(df["close"].iloc[-1])
+                        if current_close > 0 and atr_val > 0:
+                            atr_pct = atr_val / current_close
+                            min_required_trail = atr_pct * self._min_atr_stop_multiple
+                            if signal.trailing_stop_pct < min_required_trail:
+                                log.debug(
+                                    f"Backtest | {symbol} {timeframe} trailing "
+                                    f"{signal.trailing_stop_pct:.2%} too thin vs "
+                                    f"ATR {atr_pct:.2%} — skip"
+                                )
+                                continue
+
                 # ── Synthetic stop loss (catastrophic gap protection) ────────
                 # Only set when pattern provides no explicit stop_loss.
-                # Multiplier is 5x trailing_stop_pct → 15% for 3% trail,
-                # wide enough that trailing stop fires first after min_hold.
+                # Set to 1x trailing_stop_pct → 3% hard stop for 3% trail,
+                # ensuring immediate protection even when trailing has an
+                # activation gate that delays its first fire.
                 if signal.stop_loss is None and signal.trailing_stop_pct is not None:
                     if signal.action == "BUY":
                         signal.stop_loss = round(
-                            signal.price * (1 - signal.trailing_stop_pct * 5.0), 4
+                            signal.price * (1 - signal.trailing_stop_pct), 4
                         )
                     elif signal.action == "SELL":
                         signal.stop_loss = round(
-                            signal.price * (1 + signal.trailing_stop_pct * 5.0), 4
+                            signal.price * (1 + signal.trailing_stop_pct), 4
                         )
 
                 # ── Position sizing ────────────────────────────────────────
@@ -559,21 +610,26 @@ class Backtester:
                 candle.high if base is None else max(base, candle.high)
             )
 
-        # Track best unrealized P&L for trailing activation threshold.
+        # Track best unrealized close-to-close P&L for the trailing-activation
+        # and breakeven thresholds. This is tracked unconditionally (not just
+        # for the "*_close" trailing modes) so activation/breakeven behave
+        # consistently regardless of which trailing reference a given pattern
+        # uses for its own stop distance.
         entry = position.entry_price
         if entry <= 0:
             return
         if position.action == "SELL":
-            ref = position.lowest_close_since_entry
-            if ref is not None:
-                pnl = (entry - ref) / entry
+            base = position.lowest_close_since_entry
+            ref = candle.close if base is None else min(base, candle.close)
+            position.lowest_close_since_entry = ref
+            pnl = (entry - ref) / entry
         else:
-            ref = position.highest_close_since_entry
-            if ref is not None:
-                pnl = (ref - entry) / entry
-        if "pnl" in locals() and pnl is not None:
-            if position._best_pnl_pct is None or pnl > position._best_pnl_pct:
-                position._best_pnl_pct = pnl
+            base = position.highest_close_since_entry
+            ref = candle.close if base is None else max(base, candle.close)
+            position.highest_close_since_entry = ref
+            pnl = (ref - entry) / entry
+        if position._best_pnl_pct is None or pnl > position._best_pnl_pct:
+            position._best_pnl_pct = pnl
 
     @staticmethod
     def _trailing_stop_price(position: BacktestTrade, is_short: bool) -> float | None:
@@ -623,6 +679,30 @@ class Backtester:
             trail = Backtester._trailing_stop_price(position, is_short)
         if trail is not None:
             candidates.append((trail, "trailing_stop"))
+
+        # ── Engine-level breakeven floor ────────────────────────────────────
+        # Once a trade has been ahead by breakeven_trigger_pct at some point,
+        # arm a protective level at ~entry price. This only ever tightens the
+        # exit (it competes with stop_loss/trailing via min/max below) — it
+        # never loosens the pattern's own risk management, and it never
+        # fires before min_hold_bars. A round trip back through entry then
+        # exits near scratch instead of at the pattern's full stop distance.
+        if (
+            bars_held >= min_hold_bars
+            and position.breakeven_trigger_pct is not None
+            and position._best_pnl_pct is not None
+        ):
+            if position._best_pnl_pct >= position.breakeven_trigger_pct:
+                position._breakeven_armed = True
+            if position._breakeven_armed:
+                buf = position.breakeven_buffer_pct
+                breakeven_price = (
+                    position.entry_price * (1 + buf)
+                    if not is_short
+                    else position.entry_price * (1 - buf)
+                )
+                candidates.append((breakeven_price, "breakeven_stop"))
+
         if candidates:
             if is_short:
                 eff, reason = min(candidates, key=lambda c: c[0])

@@ -7,6 +7,8 @@ Usage:
     python main.py --backtest 10                    # Backtest all patterns (10 symbols)
     python main.py --backtest --pattern double_top  # Test one pattern only
     python main.py --ui                             # Launch the symbol explorer GUI
+    python scripts/compare_patterns.py              # Cross-pattern comparison (parallel)
+    python scripts/compare_patterns.py -p 4         # Limit to 4 concurrent backtests
 
 Prerequisites:
   - .env file filled in (copy from .env.example)
