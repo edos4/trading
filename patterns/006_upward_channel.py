@@ -48,11 +48,9 @@ Notes on backtester wiring:
     lower-channel-line value AT the entry bar (which the entry close is
     below by construction), so the entry bar itself is recorded as the
     "neckline break" bar and the time exit fires 15 bars later.
-  - The trailing stop's 4% activation threshold (C20) is NOT enforced by
-    the current backtester, which applies the trailing stop from bar 1.
-    `trailing_stop_pct` is still set (2.5%, lowest_close) so the trail is
-    correct once price has moved in our favour; the activation gate is a
-    known TODO on the backtester.
+  - The trailing stop's 4% activation threshold (C20) is now enforced by
+    the backtester via `trailing_activation_pct`. The trail only activates
+    after the entry-to-extreme P&L reaches 4%.
 """
 
 from __future__ import annotations
@@ -132,7 +130,7 @@ class UpwardChannelPattern(BasePattern):
     VALLEY_DEPTH_MIN        = 0.02        # C11
     VALLEY_DEPTH_MAX        = 0.25        # C12
     STOP_ABOVE_SH2          = 1.01        # C16
-    GAIN_CAP_PCT            = 0.07        # C18
+    GAIN_CAP_PCT            = 0.20        # C18 (increased from 7% to 20% to let winners run)
     TIME_STOP_BARS          = 15          # C19
     TRAIL_ACTIVATION_PCT    = 0.04        # C20 (activation; not enforced by backtester)
     TRAILING_STOP_PCT       = 0.025       # C20
@@ -231,6 +229,7 @@ class UpwardChannelPattern(BasePattern):
                     take_profit=take_profit,
                     trailing_stop_pct=self.TRAILING_STOP_PCT,
                     trailing_stop_mode="lowest_close",
+                    trailing_activation_pct=self.TRAIL_ACTIVATION_PCT,
                     neckline=round(setup.entry_lower_line, 4),
                     neckline_break_direction="below",
                     exit_bars_after_neckline_break=self.TIME_STOP_BARS,

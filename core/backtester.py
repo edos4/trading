@@ -26,6 +26,7 @@ from config import settings
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
 from data.tv_client import TVClient, MarketSnapshot, OHLCVCandle, SCREENER_FIELDS
 from patterns.base_pattern import BasePattern, TradeSignal
+from analysis.indicator_engine import IndicatorEngine
 from utils.logger import log
 
 
@@ -43,12 +44,12 @@ class BacktestTrade:
     pnl_pct: float
     stop_loss: float | None = None
     take_profit: float | None = None
-    # Path-dependent exit state (populated from TradeSignal).
     neckline: float | None = None
     neckline_break_direction: Literal["below", "above"] | None = None
     exit_bars_after_neckline_break: int | None = None
     trailing_stop_pct: float | None = None
     trailing_stop_mode: Literal["lowest_close", "highest_close"] | None = None
+    trailing_activation_pct: float | None = None
     entry_bar_idx: int = -1
     neckline_break_bar_idx: int | None = None
     lowest_close_since_entry: float | None = None
@@ -56,6 +57,11 @@ class BacktestTrade:
     lowest_low_since_entry: float | None = None
     highest_high_since_entry: float | None = None
     exit_reason: str = ""
+    confidence: float = 0.0
+    qty: float = 0.0
+
+    _trailing_activated: bool = False
+    _best_pnl_pct: float | None = None
 
     def __str__(self) -> str:
         return (
@@ -70,6 +76,7 @@ class BacktestTrade:
 class BacktestResult:
     trades: list[BacktestTrade] = field(default_factory=list)
     total_signals: int = 0
+    initial_capital: float = 100_000.0
 
     @property
     def win_count(self) -> int:
@@ -95,10 +102,17 @@ class BacktestResult:
     def max_drawdown_pct(self) -> float:
         if not self.trades:
             return 0.0
-        cumulative = np.cumsum([0.0] + [t.pnl_pct for t in self.trades])
-        peak = np.maximum.accumulate(cumulative)
-        drawdown = cumulative - peak
-        return float(drawdown.min())
+        sorted_trades = sorted(self.trades, key=lambda t: t.entry_date)
+        capital = self.initial_capital
+        peaks: list[float] = [capital]
+        for t in sorted_trades:
+            if t.qty <= 0:
+                continue
+            capital += t.pnl * t.qty
+            peaks.append(capital)
+        peak_series = np.maximum.accumulate(peaks)
+        drawdowns = (np.array(peaks) - peak_series) / peak_series
+        return float(drawdowns.min() * 100)
 
     @property
     def sharpe_ratio(self) -> float:
@@ -107,22 +121,53 @@ class BacktestResult:
         returns = np.array([t.pnl_pct for t in self.trades])
         mean = returns.mean()
         std = returns.std(ddof=1)
-        return float(mean / std * np.sqrt(252)) if std > 0 else 0.0
+        # Annualize using sqrt(n_trades) — each trade is an independent unit
+        n = len(returns)
+        return float(mean / std * np.sqrt(n)) if std > 0 else 0.0
+
+    @property
+    def account_weighted_pnl_pct(self) -> float:
+        if not self.trades:
+            return 0.0
+        sorted_trades = sorted(self.trades, key=lambda t: t.entry_date)
+        capital = self.initial_capital
+        for t in sorted_trades:
+            if t.qty <= 0:
+                continue
+            pnl_dollars = t.pnl * t.qty
+            capital += pnl_dollars
+        return ((capital - self.initial_capital) / self.initial_capital) * 100
+
+    @property
+    def final_capital(self) -> float:
+        if not self.trades:
+            return self.initial_capital
+        sorted_trades = sorted(self.trades, key=lambda t: t.entry_date)
+        capital = self.initial_capital
+        for t in sorted_trades:
+            if t.qty <= 0:
+                continue
+            capital += t.pnl * t.qty
+        return capital
 
     def summary(self) -> str:
+        eq_pnl = self.total_pnl_pct
+        aw_pnl = self.account_weighted_pnl_pct
         lines = [
             "=" * 60,
             "  BACKTEST RESULTS",
             "=" * 60,
-            f"  Total signals:  {self.total_signals}",
-            f"  Trades taken:   {len(self.trades)}",
-            f"  Wins:           {self.win_count}",
-            f"  Losses:         {self.loss_count}",
-            f"  Win rate:       {self.win_rate:.1%}",
-            f"  Total P&L:      {self.total_pnl_pct:+.2f}%",
-            f"  Avg P&L/trade:  {self.avg_pnl_pct:+.2f}%",
-            f"  Max drawdown:   {self.max_drawdown_pct:+.2f}%",
-            f"  Sharpe ratio:   {self.sharpe_ratio:.2f}",
+            f"  Total signals:     {self.total_signals}",
+            f"  Trades taken:      {len(self.trades)}",
+            f"  Wins:              {self.win_count}",
+            f"  Losses:            {self.loss_count}",
+            f"  Win rate:          {self.win_rate:.1%}",
+            f"  Equal-weighted P&L: {eq_pnl:+.2f}%",
+            f"  Account-weighted P&L: {aw_pnl:+.2f}%",
+            f"  Final capital:      ${self.final_capital:,.2f}",
+            f"  Avg P&L/trade:     {self.avg_pnl_pct:+.2f}%",
+            f"  Max drawdown:      {self.max_drawdown_pct:+.2f}%",
+            f"  Sharpe ratio:      {self.sharpe_ratio:.2f}",
             "=" * 60,
         ]
         return "\n".join(lines)
@@ -134,7 +179,8 @@ class BacktestResult:
             "wins": self.win_count,
             "losses": self.loss_count,
             "win_rate": round(self.win_rate, 4),
-            "total_pnl_pct": round(self.total_pnl_pct, 4),
+            "equal_weighted_pnl_pct": round(self.total_pnl_pct, 4),
+            "account_weighted_pnl_pct": round(self.account_weighted_pnl_pct, 4),
             "avg_pnl_pct": round(self.avg_pnl_pct, 4),
             "max_drawdown_pct": round(self.max_drawdown_pct, 4),
             "sharpe_ratio": round(self.sharpe_ratio, 4),
@@ -152,6 +198,8 @@ class BacktestResult:
                     "exit_reason": t.exit_reason,
                     "stop_loss": round(t.stop_loss, 4) if t.stop_loss else None,
                     "take_profit": round(t.take_profit, 4) if t.take_profit else None,
+                    "confidence": round(t.confidence, 4),
+                    "qty": round(t.qty, 4),
                 }
                 for t in self.trades
             ],
@@ -164,12 +212,38 @@ class BacktestResult:
 
 
 class Backtester:
-    def __init__(self, symbols: list[str]):
+    def __init__(
+        self,
+        symbols: list[str],
+        min_confidence: float = 0.0,
+        regime_filter: bool = False,
+        cooldown_bars: int = 0,
+        txn_cost_pct: float = 0.0,
+        position_sizing: str = "pattern",
+        account_value: float = 100_000.0,
+        risk_per_trade_pct: float = 0.01,
+        trailing_activation_default: float | None = None,
+        max_open_positions: int = 8,
+        min_hold_bars: int = 2,
+    ):
         self._symbols = symbols
         self._tv = TVClient(settings.tv_screener, settings.tv_exchange)
         self._patterns: list[BasePattern] = []
         self._pattern_files: dict[str, str] = {}
         self._discover_patterns()
+
+        self._min_confidence = min_confidence
+        self._regime_filter = regime_filter
+        self._cooldown_bars = cooldown_bars
+        self._txn_cost_pct = txn_cost_pct
+        self._position_sizing = position_sizing
+        self._account_value = account_value
+        self._risk_per_trade_pct = risk_per_trade_pct
+        self._trailing_activation_default = trailing_activation_default
+        self._max_open_positions = max_open_positions
+        self._min_hold_bars = min_hold_bars
+
+        self._cooldown_tracker: dict[tuple[str, str], tuple[int, bool]] = {}
 
     def _discover_patterns(self) -> None:
         for module_info in pkgutil.iter_modules(patterns_pkg.__path__):
@@ -201,7 +275,9 @@ class Backtester:
         sem = asyncio.Semaphore(concurrency)
 
         tasks = [(s, tf) for s in self._symbols for tf in sorted(all_timeframes)]
-        result = BacktestResult()
+        result = BacktestResult(
+            initial_capital=self._account_value,
+        )
 
         pbar = tqdm(total=len(tasks), desc="Backtesting", unit="sym", ncols=80)
 
@@ -247,18 +323,20 @@ class Backtester:
             if open_position is not None:
                 self._update_neckline_state(open_position, candles[i], i)
                 exit_price, exit_reason = self._check_exit(
-                    candles[i], open_position, i
+                    candles[i], open_position, i,
+                    min_hold_bars=self._min_hold_bars,
                 )
                 if exit_price is not None:
                     self._close_trade(
-                        open_position, exit_price, exit_reason, candles[i]
+                        open_position, exit_price, exit_reason, candles[i],
+                        self._txn_cost_pct,
                     )
                     trades.append(open_position)
+                    key = (open_position.symbol, open_position.pattern)
+                    self._cooldown_tracker[key] = (i, open_position.pnl < 0)
                     open_position = None
                     i += 1
                     continue
-                # No exit this bar → fold current close into trailing reference
-                # so it is available as a stop level on the next bar.
                 self._update_trailing_reference(open_position, candles[i])
                 i += 1
                 continue
@@ -284,6 +362,75 @@ class Backtester:
                     f"Backtest | {symbol} {timeframe} {signal.action} "
                     f"confidence={signal.confidence:.2f} {signal.pattern}"
                 )
+
+                # ── Confidence filter ──────────────────────────────────────
+                if signal.confidence < self._min_confidence:
+                    log.debug(
+                        f"Backtest | {symbol} {timeframe} confidence "
+                        f"{signal.confidence:.2f} < min {self._min_confidence} — skip"
+                    )
+                    continue
+
+                # ── Market regime filter (SMA200 trend) ────────────────────
+                # Only buy in bull markets (price above 200MA), only short in
+                # bear markets (price below 200MA). Removed SMA50 filter — it
+                # was too restrictive and killed trade count.
+                if self._regime_filter:
+                    df = store.get_df(symbol, timeframe, min_bars=1)
+                    if df is not None and len(df) >= 200:
+                        close = df["close"]
+                        sma200 = close.rolling(200).mean()
+                        current_sma200 = float(sma200.iloc[-1])
+                        current_close = float(close.iloc[-1])
+                        if signal.action == "BUY" and current_close < current_sma200:
+                            log.debug(
+                                f"Backtest | {symbol} {timeframe} BUY below SMA200 — skip"
+                            )
+                            continue
+                        if signal.action == "SELL" and current_close > current_sma200:
+                            log.debug(
+                                f"Backtest | {symbol} {timeframe} SELL above SMA200 — skip"
+                            )
+                            continue
+
+                # ── Pattern cooldown ───────────────────────────────────────
+                if self._cooldown_bars > 0:
+                    key = (symbol, signal.pattern)
+                    if key in self._cooldown_tracker:
+                        exit_bar, was_loss = self._cooldown_tracker[key]
+                        bars_since = i - exit_bar
+                        if was_loss and bars_since < self._cooldown_bars:
+                            log.debug(
+                                f"Backtest | {symbol} {timeframe} cooldown "
+                                f"{bars_since}/{self._cooldown_bars} bars — skip"
+                            )
+                            continue
+
+                # ── Synthetic stop loss (catastrophic gap protection) ────────
+                # Only set when pattern provides no explicit stop_loss.
+                # Multiplier is 5x trailing_stop_pct → 15% for 3% trail,
+                # wide enough that trailing stop fires first after min_hold.
+                if signal.stop_loss is None and signal.trailing_stop_pct is not None:
+                    if signal.action == "BUY":
+                        signal.stop_loss = round(
+                            signal.price * (1 - signal.trailing_stop_pct * 5.0), 4
+                        )
+                    elif signal.action == "SELL":
+                        signal.stop_loss = round(
+                            signal.price * (1 + signal.trailing_stop_pct * 5.0), 4
+                        )
+
+                # ── Position sizing ────────────────────────────────────────
+                self._apply_sizing(signal, store, symbol, timeframe)
+
+                # ── Trailing activation default ────────────────────────────
+                if (
+                    self._trailing_activation_default is not None
+                    and signal.trailing_activation_pct is None
+                    and signal.trailing_stop_pct is not None
+                ):
+                    signal.trailing_activation_pct = self._trailing_activation_default
+
                 pending_entry = signal
                 break  # one signal per bar max
 
@@ -296,17 +443,72 @@ class Backtester:
             )
         if open_position is not None:
             self._close_trade(
-                open_position, candles[-1].close, "end_of_data", candles[-1]
+                open_position, candles[-1].close, "end_of_data", candles[-1],
+                self._txn_cost_pct,
             )
             trades.append(open_position)
 
         return trades, signals_count
 
+    # ── Sizing ──────────────────────────────────────────────────────────────────
+    def _apply_sizing(
+        self,
+        signal: TradeSignal,
+        store: OHLCVStore,
+        symbol: str,
+        timeframe: str,
+        entry_price: float | None = None,
+    ) -> None:
+        current_price = entry_price if entry_price else signal.price
+        if current_price <= 0:
+            return
+
+        notional_max = self._account_value * 0.02
+        notional_max_shares = int(notional_max / current_price) if current_price > 0 else 0
+
+        if self._position_sizing == "pattern":
+            capped = min(signal.qty, notional_max_shares)
+            signal.qty = max(1, int(capped))
+            return
+
+        if self._position_sizing == "notional":
+            signal.qty = max(1, notional_max_shares)
+            return
+
+        risk_amount = self._account_value * self._risk_per_trade_pct
+
+        if self._position_sizing == "risk":
+            stop_distance = None
+            if signal.stop_loss is not None:
+                stop_distance = abs(current_price - signal.stop_loss)
+            elif signal.trailing_stop_pct is not None:
+                stop_distance = current_price * signal.trailing_stop_pct
+            if stop_distance is not None and stop_distance > 0:
+                qty = int(risk_amount / stop_distance)
+                qty = min(qty, notional_max_shares)
+                signal.qty = max(1, int(qty))
+            else:
+                signal.qty = max(1, notional_max_shares)
+            return
+
+        if self._position_sizing == "atr":
+            df = store.get_df(symbol, timeframe, min_bars=1)
+            if df is not None and len(df) >= 14:
+                ind = IndicatorEngine(df)
+                atr_val = float(ind.atr(14).iloc[-1])
+                if atr_val > 0:
+                    qty = int(risk_amount / atr_val)
+                    qty = min(qty, notional_max_shares)
+                    signal.qty = max(1, int(qty))
+                    return
+            signal.qty = max(1, notional_max_shares)
+            return
+
+    # ── Exit helpers ────────────────────────────────────────────────────────────
     @staticmethod
     def _update_neckline_state(
         position: BacktestTrade, candle: OHLCVCandle, bar_idx: int
     ) -> None:
-        """Record the first bar whose close breaks the neckline."""
         if position.neckline is None or position.neckline_break_bar_idx is not None:
             return
         if (
@@ -325,7 +527,6 @@ class Backtester:
     def _update_trailing_reference(
         position: BacktestTrade, candle: OHLCVCandle
     ) -> None:
-        """Fold the just-completed bar into the trailing reference."""
         mode = position.trailing_stop_mode
         if mode == "lowest_close":
             base = position.lowest_close_since_entry
@@ -348,8 +549,35 @@ class Backtester:
                 candle.high if base is None else max(base, candle.high)
             )
 
+        # Track best unrealized P&L for trailing activation threshold.
+        entry = position.entry_price
+        if entry <= 0:
+            return
+        if position.action == "SELL":
+            ref = position.lowest_close_since_entry
+            if ref is not None:
+                pnl = (entry - ref) / entry
+        else:
+            ref = position.highest_close_since_entry
+            if ref is not None:
+                pnl = (ref - entry) / entry
+        if "pnl" in locals() and pnl is not None:
+            if position._best_pnl_pct is None or pnl > position._best_pnl_pct:
+                position._best_pnl_pct = pnl
+
     @staticmethod
     def _trailing_stop_price(position: BacktestTrade, is_short: bool) -> float | None:
+        # Check trailing activation threshold.
+        # If no activation threshold is set, trailing stop is active from the start.
+        if position.trailing_activation_pct is not None and not position._trailing_activated:
+            if (
+                position._best_pnl_pct is not None
+                and position._best_pnl_pct >= position.trailing_activation_pct
+            ):
+                position._trailing_activated = True
+            else:
+                return None  # trailing stop not yet active
+
         mode = position.trailing_stop_mode
         pct = position.trailing_stop_pct
         if pct is None or mode is None:
@@ -368,16 +596,21 @@ class Backtester:
 
     @staticmethod
     def _check_exit(
-        candle: OHLCVCandle, position: BacktestTrade, bar_idx: int
+        candle: OHLCVCandle, position: BacktestTrade, bar_idx: int,
+        min_hold_bars: int = 0,
     ) -> tuple[float | None, str]:
         is_short = position.action == "SELL"
 
-        # Active stop = tightest of (static stop, trailing stop). For a long
-        # the tightest is the highest stop price; for a short the lowest.
+        # Enforce minimum holding period before trailing stop can fire.
+        # Static stop-loss and take-profit still work immediately.
+        bars_held = bar_idx - position.entry_bar_idx
+
         candidates: list[tuple[float, str]] = []
         if position.stop_loss is not None:
             candidates.append((position.stop_loss, "stop_loss"))
-        trail = Backtester._trailing_stop_price(position, is_short)
+        trail = None
+        if bars_held >= min_hold_bars:
+            trail = Backtester._trailing_stop_price(position, is_short)
         if trail is not None:
             candidates.append((trail, "trailing_stop"))
         if candidates:
@@ -390,7 +623,6 @@ class Backtester:
                 if candle.low <= eff:
                     return eff, reason
 
-        # Take profit — direction aware.
         if position.take_profit is not None:
             if is_short:
                 if candle.low <= position.take_profit:
@@ -399,7 +631,6 @@ class Backtester:
                 if candle.high >= position.take_profit:
                     return position.take_profit, "take_profit"
 
-        # Time exit: N bars after neckline break → exit at close.
         if (
             position.neckline_break_bar_idx is not None
             and position.exit_bars_after_neckline_break is not None
@@ -410,10 +641,30 @@ class Backtester:
 
         return None, ""
 
+    # ── Trade lifecycle ─────────────────────────────────────────────────────────
     @staticmethod
     def _open_trade(
         signal: TradeSignal, candle: OHLCVCandle, bar_idx: int
     ) -> BacktestTrade:
+        entry_price = candle.close
+        # Recalculate stop_loss based on actual entry price to avoid gap distortion.
+        stop_loss = signal.stop_loss
+        if stop_loss is not None and signal.price > 0 and entry_price > 0:
+            if signal.action == "BUY":
+                pct_below = (signal.price - stop_loss) / signal.price
+                stop_loss = round(entry_price * (1 - pct_below), 4)
+            else:
+                pct_above = (stop_loss - signal.price) / signal.price
+                stop_loss = round(entry_price * (1 + pct_above), 4)
+        # Recalculate take_profit similarly.
+        take_profit = signal.take_profit
+        if take_profit is not None and signal.price > 0 and entry_price > 0:
+            if signal.action == "BUY":
+                pct_above = (take_profit - signal.price) / signal.price
+                take_profit = round(entry_price * (1 + pct_above), 4)
+            else:
+                pct_below = (signal.price - take_profit) / signal.price
+                take_profit = round(entry_price * (1 - pct_below), 4)
         position = BacktestTrade(
             symbol=signal.symbol,
             timeframe=signal.timeframe,
@@ -421,18 +672,21 @@ class Backtester:
             action=signal.action,
             entry_date=candle.timestamp or datetime.now(timezone.utc),
             exit_date=candle.timestamp or datetime.now(timezone.utc),
-            entry_price=candle.close,
-            exit_price=candle.close,
+            entry_price=entry_price,
+            exit_price=entry_price,
             pnl=0.0,
             pnl_pct=0.0,
-            stop_loss=signal.stop_loss,
-            take_profit=signal.take_profit,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
             neckline=signal.neckline,
             neckline_break_direction=signal.neckline_break_direction,
             exit_bars_after_neckline_break=signal.exit_bars_after_neckline_break,
             trailing_stop_pct=signal.trailing_stop_pct,
             trailing_stop_mode=signal.trailing_stop_mode,
+            trailing_activation_pct=signal.trailing_activation_pct,
             entry_bar_idx=bar_idx,
+            confidence=signal.confidence,
+            qty=signal.qty,
             lowest_close_since_entry=(
                 candle.close if signal.trailing_stop_mode == "lowest_close" else None
             ),
@@ -446,7 +700,6 @@ class Backtester:
                 candle.high if signal.trailing_stop_mode == "highest_high" else None
             ),
         )
-        # Entry bar itself may be the neckline-break bar (entry via neckline break).
         if position.neckline is not None and position.neckline_break_bar_idx is None:
             if (
                 position.neckline_break_direction == "below"
@@ -466,10 +719,14 @@ class Backtester:
         exit_price: float,
         reason: str,
         candle: OHLCVCandle,
+        txn_cost_pct: float = 0.0,
     ) -> None:
         pnl = exit_price - position.entry_price
         if position.action == "SELL":
             pnl = position.entry_price - exit_price
+
+        cost = position.entry_price * txn_cost_pct + exit_price * txn_cost_pct
+        pnl -= cost
         pnl_pct = (pnl / position.entry_price) * 100
 
         position.exit_date = candle.timestamp or datetime.now(timezone.utc)

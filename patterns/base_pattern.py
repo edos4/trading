@@ -71,6 +71,7 @@ class TradeSignal:
     neckline: float | None = None
     neckline_break_direction: Literal["below", "above"] | None = None
     exit_bars_after_neckline_break: int | None = None
+    trailing_activation_pct: float | None = None
     notes:       str = ""
     chart_annotations: list[dict] = field(default_factory=list)
 

@@ -94,6 +94,7 @@ class RoundingBottomPattern(BasePattern):
     MIN_UPSIDE              = 0.23
     INITIAL_STOP_PCT        = 0.05
     TRAILING_STOP_PCT       = 0.15
+    TRAILING_ACTIVATION_PCT = 0.05
     POSITION_NOTIONAL       = 10_000.0
     RSI_RISING_MIN_PCT      = 0.70        # fallback B
     SWING_LOOKBACK          = 2
@@ -160,9 +161,10 @@ class RoundingBottomPattern(BasePattern):
                 qty=qty,
                 stop_loss=round(close * (1 - self.INITIAL_STOP_PCT), 4),
                 take_profit=round(setup.target, 4),
-                trailing_stop_pct=self.TRAILING_STOP_PCT,
-                trailing_stop_mode="highest_high",
-                notes=(
+                    trailing_stop_pct=self.TRAILING_STOP_PCT,
+                    trailing_stop_mode="highest_high",
+                    trailing_activation_pct=self.TRAILING_ACTIVATION_PCT,
+                    notes=(
                     f"Rounding bottom | bottom@{bottom_idx} "
                     f"neckline={setup.neckline:.2f} depth={setup.cup_depth_pct:.1%} "
                     f"target={setup.target:.2f} upside={setup.upside_pct:.1%} | "

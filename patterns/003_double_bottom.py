@@ -75,7 +75,7 @@ class DoubleBottomPattern(BasePattern):
     L1_L2_GAP_MAX        = 90
     ENTRY_BARS_AFTER_L2  = 7
     TAKE_PROFIT_ABOVE_NK = 0.07      # sell 7% above neckline
-    TRAILING_STOP_PCT    = 0.03      # 3% below entry
+    TRAILING_STOP_PCT    = 0.03      # 3% below highest close since entry (acts as stop loss)
     EXIT_BARS_AFTER_NECK_BREAK = 5
     SWING_LOOKBACK       = 2
     MIN_BARS             = 120

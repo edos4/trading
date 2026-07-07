@@ -74,7 +74,7 @@ class DoubleTopPattern(BasePattern):
     H1_H2_GAP_MAX        = 90
     ENTRY_BARS_AFTER_H2  = 7
     TAKE_PROFIT_BELOW_NK = 0.07      # cover 7% below neckline
-    TRAILING_STOP_PCT    = 0.03      # 3% above lowest close since entry
+    TRAILING_STOP_PCT    = 0.03      # 3% above lowest close since entry (acts as stop loss)
     EXIT_BARS_AFTER_NECK_BREAK = 5
     SWING_LOOKBACK       = 2
     MIN_BARS             = 120

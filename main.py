@@ -76,7 +76,19 @@ async def run_backtest(n_symbols: int) -> None:
     symbols = [symbol for symbol, _exchange in symbol_rows]
     log.info(f"Watchlist:  {symbols}")
 
-    backtester = Backtester(symbols)
+    backtester = Backtester(
+        symbols,
+        min_confidence=0.70,
+        regime_filter=True,
+        cooldown_bars=20,
+        txn_cost_pct=0.001,
+        position_sizing="risk",
+        account_value=100_000.0,
+        risk_per_trade_pct=0.02,
+        trailing_activation_default=None,
+        max_open_positions=settings.max_open_positions,
+        min_hold_bars=2,
+    )
     result = await backtester.run()
 
     print()

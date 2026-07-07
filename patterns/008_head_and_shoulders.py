@@ -119,7 +119,7 @@ class HeadAndShouldersPattern(BasePattern):
     RS_SIDE_RATIO_MAX       = 2.5         # C11: RS side ≤ 2.5× LS side
     ENTRY_BARS_AFTER_RS     = 7           # C14: day 7
     EXIT_BARS_AFTER_ENTRY   = 10          # C16
-    TRAILING_STOP_PCT       = 0.03        # C17: 3% on close above running low
+    TRAILING_STOP_PCT       = 0.03        # C17: 3% on close above running low (acts as stop loss)
     SHARES                  = 25
     MIN_BARS                = 200
 
