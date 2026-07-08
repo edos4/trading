@@ -157,50 +157,66 @@ class BacktestDialog:
         params_frame = ttk.LabelFrame(self._top, text="Backtest Parameters", padding=10)
         params_frame.pack(side=tk.TOP, fill=tk.X, padx=8, pady=(8, 4))
 
-        row = 0
-        for key, label, desc, ptype, default, choices in PARAMS:
-            ttk.Label(params_frame, text=label, font=("TkDefaultFont", 9, "bold")).grid(
-                row=row, column=0, sticky=tk.NW, padx=(0, 8), pady=(0, 2),
-            )
-            # Description tooltip below label
-            ttk.Label(params_frame, text=desc, wraplength=520, font=("TkDefaultFont", 8)).grid(
-                row=row, column=1, sticky=tk.NW, padx=(0, 4), pady=(0, 2),
-            )
-            # Input widget
-            widget_row = row + 1
-            if ptype == "spin":
-                minv, maxv, inc, dec = default
-                var = tk.DoubleVar(value=minv)
-                sp = ttk.Spinbox(
-                    params_frame, from_=minv, to=maxv, increment=inc,
-                    textvariable=var, width=14,
-                )
-                if dec < 1:
-                    sp.config(format=f"%.{max(0, int(-dec // 1))}f")
-                sp.grid(row=widget_row, column=1, sticky=tk.W, padx=(0, 8), pady=(0, 8))
-                self._vars[key] = var
-            elif ptype == "combo":
-                var = tk.StringVar(value=default)
-                ttk.Combobox(
-                    params_frame, textvariable=var, values=choices or [],
-                    state="readonly", width=20,
-                ).grid(row=widget_row, column=1, sticky=tk.W, padx=(0, 8), pady=(0, 8))
-                self._vars[key] = var
-            elif ptype == "check":
-                var = tk.BooleanVar(value=default)
-                ttk.Checkbutton(params_frame, variable=var).grid(
-                    row=widget_row, column=1, sticky=tk.W, padx=(0, 8), pady=(0, 8),
-                )
-                self._vars[key] = var
-            else:
-                var = tk.StringVar(value=str(default))
-                ttk.Entry(params_frame, textvariable=var, width=22).grid(
-                    row=widget_row, column=1, sticky=tk.W, padx=(0, 8), pady=(0, 8),
-                )
-                self._vars[key] = var
-            row = widget_row + 1
+        params_frame.columnconfigure(0, weight=0)
+        params_frame.columnconfigure(1, weight=1)
+        params_frame.columnconfigure(2, weight=0, pad=24)
+        params_frame.columnconfigure(3, weight=1)
 
-        # Run button + progress
+        def place_param(key, label, desc, ptype, default, choices, col, row):
+            # Label + widget on same row
+            ttk.Label(params_frame, text=label, font=("TkDefaultFont", 9, "bold")).grid(
+                row=row, column=col, sticky=tk.W, padx=(0, 4),
+            )
+            # Description below, spanning both columns of this half
+            ttk.Label(params_frame, text=desc, wraplength=280,
+                      font=("TkDefaultFont", 8)).grid(
+                row=row + 1, column=col, columnspan=2, sticky=tk.W, padx=(0, 4),
+            )
+            var = self._make_widget(params_frame, key, ptype, default, choices, col, row)
+            return var
+
+        row = 0
+        for i in range(0, len(PARAMS), 2):
+            left = PARAMS[i]
+            col0, row0 = 0, row
+            place_param(*left, col=col0, row=row0)
+
+            if i + 1 < len(PARAMS):
+                right = PARAMS[i + 1]
+                col2, row2 = 2, row
+                place_param(*right, col=col2, row=row2)
+            row += 2  # each param uses 2 grid rows
+
+    def _make_widget(self, parent, key, ptype, default, choices, col, grid_row):
+        var = None
+        if ptype == "spin":
+            minv, maxv, inc, dec = default
+            var = tk.DoubleVar(value=minv)
+            sp = ttk.Spinbox(
+                parent, from_=minv, to=maxv, increment=inc,
+                textvariable=var, width=12,
+            )
+            if dec < 1:
+                sp.config(format=f"%.{max(0, int(-dec // 1))}f")
+            sp.grid(row=grid_row, column=col + 1, sticky=tk.W, padx=(0, 8))
+        elif ptype == "combo":
+            var = tk.StringVar(value=default)
+            ttk.Combobox(
+                parent, textvariable=var, values=choices or [],
+                state="readonly", width=18,
+            ).grid(row=grid_row, column=col + 1, sticky=tk.W, padx=(0, 8))
+        elif ptype == "check":
+            var = tk.BooleanVar(value=default)
+            ttk.Checkbutton(parent, variable=var).grid(
+                row=grid_row, column=col + 1, sticky=tk.W, padx=(0, 8),
+            )
+        else:
+            var = tk.StringVar(value=str(default))
+            ttk.Entry(parent, textvariable=var, width=18).grid(
+                row=grid_row, column=col + 1, sticky=tk.W, padx=(0, 8),
+            )
+        self._vars[key] = var
+        return var
         btn_frame = ttk.Frame(self._top)
         btn_frame.pack(side=tk.TOP, fill=tk.X, padx=8, pady=(4, 4))
         self._run_btn = ttk.Button(btn_frame, text="Run Backtest", command=self._run_backtest)
