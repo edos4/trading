@@ -50,20 +50,20 @@ async def run_one(pattern_name: str, symbols: list[str]) -> tuple[str, int, int,
         # per-pattern comparisons here reflect the same engine config used
         # for actual tuning decisions, rather than an older, more lenient
         # configuration.
-        min_confidence=0.78,
+        min_confidence=0.70,
         regime_filter=True,
-        cooldown_bars=35,
+        cooldown_bars=20,
         txn_cost_pct=0.001,
         position_sizing="risk",
         account_value=100_000.0,
         risk_per_trade_pct=0.02,
-        trailing_activation_default=0.01,
-        breakeven_trigger_pct=0.025,
-        breakeven_buffer_pct=0.0015,
-        min_atr_stop_multiple=1.6,
-        synthetic_stop_multiple=1.75,
+        trailing_activation_default=0.003,
+        breakeven_trigger_pct=0.02,
+        breakeven_buffer_pct=0.001,
+        min_atr_stop_multiple=1.2,
+        synthetic_stop_multiple=0,
         max_open_positions=settings.max_open_positions,
-        min_hold_bars=4,
+        min_hold_bars=2,
         pattern_filter=pattern_name,
     )
     r = await bt.run()

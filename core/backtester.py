@@ -479,7 +479,14 @@ class Backtester:
                 # Widening this multiple keeps the hard stop as a true
                 # gap/disaster backstop while letting the pattern's own
                 # trailing/target logic do the day-to-day risk management.
-                if signal.stop_loss is None and signal.trailing_stop_pct is not None:
+                # Setting it to 0 disables the synthetic stop, leaving the
+                # pattern's trailing/breakeven/target logic as the sole
+                # exit-management layer (no catastrophic-gap backstop).
+                if (
+                    self._synthetic_stop_multiple > 0
+                    and signal.stop_loss is None
+                    and signal.trailing_stop_pct is not None
+                ):
                     stop_pct = signal.trailing_stop_pct * self._synthetic_stop_multiple
                     if signal.action == "BUY":
                         signal.stop_loss = round(
