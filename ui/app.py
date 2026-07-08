@@ -36,6 +36,7 @@ from config import settings
 from data.ohlcv_store import OHLCVStore
 from data.tv_client import MarketSnapshot, TVClient
 from patterns.base_pattern import BasePattern, TradeSignal
+from ui.backtest_dialog import BacktestDialog
 from utils.logger import log
 
 TIMEFRAMES = ["1d", "1W"]
@@ -111,6 +112,7 @@ class TradingBotUI:
         toolbar.pack(side=tk.TOP, fill=tk.X)
 
         ttk.Button(toolbar, text="Refresh symbols", command=self._load_symbols_threaded).pack(side=tk.LEFT)
+        ttk.Button(toolbar, text="Backtest", command=self._open_backtest_dialog).pack(side=tk.LEFT, padx=(6, 0))
         ttk.Label(toolbar, text="Count:").pack(side=tk.LEFT, padx=(12, 2))
         self.count_var = tk.IntVar(value=DEFAULT_SYMBOL_COUNT)
         ttk.Spinbox(
@@ -352,6 +354,9 @@ class TradingBotUI:
         self._busy = False
 
     # Downloads / saves
+    def _open_backtest_dialog(self) -> None:
+        BacktestDialog(self.root)
+
     def _download_csv(self) -> None:
         if self._current_df is None or self._current_symbol is None:
             self.status_var.set("Load a symbol first.")
