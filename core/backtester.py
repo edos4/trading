@@ -243,6 +243,7 @@ class Backtester:
         min_atr_stop_multiple: float | None = None,
         synthetic_stop_multiple: float = 1.0,
         max_loss_pct: float | None = None,
+        min_reward_risk_ratio: float | None = None,
         pattern_filter: str | None = None,
     ):
         self._symbols = symbols
@@ -275,6 +276,12 @@ class Backtester:
         # tighter stop. Acts as catastrophic-tail backstop without
         # interfering with the pattern's normal trailing/target logic.
         self._max_loss_pct = max_loss_pct
+        # Minimum reward-to-risk ratio required before a signal is accepted.
+        # reward = |take_profit - entry|, risk = |entry - stop_loss|. Signals
+        # whose R:R falls below this are skipped — this is an engine-level
+        # entry filter that does not alter any pattern's own signal logic,
+        # stop/target/trailing values, or confidence scoring.
+        self._min_reward_risk_ratio = min_reward_risk_ratio
 
         self._cooldown_tracker: dict[tuple[str, str], tuple[int, bool]] = {}
 
@@ -519,6 +526,30 @@ class Backtester:
                         cap_price = signal.price * (1 + self._max_loss_pct)
                         if signal.stop_loss is None or signal.stop_loss > cap_price:
                             signal.stop_loss = round(cap_price, 4)
+
+                # ── Reward-to-risk ratio filter ───────────────────────────
+                # Skips signals whose take_profit/stop_loss ratio is below
+                # the minimum. This screens out low-quality setups (e.g.
+                # double_bottom/double_top where the neckline is close and
+                # the synthetic stop is far) without touching the pattern's
+                # own logic. Only applied when both take_profit and stop_loss
+                # are present so patterns that use trailing-only exits are
+                # unaffected.
+                if (
+                    self._min_reward_risk_ratio is not None
+                    and signal.take_profit is not None
+                    and signal.stop_loss is not None
+                    and signal.price > 0
+                ):
+                    reward = abs(signal.take_profit - signal.price)
+                    risk = abs(signal.price - signal.stop_loss)
+                    if risk > 0 and reward / risk < self._min_reward_risk_ratio:
+                        log.debug(
+                            f"Backtest | {symbol} {timeframe} R:R "
+                            f"{reward / risk:.2f} < min "
+                            f"{self._min_reward_risk_ratio:.2f} — skip"
+                        )
+                        continue
 
                 # ── Position sizing ────────────────────────────────────────
                 self._apply_sizing(signal, store, symbol, timeframe)

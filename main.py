@@ -134,6 +134,14 @@ async def run_backtest(n_symbols: int, pattern: str | None = None) -> None:
         # Widen the synthetic catastrophic stop so it backstops real gap
         # risk instead of duplicating (and pre-empting) the trailing stop.
         synthetic_stop_multiple=1.75,
+        # Minimum reward-to-risk ratio: requires take_profit distance to be
+        # at least N× the stop_loss distance before a trade is taken. 2.0
+        # screens out low-R:R double_bottom/top setups (VZ 1.60, DE 1.87)
+        # while keeping high-R:R winners (KO#2 2.68, PFE 2.99, PANW 2.76).
+        # T (1.30) would be filtered, but T is a time_exit SELL that is
+        # already marginal — the R:R filter is a conservative trade-quality
+        # gate, not a direction filter.
+        min_reward_risk_ratio=2.0,
         max_open_positions=settings.max_open_positions,
         # Raised from 2. A couple of extra bars of mandatory hold further
         # reduces exits driven by entry-day/next-day noise before the
