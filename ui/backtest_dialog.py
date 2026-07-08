@@ -150,6 +150,7 @@ class BacktestDialog:
         self._completed = 0
         self._total = 0
         self._build_params()
+        self._build_controls()
         self._build_results()
 
     # ── Parameter forms ──────────────────────────────────────────────────
@@ -217,6 +218,9 @@ class BacktestDialog:
             )
         self._vars[key] = var
         return var
+
+    # ── Run button + progress ──────────────────────────────────────────
+    def _build_controls(self) -> None:
         btn_frame = ttk.Frame(self._top)
         btn_frame.pack(side=tk.TOP, fill=tk.X, padx=8, pady=(4, 4))
         self._run_btn = ttk.Button(btn_frame, text="Run Backtest", command=self._run_backtest)
