@@ -242,6 +242,7 @@ class Backtester:
         breakeven_buffer_pct: float = 0.0015,
         min_atr_stop_multiple: float | None = None,
         synthetic_stop_multiple: float = 1.0,
+        max_loss_pct: float | None = None,
         pattern_filter: str | None = None,
     ):
         self._symbols = symbols
@@ -268,6 +269,12 @@ class Backtester:
         self._breakeven_buffer_pct = breakeven_buffer_pct
         self._min_atr_stop_multiple = min_atr_stop_multiple
         self._synthetic_stop_multiple = synthetic_stop_multiple
+        # Hard loss cap from entry (e.g. 0.05 = -5% absolute stop). When set
+        # the engine guarantees a stop_loss no worse than -max_loss_pct of
+        # entry price, applied ONLY when the pattern itself supplies no
+        # tighter stop. Acts as catastrophic-tail backstop without
+        # interfering with the pattern's normal trailing/target logic.
+        self._max_loss_pct = max_loss_pct
 
         self._cooldown_tracker: dict[tuple[str, str], tuple[int, bool]] = {}
 
@@ -496,6 +503,22 @@ class Backtester:
                         signal.stop_loss = round(
                             signal.price * (1 + stop_pct), 4
                         )
+
+                # ── Max-loss cap (absolute floor on entry-bar+down move) ────
+                # If the existing stop is wider (or absent), tighten it to
+                # -max_loss_pct of the entry price. Acts as a true catastrophic
+                # tail backstop without competing with the pattern's normal
+                # trailing/breakeven/target logic for routine day-to-day
+                # management. None (default) means no cap.
+                if self._max_loss_pct is not None and self._max_loss_pct > 0:
+                    if signal.action == "BUY":
+                        cap_price = signal.price * (1 - self._max_loss_pct)
+                        if signal.stop_loss is None or signal.stop_loss < cap_price:
+                            signal.stop_loss = round(cap_price, 4)
+                    elif signal.action == "SELL":
+                        cap_price = signal.price * (1 + self._max_loss_pct)
+                        if signal.stop_loss is None or signal.stop_loss > cap_price:
+                            signal.stop_loss = round(cap_price, 4)
 
                 # ── Position sizing ────────────────────────────────────────
                 self._apply_sizing(signal, store, symbol, timeframe)
