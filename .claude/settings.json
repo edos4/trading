@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import tradingview_screener; print\\(dir\\(tradingview_screener\\)\\)\")",
+      "Bash(python -c \"from tradingview_screener.query import Query; print\\(dir\\(Query\\(\\)\\)\\)\")",
+      "Bash(python -c \"import tradingview_ta; print\\(dir\\(tradingview_ta\\)\\)\")",
+      "Bash(python -c \"from tradingview_ta import TA_Handler; h = TA_Handler\\(symbol='AAPL', screener='america', exchange='NASDAQ', interval='1d'\\); a = h.get_analysis\\(\\); print\\(type\\(a\\), dir\\(a\\)\\)\")",
+      "Bash(python -c \"from tradingview_screener import stocks; print\\(dir\\(stocks\\)\\)\")",
+      "Bash(python -c \"from tradingview_screener.screeners import stocks; print\\(type\\(stocks\\)\\)\")",
+      "Bash(pip show *)",
+      "Bash(python -c \"import sys; [print\\(p\\) for p in sys.path]\")",
+      "Bash(ls \"/c/Users/dell/AppData/Local/Python/pythoncore-3.14-64/Lib/site-packages/\" | grep -i trading)",
+      "Read(//c/Users/dell/AppData/Local/Python/pythoncore-3.14-64/Lib/site-packages//**)",
+      "Read(//c/Users/dell/AppData/Local/Python/pythoncore-3.14-64/Lib/site-packages/tradingview_mcp//**)",
+      "Bash(python -c \"import tradingview_mcp; print\\(dir\\(tradingview_mcp\\)\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(cat \"/c/Users/dell/AppData/Local/Python/pythoncore-3.14-64/Lib/site-packages/tradingview_mcp/core/services/yahoo_finance_service.py\" 2>&1 | head -60)",
+      "Read(//c/Users/dell/AppData/Local/Python/pythoncore-3.14-64/Lib/site-packages/tradingview_mcp/core/services/**)",
+      "Bash(ls \"/c/Users/dell/AppData/Local/Python/pythoncore-3.14-64/Lib/site-packages/tradingview_mcp/core/services/\")",
+      "Read(//c/Users/dell/AppData/Local/Python/pythoncore-3.14-64/Lib/site-packages/tradingview_mcp/core/services//**)",
+      "Bash(cat \"/c/Users/dell/AppData/Local/Python/pythoncore-3.14-64/Lib/site-packages/tradingview_mcp/core/services/proxy_manager.py\" 2>&1 | head -30)",
+      "Bash(kill %1)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\dell\\Desktop"
+    ]
+  }
+}
