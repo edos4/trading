@@ -106,19 +106,24 @@ async def run_backtest(n_symbols: int, pattern: str | None = None) -> None:
         # trailing stop arms, so normal entry-day chop doesn't stop trades
         # out before the pattern's own trailing logic gets to manage them.
         trailing_activation_default=0.01,
-        # Lowered from 0.05. This is the single highest-leverage, purely
-        # execution-layer lever for win rate: once a trade has been ahead by
-        # this much at any point, its floor is raised to ~entry (buffer
-        # above entry on longs, below on shorts) — i.e. a round trip exits
-        # at a small WIN instead of riding back down to the pattern's full
-        # stop/time-exit distance. Requiring 5% unrealized profit before
-        # arming meant most of the observed double_bottom losers (which
-        # peaked well under that) never got this protection at all; 2.5%
-        # brings it in line with (or below) most patterns' own trailing
-        # distance, so many round-trips that used to exit at stop_loss/
-        # time_exit for -4% to -5.5% now exit at scratch/small-win instead.
-        breakeven_trigger_pct=0.025,
-        breakeven_buffer_pct=0.0015,
+        # Lowered from 0.05 → 0.025 → 0.01. This is the single highest-leverage,
+        # purely execution-layer lever for win rate: once a trade has been
+        # ahead by this much at any point, its floor is raised to ~entry
+        # (buffer above entry on longs, below on shorts) — i.e. a round trip
+        # exits at a small WIN instead of riding back down to the pattern's
+        # full stop/time-exit distance. At 0.01 (1%) this aligns with the
+        # trailing activation threshold, so any trade that activates its
+        # trailing stop also arms breakeven protection — preventing the
+        # round-trip-to-loss pattern (e.g. PFE trailing_stop exit at -1.44%
+        # after being up ~1%) while still letting winners run since the
+        # ratcheting trailing stop sits above the breakeven floor once the
+        # trade is meaningfully ahead.
+        breakeven_trigger_pct=0.01,
+        # Raised from 0.0015 → 0.003. A 0.15% buffer above entry left
+        # round-trip exits at scratch/loss after txn costs (KO exited at
+        # -0.05% via breakeven_stop). 0.3% ensures the breakeven floor
+        # produces a small but positive exit even after 0.1% txn costs.
+        breakeven_buffer_pct=0.003,
         # Raised from 1.25. Requires the trailing/stop cushion to be a
         # noticeably larger multiple of the symbol's recent ATR before an
         # entry is taken at all, screening out setups where the stop is
