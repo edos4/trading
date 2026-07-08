@@ -145,6 +145,10 @@ class BacktestDialog:
         self._top.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._vars: dict[str, tk.Variable] = {}
+        self._start_time: float | None = None
+        self._timer_running = False
+        self._completed = 0
+        self._total = 0
         self._build_params()
         self._build_results()
 
@@ -201,8 +205,19 @@ class BacktestDialog:
         btn_frame.pack(side=tk.TOP, fill=tk.X, padx=8, pady=(4, 4))
         self._run_btn = ttk.Button(btn_frame, text="Run Backtest", command=self._run_backtest)
         self._run_btn.pack(side=tk.LEFT)
-        self._progress = ttk.Progressbar(btn_frame, mode="indeterminate", length=200)
-        self._progress.pack(side=tk.LEFT, padx=(8, 0))
+
+        self._progress = ttk.Progressbar(btn_frame, mode="determinate", length=280)
+        self._progress.pack(side=tk.LEFT, padx=(8, 4))
+
+        self._pct_var = tk.StringVar(value="\u2014")
+        ttk.Label(btn_frame, textvariable=self._pct_var, width=5, anchor=tk.CENTER).pack(side=tk.LEFT)
+
+        self._elapsed_var = tk.StringVar(value="Elapsed: \u2014")
+        ttk.Label(btn_frame, textvariable=self._elapsed_var).pack(side=tk.LEFT, padx=(4, 0))
+
+        self._eta_var = tk.StringVar(value="ETA: \u2014")
+        ttk.Label(btn_frame, textvariable=self._eta_var).pack(side=tk.LEFT, padx=(8, 0))
+
         self._status_var = tk.StringVar(value="Adjust parameters and click Run Backtest.")
         ttk.Label(btn_frame, textvariable=self._status_var).pack(side=tk.LEFT, padx=(8, 0))
 
@@ -274,8 +289,11 @@ class BacktestDialog:
         kwargs = params["kwargs"]
         self._busy = True
         self._run_btn.config(state=tk.DISABLED)
+        self._progress["value"] = 0
+        self._pct_var.set("0%")
+        self._elapsed_var.set("Elapsed: 0s")
+        self._eta_var.set("ETA: \u2014")
         self._status_var.set(f"Running backtest (top {n_symbols} symbols)...")
-        self._progress.start(10)
         self._summary_text.config(state=tk.NORMAL)
         self._summary_text.delete("1.0", tk.END)
         self._summary_text.insert(tk.END, "Running...\n")
@@ -296,7 +314,7 @@ class BacktestDialog:
                 self._top.after(0, lambda: self._finish(None, "No symbols returned by screener."))
                 return
             symbols = [s for s, _ex in symbol_rows]
-            backtester = Backtester(symbols, pattern_filter=pattern, **kwargs)
+            backtester = Backtester(symbols, pattern_filter=pattern, progress_callback=self._on_progress, **kwargs)
             result = asyncio.run(backtester.run())
             self._top.after(0, lambda: self._finish(result, None))
         except Exception as exc:
@@ -304,8 +322,45 @@ class BacktestDialog:
             log.error(f"UI Backtest | {err_msg}")
             self._top.after(0, lambda: self._finish(None, err_msg))
 
+    def _on_progress(self, completed: int, total: int) -> None:
+        if self._closed or not self._busy:
+            return
+        self._completed = completed
+        self._total = total
+        self._start_timer()
+        pct = (completed / total) * 100 if total > 0 else 0
+        self._top.after(0, lambda: self._apply_progress(pct))
+
+    def _apply_progress(self, pct: float) -> None:
+        if self._closed:
+            return
+        self._progress["value"] = pct
+        self._pct_var.set(f"{pct:.0f}%")
+
+    def _start_timer(self) -> None:
+        if self._start_time is None:
+            self._start_time = __import__("time").time()
+        if not self._timer_running:
+            self._timer_running = True
+            self._tick_timer()
+
+    def _tick_timer(self) -> None:
+        if self._closed or self._start_time is None:
+            return
+        if not self._busy:
+            return
+        elapsed = __import__("time").time() - self._start_time
+        self._elapsed_var.set(f"Elapsed: {elapsed:.0f}s")
+        if self._completed > 0 and self._total > 0:
+            rate = self._completed / elapsed if elapsed > 0 else 0
+            remaining = self._total - self._completed
+            eta_s = remaining / rate if rate > 0 else 0
+            label = f"ETA: {eta_s:.0f}s" if eta_s < 3600 else f"ETA: {eta_s / 60:.1f}m"
+            self._eta_var.set(label)
+        self._top.after(1000, self._tick_timer)
+
     def _finish(self, result: Optional[BacktestResult], error: Optional[str]) -> None:
-        self._progress.stop()
+        self._timer_running = False
         self._busy = False
         self._run_btn.config(state=tk.NORMAL)
         if error:
@@ -320,6 +375,8 @@ class BacktestDialog:
             return
         self._last_result = result
         self._save_btn.config(state=tk.NORMAL)
+        self._progress["value"] = 100
+        self._pct_var.set("100%")
         # Summary
         self._summary_text.config(state=tk.NORMAL)
         self._summary_text.delete("1.0", tk.END)

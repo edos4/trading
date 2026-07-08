@@ -16,7 +16,7 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
 import numpy as np
 import pandas as pd
@@ -245,6 +245,7 @@ class Backtester:
         max_loss_pct: float | None = None,
         min_reward_risk_ratio: float | None = None,
         pattern_filter: str | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ):
         self._symbols = symbols
         self._tv = TVClient(settings.tv_screener, settings.tv_exchange)
@@ -284,6 +285,7 @@ class Backtester:
         self._min_reward_risk_ratio = min_reward_risk_ratio
 
         self._cooldown_tracker: dict[tuple[str, str], tuple[int, bool]] = {}
+        self._progress_callback = progress_callback
 
     def _discover_patterns(self) -> None:
         for module_info in pkgutil.iter_modules(patterns_pkg.__path__):
@@ -334,12 +336,17 @@ class Backtester:
                 pbar.update(1)
                 return trades, signals
 
+        total_tasks = len(tasks)
+        completed = 0
         for coro in asyncio.as_completed(
             [_backtest_one(s, tf) for s, tf in tasks]
         ):
             trades, signals = await coro
             result.trades.extend(trades)
             result.total_signals += signals
+            completed += 1
+            if self._progress_callback is not None:
+                self._progress_callback(completed, total_tasks)
 
         pbar.close()
         return result
