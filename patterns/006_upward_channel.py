@@ -29,7 +29,7 @@ Entry (C13 – C15 + dual RSI):
   C15 Entry at the close of the 2nd confirming bar (SHORT).
   v7+  RSI at the break bar < SH2 RSI (divergence still declining at entry).
 
-Trade management (C16 – C20):
+Trade management (C16 – C20, C24):
   C16 Hard stop at SH2 high × 1.01.
   C17 Measured-move target = entry − channel width (channel height projected
       below the break).
@@ -37,10 +37,29 @@ Trade management (C16 – C20):
   C19 Time stop: exit at the close of bar 15 if nothing else triggered.
   C20 Trailing stop activates after 4% gain; trails 2.5% above the best
       (lowest) close since entry.
+  C24 Dual stop (v14): exit at min(SH2 × 1.01, entry × 1.05) — whichever is
+      hit first. The fixed entry × 1.05 leg caps damage from violent overnight
+      gap-ups the dynamic SH2 stop can't react to (added after WDC gapped 26.8%
+      through the SH2 stop on a sector-wide AI-memory rally).
+
+Entry filters (C22 – C23, v12): skip the trade entirely if either fails —
+  C22 Freshness: bars from SH2 to the channel-break bar must be ≤ 20. Momentum
+      from the divergence peak has a shelf life; slow drifts to the break fail
+      more often.
+  C23 Don't-chase: the drop already realised from SH2 high to the entry price
+      must be ≤ 15%. Entries after a >15% slide are chasing a crowded short.
 
 v9 filter:
   Skip the trade if any SEC EDGAR 8-K item 2.02 earnings filing date falls
   within [entry bar, bar 15]. See data/edgar_client.py.
+
+Not enforced here (C21 reclaim exit, v10): after entry, exit on the first close
+  back above the rising lower channel line that also prints a higher high AND
+  higher low vs. the prior bar. This is a path-dependent, per-bar exit that the
+  current TradeSignal exit API (static stop / target / trailing / neckline time
+  stop) can't express, so it lives in the standalone backtest_uc_v14.cjs script
+  rather than in this pattern. Documented here so the divergence from the locked
+  ruleset is explicit.
 
 Notes on backtester wiring:
   - The 15-bar time stop (C19) is delivered via the existing
@@ -130,10 +149,13 @@ class UpwardChannelPattern(BasePattern):
     VALLEY_DEPTH_MIN        = 0.02        # C11
     VALLEY_DEPTH_MAX        = 0.25        # C12
     STOP_ABOVE_SH2          = 1.01        # C16
+    FIXED_STOP_PCT          = 0.05        # C24: fixed entry × 1.05 stop leg
     GAIN_CAP_PCT            = 0.20        # C18 (increased from 7% to 20% to let winners run)
     TIME_STOP_BARS          = 15          # C19
     TRAIL_ACTIVATION_PCT    = 0.04        # C20 (activation; not enforced by backtester)
     TRAILING_STOP_PCT       = 0.025       # C20
+    FRESHNESS_MAX_BARS      = 20          # C22: SH2 → break bar must be ≤ 20 bars
+    DONT_CHASE_MAX_DROP     = 0.15        # C23: ≤ 15% already dropped from SH2 high
     SWING_LOOKBACK          = 2
     MIN_BARS                = 210
     POSITION_NOTIONAL       = 10_000.0
@@ -179,6 +201,28 @@ class UpwardChannelPattern(BasePattern):
                 if setup.entry_idx != cur:
                     continue  # only fire on the exact break bar
 
+                close = float(ind.close.iloc[cur])
+
+                # C22 freshness: the break must arrive within 20 bars of SH2.
+                days_to_break = setup.entry_idx - sh2_idx
+                if days_to_break > self.FRESHNESS_MAX_BARS:
+                    log.debug(
+                        f"[{self.name}] {symbol} {timeframe} | "
+                        f"C22 skip: daysToBreak={days_to_break} > "
+                        f"{self.FRESHNESS_MAX_BARS} (stale break)"
+                    )
+                    continue
+
+                # C23 don't-chase: skip if price has already fallen >15% from SH2.
+                drop_from_sh2 = (setup.sh2_high - close) / setup.sh2_high
+                if drop_from_sh2 > self.DONT_CHASE_MAX_DROP:
+                    log.debug(
+                        f"[{self.name}] {symbol} {timeframe} | "
+                        f"C23 skip: dropFromSH2={drop_from_sh2:.1%} > "
+                        f"{self.DONT_CHASE_MAX_DROP:.0%} (chasing)"
+                    )
+                    continue
+
                 # v9: earnings blackout over [entry, entry + TIME_STOP_BARS].
                 if self.V9_EARNINGS_BLACKOUT and self._in_earnings_blackout(
                     df, symbol, setup.entry_idx
@@ -192,10 +236,17 @@ class UpwardChannelPattern(BasePattern):
                     return None
 
                 confidence = self._score_confidence(setup)
-                close = float(ind.close.iloc[cur])
                 qty = round(self.POSITION_NOTIONAL / close, 4)
 
-                stop = round(setup.sh2_high * self.STOP_ABOVE_SH2, 4)
+                # C24 dual stop: dynamic SH2 × 1.01 OR fixed entry × 1.05,
+                # whichever is hit first (i.e. the lower price for a short).
+                stop = round(
+                    min(
+                        setup.sh2_high * self.STOP_ABOVE_SH2,
+                        close * (1 + self.FIXED_STOP_PCT),
+                    ),
+                    4,
+                )
                 target_measured = close - setup.channel_width
                 target_cap = close * (1 - self.GAIN_CAP_PCT)
                 # For a short the closer target is the HIGHER of the two.
@@ -213,6 +264,7 @@ class UpwardChannelPattern(BasePattern):
                     f"width={setup.channel_width:.2f} "
                     f"RSI_div={setup.rsi_divergence:.1f} "
                     f"break_RSI={setup.break_rsi:.1f} "
+                    f"fresh={days_to_break}b drop={drop_from_sh2:.1%} "
                     f"stop={stop:.2f} tp={take_profit:.2f} "
                     f"confidence={confidence:.2f}"
                 )
@@ -239,6 +291,7 @@ class UpwardChannelPattern(BasePattern):
                         f"width={setup.channel_width:.2f} "
                         f"RSI_div={setup.rsi_divergence:.1f} "
                         f"break_RSI={setup.break_rsi:.1f} | "
+                        f"fresh={days_to_break}b drop={drop_from_sh2:.1%} | "
                         f"stop={stop:.2f} tp={take_profit:.2f}"
                     ),
                     chart_annotations=[
