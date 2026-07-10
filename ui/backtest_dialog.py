@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import threading
 import tkinter as tk
 from datetime import datetime, timezone
@@ -129,6 +130,14 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
         "Maximum concurrent positions across all symbols.",
         "spin", (settings.max_open_positions, 1, 50, 1), None,
     ),
+    (
+        "max_workers", "CPU workers",
+        f"Detected {os.cpu_count() or '?'} CPU cores. "
+        f"Suggested: {max(1, (os.cpu_count() or 2) - 1)} "
+        f"(leaves 1 core free for the UI/system). "
+        "0 = use all cores. Higher = faster backtest but heavier load.",
+        "spin", (max(1, (os.cpu_count() or 2) - 1), 0, 64, 1), None,
+    ),
 ]
 
 
@@ -140,7 +149,7 @@ class BacktestDialog:
         self._busy = False
         self._top = tk.Toplevel(parent)
         self._top.title("Backtest Runner")
-        self._top.geometry("780x720")
+        self._top.geometry("780x820")
         self._top.minsize(640, 600)
         self._top.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -289,6 +298,10 @@ class BacktestDialog:
                 p[key] = v if v else None
         # n_symbols is not a Backtester param — extract it
         n_symbols = int(p.pop("n_symbols"))
+        # Convert spinbox floats to ints where Backtester expects int
+        for int_key in ("max_workers",):
+            if int_key in p and p[int_key] is not None:
+                p[int_key] = int(p[int_key])
         # pattern_filter maps to pattern arg, not constructor kwarg
         pattern_filter = p.pop("pattern_filter")
         # Convert "disable" sentinels: spin values of 0 where None means disabled

@@ -11,8 +11,11 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import multiprocessing as mp
+import os
 import pkgutil
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -224,6 +227,558 @@ class BacktestResult:
         log.info(f"Backtest | Results saved to {p}")
 
 
+# ── Module-level backtest helpers ─────────────────────────────────────────────
+# These are picklable functions used by both Backtester (main process) and
+# _worker_symbol_backtest (subprocess via ProcessPoolExecutor). Extracting
+# them from the class avoids pickling bound methods of unpicklable objects.
+
+
+def _min_required_bars(timeframe: str) -> int:
+    if timeframe == "1W":
+        return 65
+    return 120
+
+
+def _make_snapshot(
+    symbol: str, timeframe: str, candle: OHLCVCandle,
+) -> MarketSnapshot:
+    return MarketSnapshot(
+        symbol=symbol,
+        timeframe=timeframe,
+        timestamp=candle.timestamp or datetime.now(timezone.utc),
+        candle=candle,
+        indicators={
+            "open": candle.open,
+            "high": candle.high,
+            "low": candle.low,
+            "close": candle.close,
+            "volume": candle.volume,
+        },
+        summary={"RECOMMENDATION": "NEUTRAL"},
+        oscillators={},
+        moving_avgs={},
+    )
+
+
+def _update_neckline_state(
+    position: BacktestTrade, candle: OHLCVCandle, bar_idx: int,
+) -> None:
+    if position.neckline is None or position.neckline_break_bar_idx is not None:
+        return
+    if (
+        position.neckline_break_direction == "below"
+        and candle.close < position.neckline
+    ):
+        position.neckline_break_bar_idx = bar_idx
+        return
+    if (
+        position.neckline_break_direction == "above"
+        and candle.close > position.neckline
+    ):
+        position.neckline_break_bar_idx = bar_idx
+
+
+def _update_trailing_reference(
+    position: BacktestTrade, candle: OHLCVCandle,
+) -> None:
+    mode = position.trailing_stop_mode
+    if mode == "lowest_close":
+        base = position.lowest_close_since_entry
+        position.lowest_close_since_entry = (
+            candle.close if base is None else min(base, candle.close)
+        )
+    elif mode == "highest_close":
+        base = position.highest_close_since_entry
+        position.highest_close_since_entry = (
+            candle.close if base is None else max(base, candle.close)
+        )
+    elif mode == "lowest_low":
+        base = position.lowest_low_since_entry
+        position.lowest_low_since_entry = (
+            candle.low if base is None else min(base, candle.low)
+        )
+    elif mode == "highest_high":
+        base = position.highest_high_since_entry
+        position.highest_high_since_entry = (
+            candle.high if base is None else max(base, candle.high)
+        )
+    entry = position.entry_price
+    if entry <= 0:
+        return
+    if position.action == "SELL":
+        base = position.lowest_close_since_entry
+        ref = candle.close if base is None else min(base, candle.close)
+        position.lowest_close_since_entry = ref
+        pnl = (entry - ref) / entry
+    else:
+        base = position.highest_close_since_entry
+        ref = candle.close if base is None else max(base, candle.close)
+        position.highest_close_since_entry = ref
+        pnl = (ref - entry) / entry
+    if position._best_pnl_pct is None or pnl > position._best_pnl_pct:
+        position._best_pnl_pct = pnl
+
+
+def _trailing_stop_price(position: BacktestTrade, is_short: bool) -> float | None:
+    if (
+        position.trailing_activation_pct is not None
+        and not position._trailing_activated
+    ):
+        if (
+            position._best_pnl_pct is not None
+            and position._best_pnl_pct >= position.trailing_activation_pct
+        ):
+            position._trailing_activated = True
+        else:
+            return None
+    mode = position.trailing_stop_mode
+    pct = position.trailing_stop_pct
+    if pct is None or mode is None:
+        return None
+    if is_short:
+        ref = {
+            "lowest_close": position.lowest_close_since_entry,
+            "lowest_low": position.lowest_low_since_entry,
+        }.get(mode)
+        return None if ref is None else ref * (1 + pct)
+    ref = {
+        "highest_close": position.highest_close_since_entry,
+        "highest_high": position.highest_high_since_entry,
+    }.get(mode)
+    return None if ref is None else ref * (1 - pct)
+
+
+def _check_exit(
+    candle: OHLCVCandle,
+    position: BacktestTrade,
+    bar_idx: int,
+    min_hold_bars: int = 0,
+) -> tuple[float | None, str]:
+    is_short = position.action == "SELL"
+    bars_held = bar_idx - position.entry_bar_idx
+    candidates: list[tuple[float, str]] = []
+    if position.stop_loss is not None:
+        candidates.append((position.stop_loss, "stop_loss"))
+    trail = None
+    if bars_held >= min_hold_bars:
+        trail = _trailing_stop_price(position, is_short)
+    if trail is not None:
+        candidates.append((trail, "trailing_stop"))
+    if (
+        bars_held >= min_hold_bars
+        and position.breakeven_trigger_pct is not None
+        and position._best_pnl_pct is not None
+    ):
+        if position._best_pnl_pct >= position.breakeven_trigger_pct:
+            position._breakeven_armed = True
+        if position._breakeven_armed:
+            buf = position.breakeven_buffer_pct
+            breakeven_price = (
+                position.entry_price * (1 + buf)
+                if not is_short
+                else position.entry_price * (1 - buf)
+            )
+            candidates.append((breakeven_price, "breakeven_stop"))
+    if candidates:
+        if is_short:
+            eff, reason = min(candidates, key=lambda c: c[0])
+            if candle.high >= eff:
+                return eff, reason
+        else:
+            eff, reason = max(candidates, key=lambda c: c[0])
+            if candle.low <= eff:
+                return eff, reason
+    if position.take_profit is not None:
+        if is_short:
+            if candle.low <= position.take_profit:
+                return position.take_profit, "take_profit"
+        else:
+            if candle.high >= position.take_profit:
+                return position.take_profit, "take_profit"
+    if (
+        position.neckline_break_bar_idx is not None
+        and position.exit_bars_after_neckline_break is not None
+    ):
+        elapsed = bar_idx - position.neckline_break_bar_idx
+        if elapsed >= position.exit_bars_after_neckline_break:
+            return candle.close, "time_exit"
+    return None, ""
+
+
+def _open_trade(
+    signal: TradeSignal, candle: OHLCVCandle, bar_idx: int,
+) -> BacktestTrade:
+    entry_price = candle.close
+    stop_loss = signal.stop_loss
+    if stop_loss is not None and signal.price > 0 and entry_price > 0:
+        if signal.action == "BUY":
+            pct_below = (signal.price - stop_loss) / signal.price
+            stop_loss = round(entry_price * (1 - pct_below), 4)
+        else:
+            pct_above = (stop_loss - signal.price) / signal.price
+            stop_loss = round(entry_price * (1 + pct_above), 4)
+    take_profit = signal.take_profit
+    if take_profit is not None and signal.price > 0 and entry_price > 0:
+        if signal.action == "BUY":
+            pct_above = (take_profit - signal.price) / signal.price
+            take_profit = round(entry_price * (1 + pct_above), 4)
+        else:
+            pct_below = (signal.price - take_profit) / signal.price
+            take_profit = round(entry_price * (1 - pct_below), 4)
+    position = BacktestTrade(
+        symbol=signal.symbol,
+        timeframe=signal.timeframe,
+        pattern=signal.pattern,
+        action=signal.action,
+        entry_date=candle.timestamp or datetime.now(timezone.utc),
+        exit_date=candle.timestamp or datetime.now(timezone.utc),
+        entry_price=entry_price,
+        exit_price=entry_price,
+        pnl=0.0,
+        pnl_pct=0.0,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        neckline=signal.neckline,
+        neckline_break_direction=signal.neckline_break_direction,
+        exit_bars_after_neckline_break=signal.exit_bars_after_neckline_break,
+        trailing_stop_pct=signal.trailing_stop_pct,
+        trailing_stop_mode=signal.trailing_stop_mode,
+        trailing_activation_pct=signal.trailing_activation_pct,
+        entry_bar_idx=bar_idx,
+        confidence=signal.confidence,
+        qty=signal.qty,
+        lowest_close_since_entry=(
+            candle.close if signal.trailing_stop_mode == "lowest_close" else None
+        ),
+        highest_close_since_entry=(
+            candle.close if signal.trailing_stop_mode == "highest_close" else None
+        ),
+        lowest_low_since_entry=(
+            candle.low if signal.trailing_stop_mode == "lowest_low" else None
+        ),
+        highest_high_since_entry=(
+            candle.high if signal.trailing_stop_mode == "highest_high" else None
+        ),
+    )
+    if position.neckline is not None and position.neckline_break_bar_idx is None:
+        if (
+            position.neckline_break_direction == "below"
+            and candle.close < position.neckline
+        ):
+            position.neckline_break_bar_idx = bar_idx
+        elif (
+            position.neckline_break_direction == "above"
+            and candle.close > position.neckline
+        ):
+            position.neckline_break_bar_idx = bar_idx
+    return position
+
+
+def _close_trade(
+    position: BacktestTrade,
+    exit_price: float,
+    reason: str,
+    candle: OHLCVCandle,
+    txn_cost_pct: float = 0.0,
+) -> None:
+    pnl = exit_price - position.entry_price
+    if position.action == "SELL":
+        pnl = position.entry_price - exit_price
+    cost = position.entry_price * txn_cost_pct + exit_price * txn_cost_pct
+    pnl -= cost
+    pnl_pct = (pnl / position.entry_price) * 100
+    position.exit_date = candle.timestamp or datetime.now(timezone.utc)
+    position.exit_price = exit_price
+    position.pnl = pnl
+    position.pnl_pct = pnl_pct
+    position.exit_reason = reason
+    log.info(
+        f"Backtest | EXIT {position.symbol} {position.timeframe} "
+        f"reason={reason} pnl={pnl_pct:+.2f}%"
+    )
+
+
+def _apply_sizing(
+    signal: TradeSignal,
+    store: OHLCVStore,
+    symbol: str,
+    timeframe: str,
+    account_value: float,
+    risk_per_trade_pct: float,
+    position_sizing: str,
+    entry_price: float | None = None,
+) -> None:
+    current_price = entry_price if entry_price else signal.price
+    if current_price <= 0:
+        return
+    notional_max = account_value * 0.02
+    notional_max_shares = (
+        int(notional_max / current_price) if current_price > 0 else 0
+    )
+    if position_sizing == "pattern":
+        capped = min(signal.qty, notional_max_shares)
+        signal.qty = max(1, int(capped))
+        return
+    if position_sizing == "notional":
+        signal.qty = max(1, notional_max_shares)
+        return
+    risk_amount = account_value * risk_per_trade_pct
+    if position_sizing == "risk":
+        stop_distance = None
+        if signal.stop_loss is not None:
+            stop_distance = abs(current_price - signal.stop_loss)
+        elif signal.trailing_stop_pct is not None:
+            stop_distance = current_price * signal.trailing_stop_pct
+        if stop_distance is not None and stop_distance > 0:
+            qty = int(risk_amount / stop_distance)
+            qty = min(qty, notional_max_shares)
+            signal.qty = max(1, int(qty))
+        else:
+            signal.qty = max(1, notional_max_shares)
+        return
+    if position_sizing == "atr":
+        df = store.get_df(symbol, timeframe, min_bars=1)
+        if df is not None and len(df) >= 14:
+            ind = IndicatorEngine(df)
+            atr_val = float(ind.atr(14).iloc[-1])
+            if atr_val > 0:
+                qty = int(risk_amount / atr_val)
+                qty = min(qty, notional_max_shares)
+                signal.qty = max(1, int(qty))
+                return
+        signal.qty = max(1, notional_max_shares)
+        return
+
+
+def _load_patterns(pattern_specs: list[tuple[str, str]]) -> list[BasePattern]:
+    patterns: list[BasePattern] = []
+    for module_name, class_name in pattern_specs:
+        module = importlib.import_module(module_name)
+        cls = getattr(module, class_name)
+        patterns.append(cls())
+    return patterns
+
+
+def _core_backtest_symbol(
+    symbol: str,
+    timeframe: str,
+    candles: list[OHLCVCandle],
+    patterns: list[BasePattern],
+    config: dict,
+    cooldown: dict | None = None,
+) -> tuple[list[BacktestTrade], int]:
+    if len(candles) < 1:
+        return [], 0
+
+    store = OHLCVStore(window=max(DEFAULT_WINDOW, len(candles)))
+    trades: list[BacktestTrade] = []
+    signals_count = 0
+    pending_entry: TradeSignal | None = None
+    open_position: BacktestTrade | None = None
+
+    min_bars = _min_required_bars(timeframe)
+    i = max(min_bars, 1)
+    cooldown_tracker: dict[tuple[str, str], tuple[int, bool]] = {} if cooldown is None else cooldown  # type: ignore[assignment]
+
+    while i < len(candles):
+        window_candles = candles[: i + 1]
+        store.replace_all(symbol, timeframe, window_candles)
+
+        if open_position is not None:
+            _update_neckline_state(open_position, candles[i], i)
+            exit_price, exit_reason = _check_exit(
+                candles[i], open_position, i,
+                min_hold_bars=config["min_hold_bars"],
+            )
+            if exit_price is not None:
+                _close_trade(
+                    open_position, exit_price, exit_reason, candles[i],
+                    config["txn_cost_pct"],
+                )
+                trades.append(open_position)
+                key = (open_position.symbol, open_position.pattern)
+                cooldown_tracker[key] = (i, open_position.pnl < 0)
+                open_position = None
+                i += 1
+                continue
+            _update_trailing_reference(open_position, candles[i])
+            i += 1
+            continue
+
+        if pending_entry is not None:
+            open_position = _open_trade(pending_entry, candles[i], i)
+            open_position.breakeven_trigger_pct = config["breakeven_trigger_pct"]
+            open_position.breakeven_buffer_pct = config["breakeven_buffer_pct"]
+            pending_entry = None
+            i += 1
+            continue
+
+        snapshot = _make_snapshot(symbol, timeframe, candles[i])
+        for pattern in patterns:
+            if timeframe not in pattern.timeframes:
+                continue
+            signal = pattern.analyze(snapshot, store)
+            if signal is None:
+                continue
+
+            signals_count += 1
+            log.info(
+                f"Backtest | {symbol} {timeframe} {signal.action} "
+                f"confidence={signal.confidence:.2f} {signal.pattern}"
+            )
+
+            if signal.confidence < config["min_confidence"]:
+                log.debug(
+                    f"Backtest | {symbol} {timeframe} confidence "
+                    f"{signal.confidence:.2f} < min {config['min_confidence']} — skip"
+                )
+                continue
+
+            if config["regime_filter"]:
+                df = store.get_df(symbol, timeframe, min_bars=1)
+                if df is not None and len(df) >= 200:
+                    close = df["close"]
+                    sma200 = close.rolling(200).mean()
+                    current_sma200 = float(sma200.iloc[-1])
+                    current_close = float(close.iloc[-1])
+                    if signal.action == "BUY" and current_close < current_sma200:
+                        log.debug(
+                            f"Backtest | {symbol} {timeframe} BUY below SMA200 — skip"
+                        )
+                        continue
+                    if signal.action == "SELL" and current_close > current_sma200:
+                        log.debug(
+                            f"Backtest | {symbol} {timeframe} SELL above SMA200 — skip"
+                        )
+                        continue
+
+            if config["cooldown_bars"] > 0:
+                key = (symbol, signal.pattern)
+                if key in cooldown_tracker:
+                    exit_bar, was_loss = cooldown_tracker[key]
+                    bars_since = i - exit_bar
+                    if was_loss and bars_since < config["cooldown_bars"]:
+                        log.debug(
+                            f"Backtest | {symbol} {timeframe} cooldown "
+                            f"{bars_since}/{config['cooldown_bars']} bars — skip"
+                        )
+                        continue
+
+            if (
+                config["min_atr_stop_multiple"] is not None
+                and signal.trailing_stop_pct is not None
+            ):
+                df = store.get_df(symbol, timeframe, min_bars=1)
+                if df is not None and len(df) >= 15:
+                    ind = IndicatorEngine(df)
+                    atr_val = float(ind.atr(14).iloc[-1])
+                    current_close = float(df["close"].iloc[-1])
+                    if current_close > 0 and atr_val > 0:
+                        atr_pct = atr_val / current_close
+                        min_required_trail = (
+                            atr_pct * config["min_atr_stop_multiple"]
+                        )
+                        if signal.trailing_stop_pct < min_required_trail:
+                            log.debug(
+                                f"Backtest | {symbol} {timeframe} trailing "
+                                f"{signal.trailing_stop_pct:.2%} too thin vs "
+                                f"ATR {atr_pct:.2%} — skip"
+                            )
+                            continue
+
+            if (
+                config["synthetic_stop_multiple"] > 0
+                and signal.stop_loss is None
+                and signal.trailing_stop_pct is not None
+            ):
+                stop_pct = (
+                    signal.trailing_stop_pct * config["synthetic_stop_multiple"]
+                )
+                if signal.action == "BUY":
+                    signal.stop_loss = round(
+                        signal.price * (1 - stop_pct), 4
+                    )
+                elif signal.action == "SELL":
+                    signal.stop_loss = round(
+                        signal.price * (1 + stop_pct), 4
+                    )
+
+            if (
+                config["max_loss_pct"] is not None
+                and config["max_loss_pct"] > 0
+            ):
+                if signal.action == "BUY":
+                    cap_price = signal.price * (1 - config["max_loss_pct"])
+                    if signal.stop_loss is None or signal.stop_loss < cap_price:
+                        signal.stop_loss = round(cap_price, 4)
+                elif signal.action == "SELL":
+                    cap_price = signal.price * (1 + config["max_loss_pct"])
+                    if signal.stop_loss is None or signal.stop_loss > cap_price:
+                        signal.stop_loss = round(cap_price, 4)
+
+            if (
+                config["min_reward_risk_ratio"] is not None
+                and signal.take_profit is not None
+                and signal.stop_loss is not None
+                and signal.price > 0
+            ):
+                reward = abs(signal.take_profit - signal.price)
+                risk = abs(signal.price - signal.stop_loss)
+                if risk > 0 and reward / risk < config["min_reward_risk_ratio"]:
+                    log.debug(
+                        f"Backtest | {symbol} {timeframe} R:R "
+                        f"{reward / risk:.2f} < min "
+                        f"{config['min_reward_risk_ratio']:.2f} — skip"
+                    )
+                    continue
+
+            _apply_sizing(
+                signal, store, symbol, timeframe,
+                config["account_value"],
+                config["risk_per_trade_pct"],
+                config["position_sizing"],
+            )
+
+            if (
+                config["trailing_activation_default"] is not None
+                and signal.trailing_activation_pct is None
+                and signal.trailing_stop_pct is not None
+            ):
+                signal.trailing_activation_pct = config["trailing_activation_default"]
+
+            pending_entry = signal
+            break
+
+        i += 1
+
+    if pending_entry is not None and len(candles) > 0:
+        open_position = _open_trade(
+            pending_entry, candles[-1], len(candles) - 1
+        )
+    if open_position is not None:
+        _close_trade(
+            open_position, candles[-1].close, "end_of_data", candles[-1],
+            config["txn_cost_pct"],
+        )
+        trades.append(open_position)
+
+    return trades, signals_count
+
+
+def _worker_symbol_backtest(
+    symbol: str,
+    timeframe: str,
+    screener: str,
+    exchange: str,
+    pattern_specs: list[tuple[str, str]],
+    config: dict,
+) -> tuple[list[BacktestTrade], int]:
+    tv = TVClient(screener, exchange)
+    candles = tv._fetch_history_chart(symbol, timeframe)
+    patterns = _load_patterns(pattern_specs)
+    return _core_backtest_symbol(symbol, timeframe, candles, patterns, config)
+
+
 class Backtester:
     def __init__(
         self,
@@ -246,6 +801,7 @@ class Backtester:
         min_reward_risk_ratio: float | None = None,
         pattern_filter: str | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
+        max_workers: int = 0,
     ):
         self._symbols = symbols
         self._tv = TVClient(settings.tv_screener, settings.tv_exchange)
@@ -286,6 +842,7 @@ class Backtester:
 
         self._cooldown_tracker: dict[tuple[str, str], tuple[int, bool]] = {}
         self._progress_callback = progress_callback
+        self._max_workers = max_workers if max_workers > 0 else (os.cpu_count() or 4)
 
     def _discover_patterns(self) -> None:
         for module_info in pkgutil.iter_modules(patterns_pkg.__path__):
@@ -318,35 +875,86 @@ class Backtester:
 
         from tqdm import tqdm
 
-        concurrency = settings.scanner_concurrency
-        sem = asyncio.Semaphore(concurrency)
-
         tasks = [(s, tf) for s in self._symbols for tf in sorted(all_timeframes)]
-        result = BacktestResult(
-            initial_capital=self._account_value,
-        )
+        result = BacktestResult(initial_capital=self._account_value)
+        total_tasks = len(tasks)
+        if total_tasks == 0:
+            return result
+
+        pattern_specs = [
+            (type(p).__module__, type(p).__qualname__) for p in self._patterns
+        ]
+        config = {
+            "min_confidence": self._min_confidence,
+            "regime_filter": self._regime_filter,
+            "cooldown_bars": self._cooldown_bars,
+            "txn_cost_pct": self._txn_cost_pct,
+            "position_sizing": self._position_sizing,
+            "account_value": self._account_value,
+            "risk_per_trade_pct": self._risk_per_trade_pct,
+            "trailing_activation_default": self._trailing_activation_default,
+            "min_hold_bars": self._min_hold_bars,
+            "breakeven_trigger_pct": self._breakeven_trigger_pct,
+            "breakeven_buffer_pct": self._breakeven_buffer_pct,
+            "min_atr_stop_multiple": self._min_atr_stop_multiple,
+            "synthetic_stop_multiple": self._synthetic_stop_multiple,
+            "max_loss_pct": self._max_loss_pct,
+            "min_reward_risk_ratio": self._min_reward_risk_ratio,
+        }
+
+        loop = asyncio.get_running_loop()
+        max_workers = max(1, self._max_workers)
 
         pbar = tqdm(total=len(tasks), desc="Backtesting", unit="sym", ncols=80)
 
-        async def _backtest_one(symbol: str, timeframe: str):
-            async with sem:
-                trades, signals = await asyncio.to_thread(
-                    self._backtest_symbol, symbol, timeframe
-                )
-                pbar.update(1)
-                return trades, signals
+        try:
+            ctx = mp.get_context("spawn")
+            pool = ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx)
+            with pool:
+                futures = [
+                    loop.run_in_executor(
+                        pool, _worker_symbol_backtest,
+                        s, tf,
+                        settings.tv_screener, settings.tv_exchange,
+                        pattern_specs, config,
+                    )
+                    for s, tf in tasks
+                ]
 
-        total_tasks = len(tasks)
-        completed = 0
-        for coro in asyncio.as_completed(
-            [_backtest_one(s, tf) for s, tf in tasks]
-        ):
-            trades, signals = await coro
-            result.trades.extend(trades)
-            result.total_signals += signals
-            completed += 1
-            if self._progress_callback is not None:
-                self._progress_callback(completed, total_tasks)
+                completed = 0
+                for coro in asyncio.as_completed(futures):
+                    trades, signals = await coro
+                    result.trades.extend(trades)
+                    result.total_signals += signals
+                    completed += 1
+                    pbar.update(1)
+                    if self._progress_callback is not None:
+                        self._progress_callback(completed, total_tasks)
+        except Exception:
+            log.warning(
+                "Backtester | ProcessPoolExecutor failed, "
+                "falling back to thread pool"
+            )
+            sem = asyncio.Semaphore(max_workers)
+
+            async def _backtest_one(symbol: str, timeframe: str):
+                async with sem:
+                    trades, signals = await asyncio.to_thread(
+                        self._backtest_symbol, symbol, timeframe
+                    )
+                    pbar.update(1)
+                    return trades, signals
+
+            completed = 0
+            for coro in asyncio.as_completed(
+                [_backtest_one(s, tf) for s, tf in tasks]
+            ):
+                trades, signals = await coro
+                result.trades.extend(trades)
+                result.total_signals += signals
+                completed += 1
+                if self._progress_callback is not None:
+                    self._progress_callback(completed, total_tasks)
 
         pbar.close()
         return result
@@ -355,238 +963,27 @@ class Backtester:
         self, symbol: str, timeframe: str
     ) -> tuple[list[BacktestTrade], int]:
         candles = self._fetch_history(symbol, timeframe)
-        if len(candles) < 1:
-            return [], 0
-
-        store = OHLCVStore(window=max(DEFAULT_WINDOW, len(candles)))
-        trades: list[BacktestTrade] = []
-        signals_count = 0
-
-        pending_entry: TradeSignal | None = None
-        open_position: BacktestTrade | None = None
-        min_bars = self._min_required_bars(timeframe)
-        i = max(min_bars, 1)
-
-        while i < len(candles):
-            window_candles = candles[: i + 1]
-            store.replace_all(symbol, timeframe, window_candles)
-
-            # Exit check for open position at current bar
-            if open_position is not None:
-                self._update_neckline_state(open_position, candles[i], i)
-                exit_price, exit_reason = self._check_exit(
-                    candles[i], open_position, i,
-                    min_hold_bars=self._min_hold_bars,
-                )
-                if exit_price is not None:
-                    self._close_trade(
-                        open_position, exit_price, exit_reason, candles[i],
-                        self._txn_cost_pct,
-                    )
-                    trades.append(open_position)
-                    key = (open_position.symbol, open_position.pattern)
-                    self._cooldown_tracker[key] = (i, open_position.pnl < 0)
-                    open_position = None
-                    i += 1
-                    continue
-                self._update_trailing_reference(open_position, candles[i])
-                i += 1
-                continue
-
-            # Enter pending position at this bar
-            if pending_entry is not None:
-                open_position = self._open_trade(pending_entry, candles[i], i)
-                open_position.breakeven_trigger_pct = self._breakeven_trigger_pct
-                open_position.breakeven_buffer_pct = self._breakeven_buffer_pct
-                pending_entry = None
-                i += 1
-                continue
-
-            # Detect signals at current bar
-            snapshot = self._make_snapshot(symbol, timeframe, candles[i])
-            for pattern in self._patterns:
-                if timeframe not in pattern.timeframes:
-                    continue
-                signal = pattern.analyze(snapshot, store)
-                if signal is None:
-                    continue
-
-                signals_count += 1
-                log.info(
-                    f"Backtest | {symbol} {timeframe} {signal.action} "
-                    f"confidence={signal.confidence:.2f} {signal.pattern}"
-                )
-
-                # ── Confidence filter ──────────────────────────────────────
-                if signal.confidence < self._min_confidence:
-                    log.debug(
-                        f"Backtest | {symbol} {timeframe} confidence "
-                        f"{signal.confidence:.2f} < min {self._min_confidence} — skip"
-                    )
-                    continue
-
-                # ── Market regime filter (SMA200 trend) ────────────────────
-                # Only buy in bull markets (price above 200MA), only short in
-                # bear markets (price below 200MA). Removed SMA50 filter — it
-                # was too restrictive and killed trade count.
-                if self._regime_filter:
-                    df = store.get_df(symbol, timeframe, min_bars=1)
-                    if df is not None and len(df) >= 200:
-                        close = df["close"]
-                        sma200 = close.rolling(200).mean()
-                        current_sma200 = float(sma200.iloc[-1])
-                        current_close = float(close.iloc[-1])
-                        if signal.action == "BUY" and current_close < current_sma200:
-                            log.debug(
-                                f"Backtest | {symbol} {timeframe} BUY below SMA200 — skip"
-                            )
-                            continue
-                        if signal.action == "SELL" and current_close > current_sma200:
-                            log.debug(
-                                f"Backtest | {symbol} {timeframe} SELL above SMA200 — skip"
-                            )
-                            continue
-
-                # ── Pattern cooldown ───────────────────────────────────────
-                if self._cooldown_bars > 0:
-                    key = (symbol, signal.pattern)
-                    if key in self._cooldown_tracker:
-                        exit_bar, was_loss = self._cooldown_tracker[key]
-                        bars_since = i - exit_bar
-                        if was_loss and bars_since < self._cooldown_bars:
-                            log.debug(
-                                f"Backtest | {symbol} {timeframe} cooldown "
-                                f"{bars_since}/{self._cooldown_bars} bars — skip"
-                            )
-                            continue
-
-                # ── Volatility quality filter (ATR vs. trailing distance) ────
-                # A pattern's trailing_stop_pct is a fixed cushion (e.g. 3%).
-                # On a symbol whose normal daily range is close to or larger
-                # than that cushion, the stop is just noise — it will clip
-                # the trade on ordinary volatility rather than a real thesis
-                # failure. Require the trailing distance to be a comfortable
-                # multiple of the recent ATR before taking the trade. This is
-                # an engine-level entry filter; it does not alter any
-                # pattern's own stop/target/trailing values.
-                if (
-                    self._min_atr_stop_multiple is not None
-                    and signal.trailing_stop_pct is not None
-                ):
-                    df = store.get_df(symbol, timeframe, min_bars=1)
-                    if df is not None and len(df) >= 15:
-                        ind = IndicatorEngine(df)
-                        atr_val = float(ind.atr(14).iloc[-1])
-                        current_close = float(df["close"].iloc[-1])
-                        if current_close > 0 and atr_val > 0:
-                            atr_pct = atr_val / current_close
-                            min_required_trail = atr_pct * self._min_atr_stop_multiple
-                            if signal.trailing_stop_pct < min_required_trail:
-                                log.debug(
-                                    f"Backtest | {symbol} {timeframe} trailing "
-                                    f"{signal.trailing_stop_pct:.2%} too thin vs "
-                                    f"ATR {atr_pct:.2%} — skip"
-                                )
-                                continue
-
-                # ── Synthetic stop loss (catastrophic gap protection) ────────
-                # Only set when pattern provides no explicit stop_loss.
-                # Distance = synthetic_stop_multiple x trailing_stop_pct.
-                # At the default 1.0x this is identical to the trailing
-                # distance, which means ordinary entry-day noise trips the
-                # "catastrophic" stop before the trailing stop (which only
-                # ratchets in from a new high/low and respects
-                # min_hold_bars) ever gets a chance to manage the trade.
-                # Widening this multiple keeps the hard stop as a true
-                # gap/disaster backstop while letting the pattern's own
-                # trailing/target logic do the day-to-day risk management.
-                # Setting it to 0 disables the synthetic stop, leaving the
-                # pattern's trailing/breakeven/target logic as the sole
-                # exit-management layer (no catastrophic-gap backstop).
-                if (
-                    self._synthetic_stop_multiple > 0
-                    and signal.stop_loss is None
-                    and signal.trailing_stop_pct is not None
-                ):
-                    stop_pct = signal.trailing_stop_pct * self._synthetic_stop_multiple
-                    if signal.action == "BUY":
-                        signal.stop_loss = round(
-                            signal.price * (1 - stop_pct), 4
-                        )
-                    elif signal.action == "SELL":
-                        signal.stop_loss = round(
-                            signal.price * (1 + stop_pct), 4
-                        )
-
-                # ── Max-loss cap (absolute floor on entry-bar+down move) ────
-                # If the existing stop is wider (or absent), tighten it to
-                # -max_loss_pct of the entry price. Acts as a true catastrophic
-                # tail backstop without competing with the pattern's normal
-                # trailing/breakeven/target logic for routine day-to-day
-                # management. None (default) means no cap.
-                if self._max_loss_pct is not None and self._max_loss_pct > 0:
-                    if signal.action == "BUY":
-                        cap_price = signal.price * (1 - self._max_loss_pct)
-                        if signal.stop_loss is None or signal.stop_loss < cap_price:
-                            signal.stop_loss = round(cap_price, 4)
-                    elif signal.action == "SELL":
-                        cap_price = signal.price * (1 + self._max_loss_pct)
-                        if signal.stop_loss is None or signal.stop_loss > cap_price:
-                            signal.stop_loss = round(cap_price, 4)
-
-                # ── Reward-to-risk ratio filter ───────────────────────────
-                # Skips signals whose take_profit/stop_loss ratio is below
-                # the minimum. This screens out low-quality setups (e.g.
-                # double_bottom/double_top where the neckline is close and
-                # the synthetic stop is far) without touching the pattern's
-                # own logic. Only applied when both take_profit and stop_loss
-                # are present so patterns that use trailing-only exits are
-                # unaffected.
-                if (
-                    self._min_reward_risk_ratio is not None
-                    and signal.take_profit is not None
-                    and signal.stop_loss is not None
-                    and signal.price > 0
-                ):
-                    reward = abs(signal.take_profit - signal.price)
-                    risk = abs(signal.price - signal.stop_loss)
-                    if risk > 0 and reward / risk < self._min_reward_risk_ratio:
-                        log.debug(
-                            f"Backtest | {symbol} {timeframe} R:R "
-                            f"{reward / risk:.2f} < min "
-                            f"{self._min_reward_risk_ratio:.2f} — skip"
-                        )
-                        continue
-
-                # ── Position sizing ────────────────────────────────────────
-                self._apply_sizing(signal, store, symbol, timeframe)
-
-                # ── Trailing activation default ────────────────────────────
-                if (
-                    self._trailing_activation_default is not None
-                    and signal.trailing_activation_pct is None
-                    and signal.trailing_stop_pct is not None
-                ):
-                    signal.trailing_activation_pct = self._trailing_activation_default
-
-                pending_entry = signal
-                break  # one signal per bar max
-
-            i += 1
-
-        # Force-close any remaining position at last candle
-        if pending_entry is not None and len(candles) > 0:
-            open_position = self._open_trade(
-                pending_entry, candles[-1], len(candles) - 1
-            )
-        if open_position is not None:
-            self._close_trade(
-                open_position, candles[-1].close, "end_of_data", candles[-1],
-                self._txn_cost_pct,
-            )
-            trades.append(open_position)
-
-        return trades, signals_count
+        return _core_backtest_symbol(
+            symbol, timeframe, candles, self._patterns,
+            {
+                "min_confidence": self._min_confidence,
+                "regime_filter": self._regime_filter,
+                "cooldown_bars": self._cooldown_bars,
+                "txn_cost_pct": self._txn_cost_pct,
+                "position_sizing": self._position_sizing,
+                "account_value": self._account_value,
+                "risk_per_trade_pct": self._risk_per_trade_pct,
+                "trailing_activation_default": self._trailing_activation_default,
+                "min_hold_bars": self._min_hold_bars,
+                "breakeven_trigger_pct": self._breakeven_trigger_pct,
+                "breakeven_buffer_pct": self._breakeven_buffer_pct,
+                "min_atr_stop_multiple": self._min_atr_stop_multiple,
+                "synthetic_stop_multiple": self._synthetic_stop_multiple,
+                "max_loss_pct": self._max_loss_pct,
+                "min_reward_risk_ratio": self._min_reward_risk_ratio,
+            },
+            self._cooldown_tracker,
+        )
 
     # ── Sizing ──────────────────────────────────────────────────────────────────
     def _apply_sizing(
@@ -597,50 +994,11 @@ class Backtester:
         timeframe: str,
         entry_price: float | None = None,
     ) -> None:
-        current_price = entry_price if entry_price else signal.price
-        if current_price <= 0:
-            return
-
-        notional_max = self._account_value * 0.02
-        notional_max_shares = int(notional_max / current_price) if current_price > 0 else 0
-
-        if self._position_sizing == "pattern":
-            capped = min(signal.qty, notional_max_shares)
-            signal.qty = max(1, int(capped))
-            return
-
-        if self._position_sizing == "notional":
-            signal.qty = max(1, notional_max_shares)
-            return
-
-        risk_amount = self._account_value * self._risk_per_trade_pct
-
-        if self._position_sizing == "risk":
-            stop_distance = None
-            if signal.stop_loss is not None:
-                stop_distance = abs(current_price - signal.stop_loss)
-            elif signal.trailing_stop_pct is not None:
-                stop_distance = current_price * signal.trailing_stop_pct
-            if stop_distance is not None and stop_distance > 0:
-                qty = int(risk_amount / stop_distance)
-                qty = min(qty, notional_max_shares)
-                signal.qty = max(1, int(qty))
-            else:
-                signal.qty = max(1, notional_max_shares)
-            return
-
-        if self._position_sizing == "atr":
-            df = store.get_df(symbol, timeframe, min_bars=1)
-            if df is not None and len(df) >= 14:
-                ind = IndicatorEngine(df)
-                atr_val = float(ind.atr(14).iloc[-1])
-                if atr_val > 0:
-                    qty = int(risk_amount / atr_val)
-                    qty = min(qty, notional_max_shares)
-                    signal.qty = max(1, int(qty))
-                    return
-            signal.qty = max(1, notional_max_shares)
-            return
+        _apply_sizing(
+            signal, store, symbol, timeframe,
+            self._account_value, self._risk_per_trade_pct,
+            self._position_sizing, entry_price,
+        )
 
     # ── Exit helpers ────────────────────────────────────────────────────────────
     @staticmethod
@@ -907,10 +1265,9 @@ class Backtester:
             f"reason={reason} pnl={pnl_pct:+.2f}%"
         )
 
-    def _min_required_bars(self, timeframe: str) -> int:
-        if timeframe == "1W":
-            return 65
-        return 120
+    @staticmethod
+    def _min_required_bars(timeframe: str) -> int:
+        return _min_required_bars(timeframe)
 
     def _fetch_history(self, symbol: str, timeframe: str) -> list[OHLCVCandle]:
         return self._tv._fetch_history_chart(symbol, timeframe)
