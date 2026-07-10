@@ -32,6 +32,10 @@ from patterns.base_pattern import BasePattern, TradeSignal
 from analysis.indicator_engine import IndicatorEngine
 from utils.logger import log
 
+# ── OHLCV disk cache ──────────────────────────────────────────────────────────
+_CACHE_DIR = Path("data/cache")
+_CACHE_TTL_SECONDS = 6 * 3600  # re-fetch if cache older than 6 hours
+
 
 @dataclass
 class BacktestTrade:
@@ -765,6 +769,79 @@ def _core_backtest_symbol(
     return trades, signals_count
 
 
+# ── OHLCV caching + weekly derivation ────────────────────────────────────────
+
+
+def _cache_path(symbol: str, timeframe: str) -> Path:
+    return _CACHE_DIR / f"{symbol.upper()}_{timeframe}.json"
+
+
+def _load_cached_ohlcv(symbol: str, timeframe: str) -> list[OHLCVCandle] | None:
+    p = _cache_path(symbol, timeframe)
+    if not p.exists():
+        return None
+    try:
+        mtime = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
+        age = (datetime.now(timezone.utc) - mtime).total_seconds()
+        if age > _CACHE_TTL_SECONDS:
+            return None
+        raw = json.loads(p.read_text(encoding="utf-8"))
+        return [
+            OHLCVCandle(
+                open=c["o"], high=c["h"], low=c["l"], close=c["c"],
+                volume=c.get("v", 0.0),
+                timestamp=datetime.fromisoformat(c["t"]),
+            )
+            for c in raw
+        ]
+    except Exception:
+        return None
+
+
+def _save_cached_ohlcv(symbol: str, timeframe: str, candles: list[OHLCVCandle]) -> None:
+    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    payload = [
+        {
+            "o": c.open, "h": c.high, "l": c.low, "c": c.close,
+            "v": c.volume, "t": c.timestamp.isoformat() if c.timestamp else "",
+        }
+        for c in candles
+    ]
+    _cache_path(symbol, timeframe).write_text(
+        json.dumps(payload), encoding="utf-8",
+    )
+
+
+def _derive_weekly_from_daily(daily: list[OHLCVCandle]) -> list[OHLCVCandle]:
+    if len(daily) < 5:
+        return []
+    df = pd.DataFrame([
+        {
+            "timestamp": c.timestamp or datetime.now(timezone.utc),
+            "open": c.open, "high": c.high, "low": c.low,
+            "close": c.close, "volume": c.volume,
+        }
+        for c in daily
+    ])
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+    df = df.set_index("timestamp").sort_index()
+    weekly = df.resample("W").agg({
+        "open": "first",
+        "high": "max",
+        "low": "min",
+        "close": "last",
+        "volume": "sum",
+    }).dropna()
+    return [
+        OHLCVCandle(
+            open=row.open, high=row.high, low=row.low,
+            close=row.close, volume=row.volume,
+            timestamp=idx.to_pydatetime(),
+        )
+        for idx, row in weekly.iterrows()
+    ]
+
+
 def _worker_symbol_backtest(
     symbol: str,
     timeframe: str,
@@ -772,9 +849,11 @@ def _worker_symbol_backtest(
     exchange: str,
     pattern_specs: list[tuple[str, str]],
     config: dict,
+    candles: list[OHLCVCandle] | None = None,
 ) -> tuple[list[BacktestTrade], int]:
-    tv = TVClient(screener, exchange)
-    candles = tv._fetch_history_chart(symbol, timeframe)
+    if candles is None:
+        tv = TVClient(screener, exchange)
+        candles = tv._fetch_history_chart(symbol, timeframe)
     patterns = _load_patterns(pattern_specs)
     return _core_backtest_symbol(symbol, timeframe, candles, patterns, config)
 
@@ -881,6 +960,39 @@ class Backtester:
         if total_tasks == 0:
             return result
 
+        # ── Phase 1: Pre-fetch all daily OHLCV (cache → HTTP fallback) ─────
+        need_weekly = "1W" in all_timeframes
+        ohlcv_data: dict[tuple[str, str], list[OHLCVCandle]] = {}
+        loop = asyncio.get_running_loop()
+
+        async def _fetch_one(symbol: str):
+            candles = _load_cached_ohlcv(symbol, "1d")
+            if candles is None:
+                candles = await asyncio.to_thread(
+                    self._tv._fetch_history_chart, symbol, "1d"
+                )
+                if candles:
+                    _save_cached_ohlcv(symbol, "1d", candles)
+            if candles:
+                ohlcv_data[(symbol, "1d")] = candles
+                if need_weekly:
+                    weekly = _derive_weekly_from_daily(candles)
+                    if weekly:
+                        ohlcv_data[(symbol, "1W")] = weekly
+
+        pbar_fetch = tqdm(
+            total=len(self._symbols), desc="Fetching OHLCV",
+            unit="sym", ncols=80,
+        )
+
+        async def _fetch_with_progress(symbol: str):
+            await _fetch_one(symbol)
+            pbar_fetch.update(1)
+
+        await asyncio.gather(*[_fetch_with_progress(s) for s in self._symbols])
+        pbar_fetch.close()
+
+        # ── Phase 2: Build config, dispatch backtest workers ───────────────
         pattern_specs = [
             (type(p).__module__, type(p).__qualname__) for p in self._patterns
         ]
@@ -902,9 +1014,7 @@ class Backtester:
             "min_reward_risk_ratio": self._min_reward_risk_ratio,
         }
 
-        loop = asyncio.get_running_loop()
         max_workers = max(1, self._max_workers)
-
         pbar = tqdm(total=len(tasks), desc="Backtesting", unit="sym", ncols=80)
 
         try:
@@ -917,6 +1027,7 @@ class Backtester:
                         s, tf,
                         settings.tv_screener, settings.tv_exchange,
                         pattern_specs, config,
+                        ohlcv_data.get((s, tf)),
                     )
                     for s, tf in tasks
                 ]
