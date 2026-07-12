@@ -170,6 +170,27 @@ class BacktestResult:
             capital += t.pnl * t.qty
         return capital
 
+    def by_pattern(self) -> dict[str, list[BacktestTrade]]:
+        groups: dict[str, list[BacktestTrade]] = defaultdict(list)
+        for t in self.trades:
+            groups[t.pattern].append(t)
+        return groups
+
+    @staticmethod
+    def _pattern_stats(trades: list[BacktestTrade]) -> dict:
+        wins = sum(1 for t in trades if t.pnl > 0)
+        losses = sum(1 for t in trades if t.pnl < 0)
+        total_pnl_pct = sum(t.pnl_pct for t in trades)
+        n = len(trades)
+        return {
+            "trades": n,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": round(wins / n, 4) if n else 0.0,
+            "total_pnl_pct": round(total_pnl_pct, 4),
+            "avg_pnl_pct": round(total_pnl_pct / n, 4) if n else 0.0,
+        }
+
     def summary(self) -> str:
         eq_pnl = self.total_pnl_pct
         aw_pnl = self.account_weighted_pnl_pct
@@ -190,6 +211,24 @@ class BacktestResult:
             f"  Sharpe ratio:      {self.sharpe_ratio:.2f}",
             "=" * 60,
         ]
+        groups = self.by_pattern()
+        if len(groups) > 1:
+            lines.append("  BY PATTERN")
+            lines.append("-" * 60)
+            ranked = sorted(
+                groups.items(),
+                key=lambda kv: self._pattern_stats(kv[1])["total_pnl_pct"],
+                reverse=True,
+            )
+            for pattern, trades in ranked:
+                s = self._pattern_stats(trades)
+                lines.append(
+                    f"  {pattern:35s} n={s['trades']:<4d} "
+                    f"win={s['win_rate']:.0%} "
+                    f"pnl={s['total_pnl_pct']:+.2f}% "
+                    f"avg={s['avg_pnl_pct']:+.2f}%"
+                )
+            lines.append("=" * 60)
         return "\n".join(lines)
 
     def to_dict(self) -> dict:
@@ -204,6 +243,10 @@ class BacktestResult:
             "avg_pnl_pct": round(self.avg_pnl_pct, 4),
             "max_drawdown_pct": round(self.max_drawdown_pct, 4),
             "sharpe_ratio": round(self.sharpe_ratio, 4),
+            "by_pattern": {
+                pattern: self._pattern_stats(trades)
+                for pattern, trades in self.by_pattern().items()
+            },
             "trades": [
                 {
                     "symbol": t.symbol,
@@ -511,11 +554,17 @@ def _apply_sizing(
     risk_per_trade_pct: float,
     position_sizing: str,
     entry_price: float | None = None,
+    max_position_pct: float = 0.02,
 ) -> None:
     current_price = entry_price if entry_price else signal.price
     if current_price <= 0:
         return
-    notional_max = account_value * 0.02
+    # Diversification ceiling — the largest fraction of account_value any
+    # single position may occupy, regardless of sizing mode. Kept separate
+    # from risk_per_trade_pct: if this is tighter than what risk_per_trade_pct
+    # implies for a given stop distance, it silently caps every trade to the
+    # same size and risk_per_trade_pct stops mattering.
+    notional_max = account_value * max_position_pct
     notional_max_shares = (
         int(notional_max / current_price) if current_price > 0 else 0
     )
@@ -561,6 +610,53 @@ def _load_patterns(pattern_specs: list[tuple[str, str]]) -> list[BasePattern]:
         cls = getattr(module, class_name)
         patterns.append(cls())
     return patterns
+
+
+def _iter_pattern_classes() -> list[tuple[str, type[BasePattern]]]:
+    """Yield (module_name, class) for every BasePattern subclass in patterns/."""
+    found: list[tuple[str, type[BasePattern]]] = []
+    for module_info in pkgutil.iter_modules(patterns_pkg.__path__):
+        if module_info.name.startswith("_") or module_info.name == "base_pattern":
+            continue
+        module = importlib.import_module(f"patterns.{module_info.name}")
+        for attr_name in dir(module):
+            attr = getattr(module, attr_name)
+            if (
+                isinstance(attr, type)
+                and issubclass(attr, BasePattern)
+                and attr is not BasePattern
+            ):
+                found.append((module_info.name, attr))
+    return found
+
+
+def discover_pattern_names() -> list[str]:
+    """All registered pattern names, e.g. for populating a UI filter dropdown."""
+    return sorted({cls().name for _, cls in _iter_pattern_classes()})
+
+
+def _enforce_max_open_positions(
+    trades: list[BacktestTrade], max_open_positions: int,
+) -> list[BacktestTrade]:
+    """Cap portfolio-wide concurrent positions across all symbols/patterns.
+
+    Each symbol is backtested independently (for parallelism), so this
+    cap can't be enforced during simulation. Instead, replay accepted
+    trades in chronological order and reject any entry that would push
+    the concurrently-open count above the cap — highest-confidence
+    entries win ties on the same bar.
+    """
+    if max_open_positions <= 0:
+        return trades
+    ordered = sorted(trades, key=lambda t: (t.entry_date, -t.confidence))
+    accepted: list[BacktestTrade] = []
+    open_exits: list[datetime] = []
+    for t in ordered:
+        open_exits = [d for d in open_exits if d > t.entry_date]
+        if len(open_exits) < max_open_positions:
+            open_exits.append(t.exit_date)
+            accepted.append(t)
+    return accepted
 
 
 def _core_backtest_symbol(
@@ -708,6 +804,27 @@ def _core_backtest_symbol(
                     )
 
             if (
+                config["atr_stop_floor_multiple"] is not None
+                and signal.stop_loss is not None
+            ):
+                df = store.get_df(symbol, timeframe, min_bars=1)
+                if df is not None and len(df) >= 15:
+                    ind = IndicatorEngine(df)
+                    atr_val = float(ind.atr(14).iloc[-1])
+                    if atr_val > 0:
+                        floor_distance = atr_val * config["atr_stop_floor_multiple"]
+                        current_distance = abs(signal.price - signal.stop_loss)
+                        if current_distance < floor_distance:
+                            if signal.action == "BUY":
+                                signal.stop_loss = round(
+                                    signal.price - floor_distance, 4
+                                )
+                            elif signal.action == "SELL":
+                                signal.stop_loss = round(
+                                    signal.price + floor_distance, 4
+                                )
+
+            if (
                 config["max_loss_pct"] is not None
                 and config["max_loss_pct"] > 0
             ):
@@ -741,6 +858,7 @@ def _core_backtest_symbol(
                 config["account_value"],
                 config["risk_per_trade_pct"],
                 config["position_sizing"],
+                max_position_pct=config["max_position_pct"],
             )
 
             if (
@@ -869,6 +987,7 @@ class Backtester:
         position_sizing: str = "pattern",
         account_value: float = 100_000.0,
         risk_per_trade_pct: float = 0.01,
+        max_position_pct: float = 0.10,
         trailing_activation_default: float | None = None,
         max_open_positions: int = 8,
         min_hold_bars: int = 2,
@@ -876,9 +995,11 @@ class Backtester:
         breakeven_buffer_pct: float = 0.0015,
         min_atr_stop_multiple: float | None = None,
         synthetic_stop_multiple: float = 1.0,
+        atr_stop_floor_multiple: float | None = None,
         max_loss_pct: float | None = None,
         min_reward_risk_ratio: float | None = None,
         pattern_filter: str | None = None,
+        disabled_patterns: list[str] | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
         max_workers: int = 0,
     ):
@@ -887,6 +1008,7 @@ class Backtester:
         self._patterns: list[BasePattern] = []
         self._pattern_files: dict[str, str] = {}
         self._pattern_filter = pattern_filter
+        self._disabled_patterns = set(disabled_patterns or [])
         self._discover_patterns()
 
         self._min_confidence = min_confidence
@@ -896,6 +1018,11 @@ class Backtester:
         self._position_sizing = position_sizing
         self._account_value = account_value
         self._risk_per_trade_pct = risk_per_trade_pct
+        # Diversification ceiling — see _apply_sizing. Was hardcoded to 0.02
+        # inside _apply_sizing, which silently capped every trade at 2% of
+        # account notional and made risk_per_trade_pct a no-op for any
+        # realistic stop distance. Now a real, independent knob.
+        self._max_position_pct = max_position_pct
         self._trailing_activation_default = trailing_activation_default
         self._max_open_positions = max_open_positions
         self._min_hold_bars = min_hold_bars
@@ -906,6 +1033,11 @@ class Backtester:
         self._breakeven_buffer_pct = breakeven_buffer_pct
         self._min_atr_stop_multiple = min_atr_stop_multiple
         self._synthetic_stop_multiple = synthetic_stop_multiple
+        # Widens (never tightens) a pattern's own stop_loss up to
+        # atr_stop_floor_multiple × ATR(14) when the pattern's structural
+        # stop is tighter than that — keeps an unusually tight stop from
+        # being ordinary daily noise rather than a real thesis failure.
+        self._atr_stop_floor_multiple = atr_stop_floor_multiple
         # Hard loss cap from entry (e.g. 0.05 = -5% absolute stop). When set
         # the engine guarantees a stop_loss no worse than -max_loss_pct of
         # entry price, applied ONLY when the pattern itself supplies no
@@ -924,28 +1056,21 @@ class Backtester:
         self._max_workers = max_workers if max_workers > 0 else (os.cpu_count() or 4)
 
     def _discover_patterns(self) -> None:
-        for module_info in pkgutil.iter_modules(patterns_pkg.__path__):
-            if module_info.name.startswith("_") or module_info.name == "base_pattern":
+        for module_name, cls in _iter_pattern_classes():
+            instance = cls()
+            # disabled_patterns only applies to the default multi-pattern run —
+            # an explicit pattern_filter (testing one pattern in isolation)
+            # always wins, even if that pattern is disabled by default.
+            if self._pattern_filter is None and instance.name in self._disabled_patterns:
                 continue
-            module = importlib.import_module(f"patterns.{module_info.name}")
-            for attr_name in dir(module):
-                attr = getattr(module, attr_name)
-                if (
-                    isinstance(attr, type)
-                    and issubclass(attr, BasePattern)
-                    and attr is not BasePattern
-                ):
-                    instance = attr()
-                    # Apply pattern filter: match by case-insensitive substring
-                    if self._pattern_filter is not None:
-                        filter_lower = self._pattern_filter.lower()
-                        if filter_lower not in instance.name.lower():
-                            continue
-                    self._patterns.append(instance)
-                    self._pattern_files[instance.name] = (
-                        f"patterns/{module_info.name}.py"
-                    )
-                    log.info(f"Backtester | Registered pattern: {instance}")
+            # Apply pattern filter: match by case-insensitive substring
+            if self._pattern_filter is not None:
+                filter_lower = self._pattern_filter.lower()
+                if filter_lower not in instance.name.lower():
+                    continue
+            self._patterns.append(instance)
+            self._pattern_files[instance.name] = f"patterns/{module_name}.py"
+            log.info(f"Backtester | Registered pattern: {instance}")
 
     async def run(self) -> BacktestResult:
         all_timeframes: set[str] = set()
@@ -1004,12 +1129,14 @@ class Backtester:
             "position_sizing": self._position_sizing,
             "account_value": self._account_value,
             "risk_per_trade_pct": self._risk_per_trade_pct,
+            "max_position_pct": self._max_position_pct,
             "trailing_activation_default": self._trailing_activation_default,
             "min_hold_bars": self._min_hold_bars,
             "breakeven_trigger_pct": self._breakeven_trigger_pct,
             "breakeven_buffer_pct": self._breakeven_buffer_pct,
             "min_atr_stop_multiple": self._min_atr_stop_multiple,
             "synthetic_stop_multiple": self._synthetic_stop_multiple,
+            "atr_stop_floor_multiple": self._atr_stop_floor_multiple,
             "max_loss_pct": self._max_loss_pct,
             "min_reward_risk_ratio": self._min_reward_risk_ratio,
         }
@@ -1068,6 +1195,9 @@ class Backtester:
                     self._progress_callback(completed, total_tasks)
 
         pbar.close()
+        result.trades = _enforce_max_open_positions(
+            result.trades, self._max_open_positions
+        )
         return result
 
     def _backtest_symbol(
@@ -1084,12 +1214,14 @@ class Backtester:
                 "position_sizing": self._position_sizing,
                 "account_value": self._account_value,
                 "risk_per_trade_pct": self._risk_per_trade_pct,
+                "max_position_pct": self._max_position_pct,
                 "trailing_activation_default": self._trailing_activation_default,
                 "min_hold_bars": self._min_hold_bars,
                 "breakeven_trigger_pct": self._breakeven_trigger_pct,
                 "breakeven_buffer_pct": self._breakeven_buffer_pct,
                 "min_atr_stop_multiple": self._min_atr_stop_multiple,
                 "synthetic_stop_multiple": self._synthetic_stop_multiple,
+                "atr_stop_floor_multiple": self._atr_stop_floor_multiple,
                 "max_loss_pct": self._max_loss_pct,
                 "min_reward_risk_ratio": self._min_reward_risk_ratio,
             },
@@ -1109,6 +1241,7 @@ class Backtester:
             signal, store, symbol, timeframe,
             self._account_value, self._risk_per_trade_pct,
             self._position_sizing, entry_price,
+            max_position_pct=self._max_position_pct,
         )
 
     # ── Exit helpers ────────────────────────────────────────────────────────────

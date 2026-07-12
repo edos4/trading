@@ -20,7 +20,7 @@ from tkinter import ttk
 from typing import Any, Callable, Optional
 
 from config import settings
-from core.backtester import Backtester, BacktestResult
+from core.backtester import Backtester, BacktestResult, discover_pattern_names
 from data.tv_client import TVClient
 from utils.logger import log
 
@@ -28,7 +28,15 @@ from utils.logger import log
 # ── Parameter definitions ──────────────────────────────────────────────
 # Each entry: (key, label, description, type, default, choices_or_None)
 #   type: "entry" (free text), "spin" (numeric spinbox), "combo" (dropdown), "check" (checkbox)
-#   For "spin": (min, max, increment, decimals) packed into default as tuple -> handled below
+#   For "spin": default is packed as (default_value, min, max, increment).
+#   For the "pattern_filter" combo, choices is None here and filled in
+#   dynamically at dialog build time from discover_pattern_names().
+
+def _decimals_for_increment(inc: float) -> int:
+    """Decimal places to display for a spinbox increment (1 -> 0, 0.001 -> 3)."""
+    s = f"{inc:.10f}".rstrip("0")
+    return len(s.split(".")[1]) if "." in s else 0
+
 
 PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
     (
@@ -38,17 +46,19 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
     ),
     (
         "pattern_filter", "Pattern filter",
-        "Filter to one pattern (case-insensitive substring match). Leave blank for all patterns.",
-        "combo", "", [
-            "", "double_top", "double_bottom", "rounding_bottom",
-            "rounding_top", "upward_channel", "descending_channel",
-            "head_and_shoulders",
-        ],
+        "Filter to one pattern. Leave blank for all patterns.",
+        "combo", "", None,
+    ),
+    (
+        "disabled_patterns", "Disabled patterns",
+        "Comma-separated pattern names to exclude from the default multi-pattern run "
+        "(ignored if Pattern filter above targets one of them explicitly).",
+        "entry", "pattern_009_flag_pattern,pattern_006_upward_channel", None,
     ),
     (
         "min_confidence", "Min confidence",
         "Minimum pattern confidence to act on a signal (0.0-1.0). Higher = fewer but higher-quality trades.",
-        "spin", (0.78, 0.0, 1.0, 0.01), None,
+        "spin", (0.6, 0.0, 1.0, 0.01), None,
     ),
     (
         "regime_filter", "Regime filter (SMA200)",
@@ -58,7 +68,7 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
     (
         "cooldown_bars", "Cooldown (bars)",
         "Bars to wait before re-entering the same symbol+pattern after a loss. Reduces re-entering into chop.",
-        "spin", (35, 0, 200, 1), None,
+        "spin", (10, 0, 200, 1), None,
     ),
     (
         "txn_cost_pct", "Txn cost (%)",
@@ -82,6 +92,14 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
         "spin", (0.02, 0.0, 0.1, 0.001), None,
     ),
     (
+        "max_position_pct", "Max position (%)",
+        "Diversification ceiling: largest fraction of account any single position may "
+        "occupy, regardless of sizing mode. If tighter than what risk_per_trade_pct "
+        "implies for a given stop, every trade gets capped to this and "
+        "risk_per_trade_pct stops mattering.",
+        "spin", (0.10, 0.01, 1.0, 0.01), None,
+    ),
+    (
         "trailing_activation_default", "Trailing activation (%)",
         "Cushion of unrealized profit before trailing stop arms (0.01 = 1%). "
         "Prevents entry-day chop from stopping trades early.",
@@ -91,14 +109,14 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
         "min_hold_bars", "Min hold (bars)",
         "Mandatory holding period before trailing/breakeven stops can fire. "
         "Static stop-loss and take-profit still work immediately.",
-        "spin", (4, 0, 50, 1), None,
+        "spin", (2, 0, 50, 1), None,
     ),
     (
         "breakeven_trigger_pct", "Breakeven trigger (%)",
         "Once a trade is ahead by this much, its floor is raised to ~entry. "
         "Aligns with trailing activation so any trade that arms trailing also arms breakeven. "
-        "Set blank to disable.",
-        "spin", (0.01, 0.0, 0.2, 0.001), None,
+        "0 = disabled.",
+        "spin", (0.0, 0.0, 0.2, 0.001), None,
     ),
     (
         "breakeven_buffer_pct", "Breakeven buffer (%)",
@@ -109,21 +127,32 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
     (
         "min_atr_stop_multiple", "Min ATR stop multiple",
         "Requires trailing distance to be at least N× recent ATR before taking the trade. "
-        "Screens out setups where the stop is ordinary daily noise. Set blank to disable.",
-        "spin", (1.6, 0.0, 5.0, 0.1), None,
+        "Screens out setups where the stop is ordinary daily noise. 0 = disabled.",
+        "spin", (1.0, 0.0, 5.0, 0.1), None,
     ),
     (
         "synthetic_stop_multiple", "Synthetic stop multiple",
         "Catastrophic gap-protection stop = N × trailing_stop_pct. "
         "Higher = stop acts as disaster backstop, not routine exit. 0 = disabled.",
-        "spin", (1.75, 0.0, 5.0, 0.05), None,
+        "spin", (2.0, 0.0, 5.0, 0.05), None,
+    ),
+    (
+        "atr_stop_floor_multiple", "ATR stop floor multiple",
+        "Widens (never tightens) a pattern's own stop_loss up to N× recent ATR when "
+        "the pattern's structural stop is tighter than that. 0 = disabled.",
+        "spin", (1.2, 0.0, 5.0, 0.1), None,
+    ),
+    (
+        "max_loss_pct", "Max loss (%)",
+        "Hard absolute-loss cap from entry, applied only when the pattern's own stop "
+        "is looser (or unset). Catastrophic-tail backstop. 0 = disabled.",
+        "spin", (0.0, 0.0, 0.5, 0.005), None,
     ),
     (
         "min_reward_risk_ratio", "Min reward:risk ratio",
         "Skips signals whose take_profit/stop_loss ratio is below this. "
-        "2.0 screens out low-quality setups while keeping high-R:R winners. "
-        "Set blank to disable.",
-        "spin", (2.0, 0.0, 10.0, 0.1), None,
+        "Screens out low-quality setups while keeping high-R:R winners. 0 = disabled.",
+        "spin", (1.5, 0.0, 10.0, 0.1), None,
     ),
     (
         "max_open_positions", "Max open positions",
@@ -149,7 +178,7 @@ class BacktestDialog:
         self._busy = False
         self._top = tk.Toplevel(parent)
         self._top.title("Backtest Runner")
-        self._top.geometry("780x820")
+        self._top.geometry("1200x600")
         self._top.minsize(640, 600)
         self._top.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -167,18 +196,19 @@ class BacktestDialog:
         params_frame = ttk.LabelFrame(self._top, text="Backtest Parameters", padding=10)
         params_frame.pack(side=tk.TOP, fill=tk.X, padx=8, pady=(8, 4))
 
-        params_frame.columnconfigure(0, weight=0)
-        params_frame.columnconfigure(1, weight=1)
-        params_frame.columnconfigure(2, weight=0, pad=24)
-        params_frame.columnconfigure(3, weight=1)
+        for c in range(8):
+            if c % 2 == 1:
+                params_frame.columnconfigure(c, weight=1)
+            else:
+                params_frame.columnconfigure(c, weight=0, pad=8)
 
         def place_param(key, label, desc, ptype, default, choices, col, row):
-            # Label + widget on same row
+            if key == "pattern_filter":
+                choices = [""] + discover_pattern_names()
             ttk.Label(params_frame, text=label, font=("TkDefaultFont", 9, "bold")).grid(
                 row=row, column=col, sticky=tk.W, padx=(0, 4),
             )
-            # Description below, spanning both columns of this half
-            ttk.Label(params_frame, text=desc, wraplength=280,
+            ttk.Label(params_frame, text=desc, wraplength=180,
                       font=("TkDefaultFont", 8)).grid(
                 row=row + 1, column=col, columnspan=2, sticky=tk.W, padx=(0, 4),
             )
@@ -186,28 +216,25 @@ class BacktestDialog:
             return var
 
         row = 0
-        for i in range(0, len(PARAMS), 2):
-            left = PARAMS[i]
-            col0, row0 = 0, row
-            place_param(*left, col=col0, row=row0)
-
-            if i + 1 < len(PARAMS):
-                right = PARAMS[i + 1]
-                col2, row2 = 2, row
-                place_param(*right, col=col2, row=row2)
-            row += 2  # each param uses 2 grid rows
+        for i in range(0, len(PARAMS), 4):
+            for j in range(4):
+                idx = i + j
+                if idx >= len(PARAMS):
+                    break
+                place_param(*PARAMS[idx], col=j * 2, row=row)
+            row += 2
 
     def _make_widget(self, parent, key, ptype, default, choices, col, grid_row):
         var = None
         if ptype == "spin":
-            minv, maxv, inc, dec = default
-            var = tk.DoubleVar(value=minv)
+            default_val, minv, maxv, inc = default
+            var = tk.DoubleVar(value=default_val)
+            decimals = _decimals_for_increment(inc)
             sp = ttk.Spinbox(
                 parent, from_=minv, to=maxv, increment=inc,
                 textvariable=var, width=12,
+                format=f"%.{decimals}f",
             )
-            if dec < 1:
-                sp.config(format=f"%.{max(0, int(-dec // 1))}f")
             sp.grid(row=grid_row, column=col + 1, sticky=tk.W, padx=(0, 8))
         elif ptype == "combo":
             var = tk.StringVar(value=default)
@@ -283,12 +310,12 @@ class BacktestDialog:
             if ptype == "check":
                 p[key] = bool(var.get())
             elif ptype == "spin":
-                minv, maxv, inc, dec = default
+                default_val, minv, maxv, inc = default
                 val_str = str(var.get())
                 try:
                     val = float(val_str)
                 except (ValueError, tk.TclError):
-                    val = minv
+                    val = default_val
                 p[key] = val
             elif ptype == "combo":
                 v = var.get()
@@ -304,8 +331,16 @@ class BacktestDialog:
                 p[int_key] = int(p[int_key])
         # pattern_filter maps to pattern arg, not constructor kwarg
         pattern_filter = p.pop("pattern_filter")
+        # disabled_patterns is a comma-separated string in the form -> list
+        disabled_raw = p.pop("disabled_patterns", None) or ""
+        p["disabled_patterns"] = [
+            name.strip() for name in disabled_raw.split(",") if name.strip()
+        ]
         # Convert "disable" sentinels: spin values of 0 where None means disabled
-        for opt_key in ("breakeven_trigger_pct", "min_atr_stop_multiple", "min_reward_risk_ratio"):
+        for opt_key in (
+            "breakeven_trigger_pct", "min_atr_stop_multiple",
+            "min_reward_risk_ratio", "max_loss_pct", "atr_stop_floor_multiple",
+        ):
             if opt_key in p and p[opt_key] is not None and p[opt_key] <= 0:
                 p[opt_key] = None
         if "synthetic_stop_multiple" in p and p["synthetic_stop_multiple"] <= 0:
@@ -340,7 +375,7 @@ class BacktestDialog:
 
     def _run_backtest_thread(self, n_symbols: int, pattern: Optional[str], kwargs: dict) -> None:
         try:
-            symbol_rows = TVClient.fetch_top_symbols_with_exchanges(
+            symbol_rows = TVClient.fetch_top_symbols_with_exchanges_cached(
                 n_symbols, settings.tv_screener,
             )
             if not symbol_rows:
