@@ -133,7 +133,7 @@ class DescendingChannelPattern(BasePattern):
     STOP_BELOW_SL2          = 0.99        # C16
     GAIN_CAP_PCT            = 0.20        # C18 (increased from 7% to 20% to let winners run)
     TIME_STOP_BARS          = 15          # C19
-    TRAIL_ACTIVATION_PCT    = 0.04        # C20 (activation; not enforced by backtester)
+    TRAIL_ACTIVATION_PCT    = 0.04        # C20 (activation threshold, enforced via trailing_activation_pct)
     TRAILING_STOP_PCT       = 0.025       # C20
     SWING_LOOKBACK          = 2
     MIN_BARS                = 210

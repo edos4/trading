@@ -62,7 +62,9 @@ def discover_patterns() -> list[BasePattern]:
                 and attr is not BasePattern
             ):
                 try:
-                    found.append(attr())
+                    instance = attr()
+                    if not instance.skipped:
+                        found.append(instance)
                 except Exception as exc:
                     log.warning(f"UI | Failed to instantiate {attr_name}: {exc}")
     return found

@@ -69,8 +69,12 @@ class DoubleBottomPattern(BasePattern):
     L1_RSI_MAX           = 30.0
     L2_RSI_MIN           = 39.0
     L2_RSI_MAX           = 50.0
-    RSI_DIVERGENCE_MIN   = 3.0
-    PEAK_HEIGHT_MIN      = 0.05      # 5% rise from L1 low to peak
+    # Raised to the pattern's own confidence-bonus thresholds (see
+    # _score_confidence) — n=81/-22.47% backtest showed marginal setups at
+    # the old 3.0/0.05 floor were the loss driver; require bonus-tier
+    # divergence/height as the hard floor instead of just scoring it.
+    RSI_DIVERGENCE_MIN   = 5.0
+    PEAK_HEIGHT_MIN      = 0.07      # 7% rise from L1 low to peak
     L1_L2_GAP_MIN        = 8
     L1_L2_GAP_MAX        = 90
     ENTRY_BARS_AFTER_L2  = 7

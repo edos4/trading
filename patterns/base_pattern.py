@@ -84,6 +84,16 @@ class BasePattern(ABC):
         """Unique pattern ID, e.g. 'pattern_001_ema_crossover'."""
 
     @property
+    def skipped(self) -> bool:
+        """
+        Set to True on a pattern class to exclude it everywhere patterns are
+        discovered (scanner, backtester, comparison script, UI) — regardless
+        of --pattern filters. Use for patterns that are broken or retired,
+        not for the default-off patterns tuned via disabled_patterns.
+        """
+        return False
+
+    @property
     def timeframes(self) -> list[str]:
         """
         Timeframes this pattern wants to be called for.

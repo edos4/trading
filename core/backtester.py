@@ -270,7 +270,14 @@ class BacktestResult:
 
     def save(self, path: str) -> None:
         p = Path(path)
-        p.write_text(self.summary() + "\n", encoding="utf-8")
+        lines = [self.summary(), "", "  TRADES", "-" * 60]
+        for t in sorted(self.trades, key=lambda t: t.entry_date):
+            lines.append(
+                f"  {t.entry_date.strftime('%Y-%m-%d')} {t.action:5s} {t.symbol:8s} "
+                f"{t.timeframe:4s} entry={t.entry_price:.2f} exit={t.exit_price:.2f} "
+                f"pnl={t.pnl_pct:+.2f}% reason={t.exit_reason} pattern={t.pattern}"
+            )
+        p.write_text("\n".join(lines) + "\n", encoding="utf-8")
         log.info(f"Backtest | Results saved to {p}")
 
 
@@ -632,7 +639,10 @@ def _iter_pattern_classes() -> list[tuple[str, type[BasePattern]]]:
 
 def discover_pattern_names() -> list[str]:
     """All registered pattern names, e.g. for populating a UI filter dropdown."""
-    return sorted({cls().name for _, cls in _iter_pattern_classes()})
+    return sorted({
+        inst.name for _, cls in _iter_pattern_classes()
+        if not (inst := cls()).skipped
+    })
 
 
 def _enforce_max_open_positions(
@@ -670,19 +680,30 @@ def _core_backtest_symbol(
     if len(candles) < 1:
         return [], 0
 
-    store = OHLCVStore(window=max(DEFAULT_WINDOW, len(candles)))
+    # Bounded window, not the full backtest length — every pattern's
+    # MIN_BARS tops out at 210 and the regime filter needs 200, so
+    # DEFAULT_WINDOW (365) is plenty. Sizing this to len(candles) made every
+    # per-bar indicator recompute run over the *entire* history so far,
+    # turning a multi-year walk-forward into an O(n^2) crawl.
+    store = OHLCVStore(window=DEFAULT_WINDOW)
     trades: list[BacktestTrade] = []
     signals_count = 0
     pending_entry: TradeSignal | None = None
     open_position: BacktestTrade | None = None
 
     min_bars = _min_required_bars(timeframe)
-    i = max(min_bars, 1)
+    start = max(min_bars, 1)
+    i = start
     cooldown_tracker: dict[tuple[str, str], tuple[int, bool]] = {} if cooldown is None else cooldown  # type: ignore[assignment]
 
+    # Seed the store with the initial window once, then grow it one candle
+    # at a time as `i` advances — avoids re-slicing/rebuilding the whole
+    # history into a fresh deque on every bar (was O(n^2) over the walk).
+    store.replace_all(symbol, timeframe, candles[: i + 1])
+
     while i < len(candles):
-        window_candles = candles[: i + 1]
-        store.replace_all(symbol, timeframe, window_candles)
+        if i > start:
+            store.append_candle(symbol, timeframe, candles[i])
 
         if open_position is not None:
             _update_neckline_state(open_position, candles[i], i)
@@ -825,15 +846,15 @@ def _core_backtest_symbol(
                                 )
 
             if (
-                config["max_loss_pct"] is not None
-                and config["max_loss_pct"] > 0
+                config["hard_stop_percentage"] is not None
+                and config["hard_stop_percentage"] > 0
             ):
                 if signal.action == "BUY":
-                    cap_price = signal.price * (1 - config["max_loss_pct"])
+                    cap_price = signal.price * (1 - config["hard_stop_percentage"])
                     if signal.stop_loss is None or signal.stop_loss < cap_price:
                         signal.stop_loss = round(cap_price, 4)
                 elif signal.action == "SELL":
-                    cap_price = signal.price * (1 + config["max_loss_pct"])
+                    cap_price = signal.price * (1 + config["hard_stop_percentage"])
                     if signal.stop_loss is None or signal.stop_loss > cap_price:
                         signal.stop_loss = round(cap_price, 4)
 
@@ -996,7 +1017,7 @@ class Backtester:
         min_atr_stop_multiple: float | None = None,
         synthetic_stop_multiple: float = 1.0,
         atr_stop_floor_multiple: float | None = None,
-        max_loss_pct: float | None = None,
+        hard_stop_percentage: float | None = 0.03,
         min_reward_risk_ratio: float | None = None,
         pattern_filter: str | None = None,
         disabled_patterns: list[str] | None = None,
@@ -1039,11 +1060,11 @@ class Backtester:
         # being ordinary daily noise rather than a real thesis failure.
         self._atr_stop_floor_multiple = atr_stop_floor_multiple
         # Hard loss cap from entry (e.g. 0.05 = -5% absolute stop). When set
-        # the engine guarantees a stop_loss no worse than -max_loss_pct of
+        # the engine guarantees a stop_loss no worse than -hard_stop_percentage of
         # entry price, applied ONLY when the pattern itself supplies no
         # tighter stop. Acts as catastrophic-tail backstop without
         # interfering with the pattern's normal trailing/target logic.
-        self._max_loss_pct = max_loss_pct
+        self._hard_stop_percentage = hard_stop_percentage
         # Minimum reward-to-risk ratio required before a signal is accepted.
         # reward = |take_profit - entry|, risk = |entry - stop_loss|. Signals
         # whose R:R falls below this are skipped — this is an engine-level
@@ -1061,6 +1082,8 @@ class Backtester:
             # disabled_patterns only applies to the default multi-pattern run —
             # an explicit pattern_filter (testing one pattern in isolation)
             # always wins, even if that pattern is disabled by default.
+            if instance.skipped:
+                continue
             if self._pattern_filter is None and instance.name in self._disabled_patterns:
                 continue
             # Apply pattern filter: match by case-insensitive substring
@@ -1137,17 +1160,19 @@ class Backtester:
             "min_atr_stop_multiple": self._min_atr_stop_multiple,
             "synthetic_stop_multiple": self._synthetic_stop_multiple,
             "atr_stop_floor_multiple": self._atr_stop_floor_multiple,
-            "max_loss_pct": self._max_loss_pct,
+            "hard_stop_percentage": self._hard_stop_percentage,
             "min_reward_risk_ratio": self._min_reward_risk_ratio,
         }
 
         max_workers = max(1, self._max_workers)
         pbar = tqdm(total=len(tasks), desc="Backtesting", unit="sym", ncols=80)
 
+        pool_started = False
         try:
             ctx = mp.get_context("spawn")
             pool = ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx)
             with pool:
+                pool_started = True
                 futures = [
                     loop.run_in_executor(
                         pool, _worker_symbol_backtest,
@@ -1161,7 +1186,19 @@ class Backtester:
 
                 completed = 0
                 for coro in asyncio.as_completed(futures):
-                    trades, signals = await coro
+                    # A single symbol/pattern raising here must not throw away
+                    # every already-completed result and fall back to a fully
+                    # serial re-run of the whole task list — log and skip it.
+                    try:
+                        trades, signals = await coro
+                    except Exception:
+                        log.warning(
+                            "Backtester | worker task failed, skipping",
+                            exc_info=True,
+                        )
+                        completed += 1
+                        pbar.update(1)
+                        continue
                     result.trades.extend(trades)
                     result.total_signals += signals
                     completed += 1
@@ -1169,8 +1206,10 @@ class Backtester:
                     if self._progress_callback is not None:
                         self._progress_callback(completed, total_tasks)
         except Exception:
+            if pool_started:
+                raise
             log.warning(
-                "Backtester | ProcessPoolExecutor failed, "
+                "Backtester | ProcessPoolExecutor failed to start, "
                 "falling back to thread pool"
             )
             sem = asyncio.Semaphore(max_workers)
@@ -1222,7 +1261,7 @@ class Backtester:
                 "min_atr_stop_multiple": self._min_atr_stop_multiple,
                 "synthetic_stop_multiple": self._synthetic_stop_multiple,
                 "atr_stop_floor_multiple": self._atr_stop_floor_multiple,
-                "max_loss_pct": self._max_loss_pct,
+                "hard_stop_percentage": self._hard_stop_percentage,
                 "min_reward_risk_ratio": self._min_reward_risk_ratio,
             },
             self._cooldown_tracker,

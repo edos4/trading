@@ -143,10 +143,10 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
         "spin", (1.2, 0.0, 5.0, 0.1), None,
     ),
     (
-        "max_loss_pct", "Max loss (%)",
+        "hard_stop_percentage", "Hard stop (%)",
         "Hard absolute-loss cap from entry, applied only when the pattern's own stop "
         "is looser (or unset). Catastrophic-tail backstop. 0 = disabled.",
-        "spin", (0.0, 0.0, 0.5, 0.005), None,
+        "spin", (0.03, 0.0, 0.5, 0.005), None,
     ),
     (
         "min_reward_risk_ratio", "Min reward:risk ratio",
@@ -339,7 +339,7 @@ class BacktestDialog:
         # Convert "disable" sentinels: spin values of 0 where None means disabled
         for opt_key in (
             "breakeven_trigger_pct", "min_atr_stop_multiple",
-            "min_reward_risk_ratio", "max_loss_pct", "atr_stop_floor_multiple",
+            "min_reward_risk_ratio", "hard_stop_percentage", "atr_stop_floor_multiple",
         ):
             if opt_key in p and p[opt_key] is not None and p[opt_key] <= 0:
                 p[opt_key] = None

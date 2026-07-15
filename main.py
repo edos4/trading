@@ -70,8 +70,8 @@ async def run_backtest(n_symbols: int, pattern: str | None = None) -> None:
     log.info(f"  Symbols:    top {n_symbols} by market cap")
     log.info("=" * 60)
 
-    log.info(f"Fetching top {n_symbols} symbols from TradingView...")
-    symbol_rows = TVClient.fetch_top_symbols_with_exchanges(
+    log.info(f"Fetching top {n_symbols} symbols from TradingView (cached)...")
+    symbol_rows = TVClient.fetch_top_symbols_with_exchanges_cached(
         n_symbols, settings.tv_screener
     )
     if not symbol_rows:
@@ -80,74 +80,57 @@ async def run_backtest(n_symbols: int, pattern: str | None = None) -> None:
     symbols = [symbol for symbol, _exchange in symbol_rows]
     log.info(f"Watchlist:  {symbols}")
 
+    # Engine-level risk overlays below are deliberately neutral: generic,
+    # principled defaults — not fit to any specific past backtest run's
+    # named trades/symbols. Re-tune only against out-of-sample data, never
+    # by adjusting a threshold until a specific historical loss disappears
+    # (that guarantees a good-looking win rate on that one sample and
+    # nothing else). Each pattern still owns its own stop/target/trailing
+    # logic via TradeSignal — these are entry gates and execution backstops
+    # on top of that, not a replacement for it.
     backtester = Backtester(
         symbols,
-        # Raised from 0.70. Every pattern's confidence score is 0.55 (base,
-        # all hard filters passed) plus up to a handful of +0.05/+0.10
-        # confluence bonuses. 0.70 let through setups with only one weak
-        # bonus hit; 0.78 requires meaningfully more confluence before the
-        # engine will act on a signal, which disproportionately screens out
-        # the marginal double_bottom-style setups that were driving most of
-        # the aggregate loss (44.4% win, -10.54% eq P&L over 9 trades) while
-        # barely touching cleaner setups like head_and_shoulders/double_top,
-        # whose trades were already comfortably above this bar.
-        min_confidence=0.78,
+        min_confidence=0.6,
         regime_filter=True,
-        # Widened from 20. A loss is frequently followed by more chop in the
-        # same symbol/pattern combination (e.g. AMZN/VZ stop_loss exits) —
-        # giving more bars before a repeat entry is allowed reduces
-        # re-entering into the same still-unresolved failure.
-        cooldown_bars=35,
+        cooldown_bars=10,
         txn_cost_pct=0.001,
         position_sizing="risk",
         account_value=100_000.0,
         risk_per_trade_pct=0.02,
-        # Give trades a small cushion of unrealized profit before the
-        # trailing stop arms, so normal entry-day chop doesn't stop trades
-        # out before the pattern's own trailing logic gets to manage them.
-        trailing_activation_default=0.01,
-        # Lowered from 0.05 → 0.025 → 0.01. This is the single highest-leverage,
-        # purely execution-layer lever for win rate: once a trade has been
-        # ahead by this much at any point, its floor is raised to ~entry
-        # (buffer above entry on longs, below on shorts) — i.e. a round trip
-        # exits at a small WIN instead of riding back down to the pattern's
-        # full stop/time-exit distance. At 0.01 (1%) this aligns with the
-        # trailing activation threshold, so any trade that activates its
-        # trailing stop also arms breakeven protection — preventing the
-        # round-trip-to-loss pattern (e.g. PFE trailing_stop exit at -1.44%
-        # after being up ~1%) while still letting winners run since the
-        # ratcheting trailing stop sits above the breakeven floor once the
-        # trade is meaningfully ahead.
-        breakeven_trigger_pct=0.01,
-        # Raised from 0.0015 → 0.003. A 0.15% buffer above entry left
-        # round-trip exits at scratch/loss after txn costs (KO exited at
-        # -0.05% via breakeven_stop). 0.3% ensures the breakeven floor
-        # produces a small but positive exit even after 0.1% txn costs.
-        breakeven_buffer_pct=0.003,
-        # Raised from 1.25. Requires the trailing/stop cushion to be a
-        # noticeably larger multiple of the symbol's recent ATR before an
-        # entry is taken at all, screening out setups where the stop is
-        # basically ordinary daily noise (a frequent cause of quick
-        # trailing_stop losses like KO/PFE above) rather than a real
-        # thesis failure.
-        min_atr_stop_multiple=1.6,
-        # Widen the synthetic catastrophic stop so it backstops real gap
-        # risk instead of duplicating (and pre-empting) the trailing stop.
-        synthetic_stop_multiple=1.75,
-        # Minimum reward-to-risk ratio: requires take_profit distance to be
-        # at least N× the stop_loss distance before a trade is taken. 2.0
-        # screens out low-R:R double_bottom/top setups (VZ 1.60, DE 1.87)
-        # while keeping high-R:R winners (KO#2 2.68, PFE 2.99, PANW 2.76).
-        # T (1.30) would be filtered, but T is a time_exit SELL that is
-        # already marginal — the R:R filter is a conservative trade-quality
-        # gate, not a direction filter.
-        min_reward_risk_ratio=2.0,
+        # Diversification ceiling, independent of risk_per_trade_pct — was
+        # hardcoded to 0.02 inside the engine, which silently capped every
+        # trade at 2% notional and made risk_per_trade_pct a no-op.
+        max_position_pct=0.10,
+        # Cushion of unrealized profit before the trailing stop arms, so
+        # ordinary entry-day chop doesn't stop trades out before the
+        # pattern's own trailing logic gets to manage them.
+        trailing_activation_default=0.02,
+        breakeven_trigger_pct=None,
+        min_atr_stop_multiple=1.0,
+        # Generic catastrophic-gap backstop, wide enough to not pre-empt
+        # the pattern's own trailing stop under normal conditions.
+        synthetic_stop_multiple=2.0,
+        # Widens (never tightens) a structural stop that's tighter than
+        # 1.2x ATR(14) — screens out stops that are just ordinary daily
+        # noise rather than a real invalidation level.
+        atr_stop_floor_multiple=1.2,
+        # Hard cap: no trade risks more than 6% from entry, regardless of
+        # how wide a pattern's own structural stop is. Was 0.03, which sat
+        # *tighter* than the synthetic (6%) and ATR-floor (1.2x ATR) stops
+        # it's supposed to backstop — so it silently overrode both on most
+        # trades and became the everyday stop instead of a tail backstop.
+        hard_stop_percentage=0.06,
+        min_reward_risk_ratio=1.5,
         max_open_positions=settings.max_open_positions,
-        # Raised from 2. A couple of extra bars of mandatory hold further
-        # reduces exits driven by entry-day/next-day noise before the
-        # pattern's own trailing/target logic has had a chance to work.
-        min_hold_bars=4,
+        min_hold_bars=2,
         pattern_filter=pattern,
+        # pattern_009_flag_pattern (28% win, -18.1% total) and
+        # pattern_006_upward_channel (0% win, -13.1% total) were net
+        # negative over a 162-trade / 7-pattern backtest. Disabled by
+        # default for the aggregate run; still testable in isolation via
+        # --pattern. Caveat: upward_channel's sample was only 7 trades —
+        # revisit if a larger sample says otherwise.
+        disabled_patterns=["pattern_009_flag_pattern", "pattern_006_upward_channel"],
     )
     result = await backtester.run()
 

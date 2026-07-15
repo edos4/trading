@@ -38,7 +38,9 @@ def discover_pattern_names() -> list[str]:
                 and issubclass(attr, BasePattern)
                 and attr is not BasePattern
             ):
-                names.append(attr().name)
+                instance = attr()
+                if not instance.skipped:
+                    names.append(instance.name)
     return sorted(names)
 
 
@@ -57,12 +59,12 @@ async def run_one(pattern_name: str, symbols: list[str]) -> tuple[str, int, int,
         position_sizing="risk",
         account_value=100_000.0,
         risk_per_trade_pct=0.02,
-        trailing_activation_default=0.003,
+        trailing_activation_default=0.02,
         breakeven_trigger_pct=0.01,
         breakeven_buffer_pct=0.001,
         min_atr_stop_multiple=1.0,
         synthetic_stop_multiple=0,
-        max_loss_pct=None,
+        hard_stop_percentage=0.06,
         max_open_positions=settings.max_open_positions,
         min_hold_bars=2,
         pattern_filter=pattern_name,

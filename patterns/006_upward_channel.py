@@ -152,7 +152,7 @@ class UpwardChannelPattern(BasePattern):
     FIXED_STOP_PCT          = 0.05        # C24: fixed entry × 1.05 stop leg
     GAIN_CAP_PCT            = 0.20        # C18 (increased from 7% to 20% to let winners run)
     TIME_STOP_BARS          = 15          # C19
-    TRAIL_ACTIVATION_PCT    = 0.04        # C20 (activation; not enforced by backtester)
+    TRAIL_ACTIVATION_PCT    = 0.04        # C20 (activation threshold, enforced via trailing_activation_pct)
     TRAILING_STOP_PCT       = 0.025       # C20
     FRESHNESS_MAX_BARS      = 20          # C22: SH2 → break bar must be ≤ 20 bars
     DONT_CHASE_MAX_DROP     = 0.15        # C23: ≤ 15% already dropped from SH2 high

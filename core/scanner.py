@@ -314,6 +314,8 @@ class MarketScanner:
                     and attr is not BasePattern
                 ):
                     instance = attr()
+                    if instance.skipped:
+                        continue
                     self._patterns.append(instance)
                     self._pattern_files[instance.name] = (
                         f"patterns/{module_info.name}.py"
