@@ -68,6 +68,10 @@ class MarketScanner:
         self._patterns: list[BasePattern] = []
         self._pattern_files: dict[str, str] = {}
         self._running = False
+        # Last bar timestamp seen per (symbol, timeframe) — a daily-timeframe
+        # pattern scanned hourly would otherwise re-detect the exact same
+        # unchanged bar every cycle and repeatedly open/close identical trades.
+        self._last_bar_ts: dict[tuple[str, str], datetime] = {}
         # Scan-cycle health counters — surfaced by the paper trading UI/CLI
         # so a stalled or misbehaving scan is visible without reading logs.
         self.stats: dict = {
@@ -169,6 +173,19 @@ class MarketScanner:
 
                         if self._paper is not None:
                             self._paper.on_bar(symbol, snapshot.candle)
+
+                        bar_key = (symbol, timeframe)
+                        bar_ts = snapshot.candle.timestamp
+                        is_new_bar = bar_ts is None or self._last_bar_ts.get(bar_key) != bar_ts
+                        if bar_ts is not None:
+                            self._last_bar_ts[bar_key] = bar_ts
+                        if not is_new_bar:
+                            # Same bar as last scan (e.g. a daily pattern
+                            # polled hourly, market closed/quiet) — re-running
+                            # pattern detection on unchanged data would just
+                            # re-fire the same signal and reopen/close the
+                            # same trade every cycle.
+                            continue
 
                         for pattern in self._patterns:
                             if timeframe not in pattern.timeframes:
