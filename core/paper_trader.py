@@ -26,6 +26,8 @@ from core.backtester import (
     _close_trade,
     _open_trade,
     _update_trailing_reference,
+    trade_r_multiple,
+    trade_risk_dollars,
 )
 from data.ohlcv_store import OHLCVStore
 from data.tv_client import OHLCVCandle
@@ -34,11 +36,12 @@ from utils.logger import log
 
 DEFAULT_ACCOUNT_PATH = Path("data/cache/paper_account.json")
 
+# Re-exported under paper-trading-friendly names — same math as the
+# backtester uses (a "current price" works whether the trade is still open
+# or already closed), so live and backtested reports stay comparable.
+r_multiple = trade_r_multiple
+risk_dollars = trade_risk_dollars
 
-# ── Position/trade math for dashboards & reports ──────────────────────────
-# Small pure functions, not methods on BacktestTrade, so the same position
-# object works whether it's still open (live current_price) or already
-# closed (use exit_price as current_price).
 
 def unrealized_pct(position: BacktestTrade, current_price: float) -> float:
     if position.entry_price <= 0:
@@ -48,30 +51,20 @@ def unrealized_pct(position: BacktestTrade, current_price: float) -> float:
     return (current_price - position.entry_price) / position.entry_price * 100
 
 
-def r_multiple(position: BacktestTrade, current_price: float) -> float | None:
-    """Current gain/loss expressed in multiples of the initial stop
-    distance ("R") — e.g. +2R means the trade is currently up 2x what it
-    was risking. None if there's no stop to measure risk against."""
-    if position.stop_loss is None or position.entry_price <= 0:
-        return None
-    risk = abs(position.entry_price - position.stop_loss)
-    if risk <= 0:
-        return None
-    move = current_price - position.entry_price
-    if position.action == "SELL":
-        move = -move
-    return move / risk
-
-
-def risk_dollars(position: BacktestTrade) -> float | None:
-    if position.stop_loss is None:
-        return None
-    return abs(position.entry_price - position.stop_loss) * position.qty
-
-
 def days_held(position: BacktestTrade, as_of: datetime | None = None) -> float:
     end = as_of or position.exit_date or datetime.now(timezone.utc)
     return (end - position.entry_date).total_seconds() / 86400
+
+
+def position_status(position: BacktestTrade) -> str:
+    """Coarse open-position state for a dashboard status column — the exit
+    mechanics (_check_exit) already decide what actually triggers; this
+    just reflects which protective level is currently armed."""
+    if position._breakeven_armed:
+        return "BREAKEVEN"
+    if position._trailing_activated:
+        return "TRAILING"
+    return "OPEN"
 
 
 def _trade_to_dict(t: BacktestTrade) -> dict:
@@ -123,6 +116,25 @@ class PaperAccount:
             for sym, p in self.positions.items()
         )
         return self.cash + open_value
+
+    def exposure(self) -> dict:
+        """Long/short notional exposure across open positions, as a % of
+        equity — e.g. six same-direction positions read as one large bet
+        even if they're diversified across symbols."""
+        equity = self.equity()
+        long_value = sum(
+            self._last_price.get(sym, p.entry_price) * p.qty
+            for sym, p in self.positions.items() if p.action == "BUY"
+        )
+        short_value = sum(
+            self._last_price.get(sym, p.entry_price) * p.qty
+            for sym, p in self.positions.items() if p.action == "SELL"
+        )
+        if equity <= 0:
+            return {"long_pct": 0.0, "short_pct": 0.0, "net_pct": 0.0}
+        long_pct = long_value / equity * 100
+        short_pct = short_value / equity * 100
+        return {"long_pct": long_pct, "short_pct": short_pct, "net_pct": long_pct - short_pct}
 
     def _reset_daily_if_needed(self, ts: datetime) -> None:
         key = ts.strftime("%Y-%m-%d")

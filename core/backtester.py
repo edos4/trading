@@ -66,6 +66,7 @@ class BacktestTrade:
     exit_reason: str = ""
     confidence: float = 0.0
     qty: float = 0.0
+    notes: str = ""
 
     # Engine-level (not pattern-level) breakeven protection. Once a trade has
     # been ahead by `breakeven_trigger_pct`, its protective floor is raised to
@@ -154,19 +155,7 @@ class BacktestResult:
 
     @property
     def max_drawdown_pct(self) -> float:
-        if not self.trades:
-            return 0.0
-        sorted_trades = sorted(self.trades, key=lambda t: t.entry_date)
-        capital = self.initial_capital
-        peaks: list[float] = [capital]
-        for t in sorted_trades:
-            if t.qty <= 0:
-                continue
-            capital += t.pnl * t.qty
-            peaks.append(capital)
-        peak_series = np.maximum.accumulate(peaks)
-        drawdowns = (np.array(peaks) - peak_series) / peak_series
-        return float(drawdowns.min() * 100)
+        return _drawdown_pct(self.trades, self.initial_capital)
 
     @property
     def sharpe_ratio(self) -> float:
@@ -214,18 +203,22 @@ class BacktestResult:
         return groups
 
     def pattern_breakdown(self) -> dict[str, dict]:
-        """Per-pattern stats (trades, win_rate, total/avg pnl%, profit_factor),
-        ranked best-to-worst by total P&L% — e.g. for a pattern leaderboard."""
+        """Per-pattern stats (trades, win_rate, total/avg pnl%, profit_factor,
+        avg R, avg hold time, max drawdown), ranked best-to-worst by total
+        P&L% — e.g. for a pattern leaderboard."""
         groups = self.by_pattern()
         ranked = sorted(
             groups.items(),
-            key=lambda kv: self._pattern_stats(kv[1])["total_pnl_pct"],
+            key=lambda kv: self._pattern_stats(kv[1], self.initial_capital)["total_pnl_pct"],
             reverse=True,
         )
-        return {pattern: self._pattern_stats(trades) for pattern, trades in ranked}
+        return {
+            pattern: self._pattern_stats(trades, self.initial_capital)
+            for pattern, trades in ranked
+        }
 
     @staticmethod
-    def _pattern_stats(trades: list[BacktestTrade]) -> dict:
+    def _pattern_stats(trades: list[BacktestTrade], initial_capital: float = 100_000.0) -> dict:
         wins = sum(1 for t in trades if t.pnl > 0)
         losses = sum(1 for t in trades if t.pnl < 0)
         total_pnl_pct = sum(t.pnl_pct for t in trades)
@@ -236,6 +229,13 @@ class BacktestResult:
             profit_factor = float("inf") if gross_profit > 0 else 0.0
         else:
             profit_factor = gross_profit / gross_loss
+        r_values = [
+            r for t in trades
+            if (r := trade_r_multiple(t, t.exit_price)) is not None
+        ]
+        hold_days = [
+            (t.exit_date - t.entry_date).total_seconds() / 86400 for t in trades
+        ]
         return {
             "trades": n,
             "wins": wins,
@@ -244,6 +244,9 @@ class BacktestResult:
             "total_pnl_pct": round(total_pnl_pct, 4),
             "avg_pnl_pct": round(total_pnl_pct / n, 4) if n else 0.0,
             "profit_factor": round(profit_factor, 2) if profit_factor != float("inf") else None,
+            "avg_r": round(sum(r_values) / len(r_values), 2) if r_values else None,
+            "avg_hold_days": round(sum(hold_days) / len(hold_days), 2) if hold_days else 0.0,
+            "max_drawdown_pct": round(_drawdown_pct(trades, initial_capital), 2),
         }
 
     def summary(self) -> str:
@@ -278,12 +281,15 @@ class BacktestResult:
             lines.append("-" * 60)
             for pattern, s in breakdown.items():
                 pf = f"{s['profit_factor']:.2f}" if s["profit_factor"] is not None else "inf"
+                avg_r = f"{s['avg_r']:+.2f}" if s["avg_r"] is not None else "-"
                 lines.append(
                     f"  {pattern:35s} n={s['trades']:<4d} "
                     f"win={s['win_rate']:.0%} "
                     f"pnl={s['total_pnl_pct']:+.2f}% "
                     f"avg={s['avg_pnl_pct']:+.2f}% "
-                    f"pf={pf}"
+                    f"pf={pf} avgR={avg_r} "
+                    f"hold={s['avg_hold_days']:.1f}d "
+                    f"maxDD={s['max_drawdown_pct']:+.2f}%"
                 )
             lines.append("=" * 60)
         return "\n".join(lines)
@@ -323,6 +329,7 @@ class BacktestResult:
                     "take_profit": round(t.take_profit, 4) if t.take_profit else None,
                     "confidence": round(t.confidence, 4),
                     "qty": round(t.qty, 4),
+                    "notes": t.notes,
                 }
                 for t in self.trades
             ],
@@ -339,6 +346,47 @@ class BacktestResult:
             )
         p.write_text("\n".join(lines) + "\n", encoding="utf-8")
         log.info(f"Backtest | Results saved to {p}")
+
+
+# ── Trade math shared by reporting (backtest + paper trading) ────────────────
+# Pure functions, not BacktestTrade methods, so they work identically on an
+# open position (pass the current price) or a closed trade (pass exit_price).
+
+def trade_r_multiple(trade: BacktestTrade, price: float) -> float | None:
+    """Gain/loss expressed in multiples of the initial stop distance ("R") —
+    e.g. +2R means the trade is up 2x what it was risking. None if the trade
+    has no stop_loss to measure risk against."""
+    if trade.stop_loss is None or trade.entry_price <= 0:
+        return None
+    risk = abs(trade.entry_price - trade.stop_loss)
+    if risk <= 0:
+        return None
+    move = price - trade.entry_price
+    if trade.action == "SELL":
+        move = -move
+    return move / risk
+
+
+def trade_risk_dollars(trade: BacktestTrade) -> float | None:
+    if trade.stop_loss is None:
+        return None
+    return abs(trade.entry_price - trade.stop_loss) * trade.qty
+
+
+def _drawdown_pct(trades: list[BacktestTrade], initial_capital: float) -> float:
+    if not trades:
+        return 0.0
+    sorted_trades = sorted(trades, key=lambda t: t.entry_date)
+    capital = initial_capital
+    peaks: list[float] = [capital]
+    for t in sorted_trades:
+        if t.qty <= 0:
+            continue
+        capital += t.pnl * t.qty
+        peaks.append(capital)
+    peak_series = np.maximum.accumulate(peaks)
+    drawdowns = (np.array(peaks) - peak_series) / peak_series
+    return float(drawdowns.min() * 100)
 
 
 # ── Module-level backtest helpers ─────────────────────────────────────────────
@@ -561,6 +609,7 @@ def _open_trade(
         entry_bar_idx=bar_idx,
         confidence=signal.confidence,
         qty=signal.qty,
+        notes=signal.notes,
         lowest_close_since_entry=(
             candle.close if signal.trailing_stop_mode == "lowest_close" else None
         ),
@@ -1555,6 +1604,7 @@ class Backtester:
             entry_bar_idx=bar_idx,
             confidence=signal.confidence,
             qty=signal.qty,
+            notes=signal.notes,
             lowest_close_since_entry=(
                 candle.close if signal.trailing_stop_mode == "lowest_close" else None
             ),
