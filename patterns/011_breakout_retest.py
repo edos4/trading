@@ -65,7 +65,6 @@ class _BreakoutRetestSetup:
     retest_depth_pct: float     # how close the retest low got to resistance
     breakout_thrust_pct: float  # how far the breakout close cleared resistance
     confirm_body_pct: float     # confirmation candle's body size
-    skipped: true
 
 
 class BreakoutRetestPattern(BasePattern):

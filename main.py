@@ -6,6 +6,8 @@ Usage:
     python main.py --backtest                       # Backtest all patterns (100 symbols)
     python main.py --backtest 10                    # Backtest all patterns (10 symbols)
     python main.py --backtest --pattern double_top  # Test one pattern only
+    python main.py --paper                          # Paper trade top 100 symbols (simulated fills)
+    python main.py --paper --paper-reset            # ...starting from a fresh virtual account
     python main.py --ui                             # Launch the symbol explorer GUI
     python scripts/compare_patterns.py              # Cross-pattern comparison (parallel)
     python scripts/compare_patterns.py -p 4         # Limit to 4 concurrent backtests
@@ -27,6 +29,7 @@ from pathlib import Path
 from config import settings
 from core.scanner import MarketScanner
 from core.backtester import Backtester
+from core.paper_trader import PaperAccount, DEFAULT_ACCOUNT_PATH, days_held, r_multiple, unrealized_pct
 from data.tv_client import TVClient
 from utils.logger import log
 
@@ -59,6 +62,78 @@ async def run_scanner(n_symbols: int = 100) -> None:
 
     scanner = MarketScanner(symbols=symbols, exchange_overrides=exchange_overrides)
     await scanner.run()
+
+
+async def run_paper(n_symbols: int = 100, reset: bool = False) -> None:
+    os.makedirs("logs", exist_ok=True)
+    os.makedirs("charts", exist_ok=True)
+
+    if reset and DEFAULT_ACCOUNT_PATH.exists():
+        DEFAULT_ACCOUNT_PATH.unlink()
+        log.info("Paper | account reset")
+
+    account = PaperAccount.load()
+
+    log.info("=" * 60)
+    log.info("  Trading Bot — PAPER TRADING MODE (simulated fills, no broker)")
+    log.info(f"  Starting equity: ${account.equity():,.2f}")
+    log.info(f"  Scan every: {settings.scan_interval_seconds}s")
+    log.info("=" * 60)
+
+    log.info(f"Fetching top {n_symbols} symbols from TradingView...")
+    symbol_rows = TVClient.fetch_top_symbols_with_exchanges(
+        n_symbols, settings.tv_screener
+    )
+    if not symbol_rows:
+        log.error("Failed to fetch symbols from TradingView — aborting")
+        return
+    symbols = [symbol for symbol, _exchange in symbol_rows]
+    exchange_overrides = dict(symbol_rows)
+    log.info(f"Watchlist:  {symbols}")
+
+    scanner = MarketScanner(
+        symbols=symbols, exchange_overrides=exchange_overrides, paper_account=account,
+    )
+    try:
+        await scanner.run()
+    finally:
+        account.save()
+        print()
+        print(account.to_result().summary())
+        print(f"  Open positions:    {len(account.positions)}")
+        print(f"  Equity:            ${account.equity():,.2f}")
+        print()
+
+        if account.positions:
+            print("  OPEN POSITIONS")
+            print("-" * 85)
+            for sym, p in account.positions.items():
+                current = account.last_price(sym, p.entry_price)
+                r = r_multiple(p, current)
+                r_str = f"{r:+.2f}" if r is not None else "-"
+                print(
+                    f"  {p.entry_date.strftime('%Y-%m-%d %H:%M:%S')}  "
+                    f"{p.action:5s} {sym:8s} entry={p.entry_price:.2f} current={current:.2f} "
+                    f"unrl={unrealized_pct(p, current):+.2f}% R={r_str} "
+                    f"days={days_held(p):.1f}  {p.pattern}"
+                )
+            print()
+
+        if account.closed:
+            print("  CLOSED TRADES")
+            print("-" * 85)
+            for t in sorted(account.closed, key=lambda t: t.exit_date):
+                r = r_multiple(t, t.exit_price)
+                r_str = f"{r:+.2f}" if r is not None else "-"
+                print(
+                    f"  opened={t.entry_date.strftime('%Y-%m-%d %H:%M:%S')}  "
+                    f"closed={t.exit_date.strftime('%Y-%m-%d %H:%M:%S')}  "
+                    f"held={days_held(t):.1f}d  "
+                    f"{t.action:5s} {t.symbol:8s} R={r_str}  "
+                    f"entry={t.entry_price:.2f} exit={t.exit_price:.2f} "
+                    f"pnl={t.pnl_pct:+.2f}%  reason={t.exit_reason}  {t.pattern}"
+                )
+            print()
 
 
 async def run_backtest(n_symbols: int, pattern: str | None = None) -> None:
@@ -188,6 +263,21 @@ async def main() -> None:
         action="store_true",
         help="Launch the tkinter symbol explorer GUI instead of scanning.",
     )
+    parser.add_argument(
+        "--paper",
+        nargs="?",
+        const=100,
+        type=int,
+        default=None,
+        metavar="N",
+        help="Run paper trading on top N symbols (default: 100) — live scan, "
+        "simulated fills, no real broker.",
+    )
+    parser.add_argument(
+        "--paper-reset",
+        action="store_true",
+        help="Wipe the saved paper-trading account and start fresh (use with --paper).",
+    )
     args = parser.parse_args()
 
     if args.ui:
@@ -197,7 +287,9 @@ async def main() -> None:
         run_ui()
         return
 
-    if args.backtest is not None:
+    if args.paper is not None:
+        await run_paper(n_symbols=args.paper, reset=args.paper_reset)
+    elif args.backtest is not None:
         await run_backtest(n_symbols=args.backtest, pattern=args.pattern)
     else:
         await run_scanner()

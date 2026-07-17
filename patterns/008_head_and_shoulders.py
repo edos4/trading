@@ -1,5 +1,5 @@
 """
-patterns/pattern_007_head_and_shoulders.py — Head & Shoulders top (short setup).
+patterns/pattern_008_head_and_shoulders.py — Head & Shoulders top (short setup).
 
 Locked rules (2026-06-29), 17 conditions:
 
@@ -79,7 +79,7 @@ class HeadAndShouldersPattern(BasePattern):
     # ── Identity ───────────────────────────────────────────────────────────────
     @property
     def name(self) -> str:
-        return "pattern_007_head_and_shoulders"
+        return "pattern_008_head_and_shoulders"
 
     @property
     def timeframes(self) -> list[str]:

@@ -115,6 +115,7 @@ class TradingBotUI:
 
         ttk.Button(toolbar, text="Refresh symbols", command=self._load_symbols_threaded).pack(side=tk.LEFT)
         ttk.Button(toolbar, text="Backtest", command=self._open_backtest_dialog).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(toolbar, text="Paper Trading", command=self._open_paper_dashboard).pack(side=tk.LEFT, padx=(6, 0))
         ttk.Label(toolbar, text="Count:").pack(side=tk.LEFT, padx=(12, 2))
         self.count_var = tk.IntVar(value=DEFAULT_SYMBOL_COUNT)
         ttk.Spinbox(
@@ -358,6 +359,10 @@ class TradingBotUI:
     # Downloads / saves
     def _open_backtest_dialog(self) -> None:
         BacktestDialog(self.root)
+
+    def _open_paper_dashboard(self) -> None:
+        from ui.paper_dashboard import PaperDashboard
+        PaperDashboard(self.root)
 
     def _download_csv(self) -> None:
         if self._current_df is None or self._current_symbol is None:

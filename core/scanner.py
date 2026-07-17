@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import pkgutil
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,6 +32,7 @@ from data.tv_client import TVClient, MarketSnapshot
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
 from analysis.chart_renderer import ChartRenderer
 from analysis.vision_checker import VisionChecker, VisionVerdict
+from core.paper_trader import PaperAccount
 
 # TODO: re-enable IBKR when TWS/Gateway is available
 # from broker.ibkr_client import IBKRClient
@@ -48,6 +50,7 @@ class MarketScanner:
         self,
         symbols: list[str] | None = None,
         exchange_overrides: dict[str, str] | None = None,
+        paper_account: PaperAccount | None = None,
     ):
         self._symbols = symbols or settings.symbols
         self._tv = TVClient(
@@ -61,9 +64,19 @@ class MarketScanner:
         # self._client   = IBKRClient()
         # self._orders   = OrderManager(self._client)
         # self._risk     = RiskGuard(self._client)
+        self._paper = paper_account
         self._patterns: list[BasePattern] = []
         self._pattern_files: dict[str, str] = {}
         self._running = False
+        # Scan-cycle health counters — surfaced by the paper trading UI/CLI
+        # so a stalled or misbehaving scan is visible without reading logs.
+        self.stats: dict = {
+            "last_scan_at": None,
+            "scan_duration_s": 0.0,
+            "patterns_found": 0,
+            "signals_rejected": 0,
+            "trades_opened": 0,
+        }
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
     def start(self) -> None:
@@ -92,7 +105,11 @@ class MarketScanner:
         self.start()
         try:
             while self._running:
+                if self._paper is not None:
+                    self._paper.tick()
                 await self._scan_all()
+                if self._paper is not None:
+                    self._paper.save()
                 await asyncio.sleep(settings.scan_interval_seconds)
         finally:
             self.stop()
@@ -104,6 +121,11 @@ class MarketScanner:
         Symbols are processed concurrently with a progress bar. Each worker
         opens its own MCP session so there is no contention on the stdio pipe.
         """
+        scan_start = time.monotonic()
+        self.stats["patterns_found"] = 0
+        self.stats["signals_rejected"] = 0
+        self.stats["trades_opened"] = 0
+
         all_timeframes: set[str] = set()
         for p in self._patterns:
             all_timeframes.update(p.timeframes)
@@ -145,14 +167,18 @@ class MarketScanner:
                         if snapshot is None:
                             continue
 
+                        if self._paper is not None:
+                            self._paper.on_bar(symbol, snapshot.candle)
+
                         for pattern in self._patterns:
                             if timeframe not in pattern.timeframes:
                                 continue
                             signal = pattern.analyze(snapshot, self._store)
                             if signal:
+                                self.stats["patterns_found"] += 1
                                 self._record_detection(signal)
                                 latest_signals[(symbol, timeframe)] = signal
-                                await self._process_signal(signal, pattern)
+                                await self._process_signal(signal, pattern, snapshot.candle)
 
                     pbar.update(1)
 
@@ -161,10 +187,14 @@ class MarketScanner:
         pbar.close()
 
         self._save_scan_charts(all_timeframes, latest_signals)
+        self.stats["last_scan_at"] = datetime.now(timezone.utc).isoformat()
+        self.stats["scan_duration_s"] = round(time.monotonic() - scan_start, 2)
         log.info("Scan complete")
 
     # ── Signal pipeline ────────────────────────────────────────────────────────
-    async def _process_signal(self, signal: TradeSignal, pattern: BasePattern) -> None:
+    async def _process_signal(
+        self, signal: TradeSignal, pattern: BasePattern, candle=None,
+    ) -> None:
         log.info(
             f"Signal | {signal.symbol} {signal.timeframe} | "
             f"{signal.action} | pattern={signal.pattern} | "
@@ -182,12 +212,14 @@ class MarketScanner:
                     f"Signal REJECTED by vision check "
                     f"({verdict}) — {signal.symbol} {signal.pattern}"
                 )
+                self.stats["signals_rejected"] += 1
                 return
         elif signal.confidence < settings.vision_min_indicator_confidence:
             log.info(
                 f"Signal confidence {signal.confidence:.2f} below threshold "
                 f"{settings.vision_min_indicator_confidence} — skipping vision, skipping trade"
             )
+            self.stats["signals_rejected"] += 1
             return
 
         # Step 2 — Risk guard (disabled while IBKR is commented out)
@@ -202,10 +234,17 @@ class MarketScanner:
         #     return    # risk_guard already logged the block reason
 
         # Step 3 — Place the order (disabled while IBKR is commented out)
-        log.info(
-            f"Signal APPROVED (IBKR disabled) — would {signal.action} "
-            f"{signal.qty} {signal.symbol} @ ~{signal.price:.2f}"
-        )
+        if self._paper is not None and candle is not None:
+            opened = self._paper.open_position(signal, candle, self._store)
+            if opened:
+                self.stats["trades_opened"] += 1
+            else:
+                self.stats["signals_rejected"] += 1
+        else:
+            log.info(
+                f"Signal APPROVED (IBKR disabled) — would {signal.action} "
+                f"{signal.qty} {signal.symbol} @ ~{signal.price:.2f}"
+            )
         # if signal.action == "BUY":
         #     self._orders.place_market_order(
         #         signal.symbol, "BUY", signal.qty, signal.pattern

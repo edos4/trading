@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     max_daily_loss_usd: float = 1500.0
     max_open_positions: int = 8
 
+    # ── Paper trading ─────────────────────────────────────────────────────
+    paper_initial_capital: float = 100_000.0
+    paper_slippage_pct: float = 0.0005
+
     # ── Scanner ────────────────────────────────────────────────────────────
     watchlist: str
     tv_screener: str

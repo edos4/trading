@@ -116,6 +116,43 @@ class BacktestResult:
         return self.total_pnl_pct / len(self.trades) if self.trades else 0.0
 
     @property
+    def avg_win_pct(self) -> float:
+        wins = [t.pnl_pct for t in self.trades if t.pnl > 0]
+        return sum(wins) / len(wins) if wins else 0.0
+
+    @property
+    def avg_loss_pct(self) -> float:
+        losses = [t.pnl_pct for t in self.trades if t.pnl < 0]
+        return sum(losses) / len(losses) if losses else 0.0
+
+    @property
+    def largest_win_pct(self) -> float:
+        wins = [t.pnl_pct for t in self.trades if t.pnl > 0]
+        return max(wins) if wins else 0.0
+
+    @property
+    def largest_loss_pct(self) -> float:
+        losses = [t.pnl_pct for t in self.trades if t.pnl < 0]
+        return min(losses) if losses else 0.0
+
+    @property
+    def profit_factor(self) -> float:
+        gross_profit = sum(t.pnl for t in self.trades if t.pnl > 0)
+        gross_loss = -sum(t.pnl for t in self.trades if t.pnl < 0)
+        if gross_loss < 1e-10:
+            return float("inf") if gross_profit > 0 else 0.0
+        return gross_profit / gross_loss
+
+    @property
+    def expectancy_pct(self) -> float:
+        """Average P&L% per trade, weighted by win rate — the number that
+        answers "is this strategy worth trading" better than win rate alone
+        (a 30%-win-rate strategy can still be very profitable)."""
+        if not self.trades:
+            return 0.0
+        return self.win_rate * self.avg_win_pct + (1 - self.win_rate) * self.avg_loss_pct
+
+    @property
     def max_drawdown_pct(self) -> float:
         if not self.trades:
             return 0.0
@@ -176,12 +213,29 @@ class BacktestResult:
             groups[t.pattern].append(t)
         return groups
 
+    def pattern_breakdown(self) -> dict[str, dict]:
+        """Per-pattern stats (trades, win_rate, total/avg pnl%, profit_factor),
+        ranked best-to-worst by total P&L% — e.g. for a pattern leaderboard."""
+        groups = self.by_pattern()
+        ranked = sorted(
+            groups.items(),
+            key=lambda kv: self._pattern_stats(kv[1])["total_pnl_pct"],
+            reverse=True,
+        )
+        return {pattern: self._pattern_stats(trades) for pattern, trades in ranked}
+
     @staticmethod
     def _pattern_stats(trades: list[BacktestTrade]) -> dict:
         wins = sum(1 for t in trades if t.pnl > 0)
         losses = sum(1 for t in trades if t.pnl < 0)
         total_pnl_pct = sum(t.pnl_pct for t in trades)
         n = len(trades)
+        gross_profit = sum(t.pnl for t in trades if t.pnl > 0)
+        gross_loss = -sum(t.pnl for t in trades if t.pnl < 0)
+        if gross_loss < 1e-10:
+            profit_factor = float("inf") if gross_profit > 0 else 0.0
+        else:
+            profit_factor = gross_profit / gross_loss
         return {
             "trades": n,
             "wins": wins,
@@ -189,6 +243,7 @@ class BacktestResult:
             "win_rate": round(wins / n, 4) if n else 0.0,
             "total_pnl_pct": round(total_pnl_pct, 4),
             "avg_pnl_pct": round(total_pnl_pct / n, 4) if n else 0.0,
+            "profit_factor": round(profit_factor, 2) if profit_factor != float("inf") else None,
         }
 
     def summary(self) -> str:
@@ -207,26 +262,28 @@ class BacktestResult:
             f"  Account-weighted P&L: {aw_pnl:+.2f}%",
             f"  Final capital:      ${self.final_capital:,.2f}",
             f"  Avg P&L/trade:     {self.avg_pnl_pct:+.2f}%",
+            f"  Avg winner:        {self.avg_win_pct:+.2f}%",
+            f"  Avg loser:         {self.avg_loss_pct:+.2f}%",
+            f"  Largest win:       {self.largest_win_pct:+.2f}%",
+            f"  Largest loss:      {self.largest_loss_pct:+.2f}%",
+            f"  Profit factor:     {self.profit_factor:.2f}" if self.profit_factor != float("inf") else "  Profit factor:     inf (no losers)",
+            f"  Expectancy/trade:  {self.expectancy_pct:+.2f}%",
             f"  Max drawdown:      {self.max_drawdown_pct:+.2f}%",
             f"  Sharpe ratio:      {self.sharpe_ratio:.2f}",
             "=" * 60,
         ]
-        groups = self.by_pattern()
-        if len(groups) > 1:
+        breakdown = self.pattern_breakdown()
+        if len(breakdown) > 1:
             lines.append("  BY PATTERN")
             lines.append("-" * 60)
-            ranked = sorted(
-                groups.items(),
-                key=lambda kv: self._pattern_stats(kv[1])["total_pnl_pct"],
-                reverse=True,
-            )
-            for pattern, trades in ranked:
-                s = self._pattern_stats(trades)
+            for pattern, s in breakdown.items():
+                pf = f"{s['profit_factor']:.2f}" if s["profit_factor"] is not None else "inf"
                 lines.append(
                     f"  {pattern:35s} n={s['trades']:<4d} "
                     f"win={s['win_rate']:.0%} "
                     f"pnl={s['total_pnl_pct']:+.2f}% "
-                    f"avg={s['avg_pnl_pct']:+.2f}%"
+                    f"avg={s['avg_pnl_pct']:+.2f}% "
+                    f"pf={pf}"
                 )
             lines.append("=" * 60)
         return "\n".join(lines)
@@ -241,12 +298,15 @@ class BacktestResult:
             "equal_weighted_pnl_pct": round(self.total_pnl_pct, 4),
             "account_weighted_pnl_pct": round(self.account_weighted_pnl_pct, 4),
             "avg_pnl_pct": round(self.avg_pnl_pct, 4),
+            "avg_win_pct": round(self.avg_win_pct, 4),
+            "avg_loss_pct": round(self.avg_loss_pct, 4),
+            "largest_win_pct": round(self.largest_win_pct, 4),
+            "largest_loss_pct": round(self.largest_loss_pct, 4),
+            "profit_factor": round(self.profit_factor, 4) if self.profit_factor != float("inf") else None,
+            "expectancy_pct": round(self.expectancy_pct, 4),
             "max_drawdown_pct": round(self.max_drawdown_pct, 4),
             "sharpe_ratio": round(self.sharpe_ratio, 4),
-            "by_pattern": {
-                pattern: self._pattern_stats(trades)
-                for pattern, trades in self.by_pattern().items()
-            },
+            "by_pattern": self.pattern_breakdown(),
             "trades": [
                 {
                     "symbol": t.symbol,
