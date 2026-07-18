@@ -143,7 +143,7 @@ class PaperDashboard:
             ("action", 55, "Action"), ("entry", 75, "Entry"), ("current", 75, "Current"),
             ("unrl_pct", 70, "Unrl %"), ("r", 50, "R"), ("days", 45, "Days"),
             ("stop", 110, "Stop"), ("target", 110, "Target"),
-            ("value", 85, "Value"), ("port_pct", 60, "Port %"), ("risk", 70, "Risk $"),
+            ("value", 85, "Value"), ("mtm", 85, "MTM $"), ("port_pct", 60, "Port %"), ("risk", 70, "Risk $"),
             ("pattern", 190, "Pattern"),
         ]
         self._pos_tree = _SortableTree(pos_frame, pos_cols, self._on_sort_positions, height=7)
@@ -390,12 +390,13 @@ class PaperDashboard:
             r = r_multiple(p, current)
             risk = risk_dollars(p)
             value = current * p.qty
+            mtm = value if p.action == "BUY" else -value
             port_pct = (value / equity * 100) if equity > 0 else 0.0
             stop_dist = (p.stop_loss - current) / current * 100 if p.stop_loss else None
             target_dist = (p.take_profit - current) / current * 100 if p.take_profit else None
             rows.append({
                 "sym": sym, "p": p, "current": current, "r": r, "risk": risk,
-                "value": value, "port_pct": port_pct,
+                "value": value, "mtm": mtm, "port_pct": port_pct,
                 "stop_dist": stop_dist, "target_dist": target_dist,
                 "unrl": unrealized_pct(p, current), "days": days_held(p, now),
             })
@@ -414,6 +415,7 @@ class PaperDashboard:
             "stop": lambda r: r["stop_dist"] if r["stop_dist"] is not None else float("inf"),
             "target": lambda r: r["target_dist"] if r["target_dist"] is not None else float("-inf"),
             "value": lambda r: r["value"],
+            "mtm": lambda r: r["mtm"],
             "port_pct": lambda r: r["port_pct"],
             "risk": lambda r: r["risk"] if r["risk"] is not None else 0.0,
             "pattern": lambda r: r["p"].pattern,
@@ -434,7 +436,7 @@ class PaperDashboard:
                     f"{p.entry_price:.2f}", f"{current:.2f}", f"{row['unrl']:+.2f}%",
                     f"{r:+.2f}" if r is not None else "-", f"{row['days']:.1f}",
                     stop_str, target_str,
-                    f"${row['value']:,.0f}", f"{row['port_pct']:.1f}%",
+                    f"${row['value']:,.0f}", f"{row['mtm']:+,.0f}", f"{row['port_pct']:.1f}%",
                     f"${row['risk']:,.0f}" if row["risk"] is not None else "-",
                     p.pattern,
                 ),
