@@ -390,7 +390,7 @@ class PaperDashboard:
             r = r_multiple(p, current)
             risk = risk_dollars(p)
             value = current * p.qty
-            mtm = value if p.action == "BUY" else -value
+            mtm = (current - p.entry_price) * p.qty if p.action == "BUY" else (p.entry_price - current) * p.qty
             port_pct = (value / equity * 100) if equity > 0 else 0.0
             stop_dist = (p.stop_loss - current) / current * 100 if p.stop_loss else None
             target_dist = (p.take_profit - current) / current * 100 if p.take_profit else None

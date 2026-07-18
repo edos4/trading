@@ -171,14 +171,15 @@ class MarketScanner:
                         if snapshot is None:
                             continue
 
-                        if self._paper is not None:
-                            self._paper.on_bar(symbol, snapshot.candle)
-
                         bar_key = (symbol, timeframe)
                         bar_ts = snapshot.candle.timestamp
                         is_new_bar = bar_ts is None or self._last_bar_ts.get(bar_key) != bar_ts
                         if bar_ts is not None:
                             self._last_bar_ts[bar_key] = bar_ts
+
+                        if self._paper is not None:
+                            self._paper.on_bar(symbol, snapshot.candle, timeframe, is_new_bar)
+
                         if not is_new_bar:
                             # Same bar as last scan (e.g. a daily pattern
                             # polled hourly, market closed/quiet) — re-running

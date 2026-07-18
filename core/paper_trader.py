@@ -103,6 +103,13 @@ class PaperAccount:
         self.equity_curve: list[tuple[str, float]] = []
         self._last_price: dict[str, float] = {}
         self._tick = 0
+        # Per-symbol count of *actual new bars* seen (as opposed to
+        # scan cycles) — scan_interval_seconds is typically much shorter
+        # than a daily pattern's bar (e.g. hourly scans of a daily
+        # timeframe), so counting scan cycles as "bars" would make
+        # min_hold_bars arm in hours instead of days. Bumped from
+        # MarketScanner via on_bar(..., is_new_bar=True).
+        self._bar_count: dict[str, int] = {}
         self._daily_key = ""
         self._daily_pnl = 0.0
 
@@ -192,7 +199,7 @@ class PaperAccount:
                 timestamp=candle.timestamp,
             )
 
-        position = _open_trade(signal, fill_candle, self._tick)
+        position = _open_trade(signal, fill_candle, self._bar_count.get(signal.symbol, 0))
         # _open_trade stamps entry_date from the OHLCV bar's timestamp, which
         # is just the trading day (correct for the backtester replaying
         # history). A live paper fill needs the real wall-clock moment it
@@ -214,15 +221,37 @@ class PaperAccount:
         return True
 
     # ── Per-bar update / exit check ──────────────────────────────────────
-    def on_bar(self, symbol: str, candle: OHLCVCandle) -> None:
+    def on_bar(
+        self,
+        symbol: str,
+        candle: OHLCVCandle,
+        timeframe: str | None = None,
+        is_new_bar: bool = True,
+    ) -> None:
         self._last_price[symbol] = candle.close
+        if is_new_bar:
+            self._bar_count[symbol] = self._bar_count.get(symbol, 0) + 1
         position = self.positions.get(symbol)
         if position is None:
+            return
+        # A symbol can be scanned on several timeframes per cycle (different
+        # patterns watching different intervals). Only the candle matching
+        # the position's own timeframe is valid for exit checks — e.g. a
+        # weekly candle's high/low would spuriously trip a stop set from a
+        # daily entry.
+        if timeframe is not None and timeframe != position.timeframe:
             return
         now = datetime.now(timezone.utc)
         self._reset_daily_if_needed(now)
 
-        exit_price, reason = _check_exit(candle, position, self._tick)
+        # Match the backtester's canonical min_hold_bars=2 (see main.py) so
+        # trailing/breakeven don't arm a bar earlier here than in backtests —
+        # otherwise "live" and backtested results for the same pattern diverge.
+        # bar_idx is counted per real new bar (see _bar_count), not per scan
+        # cycle, since scans typically run far more often than a new daily
+        # bar forms.
+        bar_idx = self._bar_count.get(symbol, 0)
+        exit_price, reason = _check_exit(candle, position, bar_idx, min_hold_bars=2)
         if exit_price is None:
             _update_trailing_reference(position, candle)
             return
@@ -230,10 +259,14 @@ class PaperAccount:
         _close_trade(position, exit_price, reason, candle, self.txn_cost_pct)
         position.exit_date = datetime.now(timezone.utc)  # real fill time, not bar date
         notional_out = exit_price * position.qty
+        # Commission cost mirrors _close_trade's pnl deduction (entry + exit
+        # legs) so cash/equity stay in lockstep with the reported trade pnl —
+        # otherwise cash silently overstates the account by the cost drag.
+        cost = (position.entry_price * self.txn_cost_pct + exit_price * self.txn_cost_pct) * position.qty
         if position.action == "BUY":
-            self.cash += notional_out
+            self.cash += notional_out - cost
         else:
-            self.cash -= notional_out  # buy back the short
+            self.cash -= notional_out + cost  # buy back the short, plus commission
 
         self._daily_pnl += position.pnl * position.qty
         del self.positions[symbol]
@@ -259,6 +292,7 @@ class PaperAccount:
             "initial_capital": self.initial_capital,
             "cash": self.cash,
             "tick": self._tick,
+            "bar_count": self._bar_count,
             "daily_key": self._daily_key,
             "daily_pnl": self._daily_pnl,
             "positions": {
@@ -283,6 +317,7 @@ class PaperAccount:
         acct.initial_capital = data.get("initial_capital", acct.initial_capital)
         acct.cash = data.get("cash", acct.initial_capital)
         acct._tick = data.get("tick", 0)
+        acct._bar_count = data.get("bar_count", {})
         acct._daily_key = data.get("daily_key", "")
         acct._daily_pnl = data.get("daily_pnl", 0.0)
         acct.positions = {
