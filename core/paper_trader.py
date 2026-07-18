@@ -112,7 +112,7 @@ class PaperAccount:
 
     def equity(self) -> float:
         open_value = sum(
-            self._last_price.get(sym, p.entry_price) * p.qty
+            self._last_price.get(sym, p.entry_price) * p.qty * (1 if p.action == "BUY" else -1)
             for sym, p in self.positions.items()
         )
         return self.cash + open_value
