@@ -385,7 +385,7 @@ class PaperDashboard:
         equity = self._account.equity()
 
         rows = []
-        for sym, p in self._account.positions.items():
+        for sym, p in self._account.positions_snapshot():
             current = self._account.last_price(sym, p.entry_price)
             r = r_multiple(p, current)
             risk = risk_dollars(p)
@@ -462,7 +462,7 @@ class PaperDashboard:
             "reason": lambda t: t.exit_reason,
             "pattern": lambda t: t.pattern,
         }.get(sort_col, lambda t: t.exit_date)
-        trades = sorted(self._account.closed, key=sort_key, reverse=desc)[:200]
+        trades = sorted(self._account.closed_snapshot(), key=sort_key, reverse=desc)[:200]
 
         for t in trades:
             r = r_multiple(t, t.exit_price)
@@ -525,7 +525,7 @@ class PaperDashboard:
         self._refresh_equity_chart()
 
     def _refresh_equity_chart(self) -> None:
-        curve = self._account.equity_curve
+        curve = self._account.equity_curve_snapshot()
         if len(curve) < 2:
             self._equity_chart_label.config(text="Not enough closed trades yet for an equity curve.", image="")
             return

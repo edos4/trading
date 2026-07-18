@@ -13,6 +13,7 @@ Persisted to a single JSON file so a session survives a restart.
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -112,36 +113,60 @@ class PaperAccount:
         self._bar_count: dict[str, int] = {}
         self._daily_key = ""
         self._daily_pnl = 0.0
+        # The scanner runs in a background thread with its own asyncio loop
+        # (see ui/paper_dashboard.py) while the UI polls this same account
+        # from the Tk main thread every second. Without a lock, the UI's
+        # `for sym, p in self.positions.items()` can crash with "dictionary
+        # changed size during iteration" the instant a scan opens/closes a
+        # trade mid-refresh. RLock (not Lock) because open_position() calls
+        # self.equity(), which also acquires it, on the same thread.
+        self._lock = threading.RLock()
 
     # ── Equity / accounting ─────────────────────────────────────────────
     def last_price(self, symbol: str, default: float) -> float:
         return self._last_price.get(symbol, default)
 
     def equity(self) -> float:
-        open_value = sum(
-            self._last_price.get(sym, p.entry_price) * p.qty * (1 if p.action == "BUY" else -1)
-            for sym, p in self.positions.items()
-        )
-        return self.cash + open_value
+        with self._lock:
+            open_value = sum(
+                self._last_price.get(sym, p.entry_price) * p.qty * (1 if p.action == "BUY" else -1)
+                for sym, p in self.positions.items()
+            )
+            return self.cash + open_value
 
     def exposure(self) -> dict:
         """Long/short notional exposure across open positions, as a % of
         equity — e.g. six same-direction positions read as one large bet
         even if they're diversified across symbols."""
-        equity = self.equity()
-        long_value = sum(
-            self._last_price.get(sym, p.entry_price) * p.qty
-            for sym, p in self.positions.items() if p.action == "BUY"
-        )
-        short_value = sum(
-            self._last_price.get(sym, p.entry_price) * p.qty
-            for sym, p in self.positions.items() if p.action == "SELL"
-        )
-        if equity <= 0:
-            return {"long_pct": 0.0, "short_pct": 0.0, "net_pct": 0.0}
-        long_pct = long_value / equity * 100
-        short_pct = short_value / equity * 100
-        return {"long_pct": long_pct, "short_pct": short_pct, "net_pct": long_pct - short_pct}
+        with self._lock:
+            equity = self.equity()
+            long_value = sum(
+                self._last_price.get(sym, p.entry_price) * p.qty
+                for sym, p in self.positions.items() if p.action == "BUY"
+            )
+            short_value = sum(
+                self._last_price.get(sym, p.entry_price) * p.qty
+                for sym, p in self.positions.items() if p.action == "SELL"
+            )
+            if equity <= 0:
+                return {"long_pct": 0.0, "short_pct": 0.0, "net_pct": 0.0}
+            long_pct = long_value / equity * 100
+            short_pct = short_value / equity * 100
+            return {"long_pct": long_pct, "short_pct": short_pct, "net_pct": long_pct - short_pct}
+
+    def positions_snapshot(self) -> list[tuple[str, BacktestTrade]]:
+        """Thread-safe copy for callers (the UI) that iterate positions from
+        a different thread than the one mutating them."""
+        with self._lock:
+            return list(self.positions.items())
+
+    def closed_snapshot(self) -> list[BacktestTrade]:
+        with self._lock:
+            return list(self.closed)
+
+    def equity_curve_snapshot(self) -> list[tuple[str, float]]:
+        with self._lock:
+            return list(self.equity_curve)
 
     def _reset_daily_if_needed(self, ts: datetime) -> None:
         key = ts.strftime("%Y-%m-%d")
@@ -164,6 +189,12 @@ class PaperAccount:
     ) -> bool:
         self._reset_daily_if_needed(datetime.now(timezone.utc))
 
+        with self._lock:
+            return self._open_position_locked(signal, candle, store)
+
+    def _open_position_locked(
+        self, signal: TradeSignal, candle: OHLCVCandle, store: OHLCVStore,
+    ) -> bool:
         if signal.symbol in self.positions:
             return False
         if len(self.positions) >= settings.max_open_positions:
@@ -228,6 +259,12 @@ class PaperAccount:
         timeframe: str | None = None,
         is_new_bar: bool = True,
     ) -> None:
+        with self._lock:
+            self._on_bar_locked(symbol, candle, timeframe, is_new_bar)
+
+    def _on_bar_locked(
+        self, symbol: str, candle: OHLCVCandle, timeframe: str | None, is_new_bar: bool,
+    ) -> None:
         self._last_price[symbol] = candle.close
         if is_new_bar:
             self._bar_count[symbol] = self._bar_count.get(symbol, 0) + 1
@@ -278,29 +315,31 @@ class PaperAccount:
 
     # ── Reporting ─────────────────────────────────────────────────────────
     def to_result(self) -> BacktestResult:
-        return BacktestResult(
-            trades=list(self.closed),
-            total_signals=len(self.closed) + len(self.positions),
-            initial_capital=self.initial_capital,
-        )
+        with self._lock:
+            return BacktestResult(
+                trades=list(self.closed),
+                total_signals=len(self.closed) + len(self.positions),
+                initial_capital=self.initial_capital,
+            )
 
     # ── Persistence ───────────────────────────────────────────────────────
     def save(self, path: str | Path = DEFAULT_ACCOUNT_PATH) -> None:
+        with self._lock:
+            payload = {
+                "initial_capital": self.initial_capital,
+                "cash": self.cash,
+                "tick": self._tick,
+                "bar_count": self._bar_count,
+                "daily_key": self._daily_key,
+                "daily_pnl": self._daily_pnl,
+                "positions": {
+                    sym: _trade_to_dict(t) for sym, t in self.positions.items()
+                },
+                "closed": [_trade_to_dict(t) for t in self.closed],
+                "equity_curve": list(self.equity_curve),
+            }
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "initial_capital": self.initial_capital,
-            "cash": self.cash,
-            "tick": self._tick,
-            "bar_count": self._bar_count,
-            "daily_key": self._daily_key,
-            "daily_pnl": self._daily_pnl,
-            "positions": {
-                sym: _trade_to_dict(t) for sym, t in self.positions.items()
-            },
-            "closed": [_trade_to_dict(t) for t in self.closed],
-            "equity_curve": self.equity_curve,
-        }
         p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     @classmethod
