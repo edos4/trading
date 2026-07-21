@@ -25,7 +25,7 @@ matplotlib.use("Agg", force=True)
 import matplotlib.pyplot as plt
 from PIL import Image, ImageTk
 
-from config import settings
+from config import settings, DISABLED_PATTERNS
 from core.backtester import BacktestTrade
 from core.paper_trader import (
     PaperAccount, days_held, position_status, r_multiple,
@@ -233,7 +233,12 @@ class PaperDashboard:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         self._loop = loop
-        scanner = MarketScanner(symbols=symbols, exchange_overrides=exchange_overrides, paper_account=self._account)
+        scanner = MarketScanner(
+            symbols=symbols,
+            exchange_overrides=exchange_overrides,
+            paper_account=self._account,
+            disabled_patterns=DISABLED_PATTERNS,
+        )
         self._scanner = scanner
         self._task = loop.create_task(scanner.run())
         self._top.after(0, lambda: self._status_var.set(f"Running — {len(symbols)} symbols, scanning every {settings.scan_interval_seconds}s"))

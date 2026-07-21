@@ -23,9 +23,8 @@ class Settings(BaseSettings):
     # Swing trading: fewer, larger, longer-held positions rather than many
     # small intraday ones — sizing and exposure limits reflect that.
     trading_mode: TradingMode = TradingMode.PAPER
-    max_position_size_usd: float = 3000.0
     max_daily_loss_usd: float = 1500.0
-    max_open_positions: int = 8
+    max_open_positions: int = 0  # <=0 means unlimited
 
     # ── Paper trading ─────────────────────────────────────────────────────
     paper_initial_capital: float = 100_000.0
@@ -46,6 +45,11 @@ class Settings(BaseSettings):
     # How many symbols to process concurrently during each scan cycle.
     # Each concurrent worker opens its own MCP session.
     scanner_concurrency: int = 10
+
+    # ── ML signal (pattern_012_ml_signal, trained via `main.py --learn`) ────
+    # Trade-defining params (horizon/target/stop) live in the trained model's
+    # meta.json, not here — this is only the inference-time confidence gate.
+    ml_confidence_threshold: float = 0.6
 
     # ── Vision ────────────────────────────────────────────────────────────
     anthropic_api_key: str = ""
@@ -87,3 +91,11 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# pattern_009_flag_pattern (28% win, -18.1% total) and
+# pattern_006_upward_channel (0% win, -13.1% total) were net negative over a
+# 162-trade / 7-pattern backtest. Disabled by default everywhere a scanner
+# runs unattended (backtest aggregate run, paper trading). Still testable in
+# isolation via --pattern. Caveat: upward_channel's sample was only 7 trades —
+# revisit if a larger sample says otherwise.
+DISABLED_PATTERNS: list[str] = ["pattern_009_flag_pattern", "pattern_006_upward_channel"]

@@ -26,7 +26,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from config import settings
+from config import settings, DISABLED_PATTERNS
 from core.scanner import MarketScanner
 from core.backtester import Backtester
 from core.paper_trader import PaperAccount, DEFAULT_ACCOUNT_PATH, days_held, r_multiple, unrealized_pct
@@ -60,7 +60,11 @@ async def run_scanner(n_symbols: int = 100) -> None:
     if settings.is_live:
         log.warning("S LIVE TRADING MODE — real capital is at risk")
 
-    scanner = MarketScanner(symbols=symbols, exchange_overrides=exchange_overrides)
+    scanner = MarketScanner(
+        symbols=symbols,
+        exchange_overrides=exchange_overrides,
+        disabled_patterns=DISABLED_PATTERNS,
+    )
     await scanner.run()
 
 
@@ -92,7 +96,10 @@ async def run_paper(n_symbols: int = 100, reset: bool = False) -> None:
     log.info(f"Watchlist:  {symbols}")
 
     scanner = MarketScanner(
-        symbols=symbols, exchange_overrides=exchange_overrides, paper_account=account,
+        symbols=symbols,
+        exchange_overrides=exchange_overrides,
+        paper_account=account,
+        disabled_patterns=DISABLED_PATTERNS,
     )
     try:
         await scanner.run()
@@ -199,13 +206,7 @@ async def run_backtest(n_symbols: int, pattern: str | None = None) -> None:
         max_open_positions=settings.max_open_positions,
         min_hold_bars=2,
         pattern_filter=pattern,
-        # pattern_009_flag_pattern (28% win, -18.1% total) and
-        # pattern_006_upward_channel (0% win, -13.1% total) were net
-        # negative over a 162-trade / 7-pattern backtest. Disabled by
-        # default for the aggregate run; still testable in isolation via
-        # --pattern. Caveat: upward_channel's sample was only 7 trades —
-        # revisit if a larger sample says otherwise.
-        disabled_patterns=["pattern_009_flag_pattern", "pattern_006_upward_channel"],
+        disabled_patterns=DISABLED_PATTERNS,
     )
     result = await backtester.run()
 
@@ -278,7 +279,37 @@ async def main() -> None:
         action="store_true",
         help="Wipe the saved paper-trading account and start fresh (use with --paper).",
     )
+    parser.add_argument(
+        "--learn",
+        action="store_true",
+        help="Ingest historical daily OHLCV CSVs (default /home/r00t/stocks_data) and "
+        "train the pattern_012_ml_signal model used by paper/live trading.",
+    )
+    parser.add_argument(
+        "--learn-data-dir",
+        type=str,
+        default=None,
+        metavar="DIR",
+        help="Override the CSV directory for --learn (default: /home/r00t/stocks_data).",
+    )
+    parser.add_argument(
+        "--learn-max-tickers",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Limit --learn to the first N ticker CSVs (smoke test before a full run).",
+    )
     args = parser.parse_args()
+
+    if args.learn:
+        from pathlib import Path as _Path
+        from learn.train import run_learn
+
+        kwargs = {"max_tickers": args.learn_max_tickers}
+        if args.learn_data_dir:
+            kwargs["data_dir"] = _Path(args.learn_data_dir)
+        run_learn(**kwargs)
+        return
 
     if args.ui:
         # tkinter mainloop is blocking and not async.

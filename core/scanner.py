@@ -51,8 +51,10 @@ class MarketScanner:
         symbols: list[str] | None = None,
         exchange_overrides: dict[str, str] | None = None,
         paper_account: PaperAccount | None = None,
+        disabled_patterns: list[str] | None = None,
     ):
         self._symbols = symbols or settings.symbols
+        self._disabled_patterns = set(disabled_patterns or [])
         self._tv = TVClient(
             settings.tv_screener,
             settings.tv_exchange,
@@ -109,11 +111,17 @@ class MarketScanner:
         self.start()
         try:
             while self._running:
-                if self._paper is not None:
-                    self._paper.tick()
-                await self._scan_all()
-                if self._paper is not None:
-                    self._paper.save()
+                try:
+                    if self._paper is not None:
+                        self._paper.tick()
+                    await self._scan_all()
+                    if self._paper is not None:
+                        self._paper.save()
+                except Exception:
+                    # A single bad scan cycle (MCP subprocess crash, broken
+                    # pipe, transient TradingView error) must not take down
+                    # a session meant to run unattended for days.
+                    log.exception("Scanner | scan cycle failed — retrying next interval")
                 await asyncio.sleep(settings.scan_interval_seconds)
         finally:
             self.stop()
@@ -219,11 +227,19 @@ class MarketScanner:
             f"confidence={signal.confidence:.2f}"
         )
 
-        # Step 1 — Vision confirmation (if enabled and confidence is sufficient)
-        if (
-            settings.vision_confirmation_enabled
-            and signal.confidence >= settings.vision_min_indicator_confidence
-        ):
+        # Step 1 — Vision confirmation, only when enabled. The pattern's own
+        # min_confidence already gated this signal before analyze() returned
+        # it — vision_min_indicator_confidence exists only to decide whether
+        # a signal is worth spending a vision check on, not as a second
+        # trade-approval gate when vision is off.
+        if settings.vision_confirmation_enabled:
+            if signal.confidence < settings.vision_min_indicator_confidence:
+                log.info(
+                    f"Signal confidence {signal.confidence:.2f} below threshold "
+                    f"{settings.vision_min_indicator_confidence} — skipping vision, skipping trade"
+                )
+                self.stats["signals_rejected"] += 1
+                return
             verdict = await self._run_vision_check(signal, pattern)
             if verdict != VisionVerdict.CONFIRM:
                 log.info(
@@ -232,13 +248,6 @@ class MarketScanner:
                 )
                 self.stats["signals_rejected"] += 1
                 return
-        elif signal.confidence < settings.vision_min_indicator_confidence:
-            log.info(
-                f"Signal confidence {signal.confidence:.2f} below threshold "
-                f"{settings.vision_min_indicator_confidence} — skipping vision, skipping trade"
-            )
-            self.stats["signals_rejected"] += 1
-            return
 
         # Step 2 — Risk guard (disabled while IBKR is commented out)
         # intent = TradeIntent(
@@ -371,7 +380,7 @@ class MarketScanner:
                     and attr is not BasePattern
                 ):
                     instance = attr()
-                    if instance.skipped:
+                    if instance.skipped or instance.name in self._disabled_patterns:
                         continue
                     self._patterns.append(instance)
                     self._pattern_files[instance.name] = (

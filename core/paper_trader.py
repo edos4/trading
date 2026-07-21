@@ -90,7 +90,7 @@ class PaperAccount:
     def __init__(
         self,
         initial_capital: float | None = None,
-        txn_cost_pct: float = 0.0005,
+        txn_cost_pct: float = 0.001,
         slippage_pct: float | None = None,
     ):
         self.initial_capital = initial_capital or settings.paper_initial_capital
@@ -197,7 +197,7 @@ class PaperAccount:
     ) -> bool:
         if signal.symbol in self.positions:
             return False
-        if len(self.positions) >= settings.max_open_positions:
+        if settings.max_open_positions > 0 and len(self.positions) >= settings.max_open_positions:
             log.info("Paper | max_open_positions reached — skipping signal")
             return False
         if self._daily_pnl <= -settings.max_daily_loss_usd:
@@ -212,9 +212,6 @@ class PaperAccount:
             entry_price=candle.close,
             max_position_pct=0.10,
         )
-        if candle.close > 0:
-            max_qty = int(settings.max_position_size_usd / candle.close)
-            signal.qty = max(1, min(int(signal.qty), max(1, max_qty)))
 
         fill_candle = candle
         slip = self.slippage_pct
@@ -292,6 +289,16 @@ class PaperAccount:
         if exit_price is None:
             _update_trailing_reference(position, candle)
             return
+
+        if self.slippage_pct:
+            # Exit is a sell (closing a BUY) or a buy-to-cover (closing a
+            # SELL) — same slippage direction logic as the entry fill, so
+            # exits aren't priced better than a real fill would be.
+            exit_price = (
+                exit_price * (1 - self.slippage_pct)
+                if position.action == "BUY"
+                else exit_price * (1 + self.slippage_pct)
+            )
 
         _close_trade(position, exit_price, reason, candle, self.txn_cost_pct)
         position.exit_date = datetime.now(timezone.utc)  # real fill time, not bar date
