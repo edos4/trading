@@ -19,7 +19,7 @@ from pathlib import Path
 from tkinter import ttk
 from typing import Any, Callable, Optional
 
-from config import settings
+from config import settings, DISABLED_PATTERNS
 from core.backtester import Backtester, BacktestResult, discover_pattern_names
 from data.tv_client import TVClient
 from utils.logger import log
@@ -53,7 +53,7 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
         "disabled_patterns", "Disabled patterns",
         "Comma-separated pattern names to exclude from the default multi-pattern run "
         "(ignored if Pattern filter above targets one of them explicitly).",
-        "entry", "pattern_009_flag_pattern,pattern_006_upward_channel", None,
+        "entry", ",".join(DISABLED_PATTERNS), None,
     ),
     (
         "min_confidence", "Min confidence",
@@ -96,14 +96,16 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
         "Diversification ceiling: largest fraction of account any single position may "
         "occupy, regardless of sizing mode. If tighter than what risk_per_trade_pct "
         "implies for a given stop, every trade gets capped to this and "
-        "risk_per_trade_pct stops mattering.",
-        "spin", (0.10, 0.01, 1.0, 0.01), None,
+        "risk_per_trade_pct stops mattering. 0.33 lets a 2% risk_per_trade_pct fully "
+        "bind against a ~6% stop (0.02/0.06); lower it to trade smaller/more diversified.",
+        "spin", (0.33, 0.01, 1.0, 0.01), None,
     ),
     (
         "trailing_activation_default", "Trailing activation (%)",
-        "Cushion of unrealized profit before trailing stop arms (0.01 = 1%). "
-        "Prevents entry-day chop from stopping trades early.",
-        "spin", (0.01, 0.0, 0.1, 0.001), None,
+        "Cushion of unrealized profit before trailing stop arms (0.02 = 2%). "
+        "Prevents entry-day chop from stopping trades early. Only applies to "
+        "patterns that don't set their own trailing_activation_pct.",
+        "spin", (0.02, 0.0, 0.1, 0.001), None,
     ),
     (
         "min_hold_bars", "Min hold (bars)",
@@ -145,8 +147,10 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
     (
         "hard_stop_percentage", "Hard stop (%)",
         "Hard absolute-loss cap from entry, applied only when the pattern's own stop "
-        "is looser (or unset). Catastrophic-tail backstop. 0 = disabled.",
-        "spin", (0.03, 0.0, 0.5, 0.005), None,
+        "is looser (or unset). Catastrophic-tail backstop — keep wider than the "
+        "synthetic/ATR-floor stops it backstops or it becomes the everyday stop "
+        "instead of a tail case. 0 = disabled.",
+        "spin", (0.06, 0.0, 0.5, 0.005), None,
     ),
     (
         "min_reward_risk_ratio", "Min reward:risk ratio",

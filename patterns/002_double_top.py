@@ -75,6 +75,7 @@ class DoubleTopPattern(BasePattern):
     ENTRY_BARS_AFTER_H2  = 7
     TAKE_PROFIT_BELOW_NK = 0.07      # cover 7% below neckline
     TRAILING_STOP_PCT    = 0.03      # 3% above lowest close since entry (acts as stop loss)
+    TRAILING_ACTIVATION_PCT = 0.04   # trail doesn't arm until 4% favorable move (was clipping winners at entry)
     EXIT_BARS_AFTER_NECK_BREAK = 5
     SWING_LOOKBACK       = 2
     MIN_BARS             = 120
@@ -147,6 +148,7 @@ class DoubleTopPattern(BasePattern):
                     ),
                     trailing_stop_pct=self.TRAILING_STOP_PCT,
                     trailing_stop_mode="lowest_close",
+                    trailing_activation_pct=self.TRAILING_ACTIVATION_PCT,
                     neckline=setup.neckline,
                     neckline_break_direction="below",
                     exit_bars_after_neckline_break=self.EXIT_BARS_AFTER_NECK_BREAK,

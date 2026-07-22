@@ -98,4 +98,23 @@ settings = Settings()
 # runs unattended (backtest aggregate run, paper trading). Still testable in
 # isolation via --pattern. Caveat: upward_channel's sample was only 7 trades —
 # revisit if a larger sample says otherwise.
-DISABLED_PATTERNS: list[str] = ["pattern_009_flag_pattern", "pattern_006_upward_channel"]
+#
+# pattern_007_descending_channel (n=6, pf=0.36) and pattern_008_head_and_shoulders
+# (n=4, pf=0.02) are too small a sample to trust either way but currently lose
+# money live. pattern_012_ml_signal (n=3, pf=7826) is the opposite problem —
+# too few trades for that PF to mean anything, not a real edge yet. All three
+# disabled until sample size grows; revisit via --pattern in isolation.
+#
+# pattern_011_breakout_retest: net negative over a statistically meaningful
+# 76-trade sample (pf=0.75, pnl=-5.69%) in the same backtest run. Its own
+# docstring calls it a "DRAFT ruleset ... NOT backtested" — that draft status
+# now has a real backtest verdict against it. Disabled until the entry/exit
+# rules are reworked and re-tested in isolation via --pattern.
+DISABLED_PATTERNS: list[str] = [
+    "pattern_009_flag_pattern",
+    "pattern_006_upward_channel",
+    "pattern_007_descending_channel",
+    "pattern_008_head_and_shoulders",
+    "pattern_012_ml_signal",
+    "pattern_011_breakout_retest",
+]

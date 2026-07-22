@@ -138,8 +138,10 @@ class BacktestResult:
 
     @property
     def profit_factor(self) -> float:
-        gross_profit = sum(t.pnl for t in self.trades if t.pnl > 0)
-        gross_loss = -sum(t.pnl for t in self.trades if t.pnl < 0)
+        # t.pnl is a per-share $ diff — weight by qty so this reflects actual
+        # position-sized dollar P&L, not raw share-price magnitude.
+        gross_profit = sum(t.pnl * t.qty for t in self.trades if t.pnl > 0)
+        gross_loss = -sum(t.pnl * t.qty for t in self.trades if t.pnl < 0)
         if gross_loss < 1e-10:
             return float("inf") if gross_profit > 0 else 0.0
         return gross_profit / gross_loss
@@ -223,8 +225,8 @@ class BacktestResult:
         losses = sum(1 for t in trades if t.pnl < 0)
         total_pnl_pct = sum(t.pnl_pct for t in trades)
         n = len(trades)
-        gross_profit = sum(t.pnl for t in trades if t.pnl > 0)
-        gross_loss = -sum(t.pnl for t in trades if t.pnl < 0)
+        gross_profit = sum(t.pnl * t.qty for t in trades if t.pnl > 0)
+        gross_loss = -sum(t.pnl * t.qty for t in trades if t.pnl < 0)
         if gross_loss < 1e-10:
             profit_factor = float("inf") if gross_profit > 0 else 0.0
         else:
@@ -261,8 +263,12 @@ class BacktestResult:
             f"  Wins:              {self.win_count}",
             f"  Losses:            {self.loss_count}",
             f"  Win rate:          {self.win_rate:.1%}",
-            f"  Equal-weighted P&L: {eq_pnl:+.2f}%",
-            f"  Account-weighted P&L: {aw_pnl:+.2f}%",
+            # eq_pnl sums each trade's independent % return as if it alone got
+            # 100% of capital — not a portfolio return, just a per-trade-edge
+            # diagnostic. aw_pnl (real position sizes, real $ P&L / capital) is
+            # the actual return this strategy would have produced.
+            f"  Equal-weighted P&L (sum of per-trade %, not a real return): {eq_pnl:+.2f}%",
+            f"  Account-weighted P&L (real sizing, actual return): {aw_pnl:+.2f}%",
             f"  Final capital:      ${self.final_capital:,.2f}",
             f"  Avg P&L/trade:     {self.avg_pnl_pct:+.2f}%",
             f"  Avg winner:        {self.avg_win_pct:+.2f}%",

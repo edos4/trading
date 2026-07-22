@@ -80,6 +80,7 @@ class DoubleBottomPattern(BasePattern):
     ENTRY_BARS_AFTER_L2  = 7
     TAKE_PROFIT_ABOVE_NK = 0.07      # sell 7% above neckline
     TRAILING_STOP_PCT    = 0.03      # 3% below highest close since entry (acts as stop loss)
+    TRAILING_ACTIVATION_PCT = 0.04   # trail doesn't arm until 4% favorable move (was clipping winners at entry)
     EXIT_BARS_AFTER_NECK_BREAK = 5
     SWING_LOOKBACK       = 2
     MIN_BARS             = 120
@@ -152,6 +153,7 @@ class DoubleBottomPattern(BasePattern):
                     ),
                     trailing_stop_pct=self.TRAILING_STOP_PCT,
                     trailing_stop_mode="highest_close",
+                    trailing_activation_pct=self.TRAILING_ACTIVATION_PCT,
                     neckline=setup.neckline,
                     neckline_break_direction="above",
                     exit_bars_after_neckline_break=self.EXIT_BARS_AFTER_NECK_BREAK,

@@ -179,10 +179,14 @@ async def run_backtest(n_symbols: int, pattern: str | None = None) -> None:
         position_sizing="risk",
         account_value=100_000.0,
         risk_per_trade_pct=0.02,
-        # Diversification ceiling, independent of risk_per_trade_pct — was
-        # hardcoded to 0.02 inside the engine, which silently capped every
-        # trade at 2% notional and made risk_per_trade_pct a no-op.
-        max_position_pct=0.10,
+        # Diversification ceiling, independent of risk_per_trade_pct. At 0.10
+        # this silently capped every ~6%-stop trade (the common case, via
+        # hard_stop_percentage) to ~0.6% real risk instead of the configured
+        # 2% (0.02 risk / 0.06 stop = 33% notional needed to fully use the
+        # risk budget) — risk_per_trade_pct was a no-op in practice. Raised
+        # to 0.33 so it actually binds at the intended risk level; max_open_positions
+        # stays unlimited so this is per-name concentration, not total exposure.
+        max_position_pct=0.33,
         # Cushion of unrealized profit before the trailing stop arms, so
         # ordinary entry-day chop doesn't stop trades out before the
         # pattern's own trailing logic gets to manage them.
