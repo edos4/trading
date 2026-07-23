@@ -27,6 +27,7 @@ from core.backtester import (
     _close_trade,
     _open_trade,
     _update_trailing_reference,
+    apply_risk_gates,
     trade_r_multiple,
     trade_risk_dollars,
 )
@@ -53,8 +54,16 @@ def unrealized_pct(position: BacktestTrade, current_price: float) -> float:
 
 
 def days_held(position: BacktestTrade, as_of: datetime | None = None) -> float:
-    end = as_of or position.exit_date or datetime.now(timezone.utc)
-    return (end - position.entry_date).total_seconds() / 86400
+    """as_of (a wall-clock "now") is only ever passed for still-open
+    positions, so entry_date (also wall-clock) is the right start there. A
+    closed trade has no as_of — use sim_entry_date/sim_exit_date, the
+    underlying bar timestamps, so a stream-replay run reports simulated days
+    held instead of the real minutes/seconds the replay took to run."""
+    if as_of is not None:
+        return (as_of - position.entry_date).total_seconds() / 86400
+    start = position.sim_entry_date or position.entry_date
+    end = position.sim_exit_date or position.exit_date or datetime.now(timezone.utc)
+    return (end - start).total_seconds() / 86400
 
 
 def position_status(position: BacktestTrade) -> str:
@@ -72,6 +81,8 @@ def _trade_to_dict(t: BacktestTrade) -> dict:
     d = asdict(t)
     d["entry_date"] = t.entry_date.isoformat()
     d["exit_date"] = t.exit_date.isoformat()
+    d["sim_entry_date"] = t.sim_entry_date.isoformat() if t.sim_entry_date else None
+    d["sim_exit_date"] = t.sim_exit_date.isoformat() if t.sim_exit_date else None
     return d
 
 
@@ -79,6 +90,10 @@ def _trade_from_dict(d: dict) -> BacktestTrade:
     d = dict(d)
     d["entry_date"] = datetime.fromisoformat(d["entry_date"])
     d["exit_date"] = datetime.fromisoformat(d["exit_date"])
+    if d.get("sim_entry_date"):
+        d["sim_entry_date"] = datetime.fromisoformat(d["sim_entry_date"])
+    if d.get("sim_exit_date"):
+        d["sim_exit_date"] = datetime.fromisoformat(d["sim_exit_date"])
     return BacktestTrade(**d)
 
 
@@ -204,6 +219,23 @@ class PaperAccount:
             log.info("Paper | daily loss limit hit — skipping signal")
             return False
 
+        # Same stop-backstop/R:R gates main.py wires into the backtester
+        # (min_atr_stop_multiple, synthetic_stop_multiple, atr_stop_floor_multiple,
+        # hard_stop_percentage, min_reward_risk_ratio) — without these, paper
+        # trades ran on the pattern's raw (sometimes absent) stop_loss, with
+        # no worst-case cap, which the backtest that validated the strategy
+        # never allowed.
+        if not apply_risk_gates(
+            signal, store, signal.symbol, signal.timeframe,
+            min_atr_stop_multiple=1.0,
+            synthetic_stop_multiple=2.0,
+            atr_stop_floor_multiple=1.2,
+            hard_stop_percentage=0.06,
+            min_reward_risk_ratio=1.5,
+            trailing_activation_default=0.02,
+        ):
+            return False
+
         _apply_sizing(
             signal, store, signal.symbol, signal.timeframe,
             account_value=self.equity(),
@@ -227,11 +259,29 @@ class PaperAccount:
                 timestamp=candle.timestamp,
             )
 
+        # Cash affordability cap — _apply_sizing only bounds a position to a
+        # % of equity, not of actually-available cash. Nothing upstream
+        # tracks aggregate exposure across positions, so a burst of signals
+        # (e.g. every symbol firing "new bar" on the first stream-replay scan)
+        # could otherwise buy far more than the account has, driving cash
+        # deeply negative. The backtester's portfolio simulation already
+        # caps by cash (see _apply_portfolio_constraints); mirror that here.
+        if signal.action == "BUY" and fill_candle.close > 0:
+            affordable_qty = int(self.cash / fill_candle.close)
+            if affordable_qty < signal.qty:
+                signal.qty = affordable_qty
+            if signal.qty < 1:
+                log.info(f"Paper | insufficient cash for {signal.symbol} — skipping signal")
+                return False
+
         position = _open_trade(signal, fill_candle, self._bar_count.get(signal.symbol, 0))
         # _open_trade stamps entry_date from the OHLCV bar's timestamp, which
         # is just the trading day (correct for the backtester replaying
         # history). A live paper fill needs the real wall-clock moment it
         # happened, so multiple fills on the same trading day are distinguishable.
+        # Keep the bar's own timestamp in sim_entry_date so days_held() can
+        # still report simulated (not wall-clock) holding time.
+        position.sim_entry_date = position.entry_date
         position.entry_date = datetime.now(timezone.utc)
         position.exit_date = position.entry_date
         notional = position.entry_price * position.qty
@@ -301,6 +351,7 @@ class PaperAccount:
             )
 
         _close_trade(position, exit_price, reason, candle, self.txn_cost_pct)
+        position.sim_exit_date = position.exit_date  # bar timestamp, for days_held()
         position.exit_date = datetime.now(timezone.utc)  # real fill time, not bar date
         notional_out = exit_price * position.qty
         # Commission cost mirrors _close_trade's pnl deduction (entry + exit

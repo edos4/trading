@@ -13,17 +13,23 @@ thread with its own event loop.
 from __future__ import annotations
 
 import asyncio
+import csv
 import io
+import subprocess
+import sys
 import threading
-import tkinter as tk
+import time
 from datetime import datetime, timezone
-from tkinter import ttk, messagebox
+from pathlib import Path
+from tkinter import ttk, filedialog, messagebox
+import tkinter as tk
 from typing import Optional
 
 import matplotlib
 matplotlib.use("Agg", force=True)
 import matplotlib.pyplot as plt
 from PIL import Image, ImageTk
+import websockets
 
 from config import settings, DISABLED_PATTERNS
 from core.backtester import BacktestTrade
@@ -32,8 +38,11 @@ from core.paper_trader import (
     risk_dollars, unrealized_pct,
 )
 from core.scanner import MarketScanner
+from data.stream_client import StreamClient
 from data.tv_client import TVClient
 from utils.logger import log
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Treeview tag -> foreground color, applied by _tag_for_pnl / fixed tags below.
 COLOR_GAIN = "#1b7a1b"
@@ -81,6 +90,7 @@ class PaperDashboard:
         self._running = False
         self._closed = False
         self._photo = None  # keep a ref so PhotoImage isn't GC'd
+        self._stream_proc: Optional[subprocess.Popen] = None  # server we auto-launched, if any
 
         self._pos_sort = ("unrl_pct", True)     # (column, descending)
         self._closed_sort = ("closed", True)
@@ -98,6 +108,13 @@ class PaperDashboard:
         self._stop_btn.pack(side=tk.LEFT, padx=(6, 0))
         self._reset_btn = ttk.Button(top_bar, text="Reset account", command=self._reset)
         self._reset_btn.pack(side=tk.LEFT, padx=(6, 0))
+        self._save_btn = ttk.Button(top_bar, text="Save results...", command=self._save_results)
+        self._save_btn.pack(side=tk.LEFT, padx=(6, 0))
+
+        self._stream_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            top_bar, text="Use paper trade stream", variable=self._stream_var,
+        ).pack(side=tk.LEFT, padx=(12, 0))
 
         self._status_var = tk.StringVar(value="Stopped.")
         ttk.Label(top_bar, textvariable=self._status_var).pack(side=tk.LEFT, padx=(16, 0))
@@ -146,8 +163,9 @@ class PaperDashboard:
             ("value", 85, "Value"), ("mtm", 85, "MTM $"), ("port_pct", 60, "Port %"), ("risk", 70, "Risk $"),
             ("pattern", 190, "Pattern"),
         ]
-        self._pos_tree = _SortableTree(pos_frame, pos_cols, self._on_sort_positions, height=7)
-        self._pos_tree.pack(fill=tk.BOTH, expand=True)
+        self._pos_tree = self._add_scrollbar(pos_frame, _SortableTree(
+            pos_frame, pos_cols, self._on_sort_positions, height=7,
+        ))
         self._pos_tree.bind("<Double-1>", self._on_position_double_click)
         self._configure_color_tags(self._pos_tree)
         self._pos_rows: dict[str, tuple[str, BacktestTrade]] = {}
@@ -160,11 +178,20 @@ class PaperDashboard:
             ("exit", 75, "Exit"), ("pnl", 65, "P&L"), ("r", 50, "R"),
             ("reason", 100, "Reason"), ("pattern", 190, "Pattern"),
         ]
-        self._closed_tree = _SortableTree(closed_frame, closed_cols, self._on_sort_closed, height=10)
-        self._closed_tree.pack(fill=tk.BOTH, expand=True)
+        self._closed_tree = self._add_scrollbar(closed_frame, _SortableTree(
+            closed_frame, closed_cols, self._on_sort_closed, height=10,
+        ))
         self._closed_tree.bind("<Double-1>", self._on_closed_double_click)
         self._configure_color_tags(self._closed_tree)
         self._closed_rows: dict[str, BacktestTrade] = {}
+
+    @staticmethod
+    def _add_scrollbar(parent: ttk.Frame, tree: ttk.Treeview) -> ttk.Treeview:
+        vsb = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        return tree
 
     @staticmethod
     def _configure_color_tags(tree: ttk.Treeview) -> None:
@@ -220,9 +247,77 @@ class PaperDashboard:
         self._start_btn.config(state=tk.DISABLED)
         self._stop_btn.config(state=tk.NORMAL)
         self._status_var.set("Fetching symbols...")
-        threading.Thread(target=self._run_thread, args=(int(self._n_var.get()),), daemon=True).start()
+        threading.Thread(
+            target=self._run_thread,
+            args=(int(self._n_var.get()), self._stream_var.get()),
+            daemon=True,
+        ).start()
 
-    def _run_thread(self, n_symbols: int) -> None:
+    @staticmethod
+    def _port_open(host: str, port: int) -> bool:
+        # A bare TCP connect+close (no WebSocket handshake) makes the
+        # websockets server log a scary "opening handshake failed"
+        # traceback for what is actually a harmless health check — do a
+        # real (tiny) handshake instead so the server sees a clean connect.
+        async def _probe() -> bool:
+            try:
+                async with websockets.connect(f"ws://{host}:{port}", open_timeout=0.5):
+                    return True
+            except OSError:
+                return False
+
+        try:
+            return asyncio.run(_probe())
+        except OSError:
+            return False
+
+    @staticmethod
+    def _kill_whatever_is_on(port: int) -> None:
+        """Force the stream server's port free before (re)launching.
+
+        A port-open check alone can't tell "healthy server" from "stale
+        process left over from a previous UI session, still running
+        pre-fix code and stuck serving corrupted replay data" — both look
+        identical from the outside. Always killing and relaunching removes
+        that ambiguity entirely.
+        """
+        try:
+            subprocess.run(
+                ["fuser", "-k", f"{port}/tcp"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+    def _ensure_stream_server(self) -> Optional[str]:
+        """(Re)launch `main.py --papertrade-stream` fresh every time, so a
+        stale/outdated server process is never silently reused. Returns an
+        error message on failure, else None."""
+        host, port = settings.papertrade_stream_host, settings.papertrade_stream_port
+        self._kill_whatever_is_on(port)
+        time.sleep(0.3)  # let the kernel release the port before rebinding
+        self._top.after(0, lambda: self._status_var.set("Starting paper trade stream server..."))
+        self._stream_proc = subprocess.Popen(
+            [sys.executable, "main.py", "--papertrade-stream"],
+            cwd=str(REPO_ROOT),
+        )
+        for _ in range(20):
+            if self._port_open(host, port):
+                return None
+            if self._stream_proc.poll() is not None:
+                return "Paper trade stream server exited immediately — check logs."
+            time.sleep(0.5)
+        return f"Paper trade stream server didn't come up on {host}:{port} in time."
+
+    def _run_thread(self, n_symbols: int, use_stream: bool) -> None:
+        data_feed = None
+        if use_stream:
+            error = self._ensure_stream_server()
+            if error:
+                self._top.after(0, lambda m=error: self._finish(m))
+                return
+            data_feed = StreamClient()
+
         symbol_rows = TVClient.fetch_top_symbols_with_exchanges_cached(n_symbols, settings.tv_screener)
         if not symbol_rows:
             self._top.after(0, lambda: self._finish("No symbols returned by screener."))
@@ -238,10 +333,17 @@ class PaperDashboard:
             exchange_overrides=exchange_overrides,
             paper_account=self._account,
             disabled_patterns=DISABLED_PATTERNS,
+            data_feed=data_feed,
+            scan_interval_seconds=(
+                settings.papertrade_stream_interval_seconds if use_stream else None
+            ),
         )
         self._scanner = scanner
         self._task = loop.create_task(scanner.run())
-        self._top.after(0, lambda: self._status_var.set(f"Running — {len(symbols)} symbols, scanning every {settings.scan_interval_seconds}s"))
+        interval = settings.papertrade_stream_interval_seconds if use_stream else settings.scan_interval_seconds
+        self._top.after(0, lambda: self._status_var.set(
+            f"Running — {len(symbols)} symbols, scanning every {interval}s"
+        ))
         error_msg: Optional[str] = None
         try:
             loop.run_until_complete(self._task)
@@ -279,6 +381,55 @@ class PaperDashboard:
         self._account = PaperAccount()
         self._account.save()
         self._refresh_all()
+
+    def _save_results(self) -> None:
+        path = filedialog.asksaveasfilename(
+            title="Save paper trading results",
+            defaultextension=".csv",
+            filetypes=[("CSV", "*.csv")],
+            initialfile=f"paper_trading_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv",
+        )
+        if not path:
+            return
+
+        columns = [
+            "status", "symbol", "pattern", "timeframe", "action",
+            "entry_date", "exit_date", "entry_price", "exit_price",
+            "pnl_pct", "r", "days_held", "exit_reason", "confidence", "qty",
+        ]
+        with open(path, "w", newline="") as f:
+            writer = csv.writer(f)
+            result = self._account.to_result()
+            pf = result.profit_factor
+            writer.writerow(["# Cash", f"{self._account.cash:.2f}"])
+            writer.writerow(["# Equity", f"{self._account.equity():.2f}"])
+            writer.writerow(["# Closed trades", len(result.trades)])
+            writer.writerow(["# Win rate", f"{result.win_rate:.1%}"])
+            writer.writerow(["# Profit factor", "inf" if pf == float("inf") else f"{pf:.2f}"])
+            writer.writerow([])
+            writer.writerow(columns)
+
+            now = datetime.now(timezone.utc)
+            for sym, p in self._account.positions_snapshot():
+                current = self._account.last_price(sym, p.entry_price)
+                writer.writerow([
+                    "OPEN", sym, p.pattern, p.timeframe, p.action,
+                    p.entry_date.isoformat(), "", f"{p.entry_price:.4f}", f"{current:.4f}",
+                    f"{unrealized_pct(p, current):.4f}",
+                    f"{r_multiple(p, current):.4f}" if r_multiple(p, current) is not None else "",
+                    f"{days_held(p, now):.2f}", "", f"{p.confidence:.4f}", p.qty,
+                ])
+            for t in self._account.closed_snapshot():
+                r = r_multiple(t, t.exit_price)
+                writer.writerow([
+                    "CLOSED", t.symbol, t.pattern, t.timeframe, t.action,
+                    t.entry_date.isoformat(), t.exit_date.isoformat(),
+                    f"{t.entry_price:.4f}", f"{t.exit_price:.4f}", f"{t.pnl_pct:.4f}",
+                    f"{r:.4f}" if r is not None else "",
+                    f"{days_held(t):.2f}", t.exit_reason, f"{t.confidence:.4f}", t.qty,
+                ])
+
+        messagebox.showinfo("Paper trading", f"Saved to {path}")
 
     # ── Sorting ───────────────────────────────────────────────────────────
     def _on_sort_positions(self, col: str) -> None:
@@ -377,10 +528,11 @@ class PaperDashboard:
             return
         last = stats["last_scan_at"]
         last_str = "—" if not last else datetime.fromisoformat(last).strftime("%H:%M:%S")
+        sim_days_str = f"   Sim days: {stats['sim_days']}" if self._stream_var.get() else ""
         self._scan_stats_var.set(
             f"Last scan: {last_str}   Patterns found: {stats['patterns_found']}   "
             f"Trades opened: {stats['trades_opened']}   Rejected: {stats['signals_rejected']}   "
-            f"Scan time: {stats['scan_duration_s']:.1f}s"
+            f"Scan time: {stats['scan_duration_s']:.1f}s{sim_days_str}"
         )
 
     def _refresh_positions(self) -> None:
@@ -559,4 +711,6 @@ class PaperDashboard:
             self._stop()
         self._closed = True
         self._account.save()
+        if self._stream_proc is not None and self._stream_proc.poll() is None:
+            self._stream_proc.terminate()
         self._top.destroy()

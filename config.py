@@ -30,6 +30,15 @@ class Settings(BaseSettings):
     paper_initial_capital: float = 100_000.0
     paper_slippage_pct: float = 0.0005
 
+    # ── Paper trade stream (replays historical CSVs when markets are closed) ──
+    papertrade_stream_dir: str = "/home/r00t/stocks_data"
+    papertrade_stream_host: str = "127.0.0.1"
+    papertrade_stream_port: int = 8765
+    papertrade_stream_lookback_bars: int = 300
+    # Streamed bars are historical, not live — scan far faster than the
+    # settings.scan_interval_seconds cadence used for real market data.
+    papertrade_stream_interval_seconds: int = 60
+
     # ── Scanner ────────────────────────────────────────────────────────────
     watchlist: str
     tv_screener: str
@@ -110,11 +119,30 @@ settings = Settings()
 # docstring calls it a "DRAFT ruleset ... NOT backtested" — that draft status
 # now has a real backtest verdict against it. Disabled until the entry/exit
 # rules are reworked and re-tested in isolation via --pattern.
+#
+# pattern_002_double_top: barely above breakeven over a statistically
+# meaningful 97-trade sample (pf=1.16, avg=+0.40%/trade) in a 3000-symbol,
+# ~6-month backtest. Not a loser, just too weak to earn a slot against
+# pattern_003_double_bottom (pf=1.81, avg=+1.32%/trade, same backtest) when
+# capital/signal budget is limited. Disabled until the entry/exit rules are
+# reworked and re-tested in isolation via --pattern.
+#
+# pattern_005_rounding_top (62 SELL trades, 17.7% win, avg -1.72%/trade) and
+# pattern_010_pennant (31 trades both sides, 32.3% win, avg -0.60%/trade) were
+# net losers over a 230-sim-day paper trading run (2026-07-22). Disabled until
+# re-tested in isolation via --pattern.
 DISABLED_PATTERNS: list[str] = [
-    "pattern_009_flag_pattern",
-    "pattern_006_upward_channel",
-    "pattern_007_descending_channel",
-    "pattern_008_head_and_shoulders",
-    "pattern_012_ml_signal",
     "pattern_011_breakout_retest",
 ]
+
+# DISABLED_PATTERNS: list[str] = [
+#     "pattern_009_flag_pattern",
+#     "pattern_006_upward_channel",
+#     "pattern_007_descending_channel",
+#     "pattern_008_head_and_shoulders",
+#     "pattern_012_ml_signal",
+#     "pattern_011_breakout_retest",
+#     "pattern_002_double_top",
+#     "pattern_005_rounding_top",
+#     "pattern_010_pennant",
+# ]

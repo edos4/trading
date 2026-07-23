@@ -1,0 +1,85 @@
+"""Smallest possible check that a live/paper signal fills one bar late —
+same one-bar deferral core/backtester.py's pending_entry gives backtests —
+instead of the same candle whose close produced the signal."""
+
+import asyncio
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+
+from core.paper_trader import PaperAccount
+from core.scanner import MarketScanner
+from data.tv_client import MarketSnapshot, OHLCVCandle
+from patterns.base_pattern import BasePattern, TradeSignal
+
+
+def _candle(close: float, ts: datetime) -> OHLCVCandle:
+    return OHLCVCandle(open=close, high=close, low=close, close=close, volume=1.0, timestamp=ts)
+
+
+class _FirstBarBuyPattern(BasePattern):
+    """Fires a BUY once, on the very first bar it sees; None afterwards —
+    isolates whether the fill lands on that bar or the next one."""
+
+    name = "test_pattern"
+    fired = False
+
+    @property
+    def timeframes(self):
+        return ["1d"]
+
+    def analyze(self, snapshot, store):
+        if self.fired:
+            return None
+        self.fired = True
+        return TradeSignal(
+            symbol=snapshot.symbol, action="BUY", pattern=self.name,
+            timeframe="1d", confidence=0.9, price=snapshot.candle.close, qty=10,
+        )
+
+
+class _FakeFeed:
+    """Two-bar fake TVClient: bar 1 close=100, bar 2 close=110."""
+
+    def __init__(self):
+        self.bar = 0
+        base = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        self.candles = [_candle(100.0, base), _candle(110.0, base + timedelta(days=1))]
+
+    @asynccontextmanager
+    async def mcp_session(self):
+        yield None
+
+    async def fetch_snapshot(self, symbol, timeframe, store=None, mcp_session=None):
+        candle = self.candles[self.bar]
+        snapshot = MarketSnapshot(
+            symbol=symbol, timeframe=timeframe, timestamp=candle.timestamp,
+            candle=candle, indicators={}, summary={}, oscillators={}, moving_avgs={},
+        )
+        if store is not None:
+            store.push(snapshot)
+        return snapshot
+
+
+def demo():
+    feed = _FakeFeed()
+    paper = PaperAccount(initial_capital=100_000.0, slippage_pct=0.0)
+    scanner = MarketScanner(symbols=["TEST"], paper_account=paper, data_feed=feed)
+    scanner._patterns = [_FirstBarBuyPattern()]
+
+    asyncio.run(scanner._scan_all())
+    assert "TEST" not in paper.positions, (
+        "signal on bar 1 must NOT fill on bar 1 (same-bar execution)"
+    )
+
+    feed.bar = 1
+    asyncio.run(scanner._scan_all())
+    assert "TEST" in paper.positions, "signal on bar 1 must fill on bar 2"
+    assert paper.positions["TEST"].entry_price == 110.0, (
+        f"expected fill at bar 2's close (110.0), got {paper.positions['TEST'].entry_price}"
+    )
+
+    print("deferred entry fill: all checks passed")
+
+
+if __name__ == "__main__":
+    demo()

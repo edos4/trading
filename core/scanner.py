@@ -52,10 +52,13 @@ class MarketScanner:
         exchange_overrides: dict[str, str] | None = None,
         paper_account: PaperAccount | None = None,
         disabled_patterns: list[str] | None = None,
+        data_feed=None,
+        scan_interval_seconds: int | None = None,
     ):
         self._symbols = symbols or settings.symbols
         self._disabled_patterns = set(disabled_patterns or [])
-        self._tv = TVClient(
+        self._scan_interval = scan_interval_seconds or settings.scan_interval_seconds
+        self._tv = data_feed or TVClient(
             settings.tv_screener,
             settings.tv_exchange,
             exchange_overrides=exchange_overrides,
@@ -74,6 +77,16 @@ class MarketScanner:
         # pattern scanned hourly would otherwise re-detect the exact same
         # unchanged bar every cycle and repeatedly open/close identical trades.
         self._last_bar_ts: dict[tuple[str, str], datetime] = {}
+        # New-bar count per symbol this run — the paper trade stream server
+        # advances each symbol's tape by exactly one row (= one day) per
+        # scan tick, so counting new bars is counting simulated days.
+        self._sim_ticks: dict[str, int] = {}
+        self._sim_days: int = 0
+        # Signal detected on bar i, filled on bar i+1's close — mirrors the
+        # backtester's pending_entry deferral (core/backtester.py) so paper/
+        # live trading isn't more optimistic than the backtest that validated
+        # the strategy (filling on the very candle whose close triggered it).
+        self._pending_entries: dict[str, TradeSignal] = {}
         # Scan-cycle health counters — surfaced by the paper trading UI/CLI
         # so a stalled or misbehaving scan is visible without reading logs.
         self.stats: dict = {
@@ -82,6 +95,7 @@ class MarketScanner:
             "patterns_found": 0,
             "signals_rejected": 0,
             "trades_opened": 0,
+            "sim_days": 0,
         }
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -96,7 +110,7 @@ class MarketScanner:
             f"Scanner started | "
             f"symbols={self._symbols} | "
             f"patterns={[p.name for p in self._patterns]} | "
-            f"interval={settings.scan_interval_seconds}s"
+            f"interval={self._scan_interval}s"
         )
 
     def stop(self) -> None:
@@ -122,7 +136,7 @@ class MarketScanner:
                     # pipe, transient TradingView error) must not take down
                     # a session meant to run unattended for days.
                     log.exception("Scanner | scan cycle failed — retrying next interval")
-                await asyncio.sleep(settings.scan_interval_seconds)
+                await asyncio.sleep(self._scan_interval)
         finally:
             self.stop()
 
@@ -184,6 +198,11 @@ class MarketScanner:
                         is_new_bar = bar_ts is None or self._last_bar_ts.get(bar_key) != bar_ts
                         if bar_ts is not None:
                             self._last_bar_ts[bar_key] = bar_ts
+                        if is_new_bar and bar_ts is not None:
+                            ticks = self._sim_ticks.get(symbol, 0) + 1
+                            self._sim_ticks[symbol] = ticks
+                            self._sim_days = max(self._sim_days, ticks)
+                            self.stats["sim_days"] = self._sim_days
 
                         if self._paper is not None:
                             self._paper.on_bar(symbol, snapshot.candle, timeframe, is_new_bar)
@@ -195,6 +214,16 @@ class MarketScanner:
                             # re-fire the same signal and reopen/close the
                             # same trade every cycle.
                             continue
+
+                        pending = self._pending_entries.pop(symbol, None)
+                        if pending is not None and self._paper is not None:
+                            opened = self._paper.open_position(
+                                pending, snapshot.candle, self._store
+                            )
+                            if opened:
+                                self.stats["trades_opened"] += 1
+                            else:
+                                self.stats["signals_rejected"] += 1
 
                         for pattern in self._patterns:
                             if timeframe not in pattern.timeframes:
@@ -260,13 +289,12 @@ class MarketScanner:
         # if not self._risk.approve(intent):
         #     return    # risk_guard already logged the block reason
 
-        # Step 3 — Place the order (disabled while IBKR is commented out)
+        # Step 3 — Place the order (disabled while IBKR is commented out).
+        # Not filled here: queued to fill on this symbol's *next* new bar,
+        # same one-bar deferral the backtester's pending_entry uses — see
+        # self._pending_entries.
         if self._paper is not None and candle is not None:
-            opened = self._paper.open_position(signal, candle, self._store)
-            if opened:
-                self.stats["trades_opened"] += 1
-            else:
-                self.stats["signals_rejected"] += 1
+            self._pending_entries[signal.symbol] = signal
         else:
             log.info(
                 f"Signal APPROVED (IBKR disabled) — would {signal.action} "

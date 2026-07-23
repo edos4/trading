@@ -68,6 +68,15 @@ class BacktestTrade:
     qty: float = 0.0
     notes: str = ""
 
+    # Paper trading overwrites entry_date/exit_date with the real wall-clock
+    # fill time (see core.paper_trader) so the dashboard can show "when did
+    # this actually happen" even under a compressed stream replay. These two
+    # keep the underlying bar's own timestamp so days_held() can still report
+    # simulated holding time instead of real elapsed minutes. Unused by the
+    # backtester itself, where entry_date/exit_date already are bar time.
+    sim_entry_date: datetime | None = None
+    sim_exit_date: datetime | None = None
+
     # Engine-level (not pattern-level) breakeven protection. Once a trade has
     # been ahead by `breakeven_trigger_pct`, its protective floor is raised to
     # (roughly) entry price so a full round-trip back to red exits near
@@ -95,6 +104,10 @@ class BacktestResult:
     trades: list[BacktestTrade] = field(default_factory=list)
     total_signals: int = 0
     initial_capital: float = 100_000.0
+    # Signals that had an otherwise-valid entry but were dropped by the
+    # capital ledger (see _apply_capital_ledger) because the account was
+    # already fully deployed in other open positions at that moment.
+    capital_rejected: int = 0
 
     @property
     def win_count(self) -> int:
@@ -260,6 +273,7 @@ class BacktestResult:
             "=" * 60,
             f"  Total signals:     {self.total_signals}",
             f"  Trades taken:      {len(self.trades)}",
+            f"  Rejected (no cash): {self.capital_rejected}",
             f"  Wins:              {self.win_count}",
             f"  Losses:            {self.loss_count}",
             f"  Win rate:          {self.win_rate:.1%}",
@@ -304,6 +318,7 @@ class BacktestResult:
         return {
             "total_signals": self.total_signals,
             "trades_taken": len(self.trades),
+            "capital_rejected": self.capital_rejected,
             "wins": self.win_count,
             "losses": self.loss_count,
             "win_rate": round(self.win_rate, 4),
@@ -573,6 +588,100 @@ def _check_exit(
     return None, ""
 
 
+def apply_risk_gates(
+    signal: TradeSignal,
+    store: OHLCVStore,
+    symbol: str,
+    timeframe: str,
+    *,
+    min_atr_stop_multiple: float | None = None,
+    synthetic_stop_multiple: float = 0.0,
+    atr_stop_floor_multiple: float | None = None,
+    hard_stop_percentage: float | None = None,
+    min_reward_risk_ratio: float | None = None,
+    trailing_activation_default: float | None = None,
+) -> bool:
+    """Shared entry-gate/stop-backstop pipeline — same logic the backtester
+    applies per-signal, factored out so paper/live trading gets the same
+    safety net instead of running raw pattern stops. Mutates signal in
+    place; returns False if the signal should be dropped entirely."""
+    if min_atr_stop_multiple is not None and signal.trailing_stop_pct is not None:
+        df = store.get_df(symbol, timeframe, min_bars=1)
+        if df is not None and len(df) >= 15:
+            ind = IndicatorEngine(df)
+            atr_val = float(ind.atr(14).iloc[-1])
+            current_close = float(df["close"].iloc[-1])
+            if current_close > 0 and atr_val > 0:
+                atr_pct = atr_val / current_close
+                min_required_trail = atr_pct * min_atr_stop_multiple
+                if signal.trailing_stop_pct < min_required_trail:
+                    log.debug(
+                        f"RiskGate | {symbol} {timeframe} trailing "
+                        f"{signal.trailing_stop_pct:.2%} too thin vs "
+                        f"ATR {atr_pct:.2%} — skip"
+                    )
+                    return False
+
+    if (
+        synthetic_stop_multiple > 0
+        and signal.stop_loss is None
+        and signal.trailing_stop_pct is not None
+    ):
+        stop_pct = signal.trailing_stop_pct * synthetic_stop_multiple
+        if signal.action == "BUY":
+            signal.stop_loss = round(signal.price * (1 - stop_pct), 4)
+        elif signal.action == "SELL":
+            signal.stop_loss = round(signal.price * (1 + stop_pct), 4)
+
+    if atr_stop_floor_multiple is not None and signal.stop_loss is not None:
+        df = store.get_df(symbol, timeframe, min_bars=1)
+        if df is not None and len(df) >= 15:
+            ind = IndicatorEngine(df)
+            atr_val = float(ind.atr(14).iloc[-1])
+            if atr_val > 0:
+                floor_distance = atr_val * atr_stop_floor_multiple
+                current_distance = abs(signal.price - signal.stop_loss)
+                if current_distance < floor_distance:
+                    if signal.action == "BUY":
+                        signal.stop_loss = round(signal.price - floor_distance, 4)
+                    elif signal.action == "SELL":
+                        signal.stop_loss = round(signal.price + floor_distance, 4)
+
+    if hard_stop_percentage is not None and hard_stop_percentage > 0:
+        if signal.action == "BUY":
+            cap_price = signal.price * (1 - hard_stop_percentage)
+            if signal.stop_loss is None or signal.stop_loss < cap_price:
+                signal.stop_loss = round(cap_price, 4)
+        elif signal.action == "SELL":
+            cap_price = signal.price * (1 + hard_stop_percentage)
+            if signal.stop_loss is None or signal.stop_loss > cap_price:
+                signal.stop_loss = round(cap_price, 4)
+
+    if (
+        min_reward_risk_ratio is not None
+        and signal.take_profit is not None
+        and signal.stop_loss is not None
+        and signal.price > 0
+    ):
+        reward = abs(signal.take_profit - signal.price)
+        risk = abs(signal.price - signal.stop_loss)
+        if risk > 0 and reward / risk < min_reward_risk_ratio:
+            log.debug(
+                f"RiskGate | {symbol} {timeframe} R:R "
+                f"{reward / risk:.2f} < min {min_reward_risk_ratio:.2f} — skip"
+            )
+            return False
+
+    if (
+        trailing_activation_default is not None
+        and signal.trailing_activation_pct is None
+        and signal.trailing_stop_pct is not None
+    ):
+        signal.trailing_activation_pct = trailing_activation_default
+
+    return True
+
+
 def _open_trade(
     signal: TradeSignal, candle: OHLCVCandle, bar_idx: int,
 ) -> BacktestTrade:
@@ -593,6 +702,22 @@ def _open_trade(
         else:
             pct_below = (signal.price - take_profit) / signal.price
             take_profit = round(entry_price * (1 - pct_below), 4)
+    # A pattern's target is computed off a reference level (e.g. neckline),
+    # not off the actual fill price — a breakout candle can already close
+    # past that target by the time the entry confirms. Rebasing then lands
+    # the target on the wrong side of entry_price, which trips take_profit/
+    # stop_loss on the very next tick at a loss instead of a gain. Drop an
+    # invalid target rather than act on it; trailing_stop/time_exit still govern.
+    if signal.action == "BUY":
+        if stop_loss is not None and stop_loss >= entry_price:
+            stop_loss = None
+        if take_profit is not None and take_profit <= entry_price:
+            take_profit = None
+    else:
+        if stop_loss is not None and stop_loss <= entry_price:
+            stop_loss = None
+        if take_profit is not None and take_profit >= entry_price:
+            take_profit = None
     position = BacktestTrade(
         symbol=signal.symbol,
         timeframe=signal.timeframe,
@@ -784,6 +909,85 @@ def _enforce_max_open_positions(
     return accepted
 
 
+def _apply_capital_ledger(
+    trades: list[BacktestTrade],
+    initial_capital: float,
+    risk_per_trade_pct: float,
+    position_sizing: str,
+    max_position_pct: float,
+) -> tuple[list[BacktestTrade], int]:
+    """Re-size every trade against one shared cash ledger, replayed in
+    chronological order, instead of each trade being sized independently
+    against a fixed initial account_value.
+
+    Each symbol is backtested independently (for parallelism), so neither
+    of these can be enforced during simulation — only here, as a
+    post-processing pass over the merged trade list:
+      1. Compounding: qty is recomputed off *current* ledger cash, not the
+         static initial account_value, so winners size up later trades.
+      2. A real capital constraint: concurrently open positions can never
+         collectively commit more cash than the account actually has.
+         A signal that arrives while the account is fully deployed
+         elsewhere is dropped, same as a broker rejecting an order for
+         insufficient buying power — this is a cash account model, no
+         margin/leverage.
+    """
+    if not trades:
+        return trades, 0
+
+    # Exits before entries at the same timestamp, so same-day exits free
+    # cash for same-day entries instead of falsely starving them.
+    events = sorted(
+        [(t.exit_date, 0, t) for t in trades] + [(t.entry_date, 1, t) for t in trades],
+        key=lambda e: (e[0], e[1]),
+    )
+
+    cash = initial_capital
+    accepted: list[BacktestTrade] = []
+    opened: set[int] = set()
+    rejected = 0
+
+    for _, kind, t in events:
+        if kind == 0:
+            if id(t) in opened:
+                cash += t.qty * t.exit_price
+            continue
+
+        if t.entry_price <= 0:
+            rejected += 1
+            continue
+
+        notional_max_shares = int((cash * max_position_pct) / t.entry_price)
+        if position_sizing == "risk":
+            stop_distance = None
+            if t.stop_loss is not None:
+                stop_distance = abs(t.entry_price - t.stop_loss)
+            elif t.trailing_stop_pct is not None:
+                stop_distance = t.entry_price * t.trailing_stop_pct
+            if stop_distance and stop_distance > 0:
+                desired_qty = int((cash * risk_per_trade_pct) / stop_distance)
+            else:
+                desired_qty = notional_max_shares
+        else:
+            # pattern/notional/atr modes: keep the signal-time qty from
+            # _apply_sizing (their sizing basis isn't reproducible here
+            # without the original OHLCV/ATR data); still subject to the
+            # ledger's compounding notional cap and cash affordability.
+            desired_qty = t.qty
+
+        qty = min(desired_qty, notional_max_shares, int(cash / t.entry_price))
+        if qty < 1:
+            rejected += 1
+            continue
+
+        t.qty = qty
+        cash -= qty * t.entry_price
+        opened.add(id(t))
+        accepted.append(t)
+
+    return accepted, rejected
+
+
 def _core_backtest_symbol(
     symbol: str,
     timeframe: str,
@@ -900,94 +1104,16 @@ def _core_backtest_symbol(
                         )
                         continue
 
-            if (
-                config["min_atr_stop_multiple"] is not None
-                and signal.trailing_stop_pct is not None
+            if not apply_risk_gates(
+                signal, store, symbol, timeframe,
+                min_atr_stop_multiple=config["min_atr_stop_multiple"],
+                synthetic_stop_multiple=config["synthetic_stop_multiple"],
+                atr_stop_floor_multiple=config["atr_stop_floor_multiple"],
+                hard_stop_percentage=config["hard_stop_percentage"],
+                min_reward_risk_ratio=config["min_reward_risk_ratio"],
+                trailing_activation_default=config["trailing_activation_default"],
             ):
-                df = store.get_df(symbol, timeframe, min_bars=1)
-                if df is not None and len(df) >= 15:
-                    ind = IndicatorEngine(df)
-                    atr_val = float(ind.atr(14).iloc[-1])
-                    current_close = float(df["close"].iloc[-1])
-                    if current_close > 0 and atr_val > 0:
-                        atr_pct = atr_val / current_close
-                        min_required_trail = (
-                            atr_pct * config["min_atr_stop_multiple"]
-                        )
-                        if signal.trailing_stop_pct < min_required_trail:
-                            log.debug(
-                                f"Backtest | {symbol} {timeframe} trailing "
-                                f"{signal.trailing_stop_pct:.2%} too thin vs "
-                                f"ATR {atr_pct:.2%} — skip"
-                            )
-                            continue
-
-            if (
-                config["synthetic_stop_multiple"] > 0
-                and signal.stop_loss is None
-                and signal.trailing_stop_pct is not None
-            ):
-                stop_pct = (
-                    signal.trailing_stop_pct * config["synthetic_stop_multiple"]
-                )
-                if signal.action == "BUY":
-                    signal.stop_loss = round(
-                        signal.price * (1 - stop_pct), 4
-                    )
-                elif signal.action == "SELL":
-                    signal.stop_loss = round(
-                        signal.price * (1 + stop_pct), 4
-                    )
-
-            if (
-                config["atr_stop_floor_multiple"] is not None
-                and signal.stop_loss is not None
-            ):
-                df = store.get_df(symbol, timeframe, min_bars=1)
-                if df is not None and len(df) >= 15:
-                    ind = IndicatorEngine(df)
-                    atr_val = float(ind.atr(14).iloc[-1])
-                    if atr_val > 0:
-                        floor_distance = atr_val * config["atr_stop_floor_multiple"]
-                        current_distance = abs(signal.price - signal.stop_loss)
-                        if current_distance < floor_distance:
-                            if signal.action == "BUY":
-                                signal.stop_loss = round(
-                                    signal.price - floor_distance, 4
-                                )
-                            elif signal.action == "SELL":
-                                signal.stop_loss = round(
-                                    signal.price + floor_distance, 4
-                                )
-
-            if (
-                config["hard_stop_percentage"] is not None
-                and config["hard_stop_percentage"] > 0
-            ):
-                if signal.action == "BUY":
-                    cap_price = signal.price * (1 - config["hard_stop_percentage"])
-                    if signal.stop_loss is None or signal.stop_loss < cap_price:
-                        signal.stop_loss = round(cap_price, 4)
-                elif signal.action == "SELL":
-                    cap_price = signal.price * (1 + config["hard_stop_percentage"])
-                    if signal.stop_loss is None or signal.stop_loss > cap_price:
-                        signal.stop_loss = round(cap_price, 4)
-
-            if (
-                config["min_reward_risk_ratio"] is not None
-                and signal.take_profit is not None
-                and signal.stop_loss is not None
-                and signal.price > 0
-            ):
-                reward = abs(signal.take_profit - signal.price)
-                risk = abs(signal.price - signal.stop_loss)
-                if risk > 0 and reward / risk < config["min_reward_risk_ratio"]:
-                    log.debug(
-                        f"Backtest | {symbol} {timeframe} R:R "
-                        f"{reward / risk:.2f} < min "
-                        f"{config['min_reward_risk_ratio']:.2f} — skip"
-                    )
-                    continue
+                continue
 
             _apply_sizing(
                 signal, store, symbol, timeframe,
@@ -996,13 +1122,6 @@ def _core_backtest_symbol(
                 config["position_sizing"],
                 max_position_pct=config["max_position_pct"],
             )
-
-            if (
-                config["trailing_activation_default"] is not None
-                and signal.trailing_activation_pct is None
-                and signal.trailing_stop_pct is not None
-            ):
-                signal.trailing_activation_pct = config["trailing_activation_default"]
 
             pending_entry = signal
             break
@@ -1352,6 +1471,10 @@ class Backtester:
         result.trades = _enforce_max_open_positions(
             result.trades, self._max_open_positions
         )
+        result.trades, result.capital_rejected = _apply_capital_ledger(
+            result.trades, self._account_value, self._risk_per_trade_pct,
+            self._position_sizing, self._max_position_pct,
+        )
         return result
 
     def _backtest_symbol(
@@ -1588,6 +1711,19 @@ class Backtester:
             else:
                 pct_below = (signal.price - take_profit) / signal.price
                 take_profit = round(entry_price * (1 - pct_below), 4)
+        # See module-level _open_trade: a rebased target that lands on the
+        # wrong side of entry_price would trip on the very next tick at a
+        # loss instead of a gain — drop it rather than act on it.
+        if signal.action == "BUY":
+            if stop_loss is not None and stop_loss >= entry_price:
+                stop_loss = None
+            if take_profit is not None and take_profit <= entry_price:
+                take_profit = None
+        else:
+            if stop_loss is not None and stop_loss <= entry_price:
+                stop_loss = None
+            if take_profit is not None and take_profit >= entry_price:
+                take_profit = None
         position = BacktestTrade(
             symbol=signal.symbol,
             timeframe=signal.timeframe,

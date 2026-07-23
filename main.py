@@ -9,6 +9,7 @@ Usage:
     python main.py --paper                          # Paper trade top 100 symbols (simulated fills)
     python main.py --paper --paper-reset            # ...starting from a fresh virtual account
     python main.py --ui                             # Launch the symbol explorer GUI
+    python main.py --papertrade-stream              # Serve historical CSV bars for paper trading when markets are closed
     python scripts/compare_patterns.py              # Cross-pattern comparison (parallel)
     python scripts/compare_patterns.py -p 4         # Limit to 4 concurrent backtests
 
@@ -303,7 +304,21 @@ async def main() -> None:
         metavar="N",
         help="Limit --learn to the first N ticker CSVs (smoke test before a full run).",
     )
+    parser.add_argument(
+        "--papertrade-stream",
+        action="store_true",
+        help="Run the paper trade stream server: replays historical daily CSVs "
+        "from settings.papertrade_stream_dir (default /home/r00t/stocks_data) over "
+        "a local WebSocket so paper trading (--paper / --ui) can run with the "
+        "'Use paper trade stream' option even when US markets are closed.",
+    )
     args = parser.parse_args()
+
+    if args.papertrade_stream:
+        from data.stream_server import run_stream_server
+
+        await run_stream_server()
+        return
 
     if args.learn:
         from pathlib import Path as _Path
