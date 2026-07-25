@@ -7,7 +7,7 @@ Every SCAN_INTERVAL_SECONDS it:
   2. Pushes the new candle into OHLCVStore
   3. Runs each registered pattern's analyze() method
   4. If a signal is returned:
-        a. Checks confidence threshold
+        a. Kronos 1w forecast gate (if enabled) — direction + min move
         b. Renders a chart (if vision is enabled)
         c. Asks Claude vision to confirm the pattern
         d. If confirmed: runs risk checks → places order
@@ -33,6 +33,7 @@ from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
 from analysis.chart_renderer import ChartRenderer
 from analysis.vision_checker import VisionChecker, VisionVerdict
 from core.paper_trader import PaperAccount
+from core.kronos_gate import kronos_gate_check
 
 # TODO: re-enable IBKR when TWS/Gateway is available
 # from broker.ibkr_client import IBKRClient
@@ -54,10 +55,15 @@ class MarketScanner:
         disabled_patterns: list[str] | None = None,
         data_feed=None,
         scan_interval_seconds: int | None = None,
+        kronos_gate: bool | None = None,
     ):
         self._symbols = symbols or settings.symbols
         self._disabled_patterns = set(disabled_patterns or [])
         self._scan_interval = scan_interval_seconds or settings.scan_interval_seconds
+        # None → follow settings; explicit True/False lets UI/CLI override for a session.
+        self._kronos_gate = (
+            settings.kronos_gate_enabled if kronos_gate is None else kronos_gate
+        )
         self._tv = data_feed or TVClient(
             settings.tv_screener,
             settings.tv_exchange,
@@ -110,6 +116,7 @@ class MarketScanner:
             f"Scanner started | "
             f"symbols={self._symbols} | "
             f"patterns={[p.name for p in self._patterns]} | "
+            f"kronos_gate={'ON' if self._kronos_gate else 'OFF'} | "
             f"interval={self._scan_interval}s"
         )
 
@@ -255,6 +262,24 @@ class MarketScanner:
             f"{signal.action} | pattern={signal.pattern} | "
             f"confidence={signal.confidence:.2f}"
         )
+
+        # Step 0 — Kronos 1w confirm gate (direction + min move). Runs before
+        # vision so we don't burn Claude tokens on forecasts that disagree.
+        # Fail-open when weights missing — see core/kronos_gate.py.
+        if self._kronos_gate:
+            gate = kronos_gate_check(signal, self._store)
+            if not gate.passed:
+                log.info(
+                    f"Signal REJECTED by Kronos gate — {signal.symbol} "
+                    f"{signal.pattern} | {gate.reason}"
+                )
+                self.stats["signals_rejected"] += 1
+                return
+            if gate.pred_1w is not None:
+                log.info(
+                    f"Kronos gate PASS | {signal.symbol} {signal.pattern} | "
+                    f"pred_1w={gate.pred_1w:+.2%} | {gate.reason}"
+                )
 
         # Step 1 — Vision confirmation, only when enabled. The pattern's own
         # min_confidence already gated this signal before analyze() returned

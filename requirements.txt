@@ -17,3 +17,7 @@ schedule==1.2.2
 tqdm>=4.68.0
 lightgbm>=4.5.0
 websockets>=13.0
+torch>=2.0.0
+einops>=0.8.1
+safetensors>=0.6.2
+huggingface_hub==0.33.1

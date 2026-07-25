@@ -30,6 +30,7 @@ from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
 from data.tv_client import TVClient, MarketSnapshot, OHLCVCandle, SCREENER_FIELDS
 from patterns.base_pattern import BasePattern, TradeSignal
 from analysis.indicator_engine import IndicatorEngine
+from core.kronos_gate import kronos_gate_check
 from utils.logger import log
 
 # ── OHLCV disk cache ──────────────────────────────────────────────────────────
@@ -1074,6 +1075,15 @@ def _core_backtest_symbol(
                 )
                 continue
 
+            if config.get("kronos_gate"):
+                gate = kronos_gate_check(signal, store)
+                if not gate.passed:
+                    log.debug(
+                        f"Backtest | {symbol} {timeframe} Kronos gate — skip "
+                        f"({gate.reason})"
+                    )
+                    continue
+
             if config["regime_filter"]:
                 df = store.get_df(symbol, timeframe, min_bars=1)
                 if df is not None and len(df) >= 200:
@@ -1257,6 +1267,7 @@ class Backtester:
         disabled_patterns: list[str] | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
         max_workers: int = 0,
+        kronos_gate: bool | None = None,
     ):
         self._symbols = symbols
         self._tv = TVClient(settings.tv_screener, settings.tv_exchange)
@@ -1268,6 +1279,9 @@ class Backtester:
 
         self._min_confidence = min_confidence
         self._regime_filter = regime_filter
+        self._kronos_gate = (
+            settings.kronos_gate_enabled if kronos_gate is None else kronos_gate
+        )
         self._cooldown_bars = cooldown_bars
         self._txn_cost_pct = txn_cost_pct
         self._position_sizing = position_sizing
@@ -1396,6 +1410,7 @@ class Backtester:
             "atr_stop_floor_multiple": self._atr_stop_floor_multiple,
             "hard_stop_percentage": self._hard_stop_percentage,
             "min_reward_risk_ratio": self._min_reward_risk_ratio,
+            "kronos_gate": self._kronos_gate,
         }
 
         max_workers = max(1, self._max_workers)
@@ -1501,6 +1516,7 @@ class Backtester:
                 "atr_stop_floor_multiple": self._atr_stop_floor_multiple,
                 "hard_stop_percentage": self._hard_stop_percentage,
                 "min_reward_risk_ratio": self._min_reward_risk_ratio,
+                "kronos_gate": self._kronos_gate,
             },
             self._cooldown_tracker,
         )

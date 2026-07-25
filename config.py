@@ -53,12 +53,23 @@ class Settings(BaseSettings):
     scan_interval_seconds: int = 3600
     # How many symbols to process concurrently during each scan cycle.
     # Each concurrent worker opens its own MCP session.
-    scanner_concurrency: int = 10
+    scanner_concurrency: int = 15
 
     # ── ML signal (pattern_012_ml_signal, trained via `main.py --learn`) ────
     # Trade-defining params (horizon/target/stop) live in the trained model's
     # meta.json, not here — this is only the inference-time confidence gate.
     ml_confidence_threshold: float = 0.6
+
+    # ── Kronos confirm gate (core/kronos_gate.py) ───────────────────────────
+    # After a chart pattern fires, require Kronos 1w forecast to agree on
+    # direction and clear kronos_min_move_pct. Not a standalone entry pattern —
+    # `python main.py --kronos-test` found zero-shot base only has a weak
+    # +1 week direction edge (~57%), so it is used as a veto/confirm layer.
+    # Fail-open if weights missing.
+    kronos_min_move_pct: float = 0.06
+    kronos_sample_count: int = 3
+    kronos_gate_enabled: bool = True
+    kronos_gate_adjust_exits: bool = True  # overwrite TP/SL from 1w forecast when gate passes
 
     # ── Vision ────────────────────────────────────────────────────────────
     anthropic_api_key: str = ""
@@ -134,15 +145,3 @@ settings = Settings()
 DISABLED_PATTERNS: list[str] = [
     "pattern_011_breakout_retest",
 ]
-
-# DISABLED_PATTERNS: list[str] = [
-#     "pattern_009_flag_pattern",
-#     "pattern_006_upward_channel",
-#     "pattern_007_descending_channel",
-#     "pattern_008_head_and_shoulders",
-#     "pattern_012_ml_signal",
-#     "pattern_011_breakout_retest",
-#     "pattern_002_double_top",
-#     "pattern_005_rounding_top",
-#     "pattern_010_pennant",
-# ]

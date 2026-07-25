@@ -116,6 +116,11 @@ class PaperDashboard:
             top_bar, text="Use paper trade stream", variable=self._stream_var,
         ).pack(side=tk.LEFT, padx=(12, 0))
 
+        self._kronos_gate_var = tk.BooleanVar(value=settings.kronos_gate_enabled)
+        ttk.Checkbutton(
+            top_bar, text="Kronos 1w gate", variable=self._kronos_gate_var,
+        ).pack(side=tk.LEFT, padx=(12, 0))
+
         self._status_var = tk.StringVar(value="Stopped.")
         ttk.Label(top_bar, textvariable=self._status_var).pack(side=tk.LEFT, padx=(16, 0))
 
@@ -249,7 +254,7 @@ class PaperDashboard:
         self._status_var.set("Fetching symbols...")
         threading.Thread(
             target=self._run_thread,
-            args=(int(self._n_var.get()), self._stream_var.get()),
+            args=(int(self._n_var.get()), self._stream_var.get(), self._kronos_gate_var.get()),
             daemon=True,
         ).start()
 
@@ -309,7 +314,7 @@ class PaperDashboard:
             time.sleep(0.5)
         return f"Paper trade stream server didn't come up on {host}:{port} in time."
 
-    def _run_thread(self, n_symbols: int, use_stream: bool) -> None:
+    def _run_thread(self, n_symbols: int, use_stream: bool, kronos_gate: bool) -> None:
         data_feed = None
         if use_stream:
             error = self._ensure_stream_server()
@@ -337,12 +342,14 @@ class PaperDashboard:
             scan_interval_seconds=(
                 settings.papertrade_stream_interval_seconds if use_stream else None
             ),
+            kronos_gate=kronos_gate,
         )
         self._scanner = scanner
         self._task = loop.create_task(scanner.run())
         interval = settings.papertrade_stream_interval_seconds if use_stream else settings.scan_interval_seconds
         self._top.after(0, lambda: self._status_var.set(
             f"Running — {len(symbols)} symbols, scanning every {interval}s"
+            f", Kronos gate={'ON' if kronos_gate else 'OFF'}"
         ))
         error_msg: Optional[str] = None
         try:

@@ -1,5 +1,5 @@
 # Trading Bot v2 — Edwin & Toby
-### TradingView data → Indicator analysis → Vision confirmation → IBKR execution
+### TradingView data → Pattern analysis → Kronos gate → Vision confirmation → IBKR execution
 
 > **Configured for swing trading**: patterns run on daily/weekly bars, the
 > scanner polls hourly (no need for minute-by-minute polling since new bars
@@ -7,7 +7,8 @@
 > larger, multi-day-to-multi-week holds rather than rapid intraday turnover.
 
 No webhooks. No external triggers. The bot polls TradingView on its own schedule,
-detects patterns autonomously, and confirms them visually before placing any order.
+detects patterns autonomously, and confirms them (Kronos forecast + optional
+vision) before placing any order.
 
 ## Architecture
 
@@ -19,21 +20,25 @@ detects patterns autonomously, and confirms them visually before placing any ord
 │       │  OHLCV + 50+ indicators per symbol/timeframe            │
 │       ▼                                                          │
 │  OHLCV Store  ──────────────────────────────────────────────┐   │
-│  (rolling 200-bar history per symbol/timeframe)             │   │
+│  (rolling history per symbol/timeframe)                     │   │
 │       │                                                      │   │
 │       ▼                                                      │   │
 │  Pattern Module  (one file per Toby pattern)                │   │
 │    analyze(snapshot, store) → TradeSignal | None            │   │
 │       │                                                      │   │
-│       │  confidence ≥ threshold?                             │   │
+│       ▼                                                      │   │
+│  Kronos 1w gate  (optional, default ON)                     │   │
+│    forecast agrees with BUY/SELL + |move| ≥ min?             │   │
+│       │                                                      │   │
+│       │  PASS                                                │   │
 │       ▼                                                      │   │
 │  Chart Renderer  (mplfinance PNG)  ◀────────────────────────┘   │
 │       │                                                          │
 │       ▼                                                          │
-│  Vision Checker  (Claude vision API)                            │
+│  Vision Checker  (Claude vision API, optional)                  │
 │    CONFIRM / REJECT / UNCERTAIN                                  │
 │       │                                                          │
-│       │  CONFIRM only                                            │
+│       │  CONFIRM only (when enabled)                             │
 │       ▼                                                          │
 │  Risk Guard  (position size, daily loss, max positions)          │
 │       │                                                          │
@@ -41,6 +46,10 @@ detects patterns autonomously, and confirms them visually before placing any ord
 │  Order Manager  →  Interactive Brokers (IBKR)                   │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+Kronos is a **confirm/veto layer** on top of chart patterns — it does **not**
+generate entries on its own. Same gate runs in CLI scan/paper/backtest and in
+the `--ui` explorer, Backtest dialog, and Paper Trading dashboard.
 
 ## Setup
 
@@ -63,6 +72,8 @@ Set `TV_HISTORY_DAYS` in `.env` to control how many daily bars the screener pull
 ```bash
 cp .env.example .env
 # Fill in: IBKR settings, ANTHROPIC_API_KEY, WATCHLIST
+# Optional Kronos gate: KRONOS_GATE_ENABLED / KRONOS_MIN_MOVE_PCT
+#   (needs ~/Kronos weights — see "Kronos Confirm Gate" below)
 ```
 
 ### 4. Start TWS or IB Gateway
@@ -97,6 +108,9 @@ patterns run, making it easy to evaluate individual pattern performance.
 Results are saved as `backtest_results_<timestamp>.txt` (summary) and `.json`
 (full trade list) in the project root.
 
+When `KRONOS_GATE_ENABLED=true`, the backtester applies the same Kronos 1w
+confirm gate as live/paper (see [Kronos Confirm Gate](#kronos-confirm-gate)).
+
 ### Comparing all patterns
 
 To find which pattern has the lowest/highest win rate, run the comparison
@@ -121,6 +135,146 @@ at the top. Each row shows signals, trades, win/loss counts, equal-weighted
 and account-weighted P&L, average P&L, max drawdown, and Sharpe ratio.
 A detailed trade list follows each pattern's summary.
 
+## Kronos Confirm Gate
+
+[Kronos](https://github.com/shiyu-coder/Kronos) is an open-source foundation
+model for financial candlesticks (K-lines). This project uses
+[Kronos-base](https://huggingface.co/NeoQuasar/Kronos-base) as a **1-week
+forecast filter** on chart-pattern signals — not as a standalone trading
+pattern.
+
+### Why a gate (not an entry pattern)
+
+`python main.py --kronos-test` on the daily CSVs in `/home/r00t/stocks_data`
+found that zero-shot Kronos-base:
+
+- loses to a flat "no change" MAE baseline on daily bars
+- is near/below coin-flip on **+1 day** direction
+- only showed a weak edge on **+1 week** direction (~57% hit rate)
+
+So the live path keeps Toby chart patterns as the entry source, and asks
+Kronos only: *"does your 1w forecast agree, and is the predicted move large
+enough to matter?"*
+
+### What the gate does
+
+Implemented in `core/kronos_gate.py`. After a pattern emits BUY/SELL on the
+`1d` timeframe:
+
+1. Forecast the next **5 trading days** of close with Kronos-base
+   (`sample_count` averaged paths).
+2. **Reject** if `|pred_1w| < KRONOS_MIN_MOVE_PCT` (default 6%).
+3. **Reject** if the forecast direction conflicts with the signal
+   (BUY needs `pred_1w > 0`, SELL needs `pred_1w < 0`).
+4. On **PASS**, optionally overwrite take-profit / stop-loss from the
+   forecast (`KRONOS_GATE_ADJUST_EXITS=true`).
+
+Fail-open: if `~/Kronos` weights are missing or `predict()` errors, the
+signal is allowed through (with a one-time warning) so a broken install
+cannot freeze the scanner.
+
+Skipped: `CLOSE` actions and non-daily timeframes.
+
+### Where it runs
+
+| Entry point | How the gate is controlled |
+|---|---|
+| `python main.py` (live/paper scan) | `KRONOS_GATE_ENABLED` in `.env` |
+| `python main.py --paper` | same |
+| `python main.py --backtest` | same |
+| `python main.py --ui` → symbol explorer | toolbar checkbox **Kronos 1w gate** |
+| `python main.py --ui` → **Backtest** | form checkbox **Kronos 1w gate** |
+| `python main.py --ui` → **Paper Trading** | toolbar checkbox **Kronos 1w gate** |
+
+UI checkboxes default to the `.env` value but can override for that session.
+Startup logs print `Kronos gate: ON/OFF`.
+
+### `.env` settings
+
+```bash
+# Require Kronos 1w forecast to agree with chart-pattern BUY/SELL
+KRONOS_GATE_ENABLED=true
+# Overwrite TP/SL from the 1w forecast when the gate passes
+KRONOS_GATE_ADJUST_EXITS=true
+# Minimum |predicted 1w move| to pass (0.06 = 6%)
+KRONOS_MIN_MOVE_PCT=0.06
+# Average N sampled forecast paths per prediction (reduces noise)
+KRONOS_SAMPLE_COUNT=3
+```
+
+Disable anytime with `KRONOS_GATE_ENABLED=false` (or uncheck in the UI).
+
+### One-time weight setup
+
+Required for the gate (and for `--kronos-test` / `--kronos-finetune`):
+
+```bash
+git clone https://github.com/shiyu-coder/Kronos.git ~/Kronos
+```
+
+Download and cache the weights locally (avoids hitting Hugging Face on every run):
+
+```bash
+python3 -c "
+import sys; sys.path.insert(0, '$HOME/Kronos')
+from model import Kronos, KronosTokenizer
+KronosTokenizer.from_pretrained('NeoQuasar/Kronos-Tokenizer-base', token=False) \
+    .save_pretrained('$HOME/Kronos/weights/Kronos-Tokenizer-base')
+Kronos.from_pretrained('NeoQuasar/Kronos-base', token=False) \
+    .save_pretrained('$HOME/Kronos/weights/Kronos-base')
+"
+```
+
+### Forecast accuracy test (`--kronos-test`)
+
+Scores how well Kronos-base predicts +1 day / +1 week close-price moves on
+the historical daily CSVs in `/home/r00t/stocks_data` — useful before
+trusting the gate, and after fine-tuning.
+
+```bash
+# Default: 20 randomly sampled symbols, 3 walk-forward windows each
+python main.py --kronos-test
+
+# 50 symbols
+python main.py --kronos-test 50
+
+# Rank by recent dollar volume and take the top 50 (liquid large/mid-caps)
+# instead of a random sample — Kronos was trained on liquid exchange data,
+# so this is a fairer test of what it's actually good at than the random
+# sample, which is dominated by illiquid/penny/OTC tickers by sheer count.
+python main.py --kronos-test 50 --kronos-liquid-only
+
+# After fine-tuning (see below)
+python main.py --kronos-test 50 --kronos-liquid-only --kronos-use-finetuned
+```
+
+Output reports, per horizon:
+
+| Metric | Meaning |
+|---|---|
+| `n` | number of walk-forward windows scored |
+| `MAE` | mean absolute error between predicted and actual % move |
+| `naive MAE` | error of a "predict no change" baseline — the bar to beat |
+| `direction hit` | % of windows where predicted up/down matched reality (50% = coin flip) |
+
+If `MAE` doesn't beat `naive MAE` and `direction hit` sits at/below 50%,
+Kronos isn't adding value over doing nothing on that symbol set — keep the
+gate off, or fine-tune and re-test.
+
+### Fine-tuning (`--kronos-finetune`)
+
+Adapts Kronos-base's tokenizer + predictor on liquid tickers from
+`/home/r00t/stocks_data`. Saves checkpoints under `~/Kronos/finetuned/`.
+Needs a CUDA GPU to be practical. Re-score with
+`--kronos-test ... --kronos-use-finetuned` before flipping the live gate
+onto the fine-tuned weights (the live gate currently loads **base**
+weights by design — switch only after the finetuned eval beats naive).
+
+```bash
+python main.py --kronos-finetune
+python main.py --kronos-finetune --kronos-finetune-symbols 1500 --kronos-finetune-epochs 10
+```
+
 ## Symbol Explorer UI
 
 Launch the native desktop UI with:
@@ -140,11 +294,20 @@ What it supports:
 - Run all registered pattern modules for the selected symbol/timeframe.
   If a pattern is detected, its chart annotations are plotted on the graph
   and the signal appears in the detected-patterns table.
+- **Kronos 1w gate** checkbox (toolbar): when checked, explorer detections
+  must also clear the same Kronos confirm gate used by the scanner.
+- **Backtest** button: opens a parameter dialog (includes a **Kronos 1w gate**
+  checkbox) and runs `Backtester` with the same engine as
+  `python main.py --backtest`.
+- **Paper Trading** button: opens a live paper dashboard that runs
+  `MarketScanner` with a `PaperAccount` (includes a **Kronos 1w gate**
+  checkbox, same path as `python main.py --paper`).
 - Download the selected symbol's OHLCV data as CSV.
 - Save the current annotated chart as PNG.
 
-The UI reuses the same data, pattern, and chart-rendering code as the scanner,
-but it does not start the scan loop or place trades.
+The explorer reuses the same data, pattern, chart-rendering, and Kronos-gate
+code as the scanner. Backtest / Paper Trading in the UI are not toy modes —
+they call the real `Backtester` / `MarketScanner`.
 
 ## Adding a New Pattern
 
@@ -186,10 +349,15 @@ trading_bot_v2/
 │
 ├── core/
 │   ├── scanner.py                       # Main scan loop — ties everything together
-│   └── backtester.py                    # Historical walk-forward backtest engine
+│   ├── backtester.py                    # Historical walk-forward backtest engine
+│   ├── kronos_eval.py                   # Kronos-base forecast accuracy test (--kronos-test)
+│   ├── kronos_gate.py                   # Kronos 1w confirm gate for chart-pattern signals
+│   └── kronos_finetune.py               # Fine-tune Kronos on liquid tickers (--kronos-finetune)
 │
 ├── ui/
-│   └── app.py                           # Native tkinter symbol explorer
+│   ├── app.py                           # Native tkinter symbol explorer (--ui)
+│   ├── backtest_dialog.py               # UI Backtest launcher (Kronos gate checkbox)
+│   └── paper_dashboard.py               # UI Paper Trading dashboard (Kronos gate checkbox)
 │
 ├── scripts/
 │   └── compare_patterns.py             # Cross-pattern comparison backtest
@@ -198,16 +366,18 @@ trading_bot_v2/
     └── logger.py                        # Structured logging (console + files)
 ```
 
-## Two-Pass Signal Verification
+## Signal Verification
 
-Every trade must pass **both** gates:
+Every trade can pass up to **three** gates (then risk limits):
 
-| Gate | What it checks | Blocks if... |
-|------|---------------|--------------|
-| Indicator analysis | EMA crossovers, RSI, volume, TV recommendation | Confidence score below threshold |
-| Vision confirmation | Claude looks at the actual chart image | Pattern not visually present |
+| Gate | What it checks | Blocks if... | Default |
+|------|----------------|--------------|---------|
+| Pattern / indicator analysis | Chart structure + indicators → `TradeSignal` | No signal / confidence below engine threshold | always on |
+| Kronos 1w confirm | Forecast direction + `|pred_1w| ≥ KRONOS_MIN_MOVE_PCT` | Forecast disagrees or move too small | `KRONOS_GATE_ENABLED=true` |
+| Vision confirmation | Claude looks at the chart PNG | Pattern not visually present | `VISION_CONFIRMATION_ENABLED=false` |
 
-Then risk_guard adds hard limits before any order fires.
+Then risk_guard / paper sizing add hard limits before any order fires.
+Kronos runs **before** vision so rejected forecasts do not spend Claude tokens.
 
 ## Safety Rules
 - Always start with `TRADING_MODE=paper`

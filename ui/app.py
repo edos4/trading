@@ -33,6 +33,7 @@ matplotlib.use("Agg", force=True)
 
 from analysis.chart_renderer import ChartRenderer
 from config import settings
+from core.kronos_gate import kronos_gate_check
 from data.ohlcv_store import OHLCVStore
 from data.tv_client import MarketSnapshot, TVClient
 from patterns.base_pattern import BasePattern, TradeSignal
@@ -133,6 +134,8 @@ class TradingBotUI:
         ttk.Entry(toolbar, textvariable=self.filter_var, width=10).pack(side=tk.LEFT)
         self.run_patterns_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(toolbar, text="Run patterns", variable=self.run_patterns_var).pack(side=tk.LEFT, padx=(12, 0))
+        self.kronos_gate_var = tk.BooleanVar(value=settings.kronos_gate_enabled)
+        ttk.Checkbutton(toolbar, text="Kronos 1w gate", variable=self.kronos_gate_var).pack(side=tk.LEFT, padx=(12, 0))
         ttk.Button(toolbar, text="Download CSV", command=self._download_csv).pack(side=tk.RIGHT)
         ttk.Button(toolbar, text="Save chart PNG", command=self._save_chart_png).pack(side=tk.RIGHT, padx=(0, 6))
 
@@ -292,6 +295,7 @@ class TradingBotUI:
 
         signals: list[TradeSignal] = []
         if self.run_patterns_var.get():
+            use_kronos = self.kronos_gate_var.get()
             for pattern in self._patterns:
                 if timeframe not in pattern.timeframes:
                     continue
@@ -300,8 +304,16 @@ class TradingBotUI:
                 except Exception as exc:
                     log.warning(f"UI | {pattern.name} failed on {symbol} {timeframe}: {exc}")
                     continue
-                if sig is not None:
-                    signals.append(sig)
+                if sig is None:
+                    continue
+                if use_kronos:
+                    gate = kronos_gate_check(sig, self._store)
+                    if not gate.passed:
+                        log.info(
+                            f"UI | Kronos gate rejected {symbol} {sig.pattern}: {gate.reason}"
+                        )
+                        continue
+                signals.append(sig)
 
         annotations: list[dict] = []
         for s in signals:
