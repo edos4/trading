@@ -1,9 +1,7 @@
 """
 core/kronos_finetune.py — orchestrates `python main.py --kronos-finetune`:
 fine-tune Kronos-base's tokenizer and predictor on liquid tickers from
-/home/r00t/stocks_data, so it stops being a pure zero-shot forecaster (see
-`python main.py --kronos-test` — zero-shot loses to a flat "no change"
-baseline on this data).
+/home/r00t/stocks_data.
 
 Ports the training loops from ~/Kronos/finetune/{train_tokenizer,train_predictor}.py:
 same loss functions, same window normalization. Deliberately drops two

@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     # Streamed bars are historical, not live — scan far faster than the
     # settings.scan_interval_seconds cadence used for real market data.
     papertrade_stream_interval_seconds: int = 60
+    # YYYY-MM-DD cursor start for CSV replay. None = near end of each CSV
+    # (last papertrade_stream_lookback_bars). UI datepicker overrides this
+    # when launching via "Use paper trade stream".
+    papertrade_stream_start_date: str | None = None
 
     # ── Scanner ────────────────────────────────────────────────────────────
     watchlist: str
@@ -52,8 +56,15 @@ class Settings(BaseSettings):
     # and keeps TradingView/API call volume low.
     scan_interval_seconds: int = 3600
     # How many symbols to process concurrently during each scan cycle.
-    # Each concurrent worker opens its own MCP session.
+    # Each concurrent worker opens its own MCP session. Screener POSTs are
+    # still paced by tv_screener_min_interval_seconds across all workers.
     scanner_concurrency: int = 15
+    # Min gap between TradingView scanner POSTs (america/scan). Undocumented
+    # IP limit — ~10+ req/s trips HTTP 429 mid-universe. 0.5s ≈ 2 req/s.
+    tv_screener_min_interval_seconds: float = 0.5
+    # Retries after HTTP 429 from scanner.tradingview.com (exponential backoff).
+    tv_screener_max_retries: int = 5
+    tv_screener_retry_backoff_seconds: float = 2.0
 
     # ── ML signal (pattern_012_ml_signal, trained via `main.py --learn`) ────
     # Trade-defining params (horizon/target/stop) live in the trained model's
@@ -63,13 +74,26 @@ class Settings(BaseSettings):
     # ── Kronos confirm gate (core/kronos_gate.py) ───────────────────────────
     # After a chart pattern fires, require Kronos 1w forecast to agree on
     # direction and clear kronos_min_move_pct. Not a standalone entry pattern —
-    # `python main.py --kronos-test` found zero-shot base only has a weak
-    # +1 week direction edge (~57%), so it is used as a veto/confirm layer.
-    # Fail-open if weights missing.
-    kronos_min_move_pct: float = 0.06
+    # veto/confirm layer only. Fail-open if weights missing.
+    kronos_min_move_pct: float = 0.02
     kronos_sample_count: int = 3
     kronos_gate_enabled: bool = True
-    kronos_gate_adjust_exits: bool = True  # overwrite TP/SL from 1w forecast when gate passes
+    # Off by default: rewriting pattern TP/SL from the 1w forecast made paper
+    # and "pattern" backtests describe different strategies (paper +81% while
+    # Kronos-on formal BT printed PF 0.046). Gate still vetoes on direction;
+    # exits stay the pattern's until adjust_exits is proven to lift expectancy.
+    kronos_gate_adjust_exits: bool = False
+
+    # ── Volume confirm gate (analysis/price_volume.py) ─────────────────────
+    # After a chart pattern fires, require relative volume (signal bar /
+    # SMA20) ≥ volume_gate_rvol_min AND OBV slope over volume_gate_obv_bars
+    # to agree with BUY/SELL. Off by default: 2026-07-26 A/B (25 symbols)
+    # showed gate ON → 0 trades and gate OFF → PF 0.046 — neither is an edge.
+    # Re-enable only after --volume-gate-compare shows OOS expectancy lift.
+    # Fail-open on short history.
+    volume_gate_enabled: bool = False
+    volume_gate_rvol_min: float = 1.5
+    volume_gate_obv_bars: int = 5
 
     # ── Vision ────────────────────────────────────────────────────────────
     anthropic_api_key: str = ""
@@ -86,6 +110,21 @@ class Settings(BaseSettings):
     @classmethod
     def _clamp_history_days(cls, value: int) -> int:
         return max(1, min(value, 365))
+
+    @field_validator("tv_screener_min_interval_seconds")
+    @classmethod
+    def _clamp_screener_interval(cls, value: float) -> float:
+        return max(0.0, value)
+
+    @field_validator("tv_screener_max_retries")
+    @classmethod
+    def _clamp_screener_retries(cls, value: int) -> int:
+        return max(0, min(value, 20))
+
+    @field_validator("tv_screener_retry_backoff_seconds")
+    @classmethod
+    def _clamp_screener_backoff(cls, value: float) -> float:
+        return max(0.1, value)
 
     @property
     def is_live(self) -> bool:

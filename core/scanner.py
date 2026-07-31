@@ -34,6 +34,13 @@ from analysis.chart_renderer import ChartRenderer
 from analysis.vision_checker import VisionChecker, VisionVerdict
 from core.paper_trader import PaperAccount
 from core.kronos_gate import kronos_gate_check
+from core.engine_defaults import (
+    ENGINE,
+    passes_cooldown,
+    passes_min_confidence,
+    passes_regime_filter,
+)
+from analysis.price_volume import volume_confirm_gate
 
 # TODO: re-enable IBKR when TWS/Gateway is available
 # from broker.ibkr_client import IBKRClient
@@ -56,6 +63,7 @@ class MarketScanner:
         data_feed=None,
         scan_interval_seconds: int | None = None,
         kronos_gate: bool | None = None,
+        volume_gate: bool | None = None,
     ):
         self._symbols = symbols or settings.symbols
         self._disabled_patterns = set(disabled_patterns or [])
@@ -63,6 +71,9 @@ class MarketScanner:
         # None → follow settings; explicit True/False lets UI/CLI override for a session.
         self._kronos_gate = (
             settings.kronos_gate_enabled if kronos_gate is None else kronos_gate
+        )
+        self._volume_gate = (
+            settings.volume_gate_enabled if volume_gate is None else volume_gate
         )
         self._tv = data_feed or TVClient(
             settings.tv_screener,
@@ -93,6 +104,10 @@ class MarketScanner:
         # live trading isn't more optimistic than the backtest that validated
         # the strategy (filling on the very candle whose close triggered it).
         self._pending_entries: dict[str, TradeSignal] = {}
+        # Same (symbol, pattern) → (exit_bar_count, was_loss) cooldown map the
+        # backtester uses — without this, paper re-entered losers immediately
+        # while backtests waited cooldown_bars.
+        self._cooldown_tracker: dict[tuple[str, str], tuple[int, bool]] = {}
         # Scan-cycle health counters — surfaced by the paper trading UI/CLI
         # so a stalled or misbehaving scan is visible without reading logs.
         self.stats: dict = {
@@ -100,6 +115,7 @@ class MarketScanner:
             "scan_duration_s": 0.0,
             "patterns_found": 0,
             "signals_rejected": 0,
+            "volume_gate_rejected": 0,
             "trades_opened": 0,
             "sim_days": 0,
         }
@@ -117,6 +133,7 @@ class MarketScanner:
             f"symbols={self._symbols} | "
             f"patterns={[p.name for p in self._patterns]} | "
             f"kronos_gate={'ON' if self._kronos_gate else 'OFF'} | "
+            f"volume_gate={'ON' if self._volume_gate else 'OFF'} | "
             f"interval={self._scan_interval}s"
         )
 
@@ -212,7 +229,14 @@ class MarketScanner:
                             self.stats["sim_days"] = self._sim_days
 
                         if self._paper is not None:
-                            self._paper.on_bar(symbol, snapshot.candle, timeframe, is_new_bar)
+                            closed = self._paper.on_bar(
+                                symbol, snapshot.candle, timeframe, is_new_bar,
+                            )
+                            if closed is not None:
+                                bar_idx = self._paper.bar_count(closed.symbol)
+                                self._cooldown_tracker[
+                                    (closed.symbol, closed.pattern)
+                                ] = (bar_idx, closed.pnl < 0)
 
                         if not is_new_bar:
                             # Same bar as last scan (e.g. a daily pattern
@@ -263,7 +287,37 @@ class MarketScanner:
             f"confidence={signal.confidence:.2f}"
         )
 
-        # Step 0 — Kronos 1w confirm gate (direction + min move). Runs before
+        # Step 0 — Same entry gates the backtester applies before Kronos/volume
+        # (min_confidence + SMA200 regime + post-loss cooldown). Without these,
+        # paper/live took trades the "validated" backtest would have skipped.
+        if not passes_min_confidence(signal):
+            log.info(
+                f"Signal REJECTED by confidence — {signal.symbol} "
+                f"{signal.pattern} | {signal.confidence:.2f} < {ENGINE.min_confidence:.2f}"
+            )
+            self.stats["signals_rejected"] += 1
+            return
+
+        if not passes_regime_filter(signal, self._store):
+            log.info(
+                f"Signal REJECTED by regime filter — {signal.symbol} "
+                f"{signal.pattern} | {signal.action}"
+            )
+            self.stats["signals_rejected"] += 1
+            return
+
+        bar_idx = (
+            self._paper.bar_count(signal.symbol) if self._paper is not None else 0
+        )
+        if not passes_cooldown(signal, bar_idx, self._cooldown_tracker):
+            log.info(
+                f"Signal REJECTED by cooldown — {signal.symbol} "
+                f"{signal.pattern} | bars since loss < {ENGINE.cooldown_bars}"
+            )
+            self.stats["signals_rejected"] += 1
+            return
+
+        # Step 0b — Kronos 1w confirm gate (direction + min move). Runs before
         # vision so we don't burn Claude tokens on forecasts that disagree.
         # Fail-open when weights missing — see core/kronos_gate.py.
         if self._kronos_gate:
@@ -280,6 +334,22 @@ class MarketScanner:
                     f"Kronos gate PASS | {signal.symbol} {signal.pattern} | "
                     f"pred_1w={gate.pred_1w:+.2%} | {gate.reason}"
                 )
+
+        # Step 0c — Volume confirm gate (RVOL + OBV direction).
+        if self._volume_gate:
+            vgate = volume_confirm_gate(signal, self._store)
+            if not vgate.passed:
+                log.info(
+                    f"Volume gate REJECT | {signal.symbol} {signal.pattern} | "
+                    f"{vgate.reason}"
+                )
+                self.stats["signals_rejected"] += 1
+                self.stats["volume_gate_rejected"] += 1
+                return
+            log.info(
+                f"Volume gate PASS | {signal.symbol} {signal.pattern} | "
+                f"{vgate.reason}"
+            )
 
         # Step 1 — Vision confirmation, only when enabled. The pattern's own
         # min_confidence already gated this signal before analyze() returned

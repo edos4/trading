@@ -7,10 +7,8 @@ through when:
   - predicted move aligns with the signal action, AND
   - |pred_1w| >= settings.kronos_min_move_pct
 
-Background: `python main.py --kronos-test` found zero-shot Kronos-base loses
-to a flat baseline on daily bars; only the +1 week horizon showed a weak
-direction edge (~57%). So the model is used as a veto/confirm layer on top
-of Toby patterns, not as a standalone entry.
+Used as a veto/confirm layer on top of Toby patterns, not as a standalone
+entry.
 
 If weights are missing or predict fails, the gate fails open (passes the
 signal) so a broken Kronos install cannot freeze the scanner.

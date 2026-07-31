@@ -30,6 +30,13 @@ from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
 from data.tv_client import TVClient, MarketSnapshot, OHLCVCandle, SCREENER_FIELDS
 from patterns.base_pattern import BasePattern, TradeSignal
 from analysis.indicator_engine import IndicatorEngine
+from analysis.price_volume import compute_volume_metrics, volume_confirm_gate
+from core.engine_defaults import (
+    ENGINE,
+    passes_cooldown,
+    passes_min_confidence,
+    passes_regime_filter,
+)
 from core.kronos_gate import kronos_gate_check
 from utils.logger import log
 
@@ -68,6 +75,9 @@ class BacktestTrade:
     confidence: float = 0.0
     qty: float = 0.0
     notes: str = ""
+    # Price-volume metrics at signal time (analysis.price_volume).
+    rvol: float | None = None
+    obv_slope: float | None = None
 
     # Paper trading overwrites entry_date/exit_date with the real wall-clock
     # fill time (see core.paper_trader) so the dashboard can show "when did
@@ -352,6 +362,8 @@ class BacktestResult:
                     "confidence": round(t.confidence, 4),
                     "qty": round(t.qty, 4),
                     "notes": t.notes,
+                    "rvol": round(t.rvol, 4) if t.rvol is not None else None,
+                    "obv_slope": round(t.obv_slope, 4) if t.obv_slope is not None else None,
                 }
                 for t in self.trades
             ],
@@ -742,6 +754,8 @@ def _open_trade(
         confidence=signal.confidence,
         qty=signal.qty,
         notes=signal.notes,
+        rvol=signal.rvol,
+        obv_slope=signal.obv_slope,
         lowest_close_since_entry=(
             candle.close if signal.trailing_stop_mode == "lowest_close" else None
         ),
@@ -1068,11 +1082,7 @@ def _core_backtest_symbol(
                 f"confidence={signal.confidence:.2f} {signal.pattern}"
             )
 
-            if signal.confidence < config["min_confidence"]:
-                log.debug(
-                    f"Backtest | {symbol} {timeframe} confidence "
-                    f"{signal.confidence:.2f} < min {config['min_confidence']} — skip"
-                )
+            if not passes_min_confidence(signal, config["min_confidence"]):
                 continue
 
             if config.get("kronos_gate"):
@@ -1084,35 +1094,37 @@ def _core_backtest_symbol(
                     )
                     continue
 
-            if config["regime_filter"]:
-                df = store.get_df(symbol, timeframe, min_bars=1)
-                if df is not None and len(df) >= 200:
-                    close = df["close"]
-                    sma200 = close.rolling(200).mean()
-                    current_sma200 = float(sma200.iloc[-1])
-                    current_close = float(close.iloc[-1])
-                    if signal.action == "BUY" and current_close < current_sma200:
-                        log.debug(
-                            f"Backtest | {symbol} {timeframe} BUY below SMA200 — skip"
-                        )
-                        continue
-                    if signal.action == "SELL" and current_close > current_sma200:
-                        log.debug(
-                            f"Backtest | {symbol} {timeframe} SELL above SMA200 — skip"
-                        )
-                        continue
+            if config.get("volume_gate"):
+                vgate = volume_confirm_gate(
+                    signal, store,
+                    rvol_min=config.get("volume_gate_rvol_min"),
+                    obv_bars=config.get("volume_gate_obv_bars"),
+                )
+                if not vgate.passed:
+                    log.debug(
+                        f"Backtest | {symbol} {timeframe} Volume gate — skip "
+                        f"({vgate.reason})"
+                    )
+                    continue
+            else:
+                # Still tag metrics for A/B post-analysis when gate is off.
+                rvol, slope = compute_volume_metrics(
+                    store, symbol, timeframe,
+                    obv_bars=config.get("volume_gate_obv_bars"),
+                )
+                signal.rvol = rvol
+                signal.obv_slope = slope
 
-            if config["cooldown_bars"] > 0:
-                key = (symbol, signal.pattern)
-                if key in cooldown_tracker:
-                    exit_bar, was_loss = cooldown_tracker[key]
-                    bars_since = i - exit_bar
-                    if was_loss and bars_since < config["cooldown_bars"]:
-                        log.debug(
-                            f"Backtest | {symbol} {timeframe} cooldown "
-                            f"{bars_since}/{config['cooldown_bars']} bars — skip"
-                        )
-                        continue
+            if not passes_regime_filter(
+                signal, store, enabled=config["regime_filter"],
+            ):
+                continue
+
+            if not passes_cooldown(
+                signal, i, cooldown_tracker,
+                cooldown_bars=config["cooldown_bars"],
+            ):
+                continue
 
             if not apply_risk_gates(
                 signal, store, symbol, timeframe,
@@ -1245,29 +1257,30 @@ class Backtester:
     def __init__(
         self,
         symbols: list[str],
-        min_confidence: float = 0.0,
-        regime_filter: bool = False,
-        cooldown_bars: int = 0,
-        txn_cost_pct: float = 0.0,
-        position_sizing: str = "pattern",
-        account_value: float = 100_000.0,
-        risk_per_trade_pct: float = 0.01,
-        max_position_pct: float = 0.10,
-        trailing_activation_default: float | None = None,
-        max_open_positions: int = 8,
-        min_hold_bars: int = 2,
-        breakeven_trigger_pct: float | None = None,
-        breakeven_buffer_pct: float = 0.0015,
-        min_atr_stop_multiple: float | None = None,
-        synthetic_stop_multiple: float = 1.0,
-        atr_stop_floor_multiple: float | None = None,
-        hard_stop_percentage: float | None = 0.03,
-        min_reward_risk_ratio: float | None = None,
+        min_confidence: float = ENGINE.min_confidence,
+        regime_filter: bool = ENGINE.regime_filter,
+        cooldown_bars: int = ENGINE.cooldown_bars,
+        txn_cost_pct: float = ENGINE.txn_cost_pct,
+        position_sizing: str = ENGINE.position_sizing,
+        account_value: float = ENGINE.account_value,
+        risk_per_trade_pct: float = ENGINE.risk_per_trade_pct,
+        max_position_pct: float = ENGINE.max_position_pct,
+        trailing_activation_default: float | None = ENGINE.trailing_activation_default,
+        max_open_positions: int = 0,
+        min_hold_bars: int = ENGINE.min_hold_bars,
+        breakeven_trigger_pct: float | None = ENGINE.breakeven_trigger_pct,
+        breakeven_buffer_pct: float = ENGINE.breakeven_buffer_pct,
+        min_atr_stop_multiple: float | None = ENGINE.min_atr_stop_multiple,
+        synthetic_stop_multiple: float = ENGINE.synthetic_stop_multiple,
+        atr_stop_floor_multiple: float | None = ENGINE.atr_stop_floor_multiple,
+        hard_stop_percentage: float | None = ENGINE.hard_stop_percentage,
+        min_reward_risk_ratio: float | None = ENGINE.min_reward_risk_ratio,
         pattern_filter: str | None = None,
         disabled_patterns: list[str] | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
         max_workers: int = 0,
         kronos_gate: bool | None = None,
+        volume_gate: bool | None = None,
     ):
         self._symbols = symbols
         self._tv = TVClient(settings.tv_screener, settings.tv_exchange)
@@ -1281,6 +1294,9 @@ class Backtester:
         self._regime_filter = regime_filter
         self._kronos_gate = (
             settings.kronos_gate_enabled if kronos_gate is None else kronos_gate
+        )
+        self._volume_gate = (
+            settings.volume_gate_enabled if volume_gate is None else volume_gate
         )
         self._cooldown_bars = cooldown_bars
         self._txn_cost_pct = txn_cost_pct
@@ -1411,6 +1427,9 @@ class Backtester:
             "hard_stop_percentage": self._hard_stop_percentage,
             "min_reward_risk_ratio": self._min_reward_risk_ratio,
             "kronos_gate": self._kronos_gate,
+            "volume_gate": self._volume_gate,
+            "volume_gate_rvol_min": settings.volume_gate_rvol_min,
+            "volume_gate_obv_bars": settings.volume_gate_obv_bars,
         }
 
         max_workers = max(1, self._max_workers)
@@ -1517,6 +1536,9 @@ class Backtester:
                 "hard_stop_percentage": self._hard_stop_percentage,
                 "min_reward_risk_ratio": self._min_reward_risk_ratio,
                 "kronos_gate": self._kronos_gate,
+                "volume_gate": self._volume_gate,
+                "volume_gate_rvol_min": settings.volume_gate_rvol_min,
+                "volume_gate_obv_bars": settings.volume_gate_obv_bars,
             },
             self._cooldown_tracker,
         )

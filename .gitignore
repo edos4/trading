@@ -1,5 +1,5 @@
 graphify-out/
-data
+data/cache
 charts
 __pycache__
 data/__pycache__

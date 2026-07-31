@@ -21,6 +21,7 @@ from typing import Any, Callable, Optional
 
 from config import settings, DISABLED_PATTERNS
 from core.backtester import Backtester, BacktestResult, discover_pattern_names
+from core.engine_defaults import ENGINE
 from data.tv_client import TVClient
 from utils.logger import log
 
@@ -31,6 +32,7 @@ from utils.logger import log
 #   For "spin": default is packed as (default_value, min, max, increment).
 #   For the "pattern_filter" combo, choices is None here and filled in
 #   dynamically at dialog build time from discover_pattern_names().
+# Defaults come from ENGINE so the UI form matches CLI backtest + paper.
 
 def _decimals_for_increment(inc: float) -> int:
     """Decimal places to display for a spinbox increment (1 -> 0, 0.001 -> 3)."""
@@ -58,44 +60,52 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
     (
         "min_confidence", "Min confidence",
         "Minimum pattern confidence to act on a signal (0.0-1.0). Higher = fewer but higher-quality trades.",
-        "spin", (0.6, 0.0, 1.0, 0.01), None,
+        "spin", (ENGINE.min_confidence, 0.0, 1.0, 0.01), None,
     ),
     (
         "regime_filter", "Regime filter (SMA200)",
         "Only buy above 200-day SMA, only sell below it. Filters counter-trend trades.",
-        "check", True, None,
+        "check", ENGINE.regime_filter, None,
     ),
     (
         "kronos_gate", "Kronos 1w gate",
         "Require Kronos-base +1 week forecast to agree with the pattern's BUY/SELL "
-        "and clear KRONOS_MIN_MOVE_PCT before taking the trade. Fail-open if weights missing.",
+        "and clear KRONOS_MIN_MOVE_PCT before taking the trade. Fail-open if weights missing. "
+        "Does not rewrite TP/SL unless KRONOS_GATE_ADJUST_EXITS=true.",
         "check", settings.kronos_gate_enabled, None,
+    ),
+    (
+        "volume_gate", "Volume gate (RVOL+OBV)",
+        "Require relative volume ≥ VOLUME_GATE_RVOL_MIN and OBV slope agreeing with "
+        "BUY/SELL. Off by default — 2026-07-26 A/B showed no expectancy edge "
+        "(ON→0 trades). Fail-open on short history.",
+        "check", settings.volume_gate_enabled, None,
     ),
     (
         "cooldown_bars", "Cooldown (bars)",
         "Bars to wait before re-entering the same symbol+pattern after a loss. Reduces re-entering into chop.",
-        "spin", (10, 0, 200, 1), None,
+        "spin", (ENGINE.cooldown_bars, 0, 200, 1), None,
     ),
     (
         "txn_cost_pct", "Txn cost (%)",
         "Per-trade transaction cost as a fraction of price (0.001 = 0.1%). Applied on entry + exit.",
-        "spin", (0.001, 0.0, 0.01, 0.0001), None,
+        "spin", (ENGINE.txn_cost_pct, 0.0, 0.01, 0.0001), None,
     ),
     (
         "position_sizing", "Position sizing",
         "Sizing method: 'risk' risks a fixed % of account per trade based on stop distance; "
         "'pattern' uses pattern's qty; 'notional' uses fixed notional; 'atr' sizes by ATR.",
-        "combo", "risk", ["risk", "pattern", "notional", "atr"],
+        "combo", ENGINE.position_sizing, ["risk", "pattern", "notional", "atr"],
     ),
     (
         "account_value", "Account value ($)",
         "Starting capital for the backtest.",
-        "spin", (100000.0, 1000.0, 1000000.0, 1000.0), None,
+        "spin", (ENGINE.account_value, 1000.0, 1000000.0, 1000.0), None,
     ),
     (
         "risk_per_trade_pct", "Risk per trade (%)",
         "Fraction of account risked per trade when position_sizing='risk' (0.02 = 2%).",
-        "spin", (0.02, 0.0, 0.1, 0.001), None,
+        "spin", (ENGINE.risk_per_trade_pct, 0.0, 0.1, 0.001), None,
     ),
     (
         "max_position_pct", "Max position (%)",
@@ -104,51 +114,51 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
         "implies for a given stop, every trade gets capped to this and "
         "risk_per_trade_pct stops mattering. 0.33 lets a 2% risk_per_trade_pct fully "
         "bind against a ~6% stop (0.02/0.06); lower it to trade smaller/more diversified.",
-        "spin", (0.33, 0.01, 1.0, 0.01), None,
+        "spin", (ENGINE.max_position_pct, 0.01, 1.0, 0.01), None,
     ),
     (
         "trailing_activation_default", "Trailing activation (%)",
         "Cushion of unrealized profit before trailing stop arms (0.02 = 2%). "
         "Prevents entry-day chop from stopping trades early. Only applies to "
         "patterns that don't set their own trailing_activation_pct.",
-        "spin", (0.02, 0.0, 0.1, 0.001), None,
+        "spin", (ENGINE.trailing_activation_default, 0.0, 0.1, 0.001), None,
     ),
     (
         "min_hold_bars", "Min hold (bars)",
         "Mandatory holding period before trailing/breakeven stops can fire. "
         "Static stop-loss and take-profit still work immediately.",
-        "spin", (2, 0, 50, 1), None,
+        "spin", (ENGINE.min_hold_bars, 0, 50, 1), None,
     ),
     (
         "breakeven_trigger_pct", "Breakeven trigger (%)",
         "Once a trade is ahead by this much, its floor is raised to ~entry. "
         "Aligns with trailing activation so any trade that arms trailing also arms breakeven. "
         "0 = disabled.",
-        "spin", (0.0, 0.0, 0.2, 0.001), None,
+        "spin", (ENGINE.breakeven_trigger_pct or 0.0, 0.0, 0.2, 0.001), None,
     ),
     (
         "breakeven_buffer_pct", "Breakeven buffer (%)",
         "How far above entry (longs) / below entry (shorts) the breakeven floor sits. "
         "Ensures round-trip exits clear txn costs and land as small wins. (0.003 = 0.3%)",
-        "spin", (0.003, 0.0, 0.05, 0.0005), None,
+        "spin", (ENGINE.breakeven_buffer_pct, 0.0, 0.05, 0.0005), None,
     ),
     (
         "min_atr_stop_multiple", "Min ATR stop multiple",
         "Requires trailing distance to be at least N× recent ATR before taking the trade. "
         "Screens out setups where the stop is ordinary daily noise. 0 = disabled.",
-        "spin", (1.0, 0.0, 5.0, 0.1), None,
+        "spin", (ENGINE.min_atr_stop_multiple, 0.0, 5.0, 0.1), None,
     ),
     (
         "synthetic_stop_multiple", "Synthetic stop multiple",
         "Catastrophic gap-protection stop = N × trailing_stop_pct. "
         "Higher = stop acts as disaster backstop, not routine exit. 0 = disabled.",
-        "spin", (2.0, 0.0, 5.0, 0.05), None,
+        "spin", (ENGINE.synthetic_stop_multiple, 0.0, 5.0, 0.05), None,
     ),
     (
         "atr_stop_floor_multiple", "ATR stop floor multiple",
         "Widens (never tightens) a pattern's own stop_loss up to N× recent ATR when "
         "the pattern's structural stop is tighter than that. 0 = disabled.",
-        "spin", (1.2, 0.0, 5.0, 0.1), None,
+        "spin", (ENGINE.atr_stop_floor_multiple, 0.0, 5.0, 0.1), None,
     ),
     (
         "hard_stop_percentage", "Hard stop (%)",
@@ -156,13 +166,13 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
         "is looser (or unset). Catastrophic-tail backstop — keep wider than the "
         "synthetic/ATR-floor stops it backstops or it becomes the everyday stop "
         "instead of a tail case. 0 = disabled.",
-        "spin", (0.06, 0.0, 0.5, 0.005), None,
+        "spin", (ENGINE.hard_stop_percentage, 0.0, 0.5, 0.005), None,
     ),
     (
         "min_reward_risk_ratio", "Min reward:risk ratio",
         "Skips signals whose take_profit/stop_loss ratio is below this. "
         "Screens out low-quality setups while keeping high-R:R winners. 0 = disabled.",
-        "spin", (1.5, 0.0, 10.0, 0.1), None,
+        "spin", (ENGINE.min_reward_risk_ratio, 0.0, 10.0, 0.1), None,
     ),
     (
         "max_open_positions", "Max open positions",
@@ -272,6 +282,11 @@ class BacktestDialog:
         self._run_btn = ttk.Button(btn_frame, text="Run Backtest", command=self._run_backtest)
         self._run_btn.pack(side=tk.LEFT)
 
+        self._ab_btn = ttk.Button(
+            btn_frame, text="Compare A/B (Volume)", command=self._run_volume_ab,
+        )
+        self._ab_btn.pack(side=tk.LEFT, padx=(6, 0))
+
         self._progress = ttk.Progressbar(btn_frame, mode="determinate", length=280)
         self._progress.pack(side=tk.LEFT, padx=(8, 4))
 
@@ -367,6 +382,7 @@ class BacktestDialog:
         kwargs = params["kwargs"]
         self._busy = True
         self._run_btn.config(state=tk.DISABLED)
+        self._ab_btn.config(state=tk.DISABLED)
         self._progress["value"] = 0
         self._pct_var.set("0%")
         self._elapsed_var.set("Elapsed: 0s")
@@ -379,6 +395,35 @@ class BacktestDialog:
         self._tree.delete(*self._tree.get_children())
         threading.Thread(
             target=self._run_backtest_thread,
+            args=(n_symbols, pattern, kwargs),
+            daemon=True,
+        ).start()
+
+    def _run_volume_ab(self) -> None:
+        """Run the same backtest twice — volume gate OFF then ON — and show deltas."""
+        if self._busy:
+            return
+        params = self._collect_params()
+        n_symbols = params["n_symbols"]
+        pattern = params["pattern"]
+        kwargs = dict(params["kwargs"])
+        # A/B forces both sides; ignore the form checkbox for the pair of runs.
+        kwargs.pop("volume_gate", None)
+        self._busy = True
+        self._run_btn.config(state=tk.DISABLED)
+        self._ab_btn.config(state=tk.DISABLED)
+        self._progress["value"] = 0
+        self._pct_var.set("0%")
+        self._elapsed_var.set("Elapsed: 0s")
+        self._eta_var.set("ETA: \u2014")
+        self._status_var.set(f"Volume A/B compare (top {n_symbols} symbols)...")
+        self._summary_text.config(state=tk.NORMAL)
+        self._summary_text.delete("1.0", tk.END)
+        self._summary_text.insert(tk.END, "Running volume gate OFF then ON...\n")
+        self._summary_text.config(state=tk.DISABLED)
+        self._tree.delete(*self._tree.get_children())
+        threading.Thread(
+            target=self._run_volume_ab_thread,
             args=(n_symbols, pattern, kwargs),
             daemon=True,
         ).start()
@@ -397,6 +442,44 @@ class BacktestDialog:
             self._top.after(0, lambda: self._finish(result, None))
         except Exception as exc:
             err_msg = f"Backtest failed: {exc}"
+            log.error(f"UI Backtest | {err_msg}")
+            self._top.after(0, lambda: self._finish(None, err_msg))
+
+    def _run_volume_ab_thread(self, n_symbols: int, pattern: Optional[str], kwargs: dict) -> None:
+        try:
+            from analysis.price_volume import ab_metrics_from_result
+
+            symbol_rows = TVClient.fetch_top_symbols_with_exchanges_cached(
+                n_symbols, settings.tv_screener,
+            )
+            if not symbol_rows:
+                self._top.after(0, lambda: self._finish(None, "No symbols returned by screener."))
+                return
+            symbols = [s for s, _ex in symbol_rows]
+
+            def progress(completed: int, total: int) -> None:
+                # Two full passes — map into a 0–100 overall bar.
+                # First pass reported as 0–50, second as 50–100 via phase flag.
+                self._on_progress(completed, total)
+
+            off_bt = Backtester(
+                symbols, pattern_filter=pattern, volume_gate=False,
+                progress_callback=progress, **kwargs,
+            )
+            result_off = asyncio.run(off_bt.run())
+            on_bt = Backtester(
+                symbols, pattern_filter=pattern, volume_gate=True,
+                progress_callback=progress, **kwargs,
+            )
+            result_on = asyncio.run(on_bt.run())
+            off_m = ab_metrics_from_result(result_off)
+            on_m = ab_metrics_from_result(result_on)
+            self._top.after(
+                0,
+                lambda: self._finish_ab(result_off, result_on, off_m, on_m, None),
+            )
+        except Exception as exc:
+            err_msg = f"Volume A/B failed: {exc}"
             log.error(f"UI Backtest | {err_msg}")
             self._top.after(0, lambda: self._finish(None, err_msg))
 
@@ -441,6 +524,7 @@ class BacktestDialog:
         self._timer_running = False
         self._busy = False
         self._run_btn.config(state=tk.NORMAL)
+        self._ab_btn.config(state=tk.NORMAL)
         if error:
             self._status_var.set(error)
             self._summary_text.config(state=tk.NORMAL)
@@ -479,6 +563,90 @@ class BacktestDialog:
             )
         self._status_var.set(
             f"Done: {result.win_rate:.1%} win rate ({result.win_count}W / {result.loss_count}L / {len(result.trades)} total)"
+        )
+
+    def _finish_ab(
+        self,
+        result_off: BacktestResult,
+        result_on: BacktestResult,
+        off_m: dict,
+        on_m: dict,
+        error: Optional[str],
+    ) -> None:
+        self._timer_running = False
+        self._busy = False
+        self._run_btn.config(state=tk.NORMAL)
+        self._ab_btn.config(state=tk.NORMAL)
+        if error:
+            self._finish(None, error)
+            return
+        self._last_result = result_on  # save ON side by default
+        self._save_btn.config(state=tk.NORMAL)
+        self._progress["value"] = 100
+        self._pct_var.set("100%")
+
+        keys = [
+            "trades", "win_rate", "avg_r", "expectancy_pct",
+            "profit_factor", "max_drawdown_pct", "account_weighted_pnl_pct",
+            "total_signals",
+        ]
+
+        def _fmt(v: Any) -> str:
+            if v is None:
+                return "—"
+            if isinstance(v, float):
+                return f"{v:+.4f}" if abs(v) < 10 else f"{v:.4f}"
+            return str(v)
+
+        lines = [
+            "=" * 60,
+            "  VOLUME GATE A/B COMPARE",
+            "=" * 60,
+            f"  {'metric':28s}  {'OFF':>12s}  {'ON':>12s}  {'delta':>12s}",
+            "-" * 60,
+        ]
+        for k in keys:
+            a, b = off_m[k], on_m[k]
+            if a is None or b is None:
+                delta = "—"
+            elif isinstance(a, (int, float)) and isinstance(b, (int, float)):
+                delta = _fmt(b - a)
+            else:
+                delta = "—"
+            lines.append(f"  {k:28s}  {_fmt(a):>12s}  {_fmt(b):>12s}  {delta:>12s}")
+        lines.append("=" * 60)
+        lines.append("")
+        lines.append("--- Gate OFF ---")
+        lines.append(result_off.summary())
+        lines.append("")
+        lines.append("--- Gate ON ---")
+        lines.append(result_on.summary())
+
+        self._summary_text.config(state=tk.NORMAL)
+        self._summary_text.delete("1.0", tk.END)
+        self._summary_text.insert(tk.END, "\n".join(lines))
+        self._summary_text.config(state=tk.DISABLED)
+
+        # Show ON trades in the table
+        self._tree.delete(*self._tree.get_children())
+        for t in sorted(result_on.trades, key=lambda t: t.entry_date):
+            self._tree.insert(
+                "", tk.END,
+                values=(
+                    t.entry_date.strftime("%Y-%m-%d"),
+                    t.action,
+                    t.symbol,
+                    t.timeframe,
+                    f"{t.entry_price:.2f}",
+                    f"{t.exit_price:.2f}",
+                    f"{t.pnl_pct:+.2f}%",
+                    t.exit_reason,
+                    t.pattern,
+                ),
+            )
+        self._status_var.set(
+            f"A/B done: OFF n={off_m['trades']} exp={off_m['expectancy_pct']} | "
+            f"ON n={on_m['trades']} exp={on_m['expectancy_pct']}"
         )
 
     # ── Save results ─────────────────────────────────────────────────────

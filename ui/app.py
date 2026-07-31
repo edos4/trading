@@ -34,6 +34,8 @@ matplotlib.use("Agg", force=True)
 from analysis.chart_renderer import ChartRenderer
 from config import settings
 from core.kronos_gate import kronos_gate_check
+from core.engine_defaults import passes_min_confidence, passes_regime_filter
+from analysis.price_volume import volume_confirm_gate
 from data.ohlcv_store import OHLCVStore
 from data.tv_client import MarketSnapshot, TVClient
 from patterns.base_pattern import BasePattern, TradeSignal
@@ -136,6 +138,8 @@ class TradingBotUI:
         ttk.Checkbutton(toolbar, text="Run patterns", variable=self.run_patterns_var).pack(side=tk.LEFT, padx=(12, 0))
         self.kronos_gate_var = tk.BooleanVar(value=settings.kronos_gate_enabled)
         ttk.Checkbutton(toolbar, text="Kronos 1w gate", variable=self.kronos_gate_var).pack(side=tk.LEFT, padx=(12, 0))
+        self.volume_gate_var = tk.BooleanVar(value=settings.volume_gate_enabled)
+        ttk.Checkbutton(toolbar, text="Volume gate", variable=self.volume_gate_var).pack(side=tk.LEFT, padx=(12, 0))
         ttk.Button(toolbar, text="Download CSV", command=self._download_csv).pack(side=tk.RIGHT)
         ttk.Button(toolbar, text="Save chart PNG", command=self._save_chart_png).pack(side=tk.RIGHT, padx=(0, 6))
 
@@ -296,6 +300,7 @@ class TradingBotUI:
         signals: list[TradeSignal] = []
         if self.run_patterns_var.get():
             use_kronos = self.kronos_gate_var.get()
+            use_volume = self.volume_gate_var.get()
             for pattern in self._patterns:
                 if timeframe not in pattern.timeframes:
                     continue
@@ -306,11 +311,24 @@ class TradingBotUI:
                     continue
                 if sig is None:
                     continue
+                # Same confidence + regime gates as scanner/backtest so the
+                # explorer does not show setups paper would reject.
+                if not passes_min_confidence(sig):
+                    continue
+                if not passes_regime_filter(sig, self._store):
+                    continue
                 if use_kronos:
                     gate = kronos_gate_check(sig, self._store)
                     if not gate.passed:
                         log.info(
                             f"UI | Kronos gate rejected {symbol} {sig.pattern}: {gate.reason}"
+                        )
+                        continue
+                if use_volume:
+                    vgate = volume_confirm_gate(sig, self._store)
+                    if not vgate.passed:
+                        log.info(
+                            f"UI | Volume gate rejected {symbol} {sig.pattern}: {vgate.reason}"
                         )
                         continue
                 signals.append(sig)

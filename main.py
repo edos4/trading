@@ -6,10 +6,13 @@ Usage:
     python main.py --backtest                       # Backtest all patterns (100 symbols)
     python main.py --backtest 10                    # Backtest all patterns (10 symbols)
     python main.py --backtest --pattern double_top  # Test one pattern only
+    python main.py --backtest --volume-gate         # Backtest with volume confirm gate ON
+    python main.py --backtest 50 --volume-gate-compare  # A/B: gate OFF vs ON
     python main.py --paper                          # Paper trade top 100 symbols (simulated fills)
     python main.py --paper --paper-reset            # ...starting from a fresh virtual account
     python main.py --ui                             # Launch the symbol explorer GUI
     python main.py --papertrade-stream              # Serve historical CSV bars for paper trading when markets are closed
+    python main.py --papertrade-stream --papertrade-stream-start 2025-01-02  # Replay from a specific date
     python main.py --kronos-test                    # Score Kronos-base +1d/+1w forecast accuracy (20 random symbols)
     python main.py --kronos-test 50                  # ...on 50 randomly sampled symbols
     python main.py --kronos-test 50 --kronos-liquid-only  # ...top 50 by $ volume instead of random
@@ -38,14 +41,23 @@ from pathlib import Path
 from config import settings, DISABLED_PATTERNS
 from core.scanner import MarketScanner
 from core.backtester import Backtester
+from core.engine_defaults import backtest_kwargs
 from core.paper_trader import PaperAccount, DEFAULT_ACCOUNT_PATH, days_held, r_multiple, unrealized_pct
 from data.tv_client import TVClient
 from utils.logger import log
 
 
-async def run_scanner(n_symbols: int = 100) -> None:
+async def run_scanner(
+    n_symbols: int = 100,
+    *,
+    volume_gate: bool | None = None,
+) -> None:
     os.makedirs("logs", exist_ok=True)
     os.makedirs("charts", exist_ok=True)
+
+    use_volume = (
+        settings.volume_gate_enabled if volume_gate is None else volume_gate
+    )
 
     log.info("=" * 60)
     log.info(f"  Trading Bot — mode: {settings.trading_mode.upper()}")
@@ -53,6 +65,7 @@ async def run_scanner(n_symbols: int = 100) -> None:
     log.info(f"  History:    {settings.tv_history_days} daily bars")
     log.info(f"  Vision:     {'ON' if settings.vision_confirmation_enabled else 'OFF'}")
     log.info(f"  Kronos gate:{'ON' if settings.kronos_gate_enabled else 'OFF'}")
+    log.info(f"  Volume gate:{'ON' if use_volume else 'OFF'}")
     log.info(f"  IBKR:       disabled (commented out)")
     log.info("=" * 60)
 
@@ -75,11 +88,17 @@ async def run_scanner(n_symbols: int = 100) -> None:
         exchange_overrides=exchange_overrides,
         disabled_patterns=DISABLED_PATTERNS,
         kronos_gate=settings.kronos_gate_enabled,
+        volume_gate=use_volume,
     )
     await scanner.run()
 
 
-async def run_paper(n_symbols: int = 100, reset: bool = False) -> None:
+async def run_paper(
+    n_symbols: int = 100,
+    reset: bool = False,
+    *,
+    volume_gate: bool | None = None,
+) -> None:
     os.makedirs("logs", exist_ok=True)
     os.makedirs("charts", exist_ok=True)
 
@@ -88,12 +107,16 @@ async def run_paper(n_symbols: int = 100, reset: bool = False) -> None:
         log.info("Paper | account reset")
 
     account = PaperAccount.load()
+    use_volume = (
+        settings.volume_gate_enabled if volume_gate is None else volume_gate
+    )
 
     log.info("=" * 60)
     log.info("  Trading Bot — PAPER TRADING MODE (simulated fills, no broker)")
     log.info(f"  Starting equity: ${account.equity():,.2f}")
     log.info(f"  Scan every: {settings.scan_interval_seconds}s")
     log.info(f"  Kronos gate:{'ON' if settings.kronos_gate_enabled else 'OFF'}")
+    log.info(f"  Volume gate:{'ON' if use_volume else 'OFF'}")
     log.info("=" * 60)
 
     log.info(f"Fetching top {n_symbols} symbols from TradingView...")
@@ -113,6 +136,7 @@ async def run_paper(n_symbols: int = 100, reset: bool = False) -> None:
         paper_account=account,
         disabled_patterns=DISABLED_PATTERNS,
         kronos_gate=settings.kronos_gate_enabled,
+        volume_gate=use_volume,
     )
     try:
         await scanner.run()
@@ -156,14 +180,25 @@ async def run_paper(n_symbols: int = 100, reset: bool = False) -> None:
             print()
 
 
-async def run_backtest(n_symbols: int, pattern: str | None = None) -> None:
+async def run_backtest(
+    n_symbols: int,
+    pattern: str | None = None,
+    *,
+    volume_gate: bool | None = None,
+    volume_gate_compare: bool = False,
+) -> None:
     os.makedirs("logs", exist_ok=True)
 
+    use_volume = (
+        settings.volume_gate_enabled if volume_gate is None else volume_gate
+    )
     title = f"BACKTEST MODE{' — ' + pattern if pattern else ''}"
     log.info("=" * 60)
     log.info(f"  Trading Bot — {title}")
     log.info(f"  Symbols:    top {n_symbols} by market cap")
     log.info(f"  Kronos gate:{'ON' if settings.kronos_gate_enabled else 'OFF'}")
+    log.info(f"  Volume gate:{'ON' if use_volume else 'OFF'}"
+             f"{' (A/B compare)' if volume_gate_compare else ''}")
     log.info("=" * 60)
 
     log.info(f"Fetching top {n_symbols} symbols from TradingView (cached)...")
@@ -176,57 +211,79 @@ async def run_backtest(n_symbols: int, pattern: str | None = None) -> None:
     symbols = [symbol for symbol, _exchange in symbol_rows]
     log.info(f"Watchlist:  {symbols}")
 
-    # Engine-level risk overlays below are deliberately neutral: generic,
-    # principled defaults — not fit to any specific past backtest run's
-    # named trades/symbols. Re-tune only against out-of-sample data, never
-    # by adjusting a threshold until a specific historical loss disappears
-    # (that guarantees a good-looking win rate on that one sample and
-    # nothing else). Each pattern still owns its own stop/target/trailing
-    # logic via TradeSignal — these are entry gates and execution backstops
-    # on top of that, not a replacement for it.
-    backtester = Backtester(
-        symbols,
-        min_confidence=0.6,
-        regime_filter=True,
-        cooldown_bars=10,
-        txn_cost_pct=0.001,
-        position_sizing="risk",
-        account_value=100_000.0,
-        risk_per_trade_pct=0.02,
-        # Diversification ceiling, independent of risk_per_trade_pct. At 0.10
-        # this silently capped every ~6%-stop trade (the common case, via
-        # hard_stop_percentage) to ~0.6% real risk instead of the configured
-        # 2% (0.02 risk / 0.06 stop = 33% notional needed to fully use the
-        # risk budget) — risk_per_trade_pct was a no-op in practice. Raised
-        # to 0.33 so it actually binds at the intended risk level; max_open_positions
-        # stays unlimited so this is per-name concentration, not total exposure.
-        max_position_pct=0.33,
-        # Cushion of unrealized profit before the trailing stop arms, so
-        # ordinary entry-day chop doesn't stop trades out before the
-        # pattern's own trailing logic gets to manage them.
-        trailing_activation_default=0.02,
-        breakeven_trigger_pct=None,
-        min_atr_stop_multiple=1.0,
-        # Generic catastrophic-gap backstop, wide enough to not pre-empt
-        # the pattern's own trailing stop under normal conditions.
-        synthetic_stop_multiple=2.0,
-        # Widens (never tightens) a structural stop that's tighter than
-        # 1.2x ATR(14) — screens out stops that are just ordinary daily
-        # noise rather than a real invalidation level.
-        atr_stop_floor_multiple=1.2,
-        # Hard cap: no trade risks more than 6% from entry, regardless of
-        # how wide a pattern's own structural stop is. Was 0.03, which sat
-        # *tighter* than the synthetic (6%) and ATR-floor (1.2x ATR) stops
-        # it's supposed to backstop — so it silently overrode both on most
-        # trades and became the everyday stop instead of a tail backstop.
-        hard_stop_percentage=0.06,
-        min_reward_risk_ratio=1.5,
-        max_open_positions=settings.max_open_positions,
-        min_hold_bars=2,
+    # Shared money-path knobs — same dict paper + MarketScanner now honor via
+    # core.engine_defaults.ENGINE. Do not re-hardcode here or paper/backtest
+    # will drift again. Re-tune only against out-of-sample data.
+    bt_kwargs = backtest_kwargs(
         pattern_filter=pattern,
         disabled_patterns=DISABLED_PATTERNS,
         kronos_gate=settings.kronos_gate_enabled,
     )
+
+    if volume_gate_compare:
+        from analysis.price_volume import ab_metrics_from_result
+
+        log.info("Volume A/B | running gate OFF then ON (same symbols/patterns)...")
+        off_bt = Backtester(symbols, volume_gate=False, **bt_kwargs)
+        result_off = await off_bt.run()
+        on_bt = Backtester(symbols, volume_gate=True, **bt_kwargs)
+        result_on = await on_bt.run()
+
+        off_m = ab_metrics_from_result(result_off)
+        on_m = ab_metrics_from_result(result_on)
+        keys = [
+            "trades", "win_rate", "avg_r", "expectancy_pct",
+            "profit_factor", "max_drawdown_pct", "account_weighted_pnl_pct",
+            "total_signals",
+        ]
+
+        def _fmt(v):
+            if v is None:
+                return "—"
+            if isinstance(v, float):
+                return f"{v:+.4f}" if abs(v) < 10 else f"{v:.4f}"
+            return str(v)
+
+        print()
+        print("=" * 72)
+        print("  VOLUME GATE A/B COMPARE")
+        print("=" * 72)
+        print(f"  {'metric':28s}  {'OFF':>12s}  {'ON':>12s}  {'delta':>12s}")
+        print("-" * 72)
+        for k in keys:
+            a, b = off_m[k], on_m[k]
+            if a is None or b is None:
+                delta = "—"
+            elif isinstance(a, (int, float)) and isinstance(b, (int, float)):
+                delta = _fmt(b - a)
+            else:
+                delta = "—"
+            print(f"  {k:28s}  {_fmt(a):>12s}  {_fmt(b):>12s}  {delta:>12s}")
+        print("=" * 72)
+        print()
+        print("--- Gate OFF summary ---")
+        print(result_off.summary())
+        print()
+        print("--- Gate ON summary ---")
+        print(result_on.summary())
+
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        ab_path = f"backtest_volume_ab_{ts}.json"
+        payload = {
+            "n_symbols": n_symbols,
+            "pattern": pattern,
+            "volume_gate_rvol_min": settings.volume_gate_rvol_min,
+            "volume_gate_obv_bars": settings.volume_gate_obv_bars,
+            "off": off_m,
+            "on": on_m,
+            "off_full": result_off.to_dict(),
+            "on_full": result_on.to_dict(),
+        }
+        json.dump(payload, Path(ab_path).open("w", encoding="utf-8"), indent=2)
+        log.info(f"Backtest | Volume A/B JSON saved to {ab_path}")
+        return
+
+    backtester = Backtester(symbols, volume_gate=use_volume, **bt_kwargs)
     result = await backtester.run()
 
     print()
@@ -277,6 +334,18 @@ async def main() -> None:
         help="Filter to a specific pattern (case-insensitive substring). "
         "Use with --backtest to test one pattern in isolation. "
         "E.g.: --backtest --pattern double_top",
+    )
+    parser.add_argument(
+        "--volume-gate",
+        action="store_true",
+        help="Enable the RVOL+OBV volume confirm gate for this run "
+        "(overrides VOLUME_GATE_ENABLED=false). Use with --backtest / --paper.",
+    )
+    parser.add_argument(
+        "--volume-gate-compare",
+        action="store_true",
+        help="With --backtest, run twice (volume gate OFF then ON) and print a "
+        "side-by-side A/B report; writes backtest_volume_ab_*.json.",
     )
     parser.add_argument(
         "--ui",
@@ -399,6 +468,15 @@ async def main() -> None:
         "a local WebSocket so paper trading (--paper / --ui) can run with the "
         "'Use paper trade stream' option even when US markets are closed.",
     )
+    parser.add_argument(
+        "--papertrade-stream-start",
+        type=str,
+        default=None,
+        metavar="YYYY-MM-DD",
+        help="With --papertrade-stream, start replaying each CSV from this date "
+        "(first bar on/after). Default: PAPERTRADE_STREAM_START_DATE, or near "
+        "the end of each CSV.",
+    )
     args = parser.parse_args()
 
     if args.kronos_finetune:
@@ -428,7 +506,7 @@ async def main() -> None:
     if args.papertrade_stream:
         from data.stream_server import run_stream_server
 
-        await run_stream_server()
+        await run_stream_server(start_date=args.papertrade_stream_start)
         return
 
     if args.learn:
@@ -449,11 +527,20 @@ async def main() -> None:
         return
 
     if args.paper is not None:
-        await run_paper(n_symbols=args.paper, reset=args.paper_reset)
+        await run_paper(
+            n_symbols=args.paper,
+            reset=args.paper_reset,
+            volume_gate=True if args.volume_gate else None,
+        )
     elif args.backtest is not None:
-        await run_backtest(n_symbols=args.backtest, pattern=args.pattern)
+        await run_backtest(
+            n_symbols=args.backtest,
+            pattern=args.pattern,
+            volume_gate=True if args.volume_gate else None,
+            volume_gate_compare=args.volume_gate_compare,
+        )
     else:
-        await run_scanner()
+        await run_scanner(volume_gate=True if args.volume_gate else None)
 
 
 if __name__ == "__main__":

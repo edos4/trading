@@ -74,6 +74,10 @@ class TradeSignal:
     trailing_activation_pct: float | None = None
     notes:       str = ""
     chart_annotations: list[dict] = field(default_factory=list)
+    # Price-volume metrics (filled by analysis.price_volume when the gate
+    # runs, or when the backtester tags accepted trades for A/B analysis).
+    rvol: float | None = None
+    obv_slope: float | None = None
 
 
 class BasePattern(ABC):

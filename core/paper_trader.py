@@ -31,6 +31,7 @@ from core.backtester import (
     trade_r_multiple,
     trade_risk_dollars,
 )
+from core.engine_defaults import ENGINE, risk_gate_kwargs, sizing_kwargs
 from data.ohlcv_store import OHLCVStore
 from data.tv_client import OHLCVCandle
 from patterns.base_pattern import TradeSignal
@@ -105,12 +106,14 @@ class PaperAccount:
     def __init__(
         self,
         initial_capital: float | None = None,
-        txn_cost_pct: float = 0.001,
+        txn_cost_pct: float | None = None,
         slippage_pct: float | None = None,
     ):
         self.initial_capital = initial_capital or settings.paper_initial_capital
         self.cash = self.initial_capital
-        self.txn_cost_pct = txn_cost_pct
+        self.txn_cost_pct = (
+            ENGINE.txn_cost_pct if txn_cost_pct is None else txn_cost_pct
+        )
         self.slippage_pct = (
             slippage_pct if slippage_pct is not None else settings.paper_slippage_pct
         )
@@ -140,6 +143,11 @@ class PaperAccount:
     # ── Equity / accounting ─────────────────────────────────────────────
     def last_price(self, symbol: str, default: float) -> float:
         return self._last_price.get(symbol, default)
+
+    def bar_count(self, symbol: str) -> int:
+        """New-bar count for `symbol` — used by scanner cooldown (same units
+        as backtester bar_idx)."""
+        return self._bar_count.get(symbol, 0)
 
     def equity(self) -> float:
         with self._lock:
@@ -219,30 +227,19 @@ class PaperAccount:
             log.info("Paper | daily loss limit hit — skipping signal")
             return False
 
-        # Same stop-backstop/R:R gates main.py wires into the backtester
-        # (min_atr_stop_multiple, synthetic_stop_multiple, atr_stop_floor_multiple,
-        # hard_stop_percentage, min_reward_risk_ratio) — without these, paper
-        # trades ran on the pattern's raw (sometimes absent) stop_loss, with
-        # no worst-case cap, which the backtest that validated the strategy
-        # never allowed.
+        # Same stop-backstop/R:R gates + sizing caps as Backtester / main.py
+        # (via core.engine_defaults) — without these, paper traded a different
+        # strategy than the backtest that supposedly validated it.
         if not apply_risk_gates(
             signal, store, signal.symbol, signal.timeframe,
-            min_atr_stop_multiple=1.0,
-            synthetic_stop_multiple=2.0,
-            atr_stop_floor_multiple=1.2,
-            hard_stop_percentage=0.06,
-            min_reward_risk_ratio=1.5,
-            trailing_activation_default=0.02,
+            **risk_gate_kwargs(),
         ):
             return False
 
         _apply_sizing(
             signal, store, signal.symbol, signal.timeframe,
-            account_value=self.equity(),
-            risk_per_trade_pct=0.02,
-            position_sizing="risk",
             entry_price=candle.close,
-            max_position_pct=0.10,
+            **sizing_kwargs(account_value=self.equity()),
         )
 
         fill_candle = candle
@@ -284,6 +281,8 @@ class PaperAccount:
         position.sim_entry_date = position.entry_date
         position.entry_date = datetime.now(timezone.utc)
         position.exit_date = position.entry_date
+        position.breakeven_trigger_pct = ENGINE.breakeven_trigger_pct
+        position.breakeven_buffer_pct = ENGINE.breakeven_buffer_pct
         notional = position.entry_price * position.qty
         if signal.action == "BUY":
             self.cash -= notional
@@ -305,40 +304,41 @@ class PaperAccount:
         candle: OHLCVCandle,
         timeframe: str | None = None,
         is_new_bar: bool = True,
-    ) -> None:
+    ) -> BacktestTrade | None:
+        """Update marks / exits. Returns the closed trade if this bar exited."""
         with self._lock:
-            self._on_bar_locked(symbol, candle, timeframe, is_new_bar)
+            return self._on_bar_locked(symbol, candle, timeframe, is_new_bar)
 
     def _on_bar_locked(
         self, symbol: str, candle: OHLCVCandle, timeframe: str | None, is_new_bar: bool,
-    ) -> None:
+    ) -> BacktestTrade | None:
         self._last_price[symbol] = candle.close
         if is_new_bar:
             self._bar_count[symbol] = self._bar_count.get(symbol, 0) + 1
         position = self.positions.get(symbol)
         if position is None:
-            return
+            return None
         # A symbol can be scanned on several timeframes per cycle (different
         # patterns watching different intervals). Only the candle matching
         # the position's own timeframe is valid for exit checks — e.g. a
         # weekly candle's high/low would spuriously trip a stop set from a
         # daily entry.
         if timeframe is not None and timeframe != position.timeframe:
-            return
+            return None
         now = datetime.now(timezone.utc)
         self._reset_daily_if_needed(now)
 
-        # Match the backtester's canonical min_hold_bars=2 (see main.py) so
-        # trailing/breakeven don't arm a bar earlier here than in backtests —
-        # otherwise "live" and backtested results for the same pattern diverge.
-        # bar_idx is counted per real new bar (see _bar_count), not per scan
-        # cycle, since scans typically run far more often than a new daily
-        # bar forms.
+        # Match ENGINE.min_hold_bars so trailing/breakeven don't arm earlier
+        # here than in backtests — otherwise live and backtested results for
+        # the same pattern diverge. bar_idx is per real new bar (see
+        # _bar_count), not per scan cycle.
         bar_idx = self._bar_count.get(symbol, 0)
-        exit_price, reason = _check_exit(candle, position, bar_idx, min_hold_bars=2)
+        exit_price, reason = _check_exit(
+            candle, position, bar_idx, min_hold_bars=ENGINE.min_hold_bars,
+        )
         if exit_price is None:
             _update_trailing_reference(position, candle)
-            return
+            return None
 
         if self.slippage_pct:
             # Exit is a sell (closing a BUY) or a buy-to-cover (closing a
@@ -370,6 +370,7 @@ class PaperAccount:
         log.info(
             f"Paper | CLOSE {symbol} reason={reason} pnl={position.pnl_pct:+.2f}%"
         )
+        return position
 
     # ── Reporting ─────────────────────────────────────────────────────────
     def to_result(self) -> BacktestResult:

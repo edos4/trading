@@ -19,7 +19,7 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from tkinter import ttk, filedialog, messagebox
 import tkinter as tk
@@ -29,6 +29,7 @@ import matplotlib
 matplotlib.use("Agg", force=True)
 import matplotlib.pyplot as plt
 from PIL import Image, ImageTk
+from tkcalendar import DateEntry
 import websockets
 
 from config import settings, DISABLED_PATTERNS
@@ -112,13 +113,31 @@ class PaperDashboard:
         self._save_btn.pack(side=tk.LEFT, padx=(6, 0))
 
         self._stream_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
+        self._stream_check = ttk.Checkbutton(
             top_bar, text="Use paper trade stream", variable=self._stream_var,
-        ).pack(side=tk.LEFT, padx=(12, 0))
+            command=self._on_stream_toggle,
+        )
+        self._stream_check.pack(side=tk.LEFT, padx=(12, 0))
+
+        self._stream_start_frame = ttk.Frame(top_bar)
+        ttk.Label(self._stream_start_frame, text="Start:").pack(side=tk.LEFT, padx=(8, 2))
+        self._stream_start_picker = DateEntry(
+            self._stream_start_frame,
+            width=11,
+            date_pattern="yyyy-mm-dd",
+            **self._stream_start_date_kwargs(),
+        )
+        self._stream_start_picker.pack(side=tk.LEFT)
 
         self._kronos_gate_var = tk.BooleanVar(value=settings.kronos_gate_enabled)
-        ttk.Checkbutton(
+        self._kronos_check = ttk.Checkbutton(
             top_bar, text="Kronos 1w gate", variable=self._kronos_gate_var,
+        )
+        self._kronos_check.pack(side=tk.LEFT, padx=(12, 0))
+
+        self._volume_gate_var = tk.BooleanVar(value=settings.volume_gate_enabled)
+        ttk.Checkbutton(
+            top_bar, text="Volume gate", variable=self._volume_gate_var,
         ).pack(side=tk.LEFT, padx=(12, 0))
 
         self._status_var = tk.StringVar(value="Stopped.")
@@ -245,6 +264,26 @@ class PaperDashboard:
         self._equity_chart_label.pack(fill=tk.BOTH, expand=True)
 
     # ── Start / stop ────────────────────────────────────────────────────
+    @staticmethod
+    def _stream_start_date_kwargs() -> dict:
+        """Default date for the stream start picker (config, else ~1y ago)."""
+        default = date.today() - timedelta(days=365)
+        raw = settings.papertrade_stream_start_date
+        if raw:
+            try:
+                default = date.fromisoformat(raw.strip())
+            except ValueError:
+                pass
+        return {"year": default.year, "month": default.month, "day": default.day}
+
+    def _on_stream_toggle(self) -> None:
+        if self._stream_var.get():
+            self._stream_start_frame.pack(
+                side=tk.LEFT, before=self._kronos_check,
+            )
+        else:
+            self._stream_start_frame.pack_forget()
+
     def _start(self) -> None:
         if self._running:
             return
@@ -252,9 +291,18 @@ class PaperDashboard:
         self._start_btn.config(state=tk.DISABLED)
         self._stop_btn.config(state=tk.NORMAL)
         self._status_var.set("Fetching symbols...")
+        stream_start = None
+        if self._stream_var.get():
+            stream_start = self._stream_start_picker.get_date().isoformat()
         threading.Thread(
             target=self._run_thread,
-            args=(int(self._n_var.get()), self._stream_var.get(), self._kronos_gate_var.get()),
+            args=(
+                int(self._n_var.get()),
+                self._stream_var.get(),
+                self._kronos_gate_var.get(),
+                self._volume_gate_var.get(),
+                stream_start,
+            ),
             daemon=True,
         ).start()
 
@@ -294,16 +342,22 @@ class PaperDashboard:
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
 
-    def _ensure_stream_server(self) -> Optional[str]:
+    def _ensure_stream_server(self, start_date: Optional[str] = None) -> Optional[str]:
         """(Re)launch `main.py --papertrade-stream` fresh every time, so a
         stale/outdated server process is never silently reused. Returns an
         error message on failure, else None."""
         host, port = settings.papertrade_stream_host, settings.papertrade_stream_port
         self._kill_whatever_is_on(port)
         time.sleep(0.3)  # let the kernel release the port before rebinding
-        self._top.after(0, lambda: self._status_var.set("Starting paper trade stream server..."))
+        status = "Starting paper trade stream server..."
+        if start_date:
+            status = f"Starting paper trade stream server (from {start_date})..."
+        self._top.after(0, lambda s=status: self._status_var.set(s))
+        cmd = [sys.executable, "main.py", "--papertrade-stream"]
+        if start_date:
+            cmd.extend(["--papertrade-stream-start", start_date])
         self._stream_proc = subprocess.Popen(
-            [sys.executable, "main.py", "--papertrade-stream"],
+            cmd,
             cwd=str(REPO_ROOT),
         )
         for _ in range(20):
@@ -314,10 +368,17 @@ class PaperDashboard:
             time.sleep(0.5)
         return f"Paper trade stream server didn't come up on {host}:{port} in time."
 
-    def _run_thread(self, n_symbols: int, use_stream: bool, kronos_gate: bool) -> None:
+    def _run_thread(
+        self,
+        n_symbols: int,
+        use_stream: bool,
+        kronos_gate: bool,
+        volume_gate: bool,
+        stream_start: Optional[str] = None,
+    ) -> None:
         data_feed = None
         if use_stream:
-            error = self._ensure_stream_server()
+            error = self._ensure_stream_server(start_date=stream_start)
             if error:
                 self._top.after(0, lambda m=error: self._finish(m))
                 return
@@ -343,13 +404,17 @@ class PaperDashboard:
                 settings.papertrade_stream_interval_seconds if use_stream else None
             ),
             kronos_gate=kronos_gate,
+            volume_gate=volume_gate,
         )
         self._scanner = scanner
         self._task = loop.create_task(scanner.run())
         interval = settings.papertrade_stream_interval_seconds if use_stream else settings.scan_interval_seconds
+        stream_note = f", stream from {stream_start}" if use_stream and stream_start else ""
         self._top.after(0, lambda: self._status_var.set(
             f"Running — {len(symbols)} symbols, scanning every {interval}s"
+            f"{stream_note}"
             f", Kronos gate={'ON' if kronos_gate else 'OFF'}"
+            f", Volume gate={'ON' if volume_gate else 'OFF'}"
         ))
         error_msg: Optional[str] = None
         try:
@@ -539,6 +604,7 @@ class PaperDashboard:
         self._scan_stats_var.set(
             f"Last scan: {last_str}   Patterns found: {stats['patterns_found']}   "
             f"Trades opened: {stats['trades_opened']}   Rejected: {stats['signals_rejected']}   "
+            f"Vol reject: {stats.get('volume_gate_rejected', 0)}   "
             f"Scan time: {stats['scan_duration_s']:.1f}s{sim_days_str}"
         )
 
