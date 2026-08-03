@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Paper — Trading Bot{% endblock %}
+{% block content %}
+<section class="toolbar">
+  <label>Symbols <input type="number" id="paper-n" value="100" min="5" max="5000" step="5" /></label>
+  <button type="button" class="btn primary" id="paper-start">Start</button>
+  <button type="button" class="btn" id="paper-stop" disabled>Stop</button>
+  <button type="button" class="btn" id="paper-reset">Reset account</button>
+  <label class="check"><input type="checkbox" id="paper-stream" /> Use paper trade stream</label>
+  <label id="stream-date-wrap" hidden>Start date
+    <input type="date" id="paper-stream-start" />
+  </label>
+  <label class="check"><input type="checkbox" id="paper-kronos" {% if kronos_gate %}checked{% endif %} /> Kronos 1w gate</label>
+  <label class="check"><input type="checkbox" id="paper-volume" {% if volume_gate %}checked{% endif %} /> Volume gate</label>
+</section>
+
+<section class="panel">
+  <p id="paper-equity" class="equity"></p>
+  <p id="paper-exposure" class="muted"></p>
+  <p id="paper-scan" class="muted"></p>
+  <p id="paper-status" class="status">Idle.</p>
+</section>
+
+<div class="tabs" role="tablist">
+  <button type="button" class="tab active" data-tab="positions" role="tab" aria-selected="true">Positions</button>
+  <button type="button" class="tab" data-tab="logs" role="tab" aria-selected="false">Logs</button>
+  <button type="button" class="tab" data-tab="performance" role="tab" aria-selected="false">Performance</button>
+</div>
+
+<section class="tab-panel active" id="tab-positions">
+  <div class="split">
+    <div class="panel grow">
+      <h2>Open positions</h2>
+      <div class="table-wrap">
+        <table id="paper-pos">
+          <thead>
+            <tr>
+              <th>Symbol</th><th>Status</th><th>Action</th><th>Entry</th><th>Current</th>
+              <th>Unrl%</th><th>R</th><th>Days</th><th>Pattern</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <h2>Closed</h2>
+      <div class="table-wrap">
+        <table id="paper-closed">
+          <thead>
+            <tr>
+              <th>Opened</th><th>Closed</th><th>Symbol</th><th>Action</th>
+              <th>Entry</th><th>Exit</th><th>P&L%</th><th>Reason</th><th>Pattern</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="tab-panel" id="tab-logs" hidden>
+  <div class="panel">
+    <h2>Signal log</h2>
+    <p class="muted small">Detected pattern signals with accept/reject outcome and reason.</p>
+    <div class="table-wrap tall">
+      <table id="paper-logs">
+        <thead>
+          <tr>
+            <th>Time</th><th>Symbol</th><th>TF</th><th>Action</th><th>Pattern</th>
+            <th>Conf</th><th>Price</th><th>Status</th><th>Reason</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="tab-panel" id="tab-performance" hidden>
+  <div class="panel">
+    <h2>Performance</h2>
+    <pre id="paper-summary" class="summary">No closed trades yet.</pre>
+    <img id="paper-equity-chart" alt="equity" hidden />
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>window.TB_PAGE = "paper";</script>
+{% endblock %}

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Explorer — Trading Bot{% endblock %}
+{% block content %}
+<section class="toolbar">
+  <button class="btn" id="refresh-symbols">Refresh symbols</button>
+  <label>Count <input type="number" id="count" value="50" min="5" max="5000" step="5" /></label>
+  <label>Timeframe
+    <select id="timeframe">
+      <option value="1d">1d</option>
+      <option value="1W">1W</option>
+    </select>
+  </label>
+  <label>Filter <input type="search" id="filter" placeholder="AAPL" /></label>
+  <label class="check"><input type="checkbox" id="run-patterns" checked /> Run patterns</label>
+  <label class="check"><input type="checkbox" id="kronos-gate" {% if kronos_gate %}checked{% endif %} /> Kronos 1w gate</label>
+  <label class="check"><input type="checkbox" id="volume-gate" {% if volume_gate %}checked{% endif %} /> Volume gate</label>
+  <span class="spacer"></span>
+  <button class="btn" id="save-png" disabled>Save chart PNG</button>
+  <button class="btn" id="save-csv" disabled>Download CSV</button>
+</section>
+
+<section class="split">
+  <aside class="panel">
+    <h2>Symbols</h2>
+    <ul id="symbol-list" class="symbol-list"></ul>
+  </aside>
+  <div class="panel grow">
+    <h2 id="header">Select a symbol</h2>
+    <div id="chart-wrap" class="chart-wrap">
+      <p class="muted" id="chart-placeholder">No chart yet</p>
+      <img id="chart" alt="chart" hidden />
+    </div>
+    <h3>Detected patterns</h3>
+    <div class="table-wrap">
+      <table id="signals">
+        <thead>
+          <tr>
+            <th>Pattern</th><th>Action</th><th>TF</th><th>Conf</th><th>Price</th><th>Notes</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+<p id="status" class="status">Ready.</p>
+{% endblock %}
+{% block scripts %}
+<script>
+  window.TB_PAGE = "explorer";
+  window.TB_DEFAULTS = {
+    kronos: {{ kronos_gate | tojson }},
+    volume: {{ volume_gate | tojson }}
+  };
+</script>
+{% endblock %}

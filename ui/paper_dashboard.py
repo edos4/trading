@@ -101,7 +101,7 @@ class PaperDashboard:
 
         ttk.Label(top_bar, text="Symbols:").pack(side=tk.LEFT)
         self._n_var = tk.IntVar(value=100)
-        ttk.Spinbox(top_bar, from_=5, to=500, increment=5, width=6, textvariable=self._n_var).pack(side=tk.LEFT, padx=(4, 12))
+        ttk.Spinbox(top_bar, from_=5, to=5000, increment=5, width=6, textvariable=self._n_var).pack(side=tk.LEFT, padx=(4, 12))
 
         self._start_btn = ttk.Button(top_bar, text="Start", command=self._start)
         self._start_btn.pack(side=tk.LEFT)

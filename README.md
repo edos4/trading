@@ -387,16 +387,36 @@ collapse. A run that goes to zero trades is not an edge — it is sample death.
 
 ## Symbol Explorer UI
 
-Launch the native desktop UI with:
+### Desktop (tkinter)
 
 ```bash
 python main.py --ui
 ```
 
-The UI uses `tkinter`, so it runs as a local Python desktop app on Windows,
-macOS, and Linux. It does not require a browser or web server.
+Local desktop app on Windows/macOS/Linux. No browser required.
 
-What it supports:
+### Web (VPS)
+
+Authenticated browser UI with the same Explorer / Backtest / Paper surfaces:
+
+```bash
+# Required in .env — server refuses to start if WEB_UI_PASSWORD is empty
+WEB_UI_USERNAME=admin
+WEB_UI_PASSWORD=change-me-to-a-long-random-secret
+# WEB_UI_SECRET_KEY=...   # recommended in production
+# WEB_UI_HTTPS=true       # set when behind TLS so the session cookie is Secure
+
+pip install -r requirements.txt
+python main.py --web
+# → http://0.0.0.0:8080  (login required)
+```
+
+Auth: form login → signed HttpOnly session cookie (`tb_session`). All pages and
+`/api/*` routes require a valid session. `/login`, `/logout`, `/health`, and
+`/static/*` are public. Put nginx/Caddy TLS in front for VPS deploys and set
+`WEB_UI_HTTPS=true`.
+
+What both UIs support:
 
 - Explore top TradingView screener symbols and filter the list by ticker.
 - Click a symbol to fetch daily or weekly OHLCV history and render a
@@ -408,18 +428,16 @@ What it supports:
   must also clear the same Kronos confirm gate used by the scanner.
 - **Volume gate** checkbox (toolbar): when checked, detections must also
   clear the RVOL+OBV confirm gate (see [Volume Confirm Gate](#volume-confirm-gate)).
-- **Backtest** button: opens a parameter dialog (includes **Kronos 1w gate**
-  and **Volume gate** checkboxes, plus **Compare A/B (Volume)**) and runs
-  `Backtester` with the same engine as `python main.py --backtest`.
-- **Paper Trading** button: opens a live paper dashboard that runs
-  `MarketScanner` with a `PaperAccount` (includes **Kronos 1w gate** and
-  **Volume gate** checkboxes, same path as `python main.py --paper`).
-- Download the selected symbol's OHLCV data as CSV.
-- Save the current annotated chart as PNG.
+- **Backtest**: parameter form (includes **Kronos 1w gate** and **Volume gate**,
+  plus **Compare A/B (Volume)**) runs `Backtester` with the same engine as
+  `python main.py --backtest`.
+- **Paper Trading**: live paper dashboard that runs `MarketScanner` with a
+  `PaperAccount` (same path as `python main.py --paper`).
+- Download the selected symbol's OHLCV data as CSV / save chart PNG.
 
 The explorer reuses the same data, pattern, chart-rendering, Kronos-gate,
-and volume-gate code as the scanner. Backtest / Paper Trading in the UI are
-not toy modes — they call the real `Backtester` / `MarketScanner`.
+and volume-gate code as the scanner. Backtest / Paper Trading are not toy
+modes — they call the real `Backtester` / `MarketScanner`.
 
 ## Adding a New Pattern
 
@@ -472,6 +490,12 @@ trading_bot_v2/
 │   ├── app.py                           # Native tkinter symbol explorer (--ui)
 │   ├── backtest_dialog.py               # UI Backtest launcher (Kronos + Volume gates, A/B)
 │   └── paper_dashboard.py               # UI Paper Trading dashboard (Kronos + Volume gates)
+│
+├── web/
+│   ├── app.py                           # Authenticated FastAPI web UI (--web)
+│   ├── auth.py                          # Session login (WEB_UI_PASSWORD required)
+│   ├── services.py                      # Explorer data/pattern/chart helpers
+│   └── jobs.py                          # Background backtest + paper session
 │
 ├── scripts/
 │   └── compare_patterns.py             # Cross-pattern comparison backtest

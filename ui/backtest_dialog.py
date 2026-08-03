@@ -44,7 +44,7 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
     (
         "n_symbols", "Symbols (count)",
         "Number of top-market-cap symbols to backtest (fetched from TradingView screener).",
-        "spin", (100, 5, 200, 1), None,
+        "spin", (100, 5, 5000, 1), None,
     ),
     (
         "pattern_filter", "Pattern filter",

@@ -102,6 +102,17 @@ def passes_min_confidence(
     return True
 
 
+def describe_confidence_rejection(
+    signal: TradeSignal,
+    min_confidence: float | None = None,
+) -> str:
+    thresh = ENGINE.min_confidence if min_confidence is None else min_confidence
+    return (
+        f"Min-confidence gate: pattern scored {signal.confidence:.2f} but the "
+        f"engine floor is {thresh:.2f} — setup too weak to trade."
+    )
+
+
 def passes_regime_filter(
     signal: TradeSignal,
     store: OHLCVStore,
@@ -109,27 +120,51 @@ def passes_regime_filter(
     enabled: bool | None = None,
 ) -> bool:
     """BUY only above SMA200, SELL only below. No-op if <200 bars."""
+    return describe_regime_rejection(signal, store, enabled=enabled) is None
+
+
+def describe_regime_rejection(
+    signal: TradeSignal,
+    store: OHLCVStore,
+    *,
+    enabled: bool | None = None,
+) -> str | None:
+    """Human-readable regime reject, or None if the signal clears the filter."""
     use = ENGINE.regime_filter if enabled is None else enabled
     if not use or signal.action == "CLOSE":
-        return True
+        return None
     df = store.get_df(signal.symbol, signal.timeframe, min_bars=1)
     if df is None or len(df) < 200:
-        return True
+        return None
     close = df["close"]
     sma200 = close.rolling(200).mean()
     current_sma200 = float(sma200.iloc[-1])
     current_close = float(close.iloc[-1])
+    if current_sma200 <= 0:
+        return None
+    pct_vs = (current_close - current_sma200) / current_sma200 * 100.0
+
     if signal.action == "BUY" and current_close < current_sma200:
         log.debug(
             f"EntryGate | {signal.symbol} {signal.timeframe} BUY below SMA200 — skip"
         )
-        return False
+        return (
+            f"SMA200 regime filter: longs only when price is above the 200-bar SMA "
+            f"(treat as uptrend). {signal.symbol} {signal.timeframe} close "
+            f"${current_close:.2f} is {abs(pct_vs):.2f}% below SMA200 "
+            f"${current_sma200:.2f} — counter-trend BUY blocked."
+        )
     if signal.action == "SELL" and current_close > current_sma200:
         log.debug(
             f"EntryGate | {signal.symbol} {signal.timeframe} SELL above SMA200 — skip"
         )
-        return False
-    return True
+        return (
+            f"SMA200 regime filter: shorts only when price is below the 200-bar SMA "
+            f"(treat as downtrend). {signal.symbol} {signal.timeframe} close "
+            f"${current_close:.2f} is {pct_vs:.2f}% above SMA200 "
+            f"${current_sma200:.2f} — counter-trend SELL blocked."
+        )
+    return None
 
 
 def passes_cooldown(
@@ -140,12 +175,25 @@ def passes_cooldown(
     cooldown_bars: int | None = None,
 ) -> bool:
     """Block re-entry into (symbol, pattern) after a loss within cooldown_bars."""
+    return describe_cooldown_rejection(
+        signal, bar_idx, cooldown_tracker, cooldown_bars=cooldown_bars,
+    ) is None
+
+
+def describe_cooldown_rejection(
+    signal: TradeSignal,
+    bar_idx: int,
+    cooldown_tracker: dict[tuple[str, str], tuple[int, bool]],
+    *,
+    cooldown_bars: int | None = None,
+) -> str | None:
+    """Human-readable cooldown reject, or None if the signal clears cooldown."""
     n = ENGINE.cooldown_bars if cooldown_bars is None else cooldown_bars
     if n <= 0:
-        return True
+        return None
     key = (signal.symbol, signal.pattern)
     if key not in cooldown_tracker:
-        return True
+        return None
     exit_bar, was_loss = cooldown_tracker[key]
     bars_since = bar_idx - exit_bar
     if was_loss and bars_since < n:
@@ -153,5 +201,9 @@ def passes_cooldown(
             f"EntryGate | {signal.symbol} {signal.timeframe} cooldown "
             f"{bars_since}/{n} bars — skip"
         )
-        return False
-    return True
+        return (
+            f"Post-loss cooldown: last {signal.pattern} trade on {signal.symbol} "
+            f"was a loss; only {bars_since} of {n} required bars have printed "
+            f"since that exit — re-entry blocked to avoid chopping the same setup."
+        )
+    return None

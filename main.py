@@ -11,6 +11,7 @@ Usage:
     python main.py --paper                          # Paper trade top 100 symbols (simulated fills)
     python main.py --paper --paper-reset            # ...starting from a fresh virtual account
     python main.py --ui                             # Launch the symbol explorer GUI
+    python main.py --web                            # Launch the authenticated web UI (VPS)
     python main.py --papertrade-stream              # Serve historical CSV bars for paper trading when markets are closed
     python main.py --papertrade-stream --papertrade-stream-start 2025-01-02  # Replay from a specific date
     python main.py --kronos-test                    # Score Kronos-base +1d/+1w forecast accuracy (20 random symbols)
@@ -312,7 +313,7 @@ async def run_backtest(
     log.info(f"Backtest | JSON saved to {json_path}")
 
 
-async def main() -> None:
+def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Trading Bot - market scanner / backtester / GUI"
     )
@@ -351,6 +352,12 @@ async def main() -> None:
         "--ui",
         action="store_true",
         help="Launch the tkinter symbol explorer GUI instead of scanning.",
+    )
+    parser.add_argument(
+        "--web",
+        action="store_true",
+        help="Launch the authenticated FastAPI web UI (requires WEB_UI_PASSWORD). "
+        "Binds WEB_UI_HOST:WEB_UI_PORT (default 0.0.0.0:8080).",
     )
     parser.add_argument(
         "--paper",
@@ -477,7 +484,12 @@ async def main() -> None:
         "(first bar on/after). Default: PAPERTRADE_STREAM_START_DATE, or near "
         "the end of each CSV.",
     )
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+async def main(args: argparse.Namespace | None = None) -> None:
+    if args is None:
+        args = _parse_args()
 
     if args.kronos_finetune:
         from core.kronos_finetune import run_kronos_finetune
@@ -519,13 +531,6 @@ async def main() -> None:
         run_learn(**kwargs)
         return
 
-    if args.ui:
-        # tkinter mainloop is blocking and not async.
-        from ui.app import run as run_ui
-
-        run_ui()
-        return
-
     if args.paper is not None:
         await run_paper(
             n_symbols=args.paper,
@@ -544,4 +549,16 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # --ui / --web own their own event loop (tk / uvicorn). Running them
+    # inside asyncio.run(main()) nests asyncio.run and crashes uvicorn.
+    _args = _parse_args()
+    if _args.ui:
+        from ui.app import run as run_ui
+
+        run_ui()
+    elif _args.web:
+        from web.app import run as run_web
+
+        run_web()
+    else:
+        asyncio.run(main(_args))

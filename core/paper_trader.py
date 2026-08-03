@@ -209,7 +209,7 @@ class PaperAccount:
         signal: TradeSignal,
         candle: OHLCVCandle,
         store: OHLCVStore,
-    ) -> bool:
+    ) -> tuple[bool, str]:
         self._reset_daily_if_needed(datetime.now(timezone.utc))
 
         with self._lock:
@@ -217,15 +217,24 @@ class PaperAccount:
 
     def _open_position_locked(
         self, signal: TradeSignal, candle: OHLCVCandle, store: OHLCVStore,
-    ) -> bool:
+    ) -> tuple[bool, str]:
         if signal.symbol in self.positions:
-            return False
+            return False, (
+                f"Already flat-blocked: an open position exists in {signal.symbol}, "
+                f"so a second concurrent entry was skipped."
+            )
         if settings.max_open_positions > 0 and len(self.positions) >= settings.max_open_positions:
             log.info("Paper | max_open_positions reached — skipping signal")
-            return False
+            return False, (
+                f"Portfolio full: {len(self.positions)} open positions already at the "
+                f"MAX_OPEN_POSITIONS cap ({settings.max_open_positions})."
+            )
         if self._daily_pnl <= -settings.max_daily_loss_usd:
             log.info("Paper | daily loss limit hit — skipping signal")
-            return False
+            return False, (
+                f"Daily loss limit: realized P&L today is ${self._daily_pnl:,.2f}, "
+                f"at or beyond MAX_DAILY_LOSS_USD (${settings.max_daily_loss_usd:,.0f})."
+            )
 
         # Same stop-backstop/R:R gates + sizing caps as Backtester / main.py
         # (via core.engine_defaults) — without these, paper traded a different
@@ -234,7 +243,11 @@ class PaperAccount:
             signal, store, signal.symbol, signal.timeframe,
             **risk_gate_kwargs(),
         ):
-            return False
+            return False, (
+                "Risk gates rejected the setup (ATR trail too thin, synthetic/ATR "
+                "stop floor, hard stop, or min reward:risk) — same filters as the "
+                "formal backtester."
+            )
 
         _apply_sizing(
             signal, store, signal.symbol, signal.timeframe,
@@ -269,7 +282,11 @@ class PaperAccount:
                 signal.qty = affordable_qty
             if signal.qty < 1:
                 log.info(f"Paper | insufficient cash for {signal.symbol} — skipping signal")
-                return False
+                return False, (
+                    f"Insufficient cash: need buying power for at least 1 share of "
+                    f"{signal.symbol} at ~${fill_candle.close:.2f}, but cash is "
+                    f"${self.cash:,.2f}."
+                )
 
         position = _open_trade(signal, fill_candle, self._bar_count.get(signal.symbol, 0))
         # _open_trade stamps entry_date from the OHLCV bar's timestamp, which
@@ -295,7 +312,10 @@ class PaperAccount:
             f"Paper | OPEN {signal.action} {signal.qty} {signal.symbol} "
             f"@ {position.entry_price:.2f} (pattern={signal.pattern})"
         )
-        return True
+        return True, (
+            f"Filled next-bar entry: {signal.action} {signal.qty:g} {signal.symbol} "
+            f"@ ${position.entry_price:.2f} (pattern={signal.pattern})."
+        )
 
     # ── Per-bar update / exit check ──────────────────────────────────────
     def on_bar(

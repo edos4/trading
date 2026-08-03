@@ -109,6 +109,21 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
+    # ── Web UI (python main.py --web) ───────────────────────────────────────
+    # Session login. WEB_UI_PASSWORD is required — the server refuses to bind
+    # if it is empty so an open VPS dashboard cannot ship by accident.
+    web_ui_host: str = "0.0.0.0"
+    web_ui_port: int = 8080
+    web_ui_username: str = "admin"
+    web_ui_password: str = ""
+    # Signing key for session cookies. If empty, derived from password at boot
+    # (set an explicit long random string in production).
+    web_ui_secret_key: str = ""
+    # Set true behind HTTPS so the session cookie gets the Secure flag.
+    web_ui_https: bool = False
+    # Idle session lifetime (hours).
+    web_ui_session_hours: int = 12
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
     @field_validator("tv_history_days")

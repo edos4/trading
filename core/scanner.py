@@ -21,7 +21,9 @@ from __future__ import annotations
 import asyncio
 import importlib
 import pkgutil
+import threading
 import time
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -36,9 +38,10 @@ from core.paper_trader import PaperAccount
 from core.kronos_gate import kronos_gate_check
 from core.engine_defaults import (
     ENGINE,
-    passes_cooldown,
+    describe_confidence_rejection,
+    describe_cooldown_rejection,
+    describe_regime_rejection,
     passes_min_confidence,
-    passes_regime_filter,
 )
 from analysis.price_volume import volume_confirm_gate
 
@@ -119,6 +122,35 @@ class MarketScanner:
             "trades_opened": 0,
             "sim_days": 0,
         }
+        # Ring buffer of per-signal accept/reject decisions for the web Paper
+        # Logs tab (newest last). Thread-safe — scan workers run concurrently.
+        self._signal_log: deque[dict] = deque(maxlen=1000)
+        self._signal_log_lock = threading.Lock()
+
+    def signal_log_snapshot(self) -> list[dict]:
+        with self._signal_log_lock:
+            return list(self._signal_log)
+
+    def _append_signal_log(
+        self,
+        signal: TradeSignal,
+        *,
+        status: str,
+        reason: str,
+    ) -> None:
+        entry = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "symbol": signal.symbol,
+            "timeframe": signal.timeframe,
+            "action": signal.action,
+            "pattern": signal.pattern,
+            "confidence": round(float(signal.confidence), 4),
+            "price": round(float(signal.price), 4) if signal.price is not None else None,
+            "status": status,
+            "reason": reason,
+        }
+        with self._signal_log_lock:
+            self._signal_log.append(entry)
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
     def start(self) -> None:
@@ -248,13 +280,19 @@ class MarketScanner:
 
                         pending = self._pending_entries.pop(symbol, None)
                         if pending is not None and self._paper is not None:
-                            opened = self._paper.open_position(
+                            opened, fill_reason = self._paper.open_position(
                                 pending, snapshot.candle, self._store
                             )
                             if opened:
                                 self.stats["trades_opened"] += 1
+                                self._append_signal_log(
+                                    pending, status="filled", reason=fill_reason,
+                                )
                             else:
                                 self.stats["signals_rejected"] += 1
+                                self._append_signal_log(
+                                    pending, status="rejected", reason=fill_reason,
+                                )
 
                         for pattern in self._patterns:
                             if timeframe not in pattern.timeframes:
@@ -291,30 +329,38 @@ class MarketScanner:
         # (min_confidence + SMA200 regime + post-loss cooldown). Without these,
         # paper/live took trades the "validated" backtest would have skipped.
         if not passes_min_confidence(signal):
+            reason = describe_confidence_rejection(signal)
             log.info(
                 f"Signal REJECTED by confidence — {signal.symbol} "
-                f"{signal.pattern} | {signal.confidence:.2f} < {ENGINE.min_confidence:.2f}"
+                f"{signal.pattern} | {reason}"
             )
             self.stats["signals_rejected"] += 1
+            self._append_signal_log(signal, status="rejected", reason=reason)
             return
 
-        if not passes_regime_filter(signal, self._store):
+        regime_reason = describe_regime_rejection(signal, self._store)
+        if regime_reason is not None:
             log.info(
                 f"Signal REJECTED by regime filter — {signal.symbol} "
-                f"{signal.pattern} | {signal.action}"
+                f"{signal.pattern} | {regime_reason}"
             )
             self.stats["signals_rejected"] += 1
+            self._append_signal_log(signal, status="rejected", reason=regime_reason)
             return
 
         bar_idx = (
             self._paper.bar_count(signal.symbol) if self._paper is not None else 0
         )
-        if not passes_cooldown(signal, bar_idx, self._cooldown_tracker):
+        cooldown_reason = describe_cooldown_rejection(
+            signal, bar_idx, self._cooldown_tracker,
+        )
+        if cooldown_reason is not None:
             log.info(
                 f"Signal REJECTED by cooldown — {signal.symbol} "
-                f"{signal.pattern} | bars since loss < {ENGINE.cooldown_bars}"
+                f"{signal.pattern} | {cooldown_reason}"
             )
             self.stats["signals_rejected"] += 1
+            self._append_signal_log(signal, status="rejected", reason=cooldown_reason)
             return
 
         # Step 0b — Kronos 1w confirm gate (direction + min move). Runs before
@@ -323,11 +369,17 @@ class MarketScanner:
         if self._kronos_gate:
             gate = kronos_gate_check(signal, self._store)
             if not gate.passed:
+                reason = (
+                    f"Kronos 1w confirm gate vetoed this {signal.action}: {gate.reason}. "
+                    f"Forecast must agree with the pattern direction and clear "
+                    f"KRONOS_MIN_MOVE_PCT."
+                )
                 log.info(
                     f"Signal REJECTED by Kronos gate — {signal.symbol} "
                     f"{signal.pattern} | {gate.reason}"
                 )
                 self.stats["signals_rejected"] += 1
+                self._append_signal_log(signal, status="rejected", reason=reason)
                 return
             if gate.pred_1w is not None:
                 log.info(
@@ -339,12 +391,18 @@ class MarketScanner:
         if self._volume_gate:
             vgate = volume_confirm_gate(signal, self._store)
             if not vgate.passed:
+                reason = (
+                    f"Volume confirm gate vetoed this {signal.action}: {vgate.reason}. "
+                    f"Needs relative volume ≥ VOLUME_GATE_RVOL_MIN and OBV slope "
+                    f"agreeing with the trade direction."
+                )
                 log.info(
                     f"Volume gate REJECT | {signal.symbol} {signal.pattern} | "
                     f"{vgate.reason}"
                 )
                 self.stats["signals_rejected"] += 1
                 self.stats["volume_gate_rejected"] += 1
+                self._append_signal_log(signal, status="rejected", reason=reason)
                 return
             log.info(
                 f"Volume gate PASS | {signal.symbol} {signal.pattern} | "
@@ -358,19 +416,31 @@ class MarketScanner:
         # trade-approval gate when vision is off.
         if settings.vision_confirmation_enabled:
             if signal.confidence < settings.vision_min_indicator_confidence:
+                reason = (
+                    f"Vision gate skipped the trade: confidence {signal.confidence:.2f} "
+                    f"is below VISION_MIN_INDICATOR_CONFIDENCE "
+                    f"({settings.vision_min_indicator_confidence:.2f}), so no Claude "
+                    f"check was run and the signal was dropped."
+                )
                 log.info(
                     f"Signal confidence {signal.confidence:.2f} below threshold "
                     f"{settings.vision_min_indicator_confidence} — skipping vision, skipping trade"
                 )
                 self.stats["signals_rejected"] += 1
+                self._append_signal_log(signal, status="rejected", reason=reason)
                 return
             verdict = await self._run_vision_check(signal, pattern)
             if verdict != VisionVerdict.CONFIRM:
+                reason = (
+                    f"Vision confirmation failed with verdict {verdict} — Claude did "
+                    f"not CONFIRM the {signal.pattern} chart setup on {signal.symbol}."
+                )
                 log.info(
                     f"Signal REJECTED by vision check "
                     f"({verdict}) — {signal.symbol} {signal.pattern}"
                 )
                 self.stats["signals_rejected"] += 1
+                self._append_signal_log(signal, status="rejected", reason=reason)
                 return
 
         # Step 2 — Risk guard (disabled while IBKR is commented out)
@@ -390,10 +460,31 @@ class MarketScanner:
         # self._pending_entries.
         if self._paper is not None and candle is not None:
             self._pending_entries[signal.symbol] = signal
+            self._append_signal_log(
+                signal,
+                status="accepted",
+                reason=(
+                    f"Cleared entry gates (confidence {signal.confidence:.2f}, "
+                    f"SMA200 regime, cooldown"
+                    f"{', Kronos' if self._kronos_gate else ''}"
+                    f"{', volume' if self._volume_gate else ''}"
+                    f"). Queued to fill on the next new {signal.timeframe} bar "
+                    f"close — same one-bar deferral as the backtester."
+                ),
+            )
         else:
             log.info(
                 f"Signal APPROVED (IBKR disabled) — would {signal.action} "
                 f"{signal.qty} {signal.symbol} @ ~{signal.price:.2f}"
+            )
+            self._append_signal_log(
+                signal,
+                status="accepted",
+                reason=(
+                    f"Cleared entry gates; IBKR execution disabled so this would "
+                    f"{signal.action} {signal.qty:g} {signal.symbol} @ ~{signal.price:.2f} "
+                    f"but no order was sent."
+                ),
             )
         # if signal.action == "BUY":
         #     self._orders.place_market_order(

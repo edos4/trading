@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Backtest — Trading Bot{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Backtest</h1>
+  <form id="bt-form" class="param-grid">
+    {% for p in params %}
+    <div class="param">
+      <label for="p-{{ p.key }}"><strong>{{ p.label }}</strong></label>
+      <p class="muted small">{{ p.description }}</p>
+      {% if p.type == "spin" %}
+      <input id="p-{{ p.key }}" name="{{ p.key }}" type="number"
+             value="{{ p.default }}" min="{{ p.min }}" max="{{ p.max }}" step="{{ p.step }}" />
+      {% elif p.type == "combo" %}
+      <select id="p-{{ p.key }}" name="{{ p.key }}">
+        {% for c in p.choices %}
+        <option value="{{ c }}" {% if c == p.default %}selected{% endif %}>{{ c or "(all)" }}</option>
+        {% endfor %}
+      </select>
+      {% elif p.type == "check" %}
+      <input id="p-{{ p.key }}" name="{{ p.key }}" type="checkbox" {% if p.default %}checked{% endif %} />
+      {% else %}
+      <input id="p-{{ p.key }}" name="{{ p.key }}" type="text" value="{{ p.default or '' }}" />
+      {% endif %}
+    </div>
+    {% endfor %}
+  </form>
+  <div class="toolbar">
+    <button class="btn primary" id="bt-run" type="button">Run Backtest</button>
+    <button class="btn" id="bt-ab" type="button">Compare A/B (Volume)</button>
+    <progress id="bt-progress" max="100" value="0"></progress>
+    <span id="bt-pct">—</span>
+    <span id="bt-elapsed" class="muted">Elapsed: —</span>
+    <span id="bt-eta" class="muted">ETA: —</span>
+    <span id="bt-status" class="muted">Adjust parameters and run.</span>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Results</h2>
+  <pre id="bt-summary" class="summary">No results yet.</pre>
+  <div id="bt-ab-box" class="ab-box" hidden></div>
+  <div class="table-wrap">
+    <table id="bt-trades">
+      <thead>
+        <tr>
+          <th>Date</th><th>Action</th><th>Symbol</th><th>TF</th>
+          <th>Entry</th><th>Exit</th><th>P&L%</th><th>Reason</th><th>Pattern</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>window.TB_PAGE = "backtest";</script>
+{% endblock %}
