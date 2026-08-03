@@ -1015,8 +1015,8 @@ def _core_backtest_symbol(
         return [], 0
 
     # Bounded window, not the full backtest length — every pattern's
-    # MIN_BARS tops out at 210 and the regime filter needs 200, so
-    # DEFAULT_WINDOW (365) is plenty. Sizing this to len(candles) made every
+    # MIN_BARS tops out at 210, regime filter needs 200, Kronos gate LOOKBACK=400,
+    # so DEFAULT_WINDOW is enough. Sizing this to len(candles) made every
     # per-bar indicator recompute run over the *entire* history so far,
     # turning a multi-year walk-forward into an O(n^2) crawl.
     store = OHLCVStore(window=DEFAULT_WINDOW)

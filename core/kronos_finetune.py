@@ -27,7 +27,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
-from core.kronos_eval import KRONOS_REPO_DIR, MODEL_PATH, TOKENIZER_PATH
+from core.kronos_eval import KRONOS_REPO_DIR, MODEL_PATH, TOKENIZER_PATH, with_amount
 from learn.dataset import DEFAULT_DATA_DIR, iter_ticker_frames
 from utils.logger import log
 
@@ -80,9 +80,7 @@ def prepare_dataset(
     val_data: dict[str, pd.DataFrame] = {}
     for symbol, df in ranked:
         df = df.copy()
-        # Same amount fallback KronosPredictor.predict() uses when a feed has no
-        # real dollar-amount column — keeps train/serve feature semantics identical.
-        df["amount"] = df["volume"] * df[["open", "high", "low", "close"]].mean(axis=1)
+        df = with_amount(df)
         df.index.name = "datetime"
         split = int(len(df) * (1 - val_frac))
         if split < 60 or len(df) - split < 20:

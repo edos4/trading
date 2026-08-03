@@ -131,8 +131,9 @@ _CHART_API = "https://query1.finance.yahoo.com/v8/finance/chart"
 _CHART_UA = "trading-bot/2.0 chart-history"
 
 # interval, range, max bars to keep
+# Daily uses 2y so Kronos gate can take LOOKBACK=400 (1y ≈ 252 bars is too short).
 _CHART_SPECS: dict[str, tuple[str, str, int]] = {
-    "1d": ("1d", "1y", 252),
+    "1d": ("1d", "2y", 512),
     "1W": ("1wk", "5y", 65),
 }
 
@@ -397,7 +398,7 @@ class TVClient:
         )
 
     def _fetch_history_chart(self, symbol: str, timeframe: str) -> list[OHLCVCandle]:
-        """Fetch OHLCV history from the public chart API (~1Y daily / ~5Y weekly)."""
+        """Fetch OHLCV history from the public chart API (~2Y daily / ~5Y weekly)."""
         spec = _CHART_SPECS.get(timeframe)
         if spec is None:
             return []

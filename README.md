@@ -168,22 +168,28 @@ layer: *"does your 1w forecast agree with this BUY/SELL, and is the
 predicted move large enough to matter?"* It does not generate entries on
 its own.
 
+This is **not** the Kronos repo's finetune top-K backtest demo. We call the
+same `KronosPredictor.predict()` API; strategy layering is ours.
+
 ### What the gate does
 
 Implemented in `core/kronos_gate.py`. After a pattern emits BUY/SELL on the
 `1d` timeframe:
 
-1. Forecast the next **5 trading days** of close with Kronos-base
-   (`sample_count` averaged paths).
-2. **Reject** if `|pred_1w| < KRONOS_MIN_MOVE_PCT` (default 6%).
-3. **Reject** if the forecast direction conflicts with the signal
+1. Feed the last **400 daily bars** (official Kronos lookback) of OHLCV plus
+   synthetic `amount = volume * mean(OHLC)` when the feed has no turnover.
+2. Forecast the next **5 trading days** of close (`pred_len=5` — a 1w veto
+   horizon; Kronos demos often use 120 for longer charts).
+3. Average `KRONOS_SAMPLE_COUNT` sampled paths (`T=1.0`, `top_p=0.9`).
+4. **Reject** if `|pred_1w| < KRONOS_MIN_MOVE_PCT` (default 6%).
+5. **Reject** if the forecast direction conflicts with the signal
    (BUY needs `pred_1w > 0`, SELL needs `pred_1w < 0`).
-4. On **PASS**, optionally overwrite take-profit / stop-loss from the
+6. On **PASS**, optionally overwrite take-profit / stop-loss from the
    forecast (`KRONOS_GATE_ADJUST_EXITS=true`).
 
-Fail-open: if `~/Kronos` weights are missing or `predict()` errors, the
-signal is allowed through (with a one-time warning) so a broken install
-cannot freeze the scanner.
+Fail-open: if `~/Kronos` weights are missing, history is shorter than
+lookback, or `predict()` errors, the signal is allowed through (with a
+one-time warning) so a broken install cannot freeze the scanner.
 
 Skipped: `CLOSE` actions and non-daily timeframes.
 
@@ -206,12 +212,16 @@ Startup logs print `Kronos gate: ON/OFF`.
 ```bash
 # Require Kronos 1w forecast to agree with chart-pattern BUY/SELL
 KRONOS_GATE_ENABLED=true
-# Overwrite TP/SL from the 1w forecast when the gate passes
-KRONOS_GATE_ADJUST_EXITS=true
+# Overwrite TP/SL from the 1w forecast when the gate passes (off by default)
+KRONOS_GATE_ADJUST_EXITS=false
 # Minimum |predicted 1w move| to pass (0.06 = 6%)
-KRONOS_MIN_MOVE_PCT=0.02
+KRONOS_MIN_MOVE_PCT=0.06
 # Average N sampled forecast paths per prediction (reduces noise)
 KRONOS_SAMPLE_COUNT=3
+# Prefer finetuned weights under ~/Kronos/finetuned (falls back to base)
+KRONOS_USE_FINETUNED=false
+# Daily history pull — must be ≥400 for full official lookback (clamped ≤512)
+TV_HISTORY_DAYS=450
 ```
 
 Disable anytime with `KRONOS_GATE_ENABLED=false` (or uncheck in the UI).

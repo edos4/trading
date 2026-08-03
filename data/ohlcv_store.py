@@ -18,7 +18,8 @@ from data.tv_client import OHLCVCandle, MarketSnapshot
 from utils.logger import log
 
 # How many candles to keep in memory per symbol/timeframe
-DEFAULT_WINDOW = 365
+# Sized for Kronos gate LOOKBACK=400 (+ headroom) and TV history ≤512.
+DEFAULT_WINDOW = 512
 
 
 class OHLCVStore:

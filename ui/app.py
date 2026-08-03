@@ -36,7 +36,7 @@ from config import settings
 from core.kronos_gate import kronos_gate_check
 from core.engine_defaults import passes_min_confidence, passes_regime_filter
 from analysis.price_volume import volume_confirm_gate
-from data.ohlcv_store import OHLCVStore
+from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
 from data.tv_client import MarketSnapshot, TVClient
 from patterns.base_pattern import BasePattern, TradeSignal
 from ui.backtest_dialog import BacktestDialog
@@ -92,7 +92,7 @@ class TradingBotUI:
         self._renderer = ChartRenderer(save_to_disk=False)
         self._patterns = discover_patterns()
         self._store = OHLCVStore(
-            window=max(365, settings.tv_history_days)
+            window=max(DEFAULT_WINDOW, settings.tv_history_days)
         )
 
         self._symbols: list[tuple[str, str]] = []

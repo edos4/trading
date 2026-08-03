@@ -26,9 +26,23 @@ if str(KRONOS_REPO_DIR) not in sys.path:
 TOKENIZER_PATH = KRONOS_REPO_DIR / "weights" / "Kronos-Tokenizer-base"
 MODEL_PATH = KRONOS_REPO_DIR / "weights" / "Kronos-base"
 MAX_CONTEXT = 512
+# Official examples (prediction_example.py, prediction_cn_markets_day.py) use 400.
+LOOKBACK = 400
 
 DAY_AHEAD = 1
-WEEK_AHEAD = 5  # trading days
+WEEK_AHEAD = 5  # trading days — gate horizon (1w veto), not the demo pred_len=120
+
+
+def with_amount(df: pd.DataFrame) -> pd.DataFrame:
+    """OHLCV → OHLCV+amount using KronosPredictor's documented fallback.
+
+    When a feed has no real dollar-turnover column, the official predictor
+    fills ``amount = volume * mean(OHLC)``. We materialize that here so gate,
+    eval, and finetune all feed identical feature semantics.
+    """
+    out = df[["open", "high", "low", "close", "volume"]].copy()
+    out["amount"] = out["volume"] * out[["open", "high", "low", "close"]].mean(axis=1)
+    return out
 
 
 @dataclass
@@ -92,7 +106,7 @@ def _run_symbol(
 ) -> list[WindowResult]:
     results = []
     for context_start, context_end, future_end in _eval_windows(df, lookback, windows, stride, start_date):
-        x_df = df.iloc[context_start:context_end][["open", "high", "low", "close", "volume"]]
+        x_df = with_amount(df.iloc[context_start:context_end])
         y_actual = df.iloc[context_end:future_end]
         if len(y_actual) < WEEK_AHEAD:
             continue
@@ -149,7 +163,7 @@ def run_kronos_test(
     data_dir: Path = DEFAULT_DATA_DIR,
     n_symbols: int = 20,
     windows_per_symbol: int = 3,
-    lookback: int = 400,
+    lookback: int = LOOKBACK,
     stride: int = 20,
     min_bars: int = 500,
     seed: int = 42,

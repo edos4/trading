@@ -34,7 +34,8 @@ class Settings(BaseSettings):
     papertrade_stream_dir: str = "/home/r00t/stocks_data"
     papertrade_stream_host: str = "127.0.0.1"
     papertrade_stream_port: int = 8765
-    papertrade_stream_lookback_bars: int = 300
+    # Warm enough for Kronos gate LOOKBACK=400 when replaying near CSV end.
+    papertrade_stream_lookback_bars: int = 420
     # Streamed bars are historical, not live — scan far faster than the
     # settings.scan_interval_seconds cadence used for real market data.
     papertrade_stream_interval_seconds: int = 60
@@ -49,8 +50,9 @@ class Settings(BaseSettings):
     tv_exchange: str
     tv_exchange_overrides: str = ""
     tv_use_ta_fallback: bool = False  # unused; kept for .env compatibility
-    # Daily bars to pull from TradingView screener (close[0]=today, close[1]=yesterday, …)
-    tv_history_days: int = 252  # ~1 trading year
+    # Daily bars to pull from Yahoo chart + screener overlay. Sized for Kronos
+    # gate LOOKBACK=400 (official demo) plus a little headroom; clamp ≤512.
+    tv_history_days: int = 450
     # Swing setups form on daily/weekly bars, which only print one new candle
     # per day/week — no need to poll every minute. Once per hour is plenty
     # and keeps TradingView/API call volume low.
@@ -74,10 +76,13 @@ class Settings(BaseSettings):
     # ── Kronos confirm gate (core/kronos_gate.py) ───────────────────────────
     # After a chart pattern fires, require Kronos 1w forecast to agree on
     # direction and clear kronos_min_move_pct. Not a standalone entry pattern —
-    # veto/confirm layer only. Fail-open if weights missing.
-    kronos_min_move_pct: float = 0.02
+    # veto/confirm layer only (not the Kronos finetune top-K strategy). Fail-open
+    # if weights missing.
+    kronos_min_move_pct: float = 0.06
     kronos_sample_count: int = 3
     kronos_gate_enabled: bool = True
+    # Load finetuned weights from ~/Kronos/finetuned when present; else base.
+    kronos_use_finetuned: bool = False
     # Off by default: rewriting pattern TP/SL from the 1w forecast made paper
     # and "pattern" backtests describe different strategies (paper +81% while
     # Kronos-on formal BT printed PF 0.046). Gate still vetoes on direction;
@@ -109,7 +114,8 @@ class Settings(BaseSettings):
     @field_validator("tv_history_days")
     @classmethod
     def _clamp_history_days(cls, value: int) -> int:
-        return max(1, min(value, 365))
+        # Kronos-base max_context is 512; more bars than that are truncated.
+        return max(1, min(value, 512))
 
     @field_validator("tv_screener_min_interval_seconds")
     @classmethod

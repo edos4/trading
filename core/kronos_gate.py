@@ -8,7 +8,7 @@ through when:
   - |pred_1w| >= settings.kronos_min_move_pct
 
 Used as a veto/confirm layer on top of Toby patterns, not as a standalone
-entry.
+entry (unlike the Kronos repo's finetune top-K demo).
 
 If weights are missing or predict fails, the gate fails open (passes the
 signal) so a broken Kronos install cannot freeze the scanner.
@@ -22,12 +22,25 @@ import pandas as pd
 
 from patterns.base_pattern import TradeSignal
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
-from core.kronos_eval import _load_predictor, MODEL_PATH, WEEK_AHEAD
+from core.kronos_eval import (
+    LOOKBACK,
+    MAX_CONTEXT,
+    MODEL_PATH,
+    WEEK_AHEAD,
+    _load_predictor,
+    with_amount,
+)
 from config import settings
 from utils.logger import log
 
-# Same lookback ceiling used by the eval path — store window / TV history caps.
-_LOOKBACK = max(60, min(DEFAULT_WINDOW, settings.tv_history_days) - WEEK_AHEAD - 30)
+
+def _context_lookback() -> int:
+    """Bars fed to KronosPredictor — official demos use LOOKBACK=400.
+
+    Capped by store window, TV history pull, and model max_context (512).
+    """
+    available = min(DEFAULT_WINDOW, settings.tv_history_days)
+    return max(60, min(LOOKBACK, available, MAX_CONTEXT))
 
 
 @dataclass(frozen=True)
@@ -67,7 +80,10 @@ class KronosGate:
             import torch
 
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            self._predictor = _load_predictor(device=device, use_finetuned=False)
+            self._predictor = _load_predictor(
+                device=device,
+                use_finetuned=settings.kronos_use_finetuned,
+            )
         except Exception:
             log.exception("KronosGate | failed to load Kronos — fail-open for this run")
             self._load_failed = True
@@ -98,14 +114,21 @@ class KronosGate:
         if not self._ensure_loaded():
             return KronosGateResult(passed=True, reason="model unavailable (fail-open)")
 
-        df = store.get_df(signal.symbol, signal.timeframe, min_bars=_LOOKBACK + WEEK_AHEAD)
+        lookback = _context_lookback()
+        df = store.get_df(signal.symbol, signal.timeframe, min_bars=lookback)
         if df is None:
             return KronosGateResult(passed=True, reason="insufficient bars (fail-open)")
 
-        x_df = df.iloc[-_LOOKBACK:][["open", "high", "low", "close", "volume"]]
+        x_df = with_amount(df.iloc[-lookback:])
         last_close = float(x_df["close"].iloc[-1])
         x_timestamp = pd.Series(x_df.index)
-        y_timestamp = pd.Series(pd.bdate_range(x_df.index[-1], periods=WEEK_AHEAD + 1)[1:])
+        # Same construction as Kronos examples/prediction_cn_markets_day.py.
+        y_timestamp = pd.Series(
+            pd.bdate_range(
+                start=x_df.index[-1] + pd.Timedelta(days=1),
+                periods=WEEK_AHEAD,
+            )
+        )
 
         try:
             pred_df = self._predictor.predict(

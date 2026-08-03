@@ -29,6 +29,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from core.kronos_eval import (  # noqa: E402
+    LOOKBACK,
     WEEK_AHEAD,
     WindowResult,
     _load_predictor,
@@ -261,7 +262,7 @@ def run(
     data_dir: Path = DEFAULT_DATA_DIR,
     n_symbols: int = 30,
     windows_per_symbol: int = 8,
-    lookback: int = 400,
+    lookback: int = LOOKBACK,
     stride: int = 5,
     min_bars: int = 500,
     seed: int = 42,
@@ -356,7 +357,7 @@ def main() -> None:
     p.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     p.add_argument("--symbols", type=int, default=30, help="Number of tickers to evaluate")
     p.add_argument("--windows", type=int, default=8, help="Max walk-forward windows per symbol")
-    p.add_argument("--lookback", type=int, default=400)
+    p.add_argument("--lookback", type=int, default=LOOKBACK)
     p.add_argument("--stride", type=int, default=5, help="Bars between windows (smaller = more)")
     p.add_argument("--min-bars", type=int, default=500)
     p.add_argument("--seed", type=int, default=42)

@@ -6,14 +6,16 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
-from core.kronos_gate import KronosGate
-from data.ohlcv_store import OHLCVStore
+from core.kronos_eval import LOOKBACK
+from core.kronos_gate import KronosGate, _context_lookback
+from data.ohlcv_store import DEFAULT_WINDOW, OHLCVStore
 from data.tv_client import OHLCVCandle
 from patterns.base_pattern import TradeSignal
 
 
-def _fill_store(n: int = 300, last_close: float = 100.0) -> OHLCVStore:
-    store = OHLCVStore(window=365)
+def _fill_store(n: int | None = None, last_close: float = 100.0) -> OHLCVStore:
+    n = max(LOOKBACK, _context_lookback()) if n is None else n
+    store = OHLCVStore(window=DEFAULT_WINDOW)
     start = datetime(2024, 1, 2, tzinfo=timezone.utc)
     for i in range(n):
         # Flat path ending at last_close — gate only cares about forecast vs close.
@@ -50,8 +52,10 @@ def _signal(**kw) -> TradeSignal:
 class _FakePredictor:
     def __init__(self, pred_close: float):
         self.pred_close = pred_close
+        self.last_kwargs: dict | None = None
 
     def predict(self, **kwargs):
+        self.last_kwargs = kwargs
         # One row per forecast day; gate reads last close of week.
         pred_len = kwargs.get("pred_len", 5)
         closes = [self.pred_close] * pred_len
@@ -60,7 +64,8 @@ class _FakePredictor:
 
 def test_gate_pass_aligned_buy():
     gate = KronosGate()
-    gate._predictor = _FakePredictor(110.0)  # +10%
+    fake = _FakePredictor(110.0)  # +10%
+    gate._predictor = fake
     store = _fill_store()
     sig = _signal(action="BUY")
     result = gate.check(sig, store, adjust_exits=True)
@@ -68,6 +73,11 @@ def test_gate_pass_aligned_buy():
     assert result.pred_1w is not None and result.pred_1w > 0
     assert abs(sig.take_profit - 110.0) < 1e-6
     assert "KronosGate" in sig.notes
+    # Official-shaped inputs: lookback rows + amount column.
+    assert fake.last_kwargs is not None
+    assert len(fake.last_kwargs["df"]) == _context_lookback()
+    assert "amount" in fake.last_kwargs["df"].columns
+    assert _context_lookback() == LOOKBACK
 
 
 def test_gate_reject_wrong_direction():
