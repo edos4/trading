@@ -1281,6 +1281,7 @@ class Backtester:
         max_workers: int = 0,
         kronos_gate: bool | None = None,
         volume_gate: bool | None = None,
+        kronos_rank: bool | None = None,
     ):
         self._symbols = symbols
         self._tv = TVClient(settings.tv_screener, settings.tv_exchange)
@@ -1297,6 +1298,9 @@ class Backtester:
         )
         self._volume_gate = (
             settings.volume_gate_enabled if volume_gate is None else volume_gate
+        )
+        self._kronos_rank = (
+            settings.kronos_rank_enabled if kronos_rank is None else kronos_rank
         )
         self._cooldown_bars = cooldown_bars
         self._txn_cost_pct = txn_cost_pct
@@ -1430,6 +1434,13 @@ class Backtester:
             "volume_gate": self._volume_gate,
             "volume_gate_rvol_min": settings.volume_gate_rvol_min,
             "volume_gate_obv_bars": settings.volume_gate_obv_bars,
+            "kronos_rank": self._kronos_rank,
+            "kronos_rank_top_k": settings.kronos_rank_top_k,
+            "kronos_rank_bottom_k": settings.kronos_rank_bottom_k,
+            "kronos_rank_long_only": settings.kronos_rank_long_only,
+            "kronos_rank_min_move_pct": settings.kronos_rank_min_move_pct,
+            "kronos_rank_rebalance_bars": settings.kronos_rank_rebalance_bars,
+            "max_open_positions": self._max_open_positions,
         }
 
         max_workers = max(1, self._max_workers)
@@ -1502,6 +1513,26 @@ class Backtester:
                     self._progress_callback(completed, total_tasks)
 
         pbar.close()
+
+        if self._kronos_rank:
+            log.info("Backtester | running Kronos ranked forecast sleeve (cross-sectional)")
+            from core.kronos_rank_sleeve import backtest_rank_sleeve
+
+            ohlcv_1d = {
+                s: candles
+                for (s, tf), candles in ohlcv_data.items()
+                if tf == "1d" and candles
+            }
+            sleeve_trades, sleeve_signals = await asyncio.to_thread(
+                backtest_rank_sleeve, ohlcv_1d, config,
+            )
+            result.trades.extend(sleeve_trades)
+            result.total_signals += sleeve_signals
+            log.info(
+                f"Backtester | KronosRank added {len(sleeve_trades)} trades "
+                f"({sleeve_signals} signals)"
+            )
+
         result.trades = _enforce_max_open_positions(
             result.trades, self._max_open_positions
         )

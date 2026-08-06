@@ -26,9 +26,8 @@ from core.kronos_eval import (
     LOOKBACK,
     MAX_CONTEXT,
     MODEL_PATH,
-    WEEK_AHEAD,
     _load_predictor,
-    with_amount,
+    predict_1w_return,
 )
 from config import settings
 from utils.logger import log
@@ -119,35 +118,16 @@ class KronosGate:
         if df is None:
             return KronosGateResult(passed=True, reason="insufficient bars (fail-open)")
 
-        x_df = with_amount(df.iloc[-lookback:])
-        last_close = float(x_df["close"].iloc[-1])
-        x_timestamp = pd.Series(x_df.index)
-        # Same construction as Kronos examples/prediction_cn_markets_day.py.
-        y_timestamp = pd.Series(
-            pd.bdate_range(
-                start=x_df.index[-1] + pd.Timedelta(days=1),
-                periods=WEEK_AHEAD,
-            )
+        out = predict_1w_return(
+            self._predictor,
+            df,
+            sample_count=settings.kronos_sample_count,
+            lookback=lookback,
         )
-
-        try:
-            pred_df = self._predictor.predict(
-                df=x_df.reset_index(drop=True),
-                x_timestamp=x_timestamp,
-                y_timestamp=y_timestamp,
-                pred_len=WEEK_AHEAD,
-                T=1.0,
-                top_p=0.9,
-                sample_count=settings.kronos_sample_count,
-                verbose=False,
-            )
-        except Exception:
-            log.exception(
-                f"KronosGate | predict failed for {signal.symbol} — fail-open"
-            )
+        if out is None:
             return KronosGateResult(passed=True, reason="predict error (fail-open)")
 
-        pred_1w = float(pred_df["close"].iloc[WEEK_AHEAD - 1]) / last_close - 1.0
+        pred_1w, last_close = out
         min_move = settings.kronos_min_move_pct
 
         if abs(pred_1w) < min_move:

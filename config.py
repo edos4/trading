@@ -89,6 +89,20 @@ class Settings(BaseSettings):
     # exits stay the pattern's until adjust_exits is proven to lift expectancy.
     kronos_gate_adjust_exits: bool = False
 
+    # ── Kronos ranked forecast sleeve (core/kronos_rank_sleeve.py) ──────────
+    # Independent entry source beside Toby patterns: cross-sectionally rank
+    # predicted 1w returns and take top_k longs / bottom_k shorts. Off by
+    # default (GPU cost per scan + needs BT validation). Does not replace
+    # kronos_gate — gate still filters chart-pattern signals only.
+    kronos_rank_enabled: bool = False
+    kronos_rank_top_k: int = 3
+    kronos_rank_bottom_k: int = 3
+    kronos_rank_long_only: bool = True
+    # None → reuse kronos_min_move_pct as the |pred| floor for sleeve entries.
+    kronos_rank_min_move_pct: float | None = None
+    # Bars between cross-sectional re-ranks in backtest (5 ≈ weekly).
+    kronos_rank_rebalance_bars: int = 5
+
     # ── Volume confirm gate (analysis/price_volume.py) ─────────────────────
     # After a chart pattern fires, require relative volume (signal bar /
     # SMA20) ≥ volume_gate_rvol_min AND OBV slope over volume_gate_obv_bars

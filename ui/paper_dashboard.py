@@ -135,6 +135,11 @@ class PaperDashboard:
         )
         self._kronos_check.pack(side=tk.LEFT, padx=(12, 0))
 
+        self._kronos_rank_var = tk.BooleanVar(value=settings.kronos_rank_enabled)
+        ttk.Checkbutton(
+            top_bar, text="Kronos rank sleeve", variable=self._kronos_rank_var,
+        ).pack(side=tk.LEFT, padx=(12, 0))
+
         self._volume_gate_var = tk.BooleanVar(value=settings.volume_gate_enabled)
         ttk.Checkbutton(
             top_bar, text="Volume gate", variable=self._volume_gate_var,
@@ -300,6 +305,7 @@ class PaperDashboard:
                 int(self._n_var.get()),
                 self._stream_var.get(),
                 self._kronos_gate_var.get(),
+                self._kronos_rank_var.get(),
                 self._volume_gate_var.get(),
                 stream_start,
             ),
@@ -373,6 +379,7 @@ class PaperDashboard:
         n_symbols: int,
         use_stream: bool,
         kronos_gate: bool,
+        kronos_rank: bool,
         volume_gate: bool,
         stream_start: Optional[str] = None,
     ) -> None:
@@ -404,6 +411,7 @@ class PaperDashboard:
                 settings.papertrade_stream_interval_seconds if use_stream else None
             ),
             kronos_gate=kronos_gate,
+            kronos_rank=kronos_rank,
             volume_gate=volume_gate,
         )
         self._scanner = scanner
@@ -414,6 +422,7 @@ class PaperDashboard:
             f"Running — {len(symbols)} symbols, scanning every {interval}s"
             f"{stream_note}"
             f", Kronos gate={'ON' if kronos_gate else 'OFF'}"
+            f", Kronos rank={'ON' if kronos_rank else 'OFF'}"
             f", Volume gate={'ON' if volume_gate else 'OFF'}"
         ))
         error_msg: Optional[str] = None

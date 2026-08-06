@@ -45,6 +45,52 @@ def with_amount(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def predict_1w_return(
+    predictor,
+    df: pd.DataFrame,
+    *,
+    sample_count: int = 1,
+    lookback: int = LOOKBACK,
+) -> tuple[float, float] | None:
+    """Run Kronos on the last ``lookback`` bars; return (pred_1w, last_close).
+
+    ``pred_1w`` is close-to-close % move over ``WEEK_AHEAD`` trading days.
+    Returns None if history is too short or predict fails.
+    """
+    if df is None or len(df) < max(60, min(lookback, len(df))):
+        return None
+    use = min(lookback, len(df), MAX_CONTEXT)
+    if use < 60:
+        return None
+    try:
+        x_df = with_amount(df.iloc[-use:])
+        last_close = float(x_df["close"].iloc[-1])
+        if last_close <= 0:
+            return None
+        x_timestamp = pd.Series(x_df.index)
+        y_timestamp = pd.Series(
+            pd.bdate_range(
+                start=x_df.index[-1] + pd.Timedelta(days=1),
+                periods=WEEK_AHEAD,
+            )
+        )
+        pred_df = predictor.predict(
+            df=x_df.reset_index(drop=True),
+            x_timestamp=x_timestamp,
+            y_timestamp=y_timestamp,
+            pred_len=WEEK_AHEAD,
+            T=1.0,
+            top_p=0.9,
+            sample_count=sample_count,
+            verbose=False,
+        )
+        pred_1w = float(pred_df["close"].iloc[WEEK_AHEAD - 1]) / last_close - 1.0
+        return pred_1w, last_close
+    except Exception:
+        log.exception("Kronos | predict_1w_return failed")
+        return None
+
+
 @dataclass
 class WindowResult:
     symbol: str
@@ -53,6 +99,8 @@ class WindowResult:
     pred_1d: float
     actual_1w: float
     pred_1w: float
+    # Prior WEEK_AHEAD close-to-close return ending at asof (persistence baseline).
+    persist_1w: float = float("nan")
 
 
 def _load_predictor(device: str = "cpu", use_finetuned: bool = False):
@@ -130,6 +178,16 @@ def _run_symbol(
         pred_1d = float(pred_df["close"].iloc[DAY_AHEAD - 1]) / last_close - 1.0
         pred_1w = float(pred_df["close"].iloc[WEEK_AHEAD - 1]) / last_close - 1.0
 
+        asof_i = context_end - 1
+        prior_i = asof_i - WEEK_AHEAD
+        if prior_i >= 0:
+            prior_close = float(df["close"].iloc[prior_i])
+            persist_1w = (
+                last_close / prior_close - 1.0 if prior_close > 0 else float("nan")
+            )
+        else:
+            persist_1w = float("nan")
+
         results.append(
             WindowResult(
                 symbol=symbol,
@@ -138,24 +196,162 @@ def _run_symbol(
                 pred_1d=pred_1d,
                 actual_1w=actual_1w,
                 pred_1w=pred_1w,
+                persist_1w=persist_1w,
             )
         )
     return results
 
 
 def _score(results: list[WindowResult], actual_attr: str, pred_attr: str) -> dict:
-    actual = np.array([getattr(r, actual_attr) for r in results])
-    pred = np.array([getattr(r, pred_attr) for r in results])
+    actual = np.array([getattr(r, actual_attr) for r in results], dtype=float)
+    pred = np.array([getattr(r, pred_attr) for r in results], dtype=float)
     if len(actual) == 0:
         return {"n": 0}
     mae = float(np.mean(np.abs(pred - actual)))
     naive_mae = float(np.mean(np.abs(actual)))  # baseline: predict no change
     direction_hits = np.sign(pred) == np.sign(actual)
+    # Mean 1w return if always trading the predicted sign (unit notional).
+    signed_ret = float(np.mean(np.sign(pred) * actual))
     return {
         "n": len(actual),
         "mae_pct": mae * 100,
         "naive_mae_pct": naive_mae * 100,
         "directional_accuracy_pct": float(np.mean(direction_hits)) * 100,
+        "signed_return_pct": signed_ret * 100,
+    }
+
+
+def _score_persistence(results: list[WindowResult]) -> dict:
+    """Same metrics as `_score`, but prediction = prior-week return (persist_1w)."""
+    usable = [r for r in results if not math.isnan(r.persist_1w)]
+    return _score(usable, "actual_1w", "persist_1w")
+
+
+def score_gate_rule(
+    results: list[WindowResult],
+    min_move: float,
+) -> dict:
+    """Metrics matching `kronos_gate`: only windows with |pred_1w| >= min_move.
+
+    This is the project-relevant slice: live gate vetoes weak forecasts and only
+    confirms when magnitude clears `settings.kronos_min_move_pct`. Coverage is
+    the fraction of calendar windows that would clear the magnitude floor (as if
+    every asof were a pattern signal — still unconditional on patterns).
+    """
+    n_all = len(results)
+    if n_all == 0:
+        return {"n": 0, "n_all": 0, "coverage_pct": 0.0, "min_move": min_move}
+
+    passed = [r for r in results if abs(r.pred_1w) >= min_move]
+    base = _score(passed, "actual_1w", "pred_1w")
+    if base["n"] == 0:
+        return {
+            "n": 0,
+            "n_all": n_all,
+            "coverage_pct": 0.0,
+            "min_move": min_move,
+            "mae_pct": float("nan"),
+            "naive_mae_pct": float("nan"),
+            "directional_accuracy_pct": float("nan"),
+            "signed_return_pct": float("nan"),
+        }
+
+    pred = np.array([r.pred_1w for r in passed])
+    actual = np.array([r.actual_1w for r in passed])
+    buy_mask = pred > 0
+    sell_mask = pred < 0
+    buy_hit = (
+        float(np.mean(actual[buy_mask] > 0)) * 100 if buy_mask.any() else float("nan")
+    )
+    sell_hit = (
+        float(np.mean(actual[sell_mask] < 0)) * 100 if sell_mask.any() else float("nan")
+    )
+    return {
+        **base,
+        "n_all": n_all,
+        "coverage_pct": 100.0 * len(passed) / n_all,
+        "min_move": min_move,
+        "n_buy": int(buy_mask.sum()),
+        "n_sell": int(sell_mask.sum()),
+        "buy_dir_hit_pct": buy_hit,
+        "sell_dir_hit_pct": sell_hit,
+    }
+
+
+def bootstrap_ci(
+    results: list[WindowResult],
+    *,
+    actual_attr: str = "actual_1w",
+    pred_attr: str = "pred_1w",
+    n_boot: int = 1000,
+    seed: int = 42,
+    min_move: float | None = None,
+) -> dict:
+    """Percentile bootstrap CIs for MAE% and directional accuracy%.
+
+    When ``min_move`` is set, each resample re-applies the gate magnitude filter
+    (coverage varies per draw).
+    """
+    empty = {
+        "n": 0,
+        "mae_pct_ci": (float("nan"), float("nan"), float("nan")),
+        "dir_acc_pct_ci": (float("nan"), float("nan"), float("nan")),
+    }
+    if not results:
+        return empty
+
+    rng = np.random.default_rng(seed)
+    mae_s: list[float] = []
+    dir_s: list[float] = []
+    n = len(results)
+    for _ in range(n_boot):
+        idx = rng.integers(0, n, size=n)
+        sample = [results[i] for i in idx]
+        if min_move is not None:
+            sample = [r for r in sample if abs(getattr(r, pred_attr)) >= min_move]
+        if len(sample) < 2:
+            continue
+        s = _score(sample, actual_attr, pred_attr)
+        mae_s.append(s["mae_pct"])
+        dir_s.append(s["directional_accuracy_pct"])
+
+    if not mae_s:
+        return empty
+
+    def _pct(xs: list[float]) -> tuple[float, float, float]:
+        arr = np.asarray(xs, dtype=float)
+        lo, mid, hi = np.percentile(arr, [2.5, 50.0, 97.5])
+        return float(lo), float(mid), float(hi)
+
+    return {
+        "n": n,
+        "n_boot_kept": len(mae_s),
+        "mae_pct_ci": _pct(mae_s),
+        "dir_acc_pct_ci": _pct(dir_s),
+    }
+
+
+def majority_sign_baseline(results: list[WindowResult]) -> dict:
+    """Always predict the sample's majority actual sign (in-sample oracle bias check).
+
+    Not a tradeable baseline — shows how much dir_acc a constant-sign guess gets
+    on a one-sided tape (important when Kronos is systematically bearish/bullish).
+    """
+    if not results:
+        return {"n": 0}
+    actual = np.array([r.actual_1w for r in results])
+    maj = 1.0 if np.mean(actual > 0) >= 0.5 else -1.0
+    pred = np.full_like(actual, maj)
+    mae = float(np.mean(np.abs(pred - actual)))
+    naive_mae = float(np.mean(np.abs(actual)))
+    dir_hits = np.sign(pred) == np.sign(actual)
+    return {
+        "n": len(actual),
+        "majority_sign": int(maj),
+        "mae_pct": mae * 100,
+        "naive_mae_pct": naive_mae * 100,
+        "directional_accuracy_pct": float(np.mean(dir_hits)) * 100,
+        "signed_return_pct": float(np.mean(np.sign(pred) * actual)) * 100,
     }
 
 
@@ -252,6 +448,14 @@ def run_kronos_test(
 
     score_1d = _score(all_results, "actual_1d", "pred_1d")
     score_1w = _score(all_results, "actual_1w", "pred_1w")
+    try:
+        from config import settings
+
+        min_move = settings.kronos_min_move_pct
+    except Exception:
+        min_move = 0.06
+    gate = score_gate_rule(all_results, min_move)
+    persist = _score_persistence(all_results)
 
     print()
     print("=" * 60)
@@ -261,7 +465,23 @@ def run_kronos_test(
         print(f"  {label:8s}  n={s['n']:<5d} "
               f"MAE={s['mae_pct']:.2f}%  (naive MAE={s['naive_mae_pct']:.2f}%)  "
               f"direction hit={s['directional_accuracy_pct']:.1f}%")
+    if persist.get("n"):
+        print(
+            f"  persist  n={persist['n']:<5d} "
+            f"MAE={persist['mae_pct']:.2f}%  "
+            f"direction hit={persist['directional_accuracy_pct']:.1f}%  "
+            f"(prior-week return baseline)"
+        )
+    if gate.get("n"):
+        print(
+            f"  gate@{min_move:.0%} n={gate['n']:<5d} "
+            f"cover={gate['coverage_pct']:.0f}%  "
+            f"MAE={gate['mae_pct']:.2f}%  "
+            f"dir={gate['directional_accuracy_pct']:.1f}%  "
+            f"signed_ret={gate['signed_return_pct']:.2f}%"
+        )
     print("=" * 60)
     print("MAE = mean absolute error. Average of |predicted % move − actual % move| over all windows. Lower = better.")
     print("Naive MAE = same metric but 'prediction' is 0% change (tomorrow = today, no move). Baseline for 'model add no value' case.")
+    print("gate@min = same as live kronos_gate magnitude floor; dir/signed_ret only on windows that would clear it.")
     print()

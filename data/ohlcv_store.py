@@ -128,6 +128,11 @@ class OHLCVStore:
         candles = self._store.get(key)
         return candles[-1].close if candles else None
 
+    def latest_candle(self, symbol: str, timeframe: str) -> OHLCVCandle | None:
+        key = (symbol, timeframe)
+        candles = self._store.get(key)
+        return candles[-1] if candles else None
+
     def available(self, symbol: str, timeframe: str) -> int:
         """How many candles are currently stored."""
         return len(self._store.get((symbol, timeframe), []))

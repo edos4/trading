@@ -163,13 +163,37 @@ pattern.
 
 ### Why a gate (not an entry pattern)
 
-Toby chart patterns stay the entry source. Kronos is only a confirm/veto
-layer: *"does your 1w forecast agree with this BUY/SELL, and is the
-predicted move large enough to matter?"* It does not generate entries on
-its own.
+Toby chart patterns stay the entry source for the **confirm gate**. Kronos
+gate is only a confirm/veto layer: *"does your 1w forecast agree with this
+BUY/SELL, and is the predicted move large enough to matter?"*
 
-This is **not** the Kronos repo's finetune top-K backtest demo. We call the
-same `KronosPredictor.predict()` API; strategy layering is ours.
+Separately, the **Kronos ranked forecast sleeve** (`core/kronos_rank_sleeve.py`)
+can emit its own `pattern_kronos_rank` entries by cross-sectionally ranking
+predicted 1w returns — closer to the official finetune top-K demo. Gate and
+sleeve are independent; both call the same `KronosPredictor.predict()` API.
+
+### Kronos ranked forecast sleeve
+
+Opt-in entry source beside Toby patterns (off by default — GPU cost + needs BT):
+
+1. Forecast +1w close % for every symbol in the scan/backtest universe.
+2. Rank by `pred_1w`.
+3. Emit top `KRONOS_RANK_TOP_K` BUYs (and bottom `KRONOS_RANK_BOTTOM_K` SELLs
+   unless `KRONOS_RANK_LONG_ONLY=true`).
+4. Require `|pred_1w| ≥` floor (defaults to `KRONOS_MIN_MOVE_PCT`).
+5. Skip Kronos gate / vision / volume on these signals (forecast *is* the thesis).
+6. Same deferred fill, regime, cooldown, and risk/sizing as other entries.
+
+```bash
+KRONOS_RANK_ENABLED=false
+KRONOS_RANK_TOP_K=3
+KRONOS_RANK_BOTTOM_K=3
+KRONOS_RANK_LONG_ONLY=true
+KRONOS_RANK_REBALANCE_BARS=5
+```
+
+Enable via `.env`, paper/backtest **Kronos rank sleeve** checkbox, or
+`MarketScanner(..., kronos_rank=True)` / `Backtester(..., kronos_rank=True)`.
 
 ### What the gate does
 
@@ -247,12 +271,17 @@ Kronos.from_pretrained('NeoQuasar/Kronos-base', token=False) \
 "
 ```
 
-### Forecast accuracy test (`--kronos-test`)
+### Forecast accuracy test (`--kronos-test` / `scripts/kronos_1wk_test.py`)
 
 Walk-forward scores of Kronos +1 day / +1 week close forecasts on the
 historical daily CSVs in `/home/r00t/stocks_data`. Useful after fine-tuning
-or when comparing weight sets — not a published accuracy claim for the
-live gate.
+or when comparing weight sets.
+
+Metrics now include flat-0 MAE, **prior-week persistence**, **majority-sign**
+bias check, **gate-filtered** dir/MAE/signed-return using the same
+`|pred_1w| ≥ KRONOS_MIN_MOVE_PCT` floor as `kronos_gate`, and soft bootstrap
+CIs. This is still **unconditional** on chart patterns — for live-gate
+decision quality, run a formal backtest with `kronos_gate` on vs off.
 
 ```bash
 # Default: 20 randomly sampled symbols, 3 walk-forward windows each
@@ -269,10 +298,13 @@ python main.py --kronos-test 50 --kronos-liquid-only
 
 # After fine-tuning (see below)
 python main.py --kronos-test 50 --kronos-liquid-only --kronos-use-finetuned
+
+# Markdown report (gate metrics + raw windows) → kronos_1_wk.md
+.venv/bin/python scripts/kronos_1wk_test.py --liquid-only --symbols 30
 ```
 
-Output reports, per horizon: `n`, `MAE`, `naive MAE` (flat 0% baseline),
-and `direction hit` (% of windows where predicted up/down matched reality).
+CLI/`--kronos-test` prints per-horizon `n`, MAE, flat MAE, direction hit,
+plus persistence and `gate@min_move` rows when available.
 
 ### Fine-tuning (`--kronos-finetune`)
 
@@ -484,6 +516,7 @@ trading_bot_v2/
 │   ├── test_volume_gate.py              # Unit tests for analysis.price_volume
 │   ├── kronos_eval.py                   # Kronos-base forecast accuracy test (--kronos-test)
 │   ├── kronos_gate.py                   # Kronos 1w confirm gate for chart-pattern signals
+│   ├── kronos_rank_sleeve.py            # Cross-sectional top-K forecast sleeve (beside patterns)
 │   └── kronos_finetune.py               # Fine-tune Kronos on liquid tickers (--kronos-finetune)
 │
 ├── ui/

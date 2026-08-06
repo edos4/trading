@@ -66,6 +66,7 @@ async def run_scanner(
     log.info(f"  History:    {settings.tv_history_days} daily bars")
     log.info(f"  Vision:     {'ON' if settings.vision_confirmation_enabled else 'OFF'}")
     log.info(f"  Kronos gate:{'ON' if settings.kronos_gate_enabled else 'OFF'}")
+    log.info(f"  Kronos rank:{'ON' if settings.kronos_rank_enabled else 'OFF'}")
     log.info(f"  Volume gate:{'ON' if use_volume else 'OFF'}")
     log.info(f"  IBKR:       disabled (commented out)")
     log.info("=" * 60)
@@ -89,6 +90,7 @@ async def run_scanner(
         exchange_overrides=exchange_overrides,
         disabled_patterns=DISABLED_PATTERNS,
         kronos_gate=settings.kronos_gate_enabled,
+        kronos_rank=settings.kronos_rank_enabled,
         volume_gate=use_volume,
     )
     await scanner.run()
@@ -117,6 +119,7 @@ async def run_paper(
     log.info(f"  Starting equity: ${account.equity():,.2f}")
     log.info(f"  Scan every: {settings.scan_interval_seconds}s")
     log.info(f"  Kronos gate:{'ON' if settings.kronos_gate_enabled else 'OFF'}")
+    log.info(f"  Kronos rank:{'ON' if settings.kronos_rank_enabled else 'OFF'}")
     log.info(f"  Volume gate:{'ON' if use_volume else 'OFF'}")
     log.info("=" * 60)
 
@@ -137,6 +140,7 @@ async def run_paper(
         paper_account=account,
         disabled_patterns=DISABLED_PATTERNS,
         kronos_gate=settings.kronos_gate_enabled,
+        kronos_rank=settings.kronos_rank_enabled,
         volume_gate=use_volume,
     )
     try:
@@ -198,6 +202,7 @@ async def run_backtest(
     log.info(f"  Trading Bot — {title}")
     log.info(f"  Symbols:    top {n_symbols} by market cap")
     log.info(f"  Kronos gate:{'ON' if settings.kronos_gate_enabled else 'OFF'}")
+    log.info(f"  Kronos rank:{'ON' if settings.kronos_rank_enabled else 'OFF'}")
     log.info(f"  Volume gate:{'ON' if use_volume else 'OFF'}"
              f"{' (A/B compare)' if volume_gate_compare else ''}")
     log.info("=" * 60)
@@ -219,6 +224,7 @@ async def run_backtest(
         pattern_filter=pattern,
         disabled_patterns=DISABLED_PATTERNS,
         kronos_gate=settings.kronos_gate_enabled,
+        kronos_rank=settings.kronos_rank_enabled,
     )
 
     if volume_gate_compare:

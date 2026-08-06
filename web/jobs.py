@@ -383,6 +383,7 @@ class PaperSession:
             "equity_png_b64": curve_b64,
             "defaults": {
                 "kronos_gate": settings.kronos_gate_enabled,
+                "kronos_rank": settings.kronos_rank_enabled,
                 "volume_gate": settings.volume_gate_enabled,
                 "n_symbols": 100,
             },
@@ -410,6 +411,7 @@ class PaperSession:
         *,
         use_stream: bool,
         kronos_gate: bool,
+        kronos_rank: bool,
         volume_gate: bool,
         stream_start: Optional[str] = None,
     ) -> str | None:
@@ -422,7 +424,7 @@ class PaperSession:
             self.status = "Fetching symbols..."
         threading.Thread(
             target=self._run_thread,
-            args=(n_symbols, use_stream, kronos_gate, volume_gate, stream_start),
+            args=(n_symbols, use_stream, kronos_gate, kronos_rank, volume_gate, stream_start),
             daemon=True,
         ).start()
         return None
@@ -498,6 +500,7 @@ class PaperSession:
         n_symbols: int,
         use_stream: bool,
         kronos_gate: bool,
+        kronos_rank: bool,
         volume_gate: bool,
         stream_start: Optional[str],
     ) -> None:
@@ -539,6 +542,7 @@ class PaperSession:
                     settings.papertrade_stream_interval_seconds if use_stream else None
                 ),
                 kronos_gate=kronos_gate,
+                kronos_rank=kronos_rank,
                 volume_gate=volume_gate,
             )
             self.scanner = scanner
@@ -553,6 +557,7 @@ class PaperSession:
                 f"Running — {len(symbols)} symbols, scanning every {interval}s"
                 f"{stream_note}"
                 f", Kronos gate={'ON' if kronos_gate else 'OFF'}"
+                f", Kronos rank={'ON' if kronos_rank else 'OFF'}"
                 f", Volume gate={'ON' if volume_gate else 'OFF'}"
             )
 

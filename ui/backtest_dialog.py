@@ -75,6 +75,13 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
         "check", settings.kronos_gate_enabled, None,
     ),
     (
+        "kronos_rank", "Kronos rank sleeve",
+        "Cross-sectional top-K by predicted 1w return (pattern_kronos_rank). "
+        "Runs beside Toby patterns — not a gate. Uses KRONOS_RANK_TOP_K / LONG_ONLY. "
+        "GPU-heavy; rebalances every KRONOS_RANK_REBALANCE_BARS.",
+        "check", settings.kronos_rank_enabled, None,
+    ),
+    (
         "volume_gate", "Volume gate (RVOL+OBV)",
         "Require relative volume ≥ VOLUME_GATE_RVOL_MIN and OBV slope agreeing with "
         "BUY/SELL. Off by default — 2026-07-26 A/B showed no expectancy edge "

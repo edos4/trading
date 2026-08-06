@@ -27,6 +27,8 @@ from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pandas as pd
+
 import patterns as patterns_pkg
 from patterns.base_pattern import BasePattern, TradeSignal
 
@@ -36,6 +38,7 @@ from analysis.chart_renderer import ChartRenderer
 from analysis.vision_checker import VisionChecker, VisionVerdict
 from core.paper_trader import PaperAccount
 from core.kronos_gate import kronos_gate_check
+from core.kronos_rank_sleeve import is_kronos_rank_signal, run_sleeve
 from core.engine_defaults import (
     ENGINE,
     describe_confidence_rejection,
@@ -67,6 +70,7 @@ class MarketScanner:
         scan_interval_seconds: int | None = None,
         kronos_gate: bool | None = None,
         volume_gate: bool | None = None,
+        kronos_rank: bool | None = None,
     ):
         self._symbols = symbols or settings.symbols
         self._disabled_patterns = set(disabled_patterns or [])
@@ -77,6 +81,9 @@ class MarketScanner:
         )
         self._volume_gate = (
             settings.volume_gate_enabled if volume_gate is None else volume_gate
+        )
+        self._kronos_rank = (
+            settings.kronos_rank_enabled if kronos_rank is None else kronos_rank
         )
         self._tv = data_feed or TVClient(
             settings.tv_screener,
@@ -111,6 +118,9 @@ class MarketScanner:
         # backtester uses — without this, paper re-entered losers immediately
         # while backtests waited cooldown_bars.
         self._cooldown_tracker: dict[tuple[str, str], tuple[int, bool]] = {}
+        # Kronos rank sleeve: only re-forecast when the daily asof advances
+        # (hourly scans otherwise waste GPU on the same bar).
+        self._kronos_rank_last_asof: object | None = None
         # Scan-cycle health counters — surfaced by the paper trading UI/CLI
         # so a stalled or misbehaving scan is visible without reading logs.
         self.stats: dict = {
@@ -119,6 +129,7 @@ class MarketScanner:
             "patterns_found": 0,
             "signals_rejected": 0,
             "volume_gate_rejected": 0,
+            "kronos_rank_emitted": 0,
             "trades_opened": 0,
             "sim_days": 0,
         }
@@ -165,6 +176,7 @@ class MarketScanner:
             f"symbols={self._symbols} | "
             f"patterns={[p.name for p in self._patterns]} | "
             f"kronos_gate={'ON' if self._kronos_gate else 'OFF'} | "
+            f"kronos_rank={'ON' if self._kronos_rank else 'OFF'} | "
             f"volume_gate={'ON' if self._volume_gate else 'OFF'} | "
             f"interval={self._scan_interval}s"
         )
@@ -310,14 +322,43 @@ class MarketScanner:
         await asyncio.gather(*workers)
         pbar.close()
 
+        if self._kronos_rank:
+            await self._run_kronos_rank_sleeve()
+
         self._save_scan_charts(all_timeframes, latest_signals)
         self.stats["last_scan_at"] = datetime.now(timezone.utc).isoformat()
         self.stats["scan_duration_s"] = round(time.monotonic() - scan_start, 2)
         log.info("Scan complete")
 
+    async def _run_kronos_rank_sleeve(self) -> None:
+        """Cross-sectional top-K forecast sleeve — runs once per new daily asof."""
+        # Pick a representative asof from any symbol with 1d history.
+        asof = None
+        for symbol in self._symbols:
+            df = self._store.get_df(symbol, "1d", min_bars=1)
+            if df is not None and len(df):
+                asof = pd.Timestamp(df.index[-1]).normalize()
+                break
+        if asof is None:
+            return
+        if self._kronos_rank_last_asof == asof:
+            log.debug(f"KronosRank | skip — already forecast asof={asof.date()}")
+            return
+
+        signals = await asyncio.to_thread(run_sleeve, self._store, list(self._symbols))
+        self._kronos_rank_last_asof = asof
+        self.stats["kronos_rank_emitted"] = self.stats.get("kronos_rank_emitted", 0) + len(
+            signals
+        )
+        for signal in signals:
+            self.stats["patterns_found"] += 1
+            self._record_detection(signal)
+            candle = self._store.latest_candle(signal.symbol, "1d")
+            await self._process_signal(signal, pattern=None, candle=candle)
+
     # ── Signal pipeline ────────────────────────────────────────────────────────
     async def _process_signal(
-        self, signal: TradeSignal, pattern: BasePattern, candle=None,
+        self, signal: TradeSignal, pattern: BasePattern | None = None, candle=None,
     ) -> None:
         log.info(
             f"Signal | {signal.symbol} {signal.timeframe} | "
@@ -366,7 +407,8 @@ class MarketScanner:
         # Step 0b — Kronos 1w confirm gate (direction + min move). Runs before
         # vision so we don't burn Claude tokens on forecasts that disagree.
         # Fail-open when weights missing — see core/kronos_gate.py.
-        if self._kronos_gate:
+        # Skip for pattern_kronos_rank — the forecast *is* the entry signal.
+        if self._kronos_gate and not is_kronos_rank_signal(signal):
             gate = kronos_gate_check(signal, self._store)
             if not gate.passed:
                 reason = (
@@ -388,7 +430,8 @@ class MarketScanner:
                 )
 
         # Step 0c — Volume confirm gate (RVOL + OBV direction).
-        if self._volume_gate:
+        # Sleeve skips volume by default — ranking is price-path based.
+        if self._volume_gate and not is_kronos_rank_signal(signal):
             vgate = volume_confirm_gate(signal, self._store)
             if not vgate.passed:
                 reason = (
@@ -414,7 +457,8 @@ class MarketScanner:
         # it — vision_min_indicator_confidence exists only to decide whether
         # a signal is worth spending a vision check on, not as a second
         # trade-approval gate when vision is off.
-        if settings.vision_confirmation_enabled:
+        # Skip vision for Kronos rank sleeve (no chart pattern to confirm).
+        if settings.vision_confirmation_enabled and not is_kronos_rank_signal(signal):
             if signal.confidence < settings.vision_min_indicator_confidence:
                 reason = (
                     f"Vision gate skipped the trade: confidence {signal.confidence:.2f} "
@@ -426,6 +470,11 @@ class MarketScanner:
                     f"Signal confidence {signal.confidence:.2f} below threshold "
                     f"{settings.vision_min_indicator_confidence} — skipping vision, skipping trade"
                 )
+                self.stats["signals_rejected"] += 1
+                self._append_signal_log(signal, status="rejected", reason=reason)
+                return
+            if pattern is None:
+                reason = "Vision confirmation requires a pattern instance — none provided."
                 self.stats["signals_rejected"] += 1
                 self._append_signal_log(signal, status="rejected", reason=reason)
                 return

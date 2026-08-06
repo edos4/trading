@@ -54,6 +54,7 @@ class PaperStartRequest(BaseModel):
     n_symbols: int = Field(100, ge=5, le=5000)
     use_stream: bool = False
     kronos_gate: bool = True
+    kronos_rank: bool = False
     volume_gate: bool = False
     stream_start: Optional[str] = None
 
@@ -151,6 +152,7 @@ def create_app() -> FastAPI:
             "paper.html",
             active="paper",
             kronos_gate=settings.kronos_gate_enabled,
+            kronos_rank=settings.kronos_rank_enabled,
             volume_gate=settings.volume_gate_enabled,
         )
 
@@ -238,6 +240,7 @@ def create_app() -> FastAPI:
             payload.n_symbols,
             use_stream=payload.use_stream,
             kronos_gate=payload.kronos_gate,
+            kronos_rank=payload.kronos_rank,
             volume_gate=payload.volume_gate,
             stream_start=payload.stream_start,
         )

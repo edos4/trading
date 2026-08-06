@@ -381,6 +381,7 @@ function initPaper() {
           n_symbols: Number(document.getElementById("paper-n").value || 100),
           use_stream: document.getElementById("paper-stream").checked,
           kronos_gate: document.getElementById("paper-kronos").checked,
+          kronos_rank: document.getElementById("paper-kronos-rank").checked,
           volume_gate: document.getElementById("paper-volume").checked,
           stream_start: document.getElementById("paper-stream-start").value || null,
         }),
