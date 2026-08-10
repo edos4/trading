@@ -391,19 +391,32 @@ class PaperSession:
 
     @staticmethod
     def _equity_chart_b64(account: PaperAccount) -> Optional[str]:
+        # equity_curve is list[(iso_ts, equity)] — plot values only.
         curve = account.equity_curve_snapshot()
         if not curve or len(curve) < 2:
             return None
-        fig, ax = plt.subplots(figsize=(6, 2.8), dpi=100)
-        xs = list(range(len(curve)))
-        ax.plot(xs, curve, color="#1b6fc0", linewidth=1.5)
-        ax.set_title("Account equity", fontsize=10)
-        ax.grid(True, alpha=0.3)
-        fig.tight_layout()
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png")
-        plt.close(fig)
-        return base64.b64encode(buf.getvalue()).decode("ascii")
+        try:
+            ys: list[float] = []
+            for point in curve:
+                if isinstance(point, (list, tuple)) and len(point) >= 2:
+                    ys.append(float(point[1]))
+                else:
+                    ys.append(float(point))
+            if len(ys) < 2:
+                return None
+            fig, ax = plt.subplots(figsize=(6, 2.8), dpi=100)
+            xs = list(range(len(ys)))
+            ax.plot(xs, ys, color="#1b6fc0", linewidth=1.5)
+            ax.set_title("Account equity", fontsize=10)
+            ax.grid(True, alpha=0.3)
+            fig.tight_layout()
+            buf = io.BytesIO()
+            fig.savefig(buf, format="png")
+            plt.close(fig)
+            return base64.b64encode(buf.getvalue()).decode("ascii")
+        except Exception:
+            log.exception("Web Paper | equity chart failed")
+            return None
 
     def start(
         self,

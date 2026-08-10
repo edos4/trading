@@ -2,7 +2,7 @@ ib_insync==0.9.86
 tradingview-ta==3.3.0
 tradingview-mcp-server>=0.7.1
 tradingview-screener>=3.2.0
-mcp>=1.28.0
+mcp>=1.28.0,<2
 mplfinance>=0.12.10b0
 pandas>=2.2.2
 numpy>=2.0.0

@@ -218,4 +218,5 @@ settings = Settings()
 # re-tested in isolation via --pattern.
 DISABLED_PATTERNS: list[str] = [
     "pattern_011_breakout_retest",
+    "pattern_012_ml_signal",
 ]
