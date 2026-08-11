@@ -12,7 +12,7 @@ from typing import Any, Optional
 import patterns as patterns_pkg
 from analysis.chart_renderer import ChartRenderer
 from analysis.price_volume import volume_confirm_gate
-from config import settings
+from config import settings, DISABLED_PATTERNS
 from core.engine_defaults import passes_min_confidence, passes_regime_filter
 from core.kronos_gate import kronos_gate_check
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
@@ -23,7 +23,15 @@ from utils.logger import log
 TIMEFRAMES = ["1d", "1W"]
 
 
-def discover_patterns() -> list[BasePattern]:
+def discover_patterns(
+    disabled_patterns: list[str] | None = None,
+) -> list[BasePattern]:
+    """Instantiate patterns for the explorer — same skip rules as MarketScanner.
+
+    Skips ``instance.skipped`` and names in ``disabled_patterns`` (defaults to
+    ``DISABLED_PATTERNS`` from config).
+    """
+    disabled = set(disabled_patterns if disabled_patterns is not None else DISABLED_PATTERNS)
     found: list[BasePattern] = []
     for module_info in pkgutil.iter_modules(patterns_pkg.__path__):
         if module_info.name.startswith("_") or module_info.name == "base_pattern":
@@ -42,8 +50,9 @@ def discover_patterns() -> list[BasePattern]:
             ):
                 try:
                     instance = attr()
-                    if not instance.skipped:
-                        found.append(instance)
+                    if instance.skipped or instance.name in disabled:
+                        continue
+                    found.append(instance)
                 except Exception as exc:
                     log.warning(f"Web | Failed to instantiate {attr_name}: {exc}")
     return found

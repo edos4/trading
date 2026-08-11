@@ -294,6 +294,36 @@ function initPaper() {
     }
   }
 
+  function fmtQty(q) {
+    const n = Number(q);
+    if (!Number.isFinite(n)) return "—";
+    return Number.isInteger(n) ? String(n) : n.toFixed(2);
+  }
+
+  function fmtDays(d) {
+    const n = Number(d);
+    if (!Number.isFinite(n)) return "—";
+    if (n < 1) return `${(n * 24).toFixed(1)}h`;
+    return `${n.toFixed(1)}d`;
+  }
+
+  function fmtMoney(n, { signed = false, digits = 0 } = {}) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return "—";
+    const body = Math.abs(v).toLocaleString(undefined, {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    });
+    if (signed) return `${v >= 0 ? "+" : "-"}$${body}`;
+    return v < 0 ? `-$${body}` : `$${body}`;
+  }
+
+  function fmtSigned(n, digits = 2, suffix = "") {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return "—";
+    return `${v >= 0 ? "+" : ""}${v.toFixed(digits)}${suffix}`;
+  }
+
   function render(s) {
     status.textContent = s.status || "";
     startBtn.disabled = !!s.running;
@@ -332,10 +362,15 @@ function initPaper() {
       const cls = p.unrl_pct > 0 ? "gain" : p.unrl_pct < 0 ? "loss" : "";
       tr.innerHTML =
         `<td>${p.symbol}</td><td>${p.status}</td><td>${p.action}</td>` +
+        `<td>${fmtQty(p.qty)}</td>` +
         `<td>${Number(p.entry).toFixed(2)}</td><td>${Number(p.current).toFixed(2)}</td>` +
-        `<td class="${cls}">${p.unrl_pct >= 0 ? "+" : ""}${Number(p.unrl_pct).toFixed(2)}%</td>` +
-        `<td>${p.r == null ? "—" : Number(p.r).toFixed(2)}</td>` +
-        `<td>${p.days}</td><td>${p.pattern}</td>`;
+        `<td class="${cls}">${fmtSigned(p.unrl_pct, 2, "%")}</td>` +
+        `<td class="${cls}">${fmtMoney(p.mtm, { signed: true })}</td>` +
+        `<td>${p.r == null ? "—" : fmtSigned(p.r)}</td>` +
+        `<td>${fmtDays(p.days)}</td>` +
+        `<td>${fmtMoney(p.value)}</td>` +
+        `<td>${p.port_pct == null ? "—" : `${Number(p.port_pct).toFixed(1)}%`}</td>` +
+        `<td>${p.pattern}</td>`;
       posBody.appendChild(tr);
     }
     closedBody.innerHTML = "";
@@ -343,9 +378,12 @@ function initPaper() {
       const tr = document.createElement("tr");
       const cls = t.pnl_pct > 0 ? "gain" : t.pnl_pct < 0 ? "loss" : "";
       tr.innerHTML =
-        `<td>${t.opened}</td><td>${t.closed}</td><td>${t.symbol}</td><td>${t.action}</td>` +
+        `<td>${t.opened}</td><td>${t.closed}</td><td>${fmtDays(t.days)}</td>` +
+        `<td>${t.symbol}</td><td>${t.action}</td><td>${fmtQty(t.qty)}</td>` +
         `<td>${Number(t.entry).toFixed(2)}</td><td>${Number(t.exit).toFixed(2)}</td>` +
-        `<td class="${cls}">${t.pnl_pct >= 0 ? "+" : ""}${Number(t.pnl_pct).toFixed(2)}%</td>` +
+        `<td class="${cls}">${fmtSigned(t.pnl_pct, 2, "%")}</td>` +
+        `<td class="${cls}">${fmtMoney(t.pnl, { signed: true })}</td>` +
+        `<td>${t.r == null ? "—" : fmtSigned(t.r)}</td>` +
         `<td>${t.reason}</td><td>${t.pattern}</td>`;
       closedBody.appendChild(tr);
     }

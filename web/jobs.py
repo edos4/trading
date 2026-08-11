@@ -99,7 +99,11 @@ def normalize_backtest_form(raw: dict[str, Any]) -> dict[str, Any]:
     if "max_workers" in p and p["max_workers"] is not None:
         p["max_workers"] = int(p["max_workers"])
     pattern_filter = p.pop("pattern_filter")
-    disabled_raw = p.pop("disabled_patterns", None) or ""
+    disabled_raw = p.pop("disabled_patterns", None)
+    if disabled_raw is None:
+        # Field omitted from POST — fall back to config DISABLED_PATTERNS
+        # (same default the form schema advertises).
+        disabled_raw = ",".join(DISABLED_PATTERNS)
     p["disabled_patterns"] = [
         name.strip() for name in str(disabled_raw).split(",") if name.strip()
     ]
@@ -327,6 +331,7 @@ class PaperSession:
                     "status": position_status(p),
                     "action": p.action,
                     "pattern": p.pattern,
+                    "qty": p.qty,
                     "entry": p.entry_price,
                     "current": current,
                     "unrl_pct": unrealized_pct(p, current),
@@ -336,20 +341,27 @@ class PaperSession:
                     "mtm": mtm,
                     "port_pct": (value / equity * 100) if equity > 0 else 0.0,
                     "risk": risk,
+                    "stop": p.stop_loss,
+                    "target": p.take_profit,
                     "opened": p.entry_date.isoformat(),
                 }
             )
 
         closed = []
         for t in account.closed:
+            exit_px = t.exit_price if t.exit_price is not None else t.entry_price
             closed.append(
                 {
                     "symbol": t.symbol,
                     "action": t.action,
                     "pattern": t.pattern,
+                    "qty": t.qty,
                     "entry": t.entry_price,
                     "exit": t.exit_price,
                     "pnl_pct": t.pnl_pct,
+                    "pnl": t.pnl * t.qty,
+                    "r": r_multiple(t, exit_px),
+                    "days": days_held(t),
                     "reason": t.exit_reason,
                     "opened": t.entry_date.strftime("%Y-%m-%d") if t.entry_date else "",
                     "closed": t.exit_date.strftime("%Y-%m-%d") if t.exit_date else "",
