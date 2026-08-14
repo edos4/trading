@@ -34,6 +34,7 @@ import websockets
 
 from config import settings, DISABLED_PATTERNS
 from core.backtester import BacktestTrade
+from core.market import default_market, format_money, get_market, session_label
 from core.paper_trader import (
     PaperAccount, days_held, position_status, r_multiple,
     risk_dollars, unrealized_pct,
@@ -84,7 +85,7 @@ class PaperDashboard:
         self._top.geometry("1180x640")
         self._top.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        self._account = PaperAccount.load()
+        self._account = PaperAccount.load(market=default_market().id)
         self._scanner: Optional[MarketScanner] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._task: Optional[asyncio.Task] = None
@@ -99,9 +100,22 @@ class PaperDashboard:
         top_bar = ttk.Frame(self._top, padding=(8, 6))
         top_bar.pack(side=tk.TOP, fill=tk.X)
 
+        ttk.Label(top_bar, text="Market:").pack(side=tk.LEFT)
+        self._market_var = tk.StringVar(value=default_market().id)
+        self._market_combo = ttk.Combobox(
+            top_bar, textvariable=self._market_var, values=["us", "ph"],
+            state="readonly", width=6,
+        )
+        self._market_combo.pack(side=tk.LEFT, padx=(4, 12))
+        self._market_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_market_change())
+
         ttk.Label(top_bar, text="Symbols:").pack(side=tk.LEFT)
-        self._n_var = tk.IntVar(value=100)
-        ttk.Spinbox(top_bar, from_=5, to=5000, increment=5, width=6, textvariable=self._n_var).pack(side=tk.LEFT, padx=(4, 12))
+        self._n_var = tk.IntVar(value=default_market().default_n_symbols)
+        ttk.Spinbox(top_bar, from_=5, to=5000, increment=5, width=6, textvariable=self._n_var).pack(side=tk.LEFT, padx=(4, 8))
+
+        ttk.Label(top_bar, text="Additional:").pack(side=tk.LEFT)
+        self._extra_var = tk.StringVar(value="")
+        ttk.Entry(top_bar, textvariable=self._extra_var, width=18).pack(side=tk.LEFT, padx=(4, 12))
 
         self._start_btn = ttk.Button(top_bar, text="Start", command=self._start)
         self._start_btn.pack(side=tk.LEFT)
@@ -129,13 +143,13 @@ class PaperDashboard:
         )
         self._stream_start_picker.pack(side=tk.LEFT)
 
-        self._kronos_gate_var = tk.BooleanVar(value=settings.kronos_gate_enabled)
+        self._kronos_gate_var = tk.BooleanVar(value=default_market().kronos_gate_default)
         self._kronos_check = ttk.Checkbutton(
             top_bar, text="Kronos 1w gate", variable=self._kronos_gate_var,
         )
         self._kronos_check.pack(side=tk.LEFT, padx=(12, 0))
 
-        self._kronos_rank_var = tk.BooleanVar(value=settings.kronos_rank_enabled)
+        self._kronos_rank_var = tk.BooleanVar(value=default_market().kronos_rank_default)
         ttk.Checkbutton(
             top_bar, text="Kronos rank sleeve", variable=self._kronos_rank_var,
         ).pack(side=tk.LEFT, padx=(12, 0))
@@ -189,7 +203,7 @@ class PaperDashboard:
             ("action", 55, "Action"), ("entry", 75, "Entry"), ("current", 75, "Current"),
             ("unrl_pct", 70, "Unrl %"), ("r", 50, "R"), ("days", 45, "Days"),
             ("stop", 110, "Stop"), ("target", 110, "Target"),
-            ("value", 85, "Value"), ("mtm", 85, "MTM $"), ("port_pct", 60, "Port %"), ("risk", 70, "Risk $"),
+            ("value", 85, "Value"), ("mtm", 85, "MTM"), ("port_pct", 60, "Port %"), ("risk", 70, "Risk"),
             ("pattern", 190, "Pattern"),
         ]
         self._pos_tree = self._add_scrollbar(pos_frame, _SortableTree(
@@ -289,12 +303,26 @@ class PaperDashboard:
         else:
             self._stream_start_frame.pack_forget()
 
+    def _on_market_change(self) -> None:
+        if self._running:
+            return
+        profile = get_market(self._market_var.get())
+        self._n_var.set(profile.default_n_symbols)
+        self._kronos_gate_var.set(profile.kronos_gate_default)
+        self._kronos_rank_var.set(profile.kronos_rank_default)
+        self._account = PaperAccount.load(market=profile.id)
+        self._refresh_all()
+
     def _start(self) -> None:
         if self._running:
             return
         self._running = True
         self._start_btn.config(state=tk.DISABLED)
         self._stop_btn.config(state=tk.NORMAL)
+        try:
+            self._market_combo.configure(state=tk.DISABLED)
+        except Exception:
+            pass
         self._status_var.set("Fetching symbols...")
         stream_start = None
         if self._stream_var.get():
@@ -303,11 +331,13 @@ class PaperDashboard:
             target=self._run_thread,
             args=(
                 int(self._n_var.get()),
+                self._extra_var.get(),
                 self._stream_var.get(),
                 self._kronos_gate_var.get(),
                 self._kronos_rank_var.get(),
                 self._volume_gate_var.get(),
                 stream_start,
+                self._market_var.get(),
             ),
             daemon=True,
         ).start()
@@ -377,11 +407,13 @@ class PaperDashboard:
     def _run_thread(
         self,
         n_symbols: int,
+        extra_symbols: str,
         use_stream: bool,
         kronos_gate: bool,
         kronos_rank: bool,
         volume_gate: bool,
         stream_start: Optional[str] = None,
+        market: str = "us",
     ) -> None:
         data_feed = None
         if use_stream:
@@ -391,9 +423,12 @@ class PaperDashboard:
                 return
             data_feed = StreamClient()
 
-        symbol_rows = TVClient.fetch_top_symbols_with_exchanges_cached(n_symbols, settings.tv_screener)
+        profile = get_market(market)
+        symbol_rows = TVClient.fetch_universe_cached(
+            n_symbols, profile.id, extra_symbols=extra_symbols,
+        )
         if not symbol_rows:
-            self._top.after(0, lambda: self._finish("No symbols returned by screener."))
+            self._top.after(0, lambda: self._finish("No symbols from screener or additional list."))
             return
         symbols = [s for s, _ex in symbol_rows]
         exchange_overrides = dict(symbol_rows)
@@ -401,6 +436,7 @@ class PaperDashboard:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         self._loop = loop
+        self._account = PaperAccount.load(market=profile.id)
         scanner = MarketScanner(
             symbols=symbols,
             exchange_overrides=exchange_overrides,
@@ -408,22 +444,24 @@ class PaperDashboard:
             disabled_patterns=DISABLED_PATTERNS,
             data_feed=data_feed,
             scan_interval_seconds=(
-                settings.papertrade_stream_interval_seconds if use_stream else None
+                settings.papertrade_stream_interval_seconds if use_stream else profile.scan_interval_seconds
             ),
             kronos_gate=kronos_gate,
             kronos_rank=kronos_rank,
             volume_gate=volume_gate,
+            market=profile.id,
         )
         self._scanner = scanner
         self._task = loop.create_task(scanner.run())
-        interval = settings.papertrade_stream_interval_seconds if use_stream else settings.scan_interval_seconds
+        interval = settings.papertrade_stream_interval_seconds if use_stream else profile.scan_interval_seconds
         stream_note = f", stream from {stream_start}" if use_stream and stream_start else ""
         self._top.after(0, lambda: self._status_var.set(
-            f"Running — {len(symbols)} symbols, scanning every {interval}s"
+            f"Running — {profile.label}, {len(symbols)} symbols, scanning every {interval}s"
             f"{stream_note}"
             f", Kronos gate={'ON' if kronos_gate else 'OFF'}"
             f", Kronos rank={'ON' if kronos_rank else 'OFF'}"
             f", Volume gate={'ON' if volume_gate else 'OFF'}"
+            f", session={session_label(profile.id)}"
         ))
         error_msg: Optional[str] = None
         try:
@@ -451,6 +489,10 @@ class PaperDashboard:
         self._running = False
         self._start_btn.config(state=tk.NORMAL)
         self._stop_btn.config(state=tk.DISABLED)
+        try:
+            self._market_combo.configure(state="readonly")
+        except Exception:
+            pass
         self._status_var.set(error or "Stopped.")
 
     def _reset(self) -> None:
@@ -459,7 +501,7 @@ class PaperDashboard:
             return
         if not messagebox.askyesno("Reset account", "Wipe the paper trading account and start fresh?"):
             return
-        self._account = PaperAccount()
+        self._account = PaperAccount(market=get_market(self._market_var.get()).id)
         self._account.save()
         self._refresh_all()
 
@@ -594,9 +636,13 @@ class PaperDashboard:
         self._refresh_performance()
 
     def _refresh_header(self) -> None:
+        mkt = self._account.market
         self._equity_var.set(
-            f"Cash: ${self._account.cash:,.2f}   Equity: ${self._account.equity():,.2f}   "
+            f"Market: {get_market(mkt).label}   "
+            f"Cash: {format_money(self._account.cash, mkt)}   "
+            f"Equity: {format_money(self._account.equity(), mkt)}   "
             f"Open: {len(self._account.positions)}   Closed: {len(self._account.closed)}"
+            f"   Session: {session_label(mkt)}"
         )
         exp = self._account.exposure()
         self._exposure_var.set(
@@ -622,6 +668,7 @@ class PaperDashboard:
         self._pos_rows = {}
         now = datetime.now(timezone.utc)
         equity = self._account.equity()
+        mkt = self._account.market
 
         rows = []
         for sym, p in self._account.positions_snapshot():
@@ -675,8 +722,10 @@ class PaperDashboard:
                     f"{p.entry_price:.2f}", f"{current:.2f}", f"{row['unrl']:+.2f}%",
                     f"{r:+.2f}" if r is not None else "-", f"{row['days']:.1f}",
                     stop_str, target_str,
-                    f"${row['value']:,.0f}", f"{row['mtm']:+,.0f}", f"{row['port_pct']:.1f}%",
-                    f"${row['risk']:,.0f}" if row["risk"] is not None else "-",
+                    format_money(row["value"], mkt, signed=False),
+                    format_money(row["mtm"], mkt, signed=True),
+                    f"{row['port_pct']:.1f}%",
+                    format_money(row["risk"], mkt) if row["risk"] is not None else "-",
                     p.pattern,
                 ),
                 tags=(_pnl_tag(row["unrl"]), status_tag, action_tag),

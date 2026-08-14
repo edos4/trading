@@ -32,6 +32,13 @@ from core.backtester import (
     trade_risk_dollars,
 )
 from core.engine_defaults import ENGINE, risk_gate_kwargs, sizing_kwargs
+from core.market import (
+    apply_lot_rounding,
+    format_money,
+    get_market,
+    may_assume_fill,
+    session_label,
+)
 from data.ohlcv_store import OHLCVStore
 from data.tv_client import OHLCVCandle
 from patterns.base_pattern import TradeSignal
@@ -108,15 +115,30 @@ class PaperAccount:
         initial_capital: float | None = None,
         txn_cost_pct: float | None = None,
         slippage_pct: float | None = None,
+        market: str | None = None,
+        max_daily_loss: float | None = None,
     ):
-        self.initial_capital = initial_capital or settings.paper_initial_capital
+        self.market = get_market(market).id
+        profile = get_market(self.market)
+        if initial_capital is not None:
+            self.initial_capital = initial_capital
+        elif profile.id == "ph":
+            self.initial_capital = profile.paper_initial_capital
+        else:
+            self.initial_capital = settings.paper_initial_capital
         self.cash = self.initial_capital
         self.txn_cost_pct = (
-            ENGINE.txn_cost_pct if txn_cost_pct is None else txn_cost_pct
+            profile.txn_cost_pct if txn_cost_pct is None else txn_cost_pct
         )
         self.slippage_pct = (
             slippage_pct if slippage_pct is not None else settings.paper_slippage_pct
         )
+        if max_daily_loss is not None:
+            self.max_daily_loss = max_daily_loss
+        elif profile.id == "ph":
+            self.max_daily_loss = settings.max_daily_loss_php
+        else:
+            self.max_daily_loss = settings.max_daily_loss_usd
         self.positions: dict[str, BacktestTrade] = {}
         self.closed: list[BacktestTrade] = []
         self.equity_curve: list[tuple[str, float]] = []
@@ -229,11 +251,24 @@ class PaperAccount:
                 f"Portfolio full: {len(self.positions)} open positions already at the "
                 f"MAX_OPEN_POSITIONS cap ({settings.max_open_positions})."
             )
-        if self._daily_pnl <= -settings.max_daily_loss_usd:
+        profile = get_market(self.market)
+        if profile.long_only and signal.action == "SELL":
+            return False, (
+                f"Long-only {profile.label}: SELL/short signals are disabled "
+                f"(PSE retail shorts need SBL)."
+            )
+        if not may_assume_fill(self.market):
+            window = session_label(self.market)
+            return False, (
+                f"Session {window}: paper will not assume a fill outside continuous "
+                f"AM/PM matching (09:30–12:00 and 13:00–14:45 PHT)."
+            )
+        if self._daily_pnl <= -self.max_daily_loss:
             log.info("Paper | daily loss limit hit — skipping signal")
             return False, (
-                f"Daily loss limit: realized P&L today is ${self._daily_pnl:,.2f}, "
-                f"at or beyond MAX_DAILY_LOSS_USD (${settings.max_daily_loss_usd:,.0f})."
+                f"Daily loss limit: realized P&L today is "
+                f"{format_money(self._daily_pnl, self.market, signed=True)}, "
+                f"at or beyond {format_money(-self.max_daily_loss, self.market)}."
             )
 
         # Same stop-backstop/R:R gates + sizing caps as Backtester / main.py
@@ -254,6 +289,13 @@ class PaperAccount:
             entry_price=candle.close,
             **sizing_kwargs(account_value=self.equity()),
         )
+        if profile.lot_round:
+            signal.price = candle.close
+            if not apply_lot_rounding(signal):
+                return False, (
+                    f"Lot rounding: {signal.symbol} size rounded below one board lot "
+                    f"at {format_money(candle.close, self.market)} — skipped."
+                )
 
         fill_candle = candle
         slip = self.slippage_pct
@@ -278,14 +320,18 @@ class PaperAccount:
         # caps by cash (see _apply_portfolio_constraints); mirror that here.
         if signal.action == "BUY" and fill_candle.close > 0:
             affordable_qty = int(self.cash / fill_candle.close)
+            if profile.lot_round:
+                from core.market import round_qty_to_lot
+
+                affordable_qty = round_qty_to_lot(affordable_qty, fill_candle.close)
             if affordable_qty < signal.qty:
                 signal.qty = affordable_qty
             if signal.qty < 1:
                 log.info(f"Paper | insufficient cash for {signal.symbol} — skipping signal")
                 return False, (
                     f"Insufficient cash: need buying power for at least 1 share of "
-                    f"{signal.symbol} at ~${fill_candle.close:.2f}, but cash is "
-                    f"${self.cash:,.2f}."
+                    f"{signal.symbol} at ~{format_money(fill_candle.close, self.market)}, "
+                    f"but cash is {format_money(self.cash, self.market)}."
                 )
 
         position = _open_trade(signal, fill_candle, self._bar_count.get(signal.symbol, 0))
@@ -314,7 +360,7 @@ class PaperAccount:
         )
         return True, (
             f"Filled next-bar entry: {signal.action} {signal.qty:g} {signal.symbol} "
-            f"@ ${position.entry_price:.2f} (pattern={signal.pattern})."
+            f"@ {format_money(position.entry_price, self.market)} (pattern={signal.pattern})."
         )
 
     # ── Per-bar update / exit check ──────────────────────────────────────
@@ -402,29 +448,34 @@ class PaperAccount:
             )
 
     # ── Persistence ───────────────────────────────────────────────────────
-    def save(self, path: str | Path = DEFAULT_ACCOUNT_PATH) -> None:
+    def save(self, path: str | Path | None = None) -> None:
         with self._lock:
             payload = {
+                "market": self.market,
                 "initial_capital": self.initial_capital,
                 "cash": self.cash,
+                "txn_cost_pct": self.txn_cost_pct,
+                "max_daily_loss": self.max_daily_loss,
                 "tick": self._tick,
                 "bar_count": self._bar_count,
                 "daily_key": self._daily_key,
                 "daily_pnl": self._daily_pnl,
+                "last_price": dict(self._last_price),
                 "positions": {
                     sym: _trade_to_dict(t) for sym, t in self.positions.items()
                 },
                 "closed": [_trade_to_dict(t) for t in self.closed],
                 "equity_curve": list(self.equity_curve),
             }
-        p = Path(path)
+        p = Path(path) if path is not None else get_market(self.market).paper_account_path
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     @classmethod
-    def load(cls, path: str | Path = DEFAULT_ACCOUNT_PATH) -> "PaperAccount":
-        p = Path(path)
-        acct = cls()
+    def load(cls, path: str | Path | None = None, *, market: str | None = None) -> "PaperAccount":
+        profile = get_market(market)
+        p = Path(path) if path is not None else profile.paper_account_path
+        acct = cls(market=profile.id)
         if not p.exists():
             return acct
         try:
@@ -432,8 +483,17 @@ class PaperAccount:
         except Exception:
             log.warning(f"Paper | failed to load {p}, starting fresh")
             return acct
+        saved_market = data.get("market")
+        if saved_market and get_market(saved_market).id != profile.id:
+            log.warning(
+                f"Paper | {p} is a {saved_market} ledger; starting a fresh "
+                f"{profile.id} account instead of mixing books"
+            )
+            return acct
         acct.initial_capital = data.get("initial_capital", acct.initial_capital)
         acct.cash = data.get("cash", acct.initial_capital)
+        acct.txn_cost_pct = data.get("txn_cost_pct", acct.txn_cost_pct)
+        acct.max_daily_loss = data.get("max_daily_loss", acct.max_daily_loss)
         acct._tick = data.get("tick", 0)
         acct._bar_count = data.get("bar_count", {})
         acct._daily_key = data.get("daily_key", "")
@@ -443,5 +503,12 @@ class PaperAccount:
         }
         acct.closed = [_trade_from_dict(d) for d in data.get("closed", [])]
         acct.equity_curve = [tuple(x) for x in data.get("equity_curve", [])]
-        acct._last_price = {sym: t.entry_price for sym, t in acct.positions.items()}
+        # Prefer persisted marks so equity/MTM survive process restarts.
+        # Fall back to entry (flat unrealized) for older account files that
+        # never stored last_price.
+        saved_marks = data.get("last_price") or {}
+        acct._last_price = {
+            sym: float(saved_marks.get(sym, t.entry_price))
+            for sym, t in acct.positions.items()
+        }
         return acct

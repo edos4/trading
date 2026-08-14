@@ -87,6 +87,8 @@ class EdgarClient:
         self, symbol: str, start: date, end: date
     ) -> bool:
         """True if any 8-K item 2.02 filing date falls in [start, end]."""
+        if skip_edgar_enabled():
+            return False
         filings = self.earnings_dates(symbol)
         for fd in filings:
             if start <= fd <= end:
@@ -153,6 +155,17 @@ class EdgarClient:
 
 # Module-level convenience instance so patterns can share the cache.
 _DEFAULT_CLIENT: EdgarClient | None = None
+_SKIP_EDGAR = False
+
+
+def set_skip_edgar(skip: bool) -> None:
+    """PH / non-US books must not query SEC EDGAR (ticker collisions like SM)."""
+    global _SKIP_EDGAR
+    _SKIP_EDGAR = bool(skip)
+
+
+def skip_edgar_enabled() -> bool:
+    return _SKIP_EDGAR
 
 
 def default_client() -> EdgarClient:
@@ -176,6 +189,8 @@ def any_earnings_in(
     symbol: str, window: Iterable["date | datetime | str"]
 ) -> bool:
     """Helper: true if any earnings filing date falls on any day in `window`."""
+    if skip_edgar_enabled():
+        return False
     dates = default_client().earnings_dates(symbol)
     if not dates:
         return False

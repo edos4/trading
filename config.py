@@ -23,7 +23,11 @@ class Settings(BaseSettings):
     # Swing trading: fewer, larger, longer-held positions rather than many
     # small intraday ones — sizing and exposure limits reflect that.
     trading_mode: TradingMode = TradingMode.PAPER
+    # us = NASDAQ/NYSE USD book; ph = PSE PHP long-only daytime book.
+    # UI/web can still pick a market per backtest/paper run.
+    market: str = "us"
     max_daily_loss_usd: float = 1500.0
+    max_daily_loss_php: float = 15000.0
     max_open_positions: int = 0  # <=0 means unlimited
 
     # ── Paper trading ─────────────────────────────────────────────────────
@@ -139,6 +143,14 @@ class Settings(BaseSettings):
     web_ui_session_hours: int = 12
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+
+    @field_validator("market")
+    @classmethod
+    def _normalize_market(cls, value: str) -> str:
+        key = (value or "us").strip().lower()
+        if key in ("ph", "pse", "philippines", "philippine"):
+            return "ph"
+        return "us"
 
     @field_validator("tv_history_days")
     @classmethod

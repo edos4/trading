@@ -79,7 +79,8 @@ function initExplorer() {
   async function refreshSymbols() {
     status.textContent = "Loading symbols...";
     const n = Number(document.getElementById("count").value || 50);
-    const data = await api(`/api/symbols?n=${encodeURIComponent(n)}`);
+    const market = (document.getElementById("market") || {}).value || "";
+    const data = await api(`/api/symbols?n=${encodeURIComponent(n)}&market=${encodeURIComponent(market)}`);
     rows = data.symbols || [];
     renderList();
     status.textContent = `${rows.length} symbols loaded.`;
@@ -97,6 +98,7 @@ function initExplorer() {
       run_patterns: document.getElementById("run-patterns").checked,
       kronos_gate: document.getElementById("kronos-gate").checked,
       volume_gate: document.getElementById("volume-gate").checked,
+      market: (document.getElementById("market") || {}).value || "",
     };
     try {
       const data = await api("/api/symbol", {
@@ -137,6 +139,20 @@ function initExplorer() {
   document.getElementById("timeframe").onchange = () => {
     if (selected) loadSymbol(selected);
   };
+  const marketEl = document.getElementById("market");
+  if (marketEl) {
+    marketEl.onchange = () => {
+      const id = marketEl.value;
+      const spec = (window.TB_MARKETS || []).find((m) => m.id === id);
+      if (spec) {
+        document.getElementById("count").value = spec.default_n_symbols;
+        document.getElementById("kronos-gate").checked = !!spec.kronos_gate;
+      }
+      refreshSymbols().catch((e) => {
+        status.textContent = String(e.message || e);
+      });
+    };
+  }
   savePng.onclick = () => {
     if (!lastPayload) return;
     downloadB64(
@@ -246,6 +262,24 @@ function initBacktest() {
   abBtn.onclick = () => start(true).catch((e) => {
     status.textContent = String(e.message || e);
   });
+  const marketSel = document.getElementById("p-market");
+  if (marketSel) {
+    marketSel.addEventListener("change", () => {
+      const spec = (window.TB_MARKETS || []).find((m) => m.id === marketSel.value);
+      if (!spec) return;
+      const setVal = (id, v) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (el.type === "checkbox") el.checked = !!v;
+        else el.value = v;
+      };
+      setVal("p-n_symbols", spec.default_n_symbols);
+      setVal("p-txn_cost_pct", spec.txn_cost_pct);
+      setVal("p-account_value", spec.account_value);
+      setVal("p-kronos_gate", spec.kronos_gate);
+      setVal("p-kronos_rank", spec.kronos_rank);
+    });
+  }
   poll().catch(console.error);
 }
 
@@ -307,6 +341,8 @@ function initPaper() {
     return `${n.toFixed(1)}d`;
   }
 
+  let moneySymbol = "$";
+
   function fmtMoney(n, { signed = false, digits = 0 } = {}) {
     const v = Number(n);
     if (!Number.isFinite(v)) return "—";
@@ -314,8 +350,9 @@ function initPaper() {
       minimumFractionDigits: digits,
       maximumFractionDigits: digits,
     });
-    if (signed) return `${v >= 0 ? "+" : "-"}$${body}`;
-    return v < 0 ? `-$${body}` : `$${body}`;
+    const sym = moneySymbol || "$";
+    if (signed) return `${v >= 0 ? "+" : "-"}${sym}${body}`;
+    return v < 0 ? `-${sym}${body}` : `${sym}${body}`;
   }
 
   function fmtSigned(n, digits = 2, suffix = "") {
@@ -328,10 +365,17 @@ function initPaper() {
     status.textContent = s.status || "";
     startBtn.disabled = !!s.running;
     stopBtn.disabled = !s.running;
+    const paperMarketEl = document.getElementById("paper-market");
+    if (paperMarketEl) paperMarketEl.disabled = !!s.running;
+    moneySymbol = s.currency_symbol || "$";
+    const marketLabel = s.market ? `Market: ${s.market.toUpperCase()}   ` : "";
+    const session = s.session ? `   Session: ${s.session}` : "";
     equity.textContent =
-      `Cash: $${Number(s.cash).toLocaleString(undefined, { maximumFractionDigits: 2 })}   ` +
-      `Equity: $${Number(s.equity).toLocaleString(undefined, { maximumFractionDigits: 2 })}   ` +
-      `Open: ${s.open_count}   Closed: ${s.closed_count}`;
+      marketLabel +
+      `Cash: ${fmtMoney(s.cash, { digits: 2 })}   ` +
+      `Equity: ${fmtMoney(s.equity, { digits: 2 })}   ` +
+      `Open: ${s.open_count}   Closed: ${s.closed_count}` +
+      session;
     const exp = s.exposure || {};
     exposure.textContent =
       `Long exposure: ${(exp.long_pct || 0).toFixed(1)}%   ` +
@@ -406,7 +450,9 @@ function initPaper() {
   }
 
   async function poll() {
-    const s = await api("/api/paper/status");
+    const market = (document.getElementById("paper-market") || {}).value || "";
+    const q = market ? `?market=${encodeURIComponent(market)}` : "";
+    const s = await api(`/api/paper/status${q}`);
     render(s);
     setTimeout(() => poll().catch(console.error), s.running ? 2000 : 5000);
   }
@@ -417,11 +463,13 @@ function initPaper() {
         method: "POST",
         body: JSON.stringify({
           n_symbols: Number(document.getElementById("paper-n").value || 100),
+          extra_symbols: (document.getElementById("paper-extra") || {}).value || "",
           use_stream: document.getElementById("paper-stream").checked,
           kronos_gate: document.getElementById("paper-kronos").checked,
           kronos_rank: document.getElementById("paper-kronos-rank").checked,
           volume_gate: document.getElementById("paper-volume").checked,
           stream_start: document.getElementById("paper-stream-start").value || null,
+          market: (document.getElementById("paper-market") || {}).value || null,
         }),
       });
     } catch (e) {
@@ -435,11 +483,27 @@ function initPaper() {
   document.getElementById("paper-reset").onclick = async () => {
     if (!confirm("Wipe the paper trading account and start fresh?")) return;
     try {
-      await api("/api/paper/reset", { method: "POST" });
+      await api("/api/paper/reset", {
+        method: "POST",
+        body: JSON.stringify({
+          market: (document.getElementById("paper-market") || {}).value || null,
+        }),
+      });
     } catch (e) {
       status.textContent = String(e.message || e);
     }
   };
+  const paperMarket = document.getElementById("paper-market");
+  if (paperMarket) {
+    paperMarket.onchange = () => {
+      const spec = (window.TB_MARKETS || []).find((m) => m.id === paperMarket.value);
+      if (spec) {
+        document.getElementById("paper-n").value = spec.default_n_symbols;
+        document.getElementById("paper-kronos").checked = !!spec.kronos_gate;
+        document.getElementById("paper-kronos-rank").checked = !!spec.kronos_rank;
+      }
+    };
+  }
   poll().catch(console.error);
 }
 

@@ -9,6 +9,7 @@ builds in OHLCVStore across scan cycles — no Yahoo Finance.
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import sys
 import threading
@@ -30,6 +31,40 @@ from utils.logger import log
 
 if TYPE_CHECKING:
     from data.ohlcv_store import OHLCVStore
+
+
+def _is_benign_mcp_gone_process(message: str) -> bool:
+    """True when MCP stdio teardown races a child that already exited.
+
+    Closing stdin often reaps tradingview-mcp before the SDK's killpg();
+    ESRCH is success, not a scan failure.
+    """
+    return (
+        "Process group termination failed" in message
+        and "No such process" in message
+    ) or (
+        "Process termination failed" in message
+        and "attempting force kill" in message
+    )
+
+
+class _McpGoneProcessFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:
+            return True
+        return not _is_benign_mcp_gone_process(message)
+
+
+def _install_mcp_stdio_teardown_fix() -> None:
+    logger = logging.getLogger("mcp.os.posix.utilities")
+    if any(isinstance(f, _McpGoneProcessFilter) for f in logger.filters):
+        return
+    logger.addFilter(_McpGoneProcessFilter())
+
+
+_install_mcp_stdio_teardown_fix()
 
 
 # ── Screener rate limit + 429 retry (process-wide) ───────────────────────────
@@ -137,6 +172,72 @@ _CHART_SPECS: dict[str, tuple[str, str, int]] = {
     "1W": ("1wk", "5y", 65),
 }
 
+
+def _candles_from_yahoo_payload(
+    payload: dict | None, chart_symbol: str, timeframe: str
+) -> list[OHLCVCandle]:
+    """Parse Yahoo v8 chart JSON. Empty/YHD stubs return [] with no parse error."""
+    if not payload:
+        return []
+    try:
+        result = (payload.get("chart") or {}).get("result") or []
+        if not result:
+            err = (payload.get("chart") or {}).get("error")
+            log.warning(
+                f"TVClient | Chart history empty for {chart_symbol} {timeframe}"
+                + (f": {err}" if err else "")
+            )
+            return []
+        result0 = result[0]
+        timestamps = result0.get("timestamp") or []
+        if not timestamps:
+            meta = result0.get("meta") or {}
+            log.info(
+                f"TVClient | Yahoo {chart_symbol} {timeframe} has no bars "
+                f"(exchange={meta.get('exchangeName') or meta.get('exchange')})"
+            )
+            return []
+        quote = result0["indicators"]["quote"][0]
+        adjclose = result0["indicators"].get("adjclose", [{}])[0].get("adjclose", [])
+    except (KeyError, IndexError, TypeError) as exc:
+        log.warning(
+            f"TVClient | Chart history parse failed for {chart_symbol} {timeframe}: {exc}"
+        )
+        return []
+
+    candles: list[OHLCVCandle] = []
+    for i, ts in enumerate(timestamps):
+        o = quote["open"][i]
+        h = quote["high"][i]
+        l = quote["low"][i]
+        c = quote["close"][i]
+        v = quote["volume"][i]
+        if None in (o, h, l, c):
+            continue
+        adj = adjclose[i] if i < len(adjclose) else None
+        if adj is not None and c:
+            factor = float(adj) / float(c)
+            o, h, l, c = (
+                float(o) * factor,
+                float(h) * factor,
+                float(l) * factor,
+                float(adj),
+            )
+        else:
+            o, h, l, c = float(o), float(h), float(l), float(c)
+        candles.append(
+            OHLCVCandle(
+                open=o,
+                high=h,
+                low=l,
+                close=c,
+                volume=float(v or 0.0),
+                timestamp=datetime.fromtimestamp(ts, tz=timezone.utc),
+            )
+        )
+    return candles
+
+
 SYMBOL_EXCHANGE_OVERRIDES: dict[str, str] = {
     "SPY": "AMEX",
     "IVV": "AMEX",
@@ -149,6 +250,42 @@ SYMBOL_EXCHANGE_OVERRIDES: dict[str, str] = {
 # each time within the TTL window.
 _SYMBOLS_CACHE_DIR = Path("data/cache")
 _SYMBOLS_CACHE_TTL_SECONDS = 6 * 3600
+
+# TradingView's `value` column is None for every PSE row. Peso turnover lives
+# in `Value.Traded`; 10-day ADV ≈ close * average_volume_10d_calc.
+_PH_TRADED_COL = "Value.Traded"
+_PH_AVG_VOL_COL = "average_volume_10d_calc"
+
+
+def _numeric_col(df: pd.DataFrame, name: str) -> pd.Series:
+    if name not in df.columns:
+        return pd.Series(float("nan"), index=df.index, dtype="float64")
+    return pd.to_numeric(df[name], errors="coerce")
+
+
+def _ph_peso_adv(df: pd.DataFrame) -> pd.Series:
+    """Peso ADV: 10d share volume * close, else today's Value.Traded, else close*volume."""
+    close = _numeric_col(df, "close")
+    adv10 = close * _numeric_col(df, _PH_AVG_VOL_COL)
+    traded = _numeric_col(df, _PH_TRADED_COL)
+    session = close * _numeric_col(df, "volume")
+    return adv10.fillna(traded).fillna(session).fillna(0.0)
+
+
+def _rows_from_screener_df(df: pd.DataFrame, want_n: int) -> list[tuple[str, str]]:
+    rows: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for _, row in df.iterrows():
+        if not row.get("name") or not row.get("exchange"):
+            continue
+        sym = str(row["name"]).upper()
+        if sym in seen:
+            continue
+        seen.add(sym)
+        rows.append((sym, str(row["exchange"]).upper()))
+        if len(rows) >= want_n:
+            break
+    return rows
 
 
 @dataclass
@@ -188,45 +325,168 @@ class TVClient:
 
     @staticmethod
     def fetch_top_symbols(n: int = 100, screener: str = "america") -> list[str]:
-        """Return top N symbols by market cap from TradingView screener."""
-        q = (
-            Query()
-            .select("name")
-            .set_markets(screener)
-            .order_by("market_cap_basic", ascending=False)
-            .limit(n)
-        )
-        _, df = _get_scanner_data(q)
-        if df is None or df.empty:
-            return []
-        return df["name"].tolist()
+        """Return top N symbols from TradingView screener."""
+        return [s for s, _ex in TVClient.fetch_top_symbols_with_exchanges(n, screener)]
 
     @staticmethod
     def fetch_top_symbols_with_exchanges(
-        n: int = 100, screener: str = "america"
+        n: int = 100,
+        screener: str = "america",
+        *,
+        order_by: str | None = None,
+        min_value: float | None = None,
+        exchange: str | None = None,
     ) -> list[tuple[str, str]]:
-        """Return top N (symbol, exchange) pairs by market cap."""
-        q = (
-            Query()
-            .select("name", "exchange")
-            .set_markets(screener)
-            .order_by("market_cap_basic", ascending=False)
-            .limit(n)
-        )
-        _, df = _get_scanner_data(q)
+        """Return top N (symbol, exchange) pairs.
+
+        US default: market cap. PH: peso turnover (`Value.Traded` / 10d ADV),
+        never share-volume (that ranks penny names). Optional ADV floor in pesos.
+        """
+        from core.market import get_market
+
+        profile = None
+        if screener == "philippines":
+            profile = get_market("ph")
+        rank = order_by or (profile.universe_order if profile else "market_cap_basic")
+        want_n = max(n, 1)
+
+        if screener == "philippines":
+            return TVClient._fetch_ph_universe(
+                want_n,
+                min_value=min_value if min_value is not None else (
+                    profile.min_adv if profile else None
+                ),
+                exchange=exchange,
+            )
+
+        fetch_n = want_n
+        if min_value or exchange:
+            fetch_n = min(max(want_n * 4, want_n), 500)
+
+        select_cols = ["name", "exchange"]
+        if rank in ("value", "volume") or min_value:
+            select_cols.extend(["value", "volume"])
+
+        def _query(rank_col: str) -> pd.DataFrame | None:
+            q = (
+                Query()
+                .select(*select_cols)
+                .set_markets(screener)
+                .order_by(rank_col, ascending=False)
+                .limit(fetch_n)
+            )
+            _, df = _get_scanner_data(q)
+            return df
+
+        df = None
+        tried = []
+        for rank_col in (rank, "volume", "market_cap_basic"):
+            if rank_col in tried:
+                continue
+            tried.append(rank_col)
+            try:
+                df = _query(rank_col)
+            except Exception as exc:
+                log.warning(f"TVClient | universe order_by={rank_col} failed: {exc}")
+                df = None
+            if df is not None and not df.empty:
+                break
         if df is None or df.empty:
             return []
-        return [
-            (str(row["name"]).upper(), str(row["exchange"]).upper())
-            for _, row in df.iterrows()
-            if row.get("name") and row.get("exchange")
+
+        if exchange:
+            exch = exchange.upper()
+            if "exchange" in df.columns:
+                df = df[df["exchange"].astype(str).str.upper() == exch]
+        if min_value and "value" in df.columns:
+            vals = pd.to_numeric(df["value"], errors="coerce").fillna(0.0)
+            filtered = df[vals >= float(min_value)]
+            if filtered.empty:
+                log.warning(
+                    f"TVClient | ADV floor {min_value:.0f} removed every row — "
+                    f"keeping unfiltered top {want_n}"
+                )
+            else:
+                df = filtered
+
+        return _rows_from_screener_df(df, want_n)
+
+    @staticmethod
+    def _fetch_ph_universe(
+        want_n: int,
+        *,
+        min_value: float | None,
+        exchange: str | None,
+    ) -> list[tuple[str, str]]:
+        """Top PSE names by peso ADV. TV `value` is always None on this market."""
+        fetch_n = min(max(want_n * 5, 120), 280)
+        select_cols = [
+            "name", "exchange", "close", "volume",
+            _PH_TRADED_COL, _PH_AVG_VOL_COL,
         ]
+
+        df = None
+        for rank_col in (_PH_TRADED_COL, "volume"):
+            try:
+                q = (
+                    Query()
+                    .select(*select_cols)
+                    .set_markets("philippines")
+                    .order_by(rank_col, ascending=False)
+                    .limit(fetch_n)
+                )
+                _, df = _get_scanner_data(q)
+            except Exception as exc:
+                log.warning(f"TVClient | PH universe order_by={rank_col} failed: {exc}")
+                df = None
+            if df is not None and not df.empty:
+                break
+        if df is None or df.empty:
+            return []
+
+        if exchange and "exchange" in df.columns:
+            df = df[df["exchange"].astype(str).str.upper() == exchange.upper()]
+        if df.empty:
+            return []
+
+        df = df.copy()
+        df["_peso_adv"] = _ph_peso_adv(df)
+        df = df.sort_values("_peso_adv", ascending=False)
+        if min_value:
+            filtered = df[df["_peso_adv"] >= float(min_value)]
+            if filtered.empty:
+                log.warning(
+                    f"TVClient | PH ADV floor ₱{min_value:,.0f} removed every row — "
+                    f"keeping top {want_n} by peso turnover"
+                )
+            else:
+                df = filtered
+        return _rows_from_screener_df(df, want_n)
+
+    @staticmethod
+    def fetch_universe(n: int, market: str | None = None) -> list[tuple[str, str]]:
+        """Market-aware universe: US by cap, PH by peso volume + ADV floor."""
+        from core.market import get_market
+
+        profile = get_market(market)
+        return TVClient.fetch_top_symbols_with_exchanges(
+            n if n else profile.default_n_symbols,
+            profile.tv_screener,
+            order_by=profile.universe_order,
+            min_value=profile.min_adv,
+            exchange=profile.tv_exchange if profile.id == "ph" else None,
+        )
 
     @staticmethod
     def fetch_top_symbols_with_exchanges_cached(
         n: int = 100,
         screener: str = "america",
         ttl_seconds: int = _SYMBOLS_CACHE_TTL_SECONDS,
+        *,
+        order_by: str | None = None,
+        min_value: float | None = None,
+        exchange: str | None = None,
+        market: str | None = None,
     ) -> list[tuple[str, str]]:
         """Same as fetch_top_symbols_with_exchanges, cached to data/cache/.
 
@@ -234,7 +494,18 @@ class TVClient:
         invocation; this reads the last fetch from disk instead when it's
         still fresh, and re-fetches + saves when it's missing or stale.
         """
-        path = _SYMBOLS_CACHE_DIR / f"symbols_{screener}_{n}.json"
+        if market is not None:
+            from core.market import get_market, ohlcv_cache_key  # noqa: F401
+
+            return TVClient.fetch_universe_cached(n, market, ttl_seconds=ttl_seconds)
+
+        rank = order_by or ("value" if screener == "philippines" else "market_cap_basic")
+        tag = f"{screener}_{rank}_{n}"
+        if exchange:
+            tag += f"_{exchange}"
+        if min_value:
+            tag += f"_adv{int(min_value)}"
+        path = _SYMBOLS_CACHE_DIR / f"symbols_{tag}.json"
         if path.exists():
             age = time.time() - path.stat().st_mtime
             if age < ttl_seconds:
@@ -243,11 +514,33 @@ class TVClient:
                     return [(s, e) for s, e in rows]
                 except Exception:
                     pass
-        rows = TVClient.fetch_top_symbols_with_exchanges(n, screener)
+        rows = TVClient.fetch_top_symbols_with_exchanges(
+            n, screener, order_by=order_by, min_value=min_value, exchange=exchange,
+        )
         if rows:
             _SYMBOLS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(rows), encoding="utf-8")
         return rows
+
+    @staticmethod
+    def fetch_universe_cached(
+        n: int,
+        market: str | None = None,
+        ttl_seconds: int = _SYMBOLS_CACHE_TTL_SECONDS,
+        extra_symbols: str | list[str] | None = None,
+    ) -> list[tuple[str, str]]:
+        from core.market import get_market, merge_extra_symbols
+
+        profile = get_market(market)
+        rows = TVClient.fetch_top_symbols_with_exchanges_cached(
+            n if n else profile.default_n_symbols,
+            profile.tv_screener,
+            ttl_seconds,
+            order_by=profile.universe_order,
+            min_value=profile.min_adv,
+            exchange=profile.tv_exchange if profile.id == "ph" else None,
+        )
+        return merge_extra_symbols(rows, extra_symbols, profile.id)
 
     def __init__(
         self,
@@ -398,14 +691,28 @@ class TVClient:
         )
 
     def _fetch_history_chart(self, symbol: str, timeframe: str) -> list[OHLCVCandle]:
-        """Fetch OHLCV history from the public chart API (~2Y daily / ~5Y weekly)."""
+        """Fetch OHLCV history. PH uses PSE Edge (Yahoo *.PS is a YHD stub)."""
         spec = _CHART_SPECS.get(timeframe)
         if spec is None:
             return []
 
         interval, range_, default_max = spec
         max_bars = settings.tv_history_days if timeframe == "1d" else default_max
-        url = f"{_CHART_API}/{symbol.upper()}?interval={interval}&range={range_}"
+
+        if self._screener == "philippines":
+            from data.pse_edge import fetch_history
+
+            edge = fetch_history(symbol, timeframe, max_bars)
+            if edge:
+                log.debug(
+                    f"TVClient | PSE Edge {symbol} {timeframe} → {len(edge)} bars"
+                )
+            return edge
+
+        from core.market import yahoo_chart_symbol
+
+        chart_symbol = yahoo_chart_symbol(symbol, screener=self._screener)
+        url = f"{_CHART_API}/{chart_symbol}?interval={interval}&range={range_}"
         req = urllib.request.Request(url, headers={"User-Agent": _CHART_UA})
 
         try:
@@ -413,57 +720,17 @@ class TVClient:
                 payload = json.loads(resp.read().decode("utf-8"))
         except Exception as exc:
             log.warning(
-                f"TVClient | Chart history failed for {symbol} {timeframe}: {exc}"
+                f"TVClient | Chart history failed for {chart_symbol} {timeframe}: {exc}"
             )
-            return []
+            payload = None
 
-        try:
-            result = payload["chart"]["result"][0]
-            timestamps = result["timestamp"]
-            quote = result["indicators"]["quote"][0]
-            adjclose = result["indicators"].get("adjclose", [{}])[0].get("adjclose", [])
-        except (KeyError, IndexError, TypeError) as exc:
-            log.warning(
-                f"TVClient | Chart history parse failed for {symbol} {timeframe}: {exc}"
-            )
-            return []
-
-        candles: list[OHLCVCandle] = []
-        for i, ts in enumerate(timestamps):
-            o = quote["open"][i]
-            h = quote["high"][i]
-            l = quote["low"][i]
-            c = quote["close"][i]
-            v = quote["volume"][i]
-            if None in (o, h, l, c):
-                continue
-            adj = adjclose[i] if i < len(adjclose) else None
-            if adj is not None and c:
-                factor = float(adj) / float(c)
-                o, h, l, c = (
-                    float(o) * factor,
-                    float(h) * factor,
-                    float(l) * factor,
-                    float(adj),
-                )
-            else:
-                o, h, l, c = float(o), float(h), float(l), float(c)
-            candles.append(
-                OHLCVCandle(
-                    open=o,
-                    high=h,
-                    low=l,
-                    close=c,
-                    volume=float(v or 0.0),
-                    timestamp=datetime.fromtimestamp(ts, tz=timezone.utc),
-                )
-            )
-
-        if len(candles) > max_bars:
+        candles = _candles_from_yahoo_payload(payload, chart_symbol, timeframe)
+        if candles and len(candles) > max_bars:
             candles = candles[-max_bars:]
-        log.debug(
-            f"TVClient | Chart history {symbol} {timeframe} → {len(candles)} bars"
-        )
+        if candles:
+            log.debug(
+                f"TVClient | Chart history {symbol} {timeframe} → {len(candles)} bars"
+            )
         return candles
 
     def _fetch_history_screener(

@@ -24,6 +24,7 @@ import pkgutil
 import threading
 import time
 from collections import deque
+from contextlib import asynccontextmanager, AsyncExitStack
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -53,6 +54,7 @@ from analysis.price_volume import volume_confirm_gate
 # from broker.order_manager import OrderManager
 # from risk.risk_guard import RiskGuard, TradeIntent
 from config import settings
+from core.market import get_market
 from utils.logger import log
 
 PATTERNS_DETECTED_FILE = Path("patterns_detected.md")
@@ -71,27 +73,36 @@ class MarketScanner:
         kronos_gate: bool | None = None,
         volume_gate: bool | None = None,
         kronos_rank: bool | None = None,
+        market: str | None = None,
     ):
         self._symbols = symbols or settings.symbols
         self._disabled_patterns = set(disabled_patterns or [])
-        self._scan_interval = scan_interval_seconds or settings.scan_interval_seconds
+        profile = get_market(market if market is not None else getattr(paper_account, "market", None))
+        self._market = profile.id
+        from data.edgar_client import set_skip_edgar
+
+        set_skip_edgar(profile.skip_edgar)
+        self._scan_interval = scan_interval_seconds or profile.scan_interval_seconds
         # None → follow settings; explicit True/False lets UI/CLI override for a session.
         self._kronos_gate = (
-            settings.kronos_gate_enabled if kronos_gate is None else kronos_gate
+            profile.kronos_gate_default if kronos_gate is None else kronos_gate
         )
         self._volume_gate = (
             settings.volume_gate_enabled if volume_gate is None else volume_gate
         )
         self._kronos_rank = (
-            settings.kronos_rank_enabled if kronos_rank is None else kronos_rank
+            profile.kronos_rank_default if kronos_rank is None else kronos_rank
         )
         self._tv = data_feed or TVClient(
-            settings.tv_screener,
-            settings.tv_exchange,
+            profile.tv_screener,
+            profile.tv_exchange,
             exchange_overrides=exchange_overrides,
         )
-        self._store = OHLCVStore(window=max(DEFAULT_WINDOW, settings.tv_history_days))
-        self._renderer = ChartRenderer(save_to_disk=True)
+        self._store = OHLCVStore(
+            window=max(DEFAULT_WINDOW, settings.tv_history_days),
+            session_tz=profile.session_tz,
+        )
+        self._renderer = ChartRenderer(save_to_disk=True, session_tz=profile.session_tz)
         self._vision = VisionChecker()
         # self._client   = IBKRClient()
         # self._orders   = OrderManager(self._client)
@@ -191,29 +202,54 @@ class MarketScanner:
     # ── Main async loop ────────────────────────────────────────────────────────
     async def run(self) -> None:
         self.start()
+        n_workers = min(settings.scanner_concurrency, max(len(self._symbols), 1))
         try:
             while self._running:
                 try:
-                    if self._paper is not None:
-                        self._paper.tick()
-                    await self._scan_all()
-                    if self._paper is not None:
-                        self._paper.save()
+                    async with self._open_feed_sessions(n_workers) as sessions:
+                        while self._running:
+                            try:
+                                if self._paper is not None:
+                                    self._paper.tick()
+                                await self._scan_all(feed_sessions=sessions)
+                                if self._paper is not None:
+                                    self._paper.save()
+                            except Exception:
+                                # Broken MCP/stdio pipe: drop the pool and
+                                # reopen rather than reuse a dead session.
+                                log.exception(
+                                    "Scanner | scan cycle failed — restarting data sessions"
+                                )
+                                break
+                            await asyncio.sleep(self._scan_interval)
                 except Exception:
-                    # A single bad scan cycle (MCP subprocess crash, broken
-                    # pipe, transient TradingView error) must not take down
-                    # a session meant to run unattended for days.
-                    log.exception("Scanner | scan cycle failed — retrying next interval")
-                await asyncio.sleep(self._scan_interval)
+                    log.exception(
+                        "Scanner | failed to open data sessions — retrying next interval"
+                    )
+                    await asyncio.sleep(self._scan_interval)
         finally:
             self.stop()
 
+    @asynccontextmanager
+    async def _open_feed_sessions(self, n: int):
+        """Keep N MCP/stream sessions for the whole scan loop, not each cycle.
+
+        Opening and killing tradingview-mcp on every scan races the SDK's
+        killpg() against an already-exited child (ESRCH spam in the tqdm bar).
+        """
+        async with AsyncExitStack() as stack:
+            sessions = [
+                await stack.enter_async_context(self._tv.mcp_session())
+                for _ in range(n)
+            ]
+            yield sessions
+
     # ── Scan cycle ─────────────────────────────────────────────────────────────
-    async def _scan_all(self) -> None:
+    async def _scan_all(self, feed_sessions: list | None = None) -> None:
         """Run one full scan across all symbols x timeframes x patterns.
 
         Symbols are processed concurrently with a progress bar. Each worker
-        opens its own MCP session so there is no contention on the stdio pipe.
+        uses its own MCP session so there is no contention on the stdio pipe.
         """
         scan_start = time.monotonic()
         self.stats["patterns_found"] = 0
@@ -244,83 +280,91 @@ class MarketScanner:
 
         pbar = tqdm(total=len(self._symbols), desc="Scanning", unit="sym", ncols=80)
 
-        async def _worker() -> None:
-            """Each worker owns one MCP session for its entire lifetime."""
-            async with self._tv.mcp_session() as mcp:
-                while True:
-                    try:
-                        symbol = queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        return
+        async def _drain(mcp) -> None:
+            while True:
+                try:
+                    symbol = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
 
-                    for timeframe in all_timeframes:
-                        snapshot = await self._tv.fetch_snapshot(
-                            symbol, timeframe,
-                            store=self._store, mcp_session=mcp,
+                for timeframe in all_timeframes:
+                    snapshot = await self._tv.fetch_snapshot(
+                        symbol, timeframe,
+                        store=self._store, mcp_session=mcp,
+                    )
+                    if snapshot is None:
+                        continue
+
+                    bar_key = (symbol, timeframe)
+                    bar_ts = snapshot.candle.timestamp
+                    is_new_bar = bar_ts is None or self._last_bar_ts.get(bar_key) != bar_ts
+                    if bar_ts is not None:
+                        self._last_bar_ts[bar_key] = bar_ts
+                    if is_new_bar and bar_ts is not None:
+                        ticks = self._sim_ticks.get(symbol, 0) + 1
+                        self._sim_ticks[symbol] = ticks
+                        self._sim_days = max(self._sim_days, ticks)
+                        self.stats["sim_days"] = self._sim_days
+
+                    if self._paper is not None:
+                        closed = self._paper.on_bar(
+                            symbol, snapshot.candle, timeframe, is_new_bar,
                         )
-                        if snapshot is None:
-                            continue
+                        if closed is not None:
+                            bar_idx = self._paper.bar_count(closed.symbol)
+                            self._cooldown_tracker[
+                                (closed.symbol, closed.pattern)
+                            ] = (bar_idx, closed.pnl < 0)
 
-                        bar_key = (symbol, timeframe)
-                        bar_ts = snapshot.candle.timestamp
-                        is_new_bar = bar_ts is None or self._last_bar_ts.get(bar_key) != bar_ts
-                        if bar_ts is not None:
-                            self._last_bar_ts[bar_key] = bar_ts
-                        if is_new_bar and bar_ts is not None:
-                            ticks = self._sim_ticks.get(symbol, 0) + 1
-                            self._sim_ticks[symbol] = ticks
-                            self._sim_days = max(self._sim_days, ticks)
-                            self.stats["sim_days"] = self._sim_days
+                    if not is_new_bar:
+                        # Same bar as last scan (e.g. a daily pattern
+                        # polled hourly, market closed/quiet) — re-running
+                        # pattern detection on unchanged data would just
+                        # re-fire the same signal and reopen/close the
+                        # same trade every cycle.
+                        continue
 
-                        if self._paper is not None:
-                            closed = self._paper.on_bar(
-                                symbol, snapshot.candle, timeframe, is_new_bar,
+                    pending = self._pending_entries.pop(symbol, None)
+                    if pending is not None and self._paper is not None:
+                        opened, fill_reason = self._paper.open_position(
+                            pending, snapshot.candle, self._store
+                        )
+                        if opened:
+                            self.stats["trades_opened"] += 1
+                            self._append_signal_log(
+                                pending, status="filled", reason=fill_reason,
                             )
-                            if closed is not None:
-                                bar_idx = self._paper.bar_count(closed.symbol)
-                                self._cooldown_tracker[
-                                    (closed.symbol, closed.pattern)
-                                ] = (bar_idx, closed.pnl < 0)
-
-                        if not is_new_bar:
-                            # Same bar as last scan (e.g. a daily pattern
-                            # polled hourly, market closed/quiet) — re-running
-                            # pattern detection on unchanged data would just
-                            # re-fire the same signal and reopen/close the
-                            # same trade every cycle.
-                            continue
-
-                        pending = self._pending_entries.pop(symbol, None)
-                        if pending is not None and self._paper is not None:
-                            opened, fill_reason = self._paper.open_position(
-                                pending, snapshot.candle, self._store
+                        else:
+                            self.stats["signals_rejected"] += 1
+                            self._append_signal_log(
+                                pending, status="rejected", reason=fill_reason,
                             )
-                            if opened:
-                                self.stats["trades_opened"] += 1
-                                self._append_signal_log(
-                                    pending, status="filled", reason=fill_reason,
-                                )
-                            else:
-                                self.stats["signals_rejected"] += 1
-                                self._append_signal_log(
-                                    pending, status="rejected", reason=fill_reason,
-                                )
 
-                        for pattern in self._patterns:
-                            if timeframe not in pattern.timeframes:
-                                continue
-                            signal = pattern.analyze(snapshot, self._store)
-                            if signal:
-                                self.stats["patterns_found"] += 1
-                                self._record_detection(signal)
-                                latest_signals[(symbol, timeframe)] = signal
-                                await self._process_signal(signal, pattern, snapshot.candle)
+                    for pattern in self._patterns:
+                        if timeframe not in pattern.timeframes:
+                            continue
+                        signal = pattern.analyze(snapshot, self._store)
+                        if signal:
+                            self.stats["patterns_found"] += 1
+                            self._record_detection(signal)
+                            latest_signals[(symbol, timeframe)] = signal
+                            await self._process_signal(signal, pattern, snapshot.candle)
 
-                    pbar.update(1)
+                pbar.update(1)
 
-        workers = [_worker() for _ in range(min(concurrency, len(self._symbols)))]
-        await asyncio.gather(*workers)
-        pbar.close()
+        async def _owned_session_worker() -> None:
+            async with self._tv.mcp_session() as mcp:
+                await _drain(mcp)
+
+        n_workers = min(concurrency, len(self._symbols))
+        if feed_sessions:
+            workers = [_drain(mcp) for mcp in feed_sessions[:n_workers]]
+        else:
+            workers = [_owned_session_worker() for _ in range(n_workers)]
+        try:
+            await asyncio.gather(*workers)
+        finally:
+            pbar.close()
 
         if self._kronos_rank:
             await self._run_kronos_rank_sleeve()
@@ -345,7 +389,12 @@ class MarketScanner:
             log.debug(f"KronosRank | skip — already forecast asof={asof.date()}")
             return
 
-        signals = await asyncio.to_thread(run_sleeve, self._store, list(self._symbols))
+        signals = await asyncio.to_thread(
+            run_sleeve,
+            self._store,
+            list(self._symbols),
+            long_only=True if get_market(self._market).long_only else None,
+        )
         self._kronos_rank_last_asof = asof
         self.stats["kronos_rank_emitted"] = self.stats.get("kronos_rank_emitted", 0) + len(
             signals
@@ -402,6 +451,20 @@ class MarketScanner:
             )
             self.stats["signals_rejected"] += 1
             self._append_signal_log(signal, status="rejected", reason=cooldown_reason)
+            return
+
+        profile = get_market(self._market)
+        if profile.long_only and signal.action == "SELL":
+            reason = (
+                f"Long-only {profile.label}: pattern SELL/short is disabled "
+                f"(PSE retail shorts need SBL)."
+            )
+            log.info(
+                f"Signal REJECTED by long-only — {signal.symbol} "
+                f"{signal.pattern} | {reason}"
+            )
+            self.stats["signals_rejected"] += 1
+            self._append_signal_log(signal, status="rejected", reason=reason)
             return
 
         # Step 0b — Kronos 1w confirm gate (direction + min move). Runs before

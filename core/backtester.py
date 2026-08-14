@@ -38,6 +38,7 @@ from core.engine_defaults import (
     passes_regime_filter,
 )
 from core.kronos_gate import kronos_gate_check
+from core.market import apply_lot_rounding, get_market, ohlcv_cache_key
 from utils.logger import log
 
 # ── OHLCV disk cache ──────────────────────────────────────────────────────────
@@ -1014,12 +1015,19 @@ def _core_backtest_symbol(
     if len(candles) < 1:
         return [], 0
 
+    from data.edgar_client import set_skip_edgar
+
+    set_skip_edgar(bool(config.get("skip_edgar")))
+
     # Bounded window, not the full backtest length — every pattern's
     # MIN_BARS tops out at 210, regime filter needs 200, Kronos gate LOOKBACK=400,
     # so DEFAULT_WINDOW is enough. Sizing this to len(candles) made every
     # per-bar indicator recompute run over the *entire* history so far,
     # turning a multi-year walk-forward into an O(n^2) crawl.
-    store = OHLCVStore(window=DEFAULT_WINDOW)
+    store = OHLCVStore(
+        window=DEFAULT_WINDOW,
+        session_tz=config.get("session_tz") or "America/New_York",
+    )
     trades: list[BacktestTrade] = []
     signals_count = 0
     pending_entry: TradeSignal | None = None
@@ -1137,6 +1145,9 @@ def _core_backtest_symbol(
             ):
                 continue
 
+            if config.get("long_only") and signal.action == "SELL":
+                continue
+
             _apply_sizing(
                 signal, store, symbol, timeframe,
                 config["account_value"],
@@ -1144,6 +1155,10 @@ def _core_backtest_symbol(
                 config["position_sizing"],
                 max_position_pct=config["max_position_pct"],
             )
+            if config.get("lot_round"):
+                signal.price = signal.price or candles[i].close
+                if not apply_lot_rounding(signal):
+                    continue
 
             pending_entry = signal
             break
@@ -1167,12 +1182,14 @@ def _core_backtest_symbol(
 # ── OHLCV caching + weekly derivation ────────────────────────────────────────
 
 
-def _cache_path(symbol: str, timeframe: str) -> Path:
-    return _CACHE_DIR / f"{symbol.upper()}_{timeframe}.json"
+def _cache_path(symbol: str, timeframe: str, market: str | None = None) -> Path:
+    return _CACHE_DIR / f"{ohlcv_cache_key(symbol, timeframe, market)}.json"
 
 
-def _load_cached_ohlcv(symbol: str, timeframe: str) -> list[OHLCVCandle] | None:
-    p = _cache_path(symbol, timeframe)
+def _load_cached_ohlcv(
+    symbol: str, timeframe: str, market: str | None = None,
+) -> list[OHLCVCandle] | None:
+    p = _cache_path(symbol, timeframe, market)
     if not p.exists():
         return None
     try:
@@ -1193,7 +1210,10 @@ def _load_cached_ohlcv(symbol: str, timeframe: str) -> list[OHLCVCandle] | None:
         return None
 
 
-def _save_cached_ohlcv(symbol: str, timeframe: str, candles: list[OHLCVCandle]) -> None:
+def _save_cached_ohlcv(
+    symbol: str, timeframe: str, candles: list[OHLCVCandle],
+    market: str | None = None,
+) -> None:
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
     payload = [
         {
@@ -1202,7 +1222,7 @@ def _save_cached_ohlcv(symbol: str, timeframe: str, candles: list[OHLCVCandle]) 
         }
         for c in candles
     ]
-    _cache_path(symbol, timeframe).write_text(
+    _cache_path(symbol, timeframe, market).write_text(
         json.dumps(payload), encoding="utf-8",
     )
 
@@ -1282,9 +1302,17 @@ class Backtester:
         kronos_gate: bool | None = None,
         volume_gate: bool | None = None,
         kronos_rank: bool | None = None,
+        market: str | None = None,
+        long_only: bool | None = None,
     ):
         self._symbols = symbols
-        self._tv = TVClient(settings.tv_screener, settings.tv_exchange)
+        profile = get_market(market)
+        self._market = profile.id
+        from data.edgar_client import set_skip_edgar
+
+        set_skip_edgar(profile.skip_edgar)
+        self._long_only = profile.long_only if long_only is None else long_only
+        self._tv = TVClient(profile.tv_screener, profile.tv_exchange)
         self._patterns: list[BasePattern] = []
         self._pattern_files: dict[str, str] = {}
         self._pattern_filter = pattern_filter
@@ -1294,13 +1322,13 @@ class Backtester:
         self._min_confidence = min_confidence
         self._regime_filter = regime_filter
         self._kronos_gate = (
-            settings.kronos_gate_enabled if kronos_gate is None else kronos_gate
+            profile.kronos_gate_default if kronos_gate is None else kronos_gate
         )
         self._volume_gate = (
             settings.volume_gate_enabled if volume_gate is None else volume_gate
         )
         self._kronos_rank = (
-            settings.kronos_rank_enabled if kronos_rank is None else kronos_rank
+            profile.kronos_rank_default if kronos_rank is None else kronos_rank
         )
         self._cooldown_bars = cooldown_bars
         self._txn_cost_pct = txn_cost_pct
@@ -1382,13 +1410,13 @@ class Backtester:
         loop = asyncio.get_running_loop()
 
         async def _fetch_one(symbol: str):
-            candles = _load_cached_ohlcv(symbol, "1d")
+            candles = _load_cached_ohlcv(symbol, "1d", self._market)
             if candles is None:
                 candles = await asyncio.to_thread(
                     self._tv._fetch_history_chart, symbol, "1d"
                 )
                 if candles:
-                    _save_cached_ohlcv(symbol, "1d", candles)
+                    _save_cached_ohlcv(symbol, "1d", candles, self._market)
             if candles:
                 ohlcv_data[(symbol, "1d")] = candles
                 if need_weekly:
@@ -1437,10 +1465,17 @@ class Backtester:
             "kronos_rank": self._kronos_rank,
             "kronos_rank_top_k": settings.kronos_rank_top_k,
             "kronos_rank_bottom_k": settings.kronos_rank_bottom_k,
-            "kronos_rank_long_only": settings.kronos_rank_long_only,
+            "kronos_rank_long_only": (
+                True if self._long_only else settings.kronos_rank_long_only
+            ),
             "kronos_rank_min_move_pct": settings.kronos_rank_min_move_pct,
             "kronos_rank_rebalance_bars": settings.kronos_rank_rebalance_bars,
             "max_open_positions": self._max_open_positions,
+            "long_only": self._long_only,
+            "skip_edgar": get_market(self._market).skip_edgar,
+            "lot_round": get_market(self._market).lot_round,
+            "session_tz": get_market(self._market).session_tz,
+            "market": self._market,
         }
 
         max_workers = max(1, self._max_workers)
@@ -1456,7 +1491,8 @@ class Backtester:
                     loop.run_in_executor(
                         pool, _worker_symbol_backtest,
                         s, tf,
-                        settings.tv_screener, settings.tv_exchange,
+                        get_market(self._market).tv_screener,
+                        get_market(self._market).tv_exchange,
                         pattern_specs, config,
                         ohlcv_data.get((s, tf)),
                     )
@@ -1570,6 +1606,10 @@ class Backtester:
                 "volume_gate": self._volume_gate,
                 "volume_gate_rvol_min": settings.volume_gate_rvol_min,
                 "volume_gate_obv_bars": settings.volume_gate_obv_bars,
+                "long_only": self._long_only,
+                "lot_round": get_market(self._market).lot_round,
+                "session_tz": get_market(self._market).session_tz,
+                "market": self._market,
             },
             self._cooldown_tracker,
         )

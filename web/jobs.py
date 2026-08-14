@@ -21,6 +21,7 @@ import websockets
 
 from config import settings, DISABLED_PATTERNS
 from core.backtester import Backtester, BacktestResult, discover_pattern_names
+from core.market import default_market, get_market, session_label
 from core.paper_trader import (
     PaperAccount,
     days_held,
@@ -96,6 +97,8 @@ def normalize_backtest_form(raw: dict[str, Any]) -> dict[str, Any]:
             p[key] = v if v else None
 
     n_symbols = int(p.pop("n_symbols"))
+    extra_symbols = p.pop("extra_symbols", None) or ""
+    market = p.pop("market", None) or default_market().id
     if "max_workers" in p and p["max_workers"] is not None:
         p["max_workers"] = int(p["max_workers"])
     pattern_filter = p.pop("pattern_filter")
@@ -118,7 +121,15 @@ def normalize_backtest_form(raw: dict[str, Any]) -> dict[str, Any]:
             p[opt_key] = None
     if "synthetic_stop_multiple" in p and p["synthetic_stop_multiple"] <= 0:
         p["synthetic_stop_multiple"] = 0
-    return {"n_symbols": n_symbols, "pattern": pattern_filter, "kwargs": p}
+    p["market"] = market
+    p["long_only"] = get_market(market).long_only
+    return {
+        "n_symbols": n_symbols,
+        "extra_symbols": extra_symbols,
+        "pattern": pattern_filter,
+        "kwargs": p,
+        "market": market,
+    }
 
 
 def _result_to_payload(result: BacktestResult) -> dict[str, Any]:
@@ -189,7 +200,10 @@ class BacktestJob:
             self.completed = completed
             self.total = total
 
-    def start(self, n_symbols: int, pattern: Optional[str], kwargs: dict, *, ab: bool) -> str | None:
+    def start(
+        self, n_symbols: int, pattern: Optional[str], kwargs: dict, *, ab: bool,
+        extra_symbols: str = "",
+    ) -> str | None:
         with self.lock:
             if self.busy:
                 return "Backtest already running."
@@ -208,18 +222,18 @@ class BacktestJob:
             self.ab = None
         threading.Thread(
             target=self._run_ab if ab else self._run,
-            args=(n_symbols, pattern, kwargs),
+            args=(n_symbols, extra_symbols, pattern, kwargs),
             daemon=True,
         ).start()
         return None
 
-    def _run(self, n_symbols: int, pattern: Optional[str], kwargs: dict) -> None:
+    def _run(self, n_symbols: int, extra_symbols: str, pattern: Optional[str], kwargs: dict) -> None:
         try:
-            symbol_rows = TVClient.fetch_top_symbols_with_exchanges_cached(
-                n_symbols, settings.tv_screener,
+            symbol_rows = TVClient.fetch_universe_cached(
+                n_symbols, kwargs.get("market"), extra_symbols=extra_symbols,
             )
             if not symbol_rows:
-                raise RuntimeError("No symbols returned by screener.")
+                raise RuntimeError("No symbols from screener or additional list.")
             symbols = [s for s, _ex in symbol_rows]
             backtester = Backtester(
                 symbols,
@@ -244,17 +258,17 @@ class BacktestJob:
             with self.lock:
                 self.busy = False
 
-    def _run_ab(self, n_symbols: int, pattern: Optional[str], kwargs: dict) -> None:
+    def _run_ab(self, n_symbols: int, extra_symbols: str, pattern: Optional[str], kwargs: dict) -> None:
         try:
             from analysis.price_volume import ab_metrics_from_result
 
             kwargs = dict(kwargs)
             kwargs.pop("volume_gate", None)
-            symbol_rows = TVClient.fetch_top_symbols_with_exchanges_cached(
-                n_symbols, settings.tv_screener,
+            symbol_rows = TVClient.fetch_universe_cached(
+                n_symbols, kwargs.get("market"), extra_symbols=extra_symbols,
             )
             if not symbol_rows:
-                raise RuntimeError("No symbols returned by screener.")
+                raise RuntimeError("No symbols from screener or additional list.")
             symbols = [s for s, _ex in symbol_rows]
 
             off_bt = Backtester(
@@ -292,7 +306,7 @@ class BacktestJob:
 class PaperSession:
     def __init__(self) -> None:
         self.lock = threading.Lock()
-        self.account = PaperAccount.load()
+        self.account = PaperAccount.load(market=default_market().id)
         self.scanner: Optional[MarketScanner] = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self.task: Optional[asyncio.Task] = None
@@ -302,14 +316,20 @@ class PaperSession:
         self._stream_proc: Optional[subprocess.Popen] = None
         self.error: Optional[str] = None
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self, market: Optional[str] = None) -> dict[str, Any]:
         with self.lock:
+            if not self.running and market:
+                want = get_market(market).id
+                if self.account.market != want:
+                    self.account = PaperAccount.load(market=want)
             account = self.account
             scanner = self.scanner
             use_stream = self.use_stream
             status = self.status
             running = self.running
             error = self.error
+
+        profile = get_market(account.market)
 
         now = datetime.now(timezone.utc)
         equity = account.equity()
@@ -393,11 +413,15 @@ class PaperSession:
             "signal_logs": signal_logs,
             "summary": result.summary() if result.trades else "No closed trades yet.",
             "equity_png_b64": curve_b64,
+            "market": profile.id,
+            "currency": profile.currency,
+            "currency_symbol": profile.currency_symbol,
+            "session": session_label(profile.id),
             "defaults": {
-                "kronos_gate": settings.kronos_gate_enabled,
-                "kronos_rank": settings.kronos_rank_enabled,
+                "kronos_gate": profile.kronos_gate_default,
+                "kronos_rank": profile.kronos_rank_default,
                 "volume_gate": settings.volume_gate_enabled,
-                "n_symbols": 100,
+                "n_symbols": profile.default_n_symbols,
             },
         }
 
@@ -434,11 +458,13 @@ class PaperSession:
         self,
         n_symbols: int,
         *,
+        extra_symbols: str = "",
         use_stream: bool,
         kronos_gate: bool,
         kronos_rank: bool,
         volume_gate: bool,
         stream_start: Optional[str] = None,
+        market: Optional[str] = None,
     ) -> str | None:
         with self.lock:
             if self.running:
@@ -449,7 +475,7 @@ class PaperSession:
             self.status = "Fetching symbols..."
         threading.Thread(
             target=self._run_thread,
-            args=(n_symbols, use_stream, kronos_gate, kronos_rank, volume_gate, stream_start),
+            args=(n_symbols, extra_symbols, use_stream, kronos_gate, kronos_rank, volume_gate, stream_start, market),
             daemon=True,
         ).start()
         return None
@@ -462,13 +488,14 @@ class PaperSession:
             self.status = "Stopping..."
         loop.call_soon_threadsafe(task.cancel)
 
-    def reset(self) -> str | None:
+    def reset(self, market: Optional[str] = None) -> str | None:
         with self.lock:
             if self.running:
                 return "Stop the session before resetting."
-            self.account = PaperAccount()
+            profile = get_market(market or self.account.market)
+            self.account = PaperAccount(market=profile.id)
             self.account.save()
-            self.status = "Account reset."
+            self.status = f"{profile.label} account reset."
             self.error = None
         return None
 
@@ -523,11 +550,13 @@ class PaperSession:
     def _run_thread(
         self,
         n_symbols: int,
+        extra_symbols: str,
         use_stream: bool,
         kronos_gate: bool,
         kronos_rank: bool,
         volume_gate: bool,
         stream_start: Optional[str],
+        market: Optional[str],
     ) -> None:
         data_feed = None
         if use_stream:
@@ -540,13 +569,14 @@ class PaperSession:
                 return
             data_feed = StreamClient()
 
-        symbol_rows = TVClient.fetch_top_symbols_with_exchanges_cached(
-            n_symbols, settings.tv_screener,
+        profile = get_market(market)
+        symbol_rows = TVClient.fetch_universe_cached(
+            n_symbols, profile.id, extra_symbols=extra_symbols,
         )
         if not symbol_rows:
             with self.lock:
                 self.running = False
-                self.error = "No symbols returned by screener."
+                self.error = "No symbols from screener or additional list."
                 self.status = self.error
             return
         symbols = [s for s, _ex in symbol_rows]
@@ -556,7 +586,7 @@ class PaperSession:
         asyncio.set_event_loop(loop)
         with self.lock:
             self.loop = loop
-            self.account = PaperAccount.load()
+            self.account = PaperAccount.load(market=profile.id)
             scanner = MarketScanner(
                 symbols=symbols,
                 exchange_overrides=exchange_overrides,
@@ -564,22 +594,23 @@ class PaperSession:
                 disabled_patterns=DISABLED_PATTERNS,
                 data_feed=data_feed,
                 scan_interval_seconds=(
-                    settings.papertrade_stream_interval_seconds if use_stream else None
+                    settings.papertrade_stream_interval_seconds if use_stream else profile.scan_interval_seconds
                 ),
                 kronos_gate=kronos_gate,
                 kronos_rank=kronos_rank,
                 volume_gate=volume_gate,
+                market=profile.id,
             )
             self.scanner = scanner
             self.task = loop.create_task(scanner.run())
             interval = (
                 settings.papertrade_stream_interval_seconds
                 if use_stream
-                else settings.scan_interval_seconds
+                else profile.scan_interval_seconds
             )
             stream_note = f", stream from {stream_start}" if use_stream and stream_start else ""
             self.status = (
-                f"Running — {len(symbols)} symbols, scanning every {interval}s"
+                f"Running — {profile.label}, {len(symbols)} symbols, scanning every {interval}s"
                 f"{stream_note}"
                 f", Kronos gate={'ON' if kronos_gate else 'OFF'}"
                 f", Kronos rank={'ON' if kronos_rank else 'OFF'}"

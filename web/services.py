@@ -15,6 +15,7 @@ from analysis.price_volume import volume_confirm_gate
 from config import settings, DISABLED_PATTERNS
 from core.engine_defaults import passes_min_confidence, passes_regime_filter
 from core.kronos_gate import kronos_gate_check
+from core.market import get_market
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
 from data.tv_client import MarketSnapshot, TVClient
 from patterns.base_pattern import BasePattern, TradeSignal
@@ -60,17 +61,28 @@ def discover_patterns(
 
 class ExplorerService:
     def __init__(self) -> None:
+        profile = get_market()
+        self._bind_market(profile)
+        self._patterns = discover_patterns()
+
+    def _bind_market(self, profile) -> None:
+        self._market = profile.id
         self._tv = TVClient(
-            settings.tv_screener,
-            settings.tv_exchange,
+            profile.tv_screener,
+            profile.tv_exchange,
             exchange_overrides=None,
         )
-        self._renderer = ChartRenderer(save_to_disk=False)
-        self._patterns = discover_patterns()
-        self._store = OHLCVStore(window=max(DEFAULT_WINDOW, settings.tv_history_days))
+        self._renderer = ChartRenderer(save_to_disk=False, session_tz=profile.session_tz)
+        self._store = OHLCVStore(
+            window=max(DEFAULT_WINDOW, settings.tv_history_days),
+            session_tz=profile.session_tz,
+        )
 
-    def fetch_symbols(self, n: int) -> list[dict[str, str]]:
-        rows = TVClient.fetch_top_symbols_with_exchanges_cached(n, settings.tv_screener)
+    def fetch_symbols(self, n: int, market: str | None = None) -> list[dict[str, str]]:
+        profile = get_market(market)
+        if profile.id != getattr(self, "_market", None):
+            self._bind_market(profile)
+        rows = TVClient.fetch_universe_cached(n, profile.id)
         return [{"symbol": s, "exchange": ex} for s, ex in rows]
 
     def load_symbol(
@@ -82,9 +94,19 @@ class ExplorerService:
         run_patterns: bool = True,
         kronos_gate: bool | None = None,
         volume_gate: bool | None = None,
+        market: str | None = None,
     ) -> dict[str, Any]:
         if timeframe not in TIMEFRAMES:
             raise ValueError(f"Unsupported timeframe: {timeframe}")
+
+        if market:
+            profile = get_market(market)
+        elif exchange.upper() == "PSE":
+            profile = get_market("ph")
+        else:
+            profile = get_market("us")
+        if profile.id != getattr(self, "_market", None):
+            self._bind_market(profile)
 
         candles = self._tv._fetch_history_screener(symbol, exchange, timeframe)
         if not candles:

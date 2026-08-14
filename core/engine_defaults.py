@@ -52,11 +52,19 @@ def backtest_kwargs(**overrides: Any) -> dict[str, Any]:
 
     Includes max_open_positions from settings. Pass pattern_filter /
     disabled_patterns / kronos_gate / volume_gate via overrides.
+    `market` overlays PH costs / capital / long-only when selected.
     """
     from config import settings
+    from core.market import get_market
 
     d = asdict(ENGINE)
     d["max_open_positions"] = settings.max_open_positions
+    market = overrides.pop("market", None)
+    profile = get_market(market)
+    d["market"] = profile.id
+    d["txn_cost_pct"] = profile.txn_cost_pct
+    d["account_value"] = profile.paper_initial_capital
+    d["long_only"] = profile.long_only
     d.update(overrides)
     return d
 

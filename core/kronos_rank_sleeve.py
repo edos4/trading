@@ -216,7 +216,7 @@ def is_kronos_rank_signal(signal: TradeSignal) -> bool:
     return signal.pattern == PATTERN_NAME
 
 
-def _candles_to_df(candles: list) -> pd.DataFrame:
+def _candles_to_df(candles: list, session_tz: str = "America/New_York") -> pd.DataFrame:
     """OHLCVCandle list → DataFrame indexed by normalized session date."""
     rows = []
     for c in candles:
@@ -234,10 +234,11 @@ def _candles_to_df(candles: list) -> pd.DataFrame:
     if df.empty:
         return df
     idx = pd.to_datetime(df["timestamp"])
+    tz = session_tz or "America/New_York"
     if getattr(idx.dt, "tz", None) is not None:
-        idx = idx.dt.tz_convert("America/New_York")
+        idx = idx.dt.tz_convert(tz)
     else:
-        idx = idx.dt.tz_localize("America/New_York")
+        idx = idx.dt.tz_localize(tz)
     df.index = idx.dt.tz_localize(None).dt.normalize()
     return df[["open", "high", "low", "close", "volume"]]
 
@@ -281,7 +282,10 @@ def backtest_rank_sleeve(
     )
     rebalance = max(1, rebalance)
 
-    frames = {sym: _candles_to_df(candles) for sym, candles in ohlcv_1d.items()}
+    frames = {
+        sym: _candles_to_df(candles, config.get("session_tz") or "America/New_York")
+        for sym, candles in ohlcv_1d.items()
+    }
     frames = {s: df for s, df in frames.items() if df is not None and len(df) >= 60}
     if not frames:
         return [], 0

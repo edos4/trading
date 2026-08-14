@@ -81,10 +81,12 @@ def demo():
     assert sk["risk_per_trade_pct"] == 0.02
     assert sk["account_value"] == 50_000.0
 
-    bt = backtest_kwargs(pattern_filter="double_bottom")
+    bt = backtest_kwargs(pattern_filter="double_bottom", market="us")
     assert bt["min_confidence"] == 0.6
     assert bt["max_position_pct"] == 0.33
     assert bt["pattern_filter"] == "double_bottom"
+    assert bt["market"] == "us"
+    assert bt["long_only"] is False
 
     print("engine_defaults: all checks passed")
 

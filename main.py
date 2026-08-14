@@ -3,6 +3,8 @@ main.py - Entry point. Runs the market scanner, backtester, or GUI.
 
 Usage:
     python main.py                                  # Live/paper scan mode
+    python main.py --backtest --market ph            # PSE / PHP / long-only
+    python main.py --paper --market ph               # PHP paper ledger (separate file)
     python main.py --backtest                       # Backtest all patterns (100 symbols)
     python main.py --backtest 10                    # Backtest all patterns (10 symbols)
     python main.py --backtest --pattern double_top  # Test one pattern only
@@ -43,7 +45,8 @@ from config import settings, DISABLED_PATTERNS
 from core.scanner import MarketScanner
 from core.backtester import Backtester
 from core.engine_defaults import backtest_kwargs
-from core.paper_trader import PaperAccount, DEFAULT_ACCOUNT_PATH, days_held, r_multiple, unrealized_pct
+from core.market import format_money, get_market
+from core.paper_trader import PaperAccount, days_held, r_multiple, unrealized_pct
 from data.tv_client import TVClient
 from utils.logger import log
 
@@ -52,29 +55,31 @@ async def run_scanner(
     n_symbols: int = 100,
     *,
     volume_gate: bool | None = None,
+    market: str | None = None,
 ) -> None:
     os.makedirs("logs", exist_ok=True)
     os.makedirs("charts", exist_ok=True)
 
+    profile = get_market(market)
     use_volume = (
         settings.volume_gate_enabled if volume_gate is None else volume_gate
     )
 
     log.info("=" * 60)
     log.info(f"  Trading Bot — mode: {settings.trading_mode.upper()}")
-    log.info(f"  Scan every: {settings.scan_interval_seconds}s")
+    log.info(f"  Market:     {profile.label} ({profile.currency})")
+    log.info(f"  Scan every: {profile.scan_interval_seconds}s")
     log.info(f"  History:    {settings.tv_history_days} daily bars")
     log.info(f"  Vision:     {'ON' if settings.vision_confirmation_enabled else 'OFF'}")
-    log.info(f"  Kronos gate:{'ON' if settings.kronos_gate_enabled else 'OFF'}")
-    log.info(f"  Kronos rank:{'ON' if settings.kronos_rank_enabled else 'OFF'}")
+    log.info(f"  Kronos gate:{'ON' if profile.kronos_gate_default else 'OFF'}")
+    log.info(f"  Kronos rank:{'ON' if profile.kronos_rank_default else 'OFF'}")
     log.info(f"  Volume gate:{'ON' if use_volume else 'OFF'}")
+    log.info(f"  Long-only:  {'YES' if profile.long_only else 'no'}")
     log.info(f"  IBKR:       disabled (commented out)")
     log.info("=" * 60)
 
-    log.info(f"Fetching top {n_symbols} symbols from TradingView...")
-    symbol_rows = TVClient.fetch_top_symbols_with_exchanges(
-        n_symbols, settings.tv_screener
-    )
+    log.info(f"Fetching top {n_symbols} symbols from TradingView ({profile.tv_screener})...")
+    symbol_rows = TVClient.fetch_universe(n_symbols, profile.id)
     if not symbol_rows:
         log.error("Failed to fetch symbols from TradingView — aborting")
         return
@@ -89,9 +94,10 @@ async def run_scanner(
         symbols=symbols,
         exchange_overrides=exchange_overrides,
         disabled_patterns=DISABLED_PATTERNS,
-        kronos_gate=settings.kronos_gate_enabled,
-        kronos_rank=settings.kronos_rank_enabled,
+        kronos_gate=profile.kronos_gate_default,
+        kronos_rank=profile.kronos_rank_default,
         volume_gate=use_volume,
+        market=profile.id,
     )
     await scanner.run()
 
@@ -101,32 +107,36 @@ async def run_paper(
     reset: bool = False,
     *,
     volume_gate: bool | None = None,
+    market: str | None = None,
 ) -> None:
     os.makedirs("logs", exist_ok=True)
     os.makedirs("charts", exist_ok=True)
 
-    if reset and DEFAULT_ACCOUNT_PATH.exists():
-        DEFAULT_ACCOUNT_PATH.unlink()
-        log.info("Paper | account reset")
+    profile = get_market(market)
+    if reset and profile.paper_account_path.exists():
+        profile.paper_account_path.unlink()
+        log.info(f"Paper | {profile.id} account reset")
 
-    account = PaperAccount.load()
+    account = PaperAccount.load(market=profile.id)
     use_volume = (
         settings.volume_gate_enabled if volume_gate is None else volume_gate
     )
+    kronos_gate = profile.kronos_gate_default
+    kronos_rank = profile.kronos_rank_default
 
     log.info("=" * 60)
     log.info("  Trading Bot — PAPER TRADING MODE (simulated fills, no broker)")
-    log.info(f"  Starting equity: ${account.equity():,.2f}")
-    log.info(f"  Scan every: {settings.scan_interval_seconds}s")
-    log.info(f"  Kronos gate:{'ON' if settings.kronos_gate_enabled else 'OFF'}")
-    log.info(f"  Kronos rank:{'ON' if settings.kronos_rank_enabled else 'OFF'}")
+    log.info(f"  Market:     {profile.label} ({profile.currency})")
+    log.info(f"  Starting equity: {format_money(account.equity(), profile.id)}")
+    log.info(f"  Scan every: {profile.scan_interval_seconds}s")
+    log.info(f"  Kronos gate:{'ON' if kronos_gate else 'OFF'}")
+    log.info(f"  Kronos rank:{'ON' if kronos_rank else 'OFF'}")
     log.info(f"  Volume gate:{'ON' if use_volume else 'OFF'}")
+    log.info(f"  Long-only:  {'YES' if profile.long_only else 'no'}")
     log.info("=" * 60)
 
-    log.info(f"Fetching top {n_symbols} symbols from TradingView...")
-    symbol_rows = TVClient.fetch_top_symbols_with_exchanges(
-        n_symbols, settings.tv_screener
-    )
+    log.info(f"Fetching top {n_symbols} symbols from TradingView ({profile.tv_screener})...")
+    symbol_rows = TVClient.fetch_universe(n_symbols, profile.id)
     if not symbol_rows:
         log.error("Failed to fetch symbols from TradingView — aborting")
         return
@@ -139,9 +149,10 @@ async def run_paper(
         exchange_overrides=exchange_overrides,
         paper_account=account,
         disabled_patterns=DISABLED_PATTERNS,
-        kronos_gate=settings.kronos_gate_enabled,
-        kronos_rank=settings.kronos_rank_enabled,
+        kronos_gate=kronos_gate,
+        kronos_rank=kronos_rank,
         volume_gate=use_volume,
+        market=profile.id,
     )
     try:
         await scanner.run()
@@ -150,7 +161,7 @@ async def run_paper(
         print()
         print(account.to_result().summary())
         print(f"  Open positions:    {len(account.positions)}")
-        print(f"  Equity:            ${account.equity():,.2f}")
+        print(f"  Equity:            {format_money(account.equity(), profile.id)}")
         print()
 
         if account.positions:
@@ -191,26 +202,32 @@ async def run_backtest(
     *,
     volume_gate: bool | None = None,
     volume_gate_compare: bool = False,
+    market: str | None = None,
 ) -> None:
     os.makedirs("logs", exist_ok=True)
 
+    profile = get_market(market)
     use_volume = (
         settings.volume_gate_enabled if volume_gate is None else volume_gate
     )
     title = f"BACKTEST MODE{' — ' + pattern if pattern else ''}"
+    universe_note = (
+        "top by peso volume" if profile.id == "ph" else "top by market cap"
+    )
     log.info("=" * 60)
     log.info(f"  Trading Bot — {title}")
-    log.info(f"  Symbols:    top {n_symbols} by market cap")
-    log.info(f"  Kronos gate:{'ON' if settings.kronos_gate_enabled else 'OFF'}")
-    log.info(f"  Kronos rank:{'ON' if settings.kronos_rank_enabled else 'OFF'}")
+    log.info(f"  Market:     {profile.label} ({profile.currency})")
+    log.info(f"  Symbols:    {n_symbols} {universe_note}")
+    log.info(f"  Kronos gate:{'ON' if profile.kronos_gate_default else 'OFF'}")
+    log.info(f"  Kronos rank:{'ON' if profile.kronos_rank_default else 'OFF'}")
+    log.info(f"  Long-only:  {'YES' if profile.long_only else 'no'}")
+    log.info(f"  Txn cost:   {profile.txn_cost_pct:.4f} one-way")
     log.info(f"  Volume gate:{'ON' if use_volume else 'OFF'}"
              f"{' (A/B compare)' if volume_gate_compare else ''}")
     log.info("=" * 60)
 
-    log.info(f"Fetching top {n_symbols} symbols from TradingView (cached)...")
-    symbol_rows = TVClient.fetch_top_symbols_with_exchanges_cached(
-        n_symbols, settings.tv_screener
-    )
+    log.info(f"Fetching {n_symbols} symbols from TradingView (cached, {profile.tv_screener})...")
+    symbol_rows = TVClient.fetch_universe_cached(n_symbols, profile.id)
     if not symbol_rows:
         log.error("Failed to fetch symbols from TradingView — aborting")
         return
@@ -221,10 +238,11 @@ async def run_backtest(
     # core.engine_defaults.ENGINE. Do not re-hardcode here or paper/backtest
     # will drift again. Re-tune only against out-of-sample data.
     bt_kwargs = backtest_kwargs(
+        market=profile.id,
         pattern_filter=pattern,
         disabled_patterns=DISABLED_PATTERNS,
-        kronos_gate=settings.kronos_gate_enabled,
-        kronos_rank=settings.kronos_rank_enabled,
+        kronos_gate=profile.kronos_gate_default,
+        kronos_rank=profile.kronos_rank_default,
     )
 
     if volume_gate_compare:
@@ -322,6 +340,13 @@ async def run_backtest(
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Trading Bot - market scanner / backtester / GUI"
+    )
+    parser.add_argument(
+        "--market",
+        choices=["us", "ph"],
+        default=None,
+        help="Market profile: us (NASDAQ/NYSE, USD) or ph (PSE, PHP, long-only). "
+        "Default: MARKET in .env (us). UI/web can also pick per run.",
     )
     parser.add_argument(
         "--backtest",
@@ -542,6 +567,7 @@ async def main(args: argparse.Namespace | None = None) -> None:
             n_symbols=args.paper,
             reset=args.paper_reset,
             volume_gate=True if args.volume_gate else None,
+            market=args.market,
         )
     elif args.backtest is not None:
         await run_backtest(
@@ -549,9 +575,13 @@ async def main(args: argparse.Namespace | None = None) -> None:
             pattern=args.pattern,
             volume_gate=True if args.volume_gate else None,
             volume_gate_compare=args.volume_gate_compare,
+            market=args.market,
         )
     else:
-        await run_scanner(volume_gate=True if args.volume_gate else None)
+        await run_scanner(
+            volume_gate=True if args.volume_gate else None,
+            market=args.market,
+        )
 
 
 if __name__ == "__main__":

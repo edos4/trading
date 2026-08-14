@@ -23,8 +23,9 @@ DEFAULT_WINDOW = 512
 
 
 class OHLCVStore:
-    def __init__(self, window: int = DEFAULT_WINDOW):
+    def __init__(self, window: int = DEFAULT_WINDOW, session_tz: str = "America/New_York"):
         self._window = window
+        self._session_tz = session_tz or "America/New_York"
         # {(symbol, timeframe): deque[OHLCVCandle]}
         self._store: dict[tuple[str, str], deque[OHLCVCandle]] = {}
         # {(symbol, timeframe): date of the last pushed snapshot} — used to
@@ -113,10 +114,11 @@ class OHLCVStore:
         df = pd.DataFrame(records)
         if "timestamp" in df.columns and df["timestamp"].notna().any():
             idx = pd.to_datetime(df["timestamp"])
+            tz = self._session_tz
             if idx.dt.tz is not None:
-                idx = idx.dt.tz_convert("America/New_York")
+                idx = idx.dt.tz_convert(tz)
             else:
-                idx = idx.dt.tz_localize("America/New_York")
+                idx = idx.dt.tz_localize(tz)
             df.index = idx.dt.tz_localize(None).dt.normalize()
             df = df.drop(columns=["timestamp"])
         df = df[["open", "high", "low", "close", "volume"]]

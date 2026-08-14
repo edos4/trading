@@ -22,6 +22,7 @@ from typing import Any, Callable, Optional
 from config import settings, DISABLED_PATTERNS
 from core.backtester import Backtester, BacktestResult, discover_pattern_names
 from core.engine_defaults import ENGINE
+from core.market import default_market, get_market
 from data.tv_client import TVClient
 from utils.logger import log
 
@@ -42,9 +43,21 @@ def _decimals_for_increment(inc: float) -> int:
 
 PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
     (
+        "market", "Market",
+        "US = NASDAQ/NYSE, USD, shorts allowed. PH = PSE, PHP, long-only, "
+        "Manila session, higher round-trip costs. Separate paper ledgers.",
+        "combo", default_market().id, ["us", "ph"],
+    ),
+    (
         "n_symbols", "Symbols (count)",
-        "Number of top-market-cap symbols to backtest (fetched from TradingView screener).",
+        "Number of symbols to backtest (US: top by market cap; PH: top by peso volume).",
         "spin", (100, 5, 5000, 1), None,
+    ),
+    (
+        "extra_symbols", "Additional symbols",
+        "Optional tickers to include besides the screener top-N (comma or space). "
+        "Duplicates already in the screener list are skipped.",
+        "entry", "", None,
     ),
     (
         "pattern_filter", "Pattern filter",
@@ -107,7 +120,7 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
     (
         "account_value", "Account value ($)",
         "Starting capital for the backtest.",
-        "spin", (ENGINE.account_value, 1000.0, 1000000.0, 1000.0), None,
+        "spin", (ENGINE.account_value, 1000.0, 50_000_000.0, 1000.0), None,
     ),
     (
         "risk_per_trade_pct", "Risk per trade (%)",
@@ -250,6 +263,21 @@ class BacktestDialog:
                     break
                 place_param(*PARAMS[idx], col=j * 2, row=row)
             row += 2
+        if "market" in self._vars:
+            self._vars["market"].trace_add("write", lambda *_: self._apply_market_defaults())
+
+    def _apply_market_defaults(self) -> None:
+        profile = get_market(self._vars["market"].get())
+        mapping = {
+            "n_symbols": profile.default_n_symbols,
+            "txn_cost_pct": profile.txn_cost_pct,
+            "account_value": profile.paper_initial_capital,
+            "kronos_gate": profile.kronos_gate_default,
+            "kronos_rank": profile.kronos_rank_default,
+        }
+        for key, value in mapping.items():
+            if key in self._vars:
+                self._vars[key].set(value)
 
     def _make_widget(self, parent, key, ptype, default, choices, col, grid_row):
         var = None
@@ -276,7 +304,8 @@ class BacktestDialog:
             )
         else:
             var = tk.StringVar(value=str(default))
-            ttk.Entry(parent, textvariable=var, width=18).grid(
+            width = 28 if key == "extra_symbols" else 18
+            ttk.Entry(parent, textvariable=var, width=width).grid(
                 row=grid_row, column=col + 1, sticky=tk.W, padx=(0, 8),
             )
         self._vars[key] = var
@@ -355,8 +384,10 @@ class BacktestDialog:
             else:
                 v = var.get().strip()
                 p[key] = v if v else None
-        # n_symbols is not a Backtester param — extract it
+        # n_symbols / extra_symbols / market are not Backtester params
         n_symbols = int(p.pop("n_symbols"))
+        extra_symbols = p.pop("extra_symbols", None) or ""
+        market = p.pop("market", None) or default_market().id
         # Convert spinbox floats to ints where Backtester expects int
         for int_key in ("max_workers",):
             if int_key in p and p[int_key] is not None:
@@ -377,7 +408,15 @@ class BacktestDialog:
                 p[opt_key] = None
         if "synthetic_stop_multiple" in p and p["synthetic_stop_multiple"] <= 0:
             p["synthetic_stop_multiple"] = 0
-        return {"n_symbols": n_symbols, "pattern": pattern_filter, "kwargs": p}
+        p["market"] = market
+        p["long_only"] = get_market(market).long_only
+        return {
+            "n_symbols": n_symbols,
+            "extra_symbols": extra_symbols,
+            "pattern": pattern_filter,
+            "kwargs": p,
+            "market": market,
+        }
 
     # ── Run backtest in background thread ─────────────────────────────────
     def _run_backtest(self) -> None:
@@ -385,6 +424,7 @@ class BacktestDialog:
             return
         params = self._collect_params()
         n_symbols = params["n_symbols"]
+        extra_symbols = params.get("extra_symbols") or ""
         pattern = params["pattern"]
         kwargs = params["kwargs"]
         self._busy = True
@@ -402,7 +442,7 @@ class BacktestDialog:
         self._tree.delete(*self._tree.get_children())
         threading.Thread(
             target=self._run_backtest_thread,
-            args=(n_symbols, pattern, kwargs),
+            args=(n_symbols, extra_symbols, pattern, kwargs),
             daemon=True,
         ).start()
 
@@ -412,6 +452,7 @@ class BacktestDialog:
             return
         params = self._collect_params()
         n_symbols = params["n_symbols"]
+        extra_symbols = params.get("extra_symbols") or ""
         pattern = params["pattern"]
         kwargs = dict(params["kwargs"])
         # A/B forces both sides; ignore the form checkbox for the pair of runs.
@@ -431,17 +472,19 @@ class BacktestDialog:
         self._tree.delete(*self._tree.get_children())
         threading.Thread(
             target=self._run_volume_ab_thread,
-            args=(n_symbols, pattern, kwargs),
+            args=(n_symbols, extra_symbols, pattern, kwargs),
             daemon=True,
         ).start()
 
-    def _run_backtest_thread(self, n_symbols: int, pattern: Optional[str], kwargs: dict) -> None:
+    def _run_backtest_thread(
+        self, n_symbols: int, extra_symbols: str, pattern: Optional[str], kwargs: dict,
+    ) -> None:
         try:
-            symbol_rows = TVClient.fetch_top_symbols_with_exchanges_cached(
-                n_symbols, settings.tv_screener,
+            symbol_rows = TVClient.fetch_universe_cached(
+                n_symbols, kwargs.get("market"), extra_symbols=extra_symbols,
             )
             if not symbol_rows:
-                self._top.after(0, lambda: self._finish(None, "No symbols returned by screener."))
+                self._top.after(0, lambda: self._finish(None, "No symbols from screener or additional list."))
                 return
             symbols = [s for s, _ex in symbol_rows]
             backtester = Backtester(symbols, pattern_filter=pattern, progress_callback=self._on_progress, **kwargs)
@@ -452,15 +495,17 @@ class BacktestDialog:
             log.error(f"UI Backtest | {err_msg}")
             self._top.after(0, lambda: self._finish(None, err_msg))
 
-    def _run_volume_ab_thread(self, n_symbols: int, pattern: Optional[str], kwargs: dict) -> None:
+    def _run_volume_ab_thread(
+        self, n_symbols: int, extra_symbols: str, pattern: Optional[str], kwargs: dict,
+    ) -> None:
         try:
             from analysis.price_volume import ab_metrics_from_result
 
-            symbol_rows = TVClient.fetch_top_symbols_with_exchanges_cached(
-                n_symbols, settings.tv_screener,
+            symbol_rows = TVClient.fetch_universe_cached(
+                n_symbols, kwargs.get("market"), extra_symbols=extra_symbols,
             )
             if not symbol_rows:
-                self._top.after(0, lambda: self._finish(None, "No symbols returned by screener."))
+                self._top.after(0, lambda: self._finish(None, "No symbols from screener or additional list."))
                 return
             symbols = [s for s, _ex in symbol_rows]
 

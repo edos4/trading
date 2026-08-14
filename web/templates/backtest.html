@@ -54,5 +54,9 @@
 </section>
 {% endblock %}
 {% block scripts %}
-<script>window.TB_PAGE = "backtest";</script>
+<script>
+  window.TB_PAGE = "backtest";
+  window.TB_MARKETS = {{ markets | tojson }};
+  window.TB_DEFAULT_MARKET = {{ default_market | tojson }};
+</script>
 {% endblock %}

@@ -35,6 +35,7 @@ from analysis.chart_renderer import ChartRenderer
 from config import settings
 from core.kronos_gate import kronos_gate_check
 from core.engine_defaults import passes_min_confidence, passes_regime_filter
+from core.market import default_market, get_market
 from analysis.price_volume import volume_confirm_gate
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
 from data.tv_client import MarketSnapshot, TVClient
@@ -84,15 +85,18 @@ class TradingBotUI:
         except tk.TclError:
             pass
 
+        profile = default_market()
+        self._market = profile.id
         self._tv = TVClient(
-            settings.tv_screener,
-            settings.tv_exchange,
+            profile.tv_screener,
+            profile.tv_exchange,
             exchange_overrides=None,
         )
-        self._renderer = ChartRenderer(save_to_disk=False)
+        self._renderer = ChartRenderer(save_to_disk=False, session_tz=profile.session_tz)
         self._patterns = discover_patterns()
         self._store = OHLCVStore(
-            window=max(DEFAULT_WINDOW, settings.tv_history_days)
+            window=max(DEFAULT_WINDOW, settings.tv_history_days),
+            session_tz=profile.session_tz,
         )
 
         self._symbols: list[tuple[str, str]] = []
@@ -119,8 +123,18 @@ class TradingBotUI:
         ttk.Button(toolbar, text="Refresh symbols", command=self._load_symbols_threaded).pack(side=tk.LEFT)
         ttk.Button(toolbar, text="Backtest", command=self._open_backtest_dialog).pack(side=tk.LEFT, padx=(6, 0))
         ttk.Button(toolbar, text="Paper Trading", command=self._open_paper_dashboard).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Label(toolbar, text="Market:").pack(side=tk.LEFT, padx=(12, 2))
+        self.market_var = tk.StringVar(value=default_market().id)
+        market_combo = ttk.Combobox(
+            toolbar, textvariable=self.market_var, values=["us", "ph"],
+            state="readonly", width=6,
+        )
+        market_combo.pack(side=tk.LEFT)
+        market_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_market_change())
         ttk.Label(toolbar, text="Count:").pack(side=tk.LEFT, padx=(12, 2))
-        self.count_var = tk.IntVar(value=DEFAULT_SYMBOL_COUNT)
+        self.count_var = tk.IntVar(
+            value=30 if default_market().id == "ph" else DEFAULT_SYMBOL_COUNT
+        )
         ttk.Spinbox(
             toolbar, from_=5, to=200, increment=5, width=5, textvariable=self.count_var
         ).pack(side=tk.LEFT)
@@ -136,7 +150,7 @@ class TradingBotUI:
         ttk.Entry(toolbar, textvariable=self.filter_var, width=10).pack(side=tk.LEFT)
         self.run_patterns_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(toolbar, text="Run patterns", variable=self.run_patterns_var).pack(side=tk.LEFT, padx=(12, 0))
-        self.kronos_gate_var = tk.BooleanVar(value=settings.kronos_gate_enabled)
+        self.kronos_gate_var = tk.BooleanVar(value=default_market().kronos_gate_default)
         ttk.Checkbutton(toolbar, text="Kronos 1w gate", variable=self.kronos_gate_var).pack(side=tk.LEFT, padx=(12, 0))
         self.volume_gate_var = tk.BooleanVar(value=settings.volume_gate_enabled)
         ttk.Checkbutton(toolbar, text="Volume gate", variable=self.volume_gate_var).pack(side=tk.LEFT, padx=(12, 0))
@@ -220,7 +234,7 @@ class TradingBotUI:
 
     def _load_symbols(self, n: int) -> None:
         try:
-            rows = TVClient.fetch_top_symbols_with_exchanges(n, settings.tv_screener)
+            rows = TVClient.fetch_universe(n, self._market)
         except Exception as exc:
             msg = f"Symbol fetch failed: {exc}"
             self._safe_after(lambda: self._fail(msg))
@@ -248,6 +262,19 @@ class TradingBotUI:
             self._filtered_rows.append((sym, exch))
 
     # Symbol selection -> load chart + patterns
+    def _on_market_change(self) -> None:
+        profile = get_market(self.market_var.get())
+        self._market = profile.id
+        self._tv = TVClient(profile.tv_screener, profile.tv_exchange)
+        self._store = OHLCVStore(
+            window=max(DEFAULT_WINDOW, settings.tv_history_days),
+            session_tz=profile.session_tz,
+        )
+        self._renderer = ChartRenderer(save_to_disk=False, session_tz=profile.session_tz)
+        self.kronos_gate_var.set(profile.kronos_gate_default)
+        self.count_var.set(profile.default_n_symbols)
+        self._load_symbols_threaded()
+
     def _on_symbol_select(self, _event) -> None:
         sel = self.listbox.curselection()
         if not sel or self._busy:

@@ -20,6 +20,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, ValidationError
 
 from config import settings
+from core.market import default_market, markets_payload
 from utils.logger import log
 from web.auth import (
     clear_session_cookie,
@@ -48,15 +49,18 @@ class SymbolRequest(BaseModel):
     run_patterns: bool = True
     kronos_gate: Optional[bool] = None
     volume_gate: Optional[bool] = None
+    market: Optional[str] = None
 
 
 class PaperStartRequest(BaseModel):
     n_symbols: int = Field(100, ge=5, le=5000)
+    extra_symbols: str = ""
     use_stream: bool = False
     kronos_gate: bool = True
     kronos_rank: bool = False
     volume_gate: bool = False
     stream_start: Optional[str] = None
+    market: Optional[str] = None
 
 
 async def _json_body(request: Request) -> dict[str, Any]:
@@ -132,8 +136,11 @@ def create_app() -> FastAPI:
             request,
             "explorer.html",
             active="explorer",
-            kronos_gate=settings.kronos_gate_enabled,
+            kronos_gate=default_market().kronos_gate_default,
             volume_gate=settings.volume_gate_enabled,
+            default_market=default_market().id,
+            markets=markets_payload(),
+            default_n_symbols=30 if default_market().id == "ph" else 50,
         )
 
     @app.get("/backtest", response_class=HTMLResponse)
@@ -143,6 +150,8 @@ def create_app() -> FastAPI:
             "backtest.html",
             active="backtest",
             params=backtest_param_schema(),
+            default_market=default_market().id,
+            markets=markets_payload(),
         )
 
     @app.get("/paper", response_class=HTMLResponse)
@@ -151,16 +160,27 @@ def create_app() -> FastAPI:
             request,
             "paper.html",
             active="paper",
-            kronos_gate=settings.kronos_gate_enabled,
-            kronos_rank=settings.kronos_rank_enabled,
+            kronos_gate=default_market().kronos_gate_default,
+            kronos_rank=default_market().kronos_rank_default,
             volume_gate=settings.volume_gate_enabled,
+            default_market=default_market().id,
+            default_n_symbols=default_market().default_n_symbols,
+            markets=markets_payload(),
         )
 
     # ── Explorer API ──────────────────────────────────────────────────────
+    @app.get("/api/markets")
+    async def api_markets(_user: str = Depends(require_login)):
+        return {"markets": markets_payload(), "default": default_market().id}
+
     @app.get("/api/symbols")
-    async def api_symbols(n: int = 50, _user: str = Depends(require_login)):
+    async def api_symbols(
+        n: int = 50,
+        market: str = "",
+        _user: str = Depends(require_login),
+    ):
         n = max(5, min(int(n), 5000))
-        symbols = get_explorer().fetch_symbols(n)
+        symbols = get_explorer().fetch_symbols(n, market=market or None)
         return {"symbols": symbols}
 
     @app.post("/api/symbol")
@@ -180,6 +200,7 @@ def create_app() -> FastAPI:
                 run_patterns=payload.run_patterns,
                 kronos_gate=payload.kronos_gate,
                 volume_gate=payload.volume_gate,
+                market=payload.market,
             )
         except Exception as exc:
             return JSONResponse({"detail": str(exc)}, status_code=400)
@@ -199,6 +220,7 @@ def create_app() -> FastAPI:
         params = normalize_backtest_form(payload)
         err = backtest_job.start(
             params["n_symbols"], params["pattern"], params["kwargs"], ab=False,
+            extra_symbols=params.get("extra_symbols") or "",
         )
         if err:
             return JSONResponse({"detail": err}, status_code=409)
@@ -213,6 +235,7 @@ def create_app() -> FastAPI:
         params = normalize_backtest_form(payload)
         err = backtest_job.start(
             params["n_symbols"], params["pattern"], params["kwargs"], ab=True,
+            extra_symbols=params.get("extra_symbols") or "",
         )
         if err:
             return JSONResponse({"detail": err}, status_code=409)
@@ -220,8 +243,11 @@ def create_app() -> FastAPI:
 
     # ── Paper API ─────────────────────────────────────────────────────────
     @app.get("/api/paper/status")
-    async def api_paper_status(_user: str = Depends(require_login)):
-        return paper_session.snapshot()
+    async def api_paper_status(
+        request: Request, _user: str = Depends(require_login),
+    ):
+        market = request.query_params.get("market") or None
+        return paper_session.snapshot(market=market)
 
     @app.post("/api/paper/start")
     async def api_paper_start(request: Request, _user: str = Depends(require_login)):
@@ -238,11 +264,13 @@ def create_app() -> FastAPI:
             return JSONResponse({"detail": msgs}, status_code=400)
         err = paper_session.start(
             payload.n_symbols,
+            extra_symbols=payload.extra_symbols,
             use_stream=payload.use_stream,
             kronos_gate=payload.kronos_gate,
             kronos_rank=payload.kronos_rank,
             volume_gate=payload.volume_gate,
             stream_start=payload.stream_start,
+            market=payload.market,
         )
         if err:
             return JSONResponse({"detail": err}, status_code=409)
@@ -254,8 +282,14 @@ def create_app() -> FastAPI:
         return {"ok": True}
 
     @app.post("/api/paper/reset")
-    async def api_paper_reset(_user: str = Depends(require_login)):
-        err = paper_session.reset()
+    async def api_paper_reset(request: Request, _user: str = Depends(require_login)):
+        market = None
+        try:
+            raw = await _json_body(request)
+            market = (raw or {}).get("market")
+        except ValueError:
+            market = None
+        err = paper_session.reset(market=market)
         if err:
             return JSONResponse({"detail": err}, status_code=409)
         return {"ok": True}

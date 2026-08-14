@@ -39,8 +39,9 @@ TV_EMA_COLORS = ["#2962ff", "#ff9800"]
 
 
 class ChartRenderer:
-    def __init__(self, save_to_disk: bool = True):
+    def __init__(self, save_to_disk: bool = True, session_tz: str = "America/New_York"):
         self._save = save_to_disk
+        self._session_tz = session_tz or "America/New_York"
         if save_to_disk:
             CHARTS_DIR.mkdir(exist_ok=True)
 
@@ -208,8 +209,7 @@ class ChartRenderer:
             "bars": bars,
         }
 
-    @staticmethod
-    def _prepare_df(df: pd.DataFrame, timeframe: str = "1d") -> pd.DataFrame:
+    def _prepare_df(self, df: pd.DataFrame, timeframe: str = "1d") -> pd.DataFrame:
         """
         mplfinance expects Title-case columns and a DatetimeIndex.
         Synthesizes business-day dates when the store has no timestamps.
@@ -223,7 +223,7 @@ class ChartRenderer:
         }
         out = df.rename(columns=rename)
         if isinstance(out.index, pd.DatetimeIndex):
-            out = ChartRenderer._normalize_session_index(out)
+            out = self._normalize_session_index(out)
         if not isinstance(out.index, pd.DatetimeIndex):
             end = pd.Timestamp.now().normalize()
             if timeframe == "1W":
@@ -314,20 +314,19 @@ class ChartRenderer:
         if len(axes) > 1:
             plt.setp(axes[0].get_xticklabels(), visible=False)
 
-    @staticmethod
-    def _normalize_session_index(df: pd.DataFrame) -> pd.DataFrame:
-        """Use US/Eastern session dates — matches TradingView daily bar labels."""
+    def _normalize_session_index(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Session dates in this market's timezone (NY or Manila)."""
         out = df.copy()
         idx = out.index
+        tz = self._session_tz
         if idx.tz is not None:
-            idx = idx.tz_convert("America/New_York")
+            idx = idx.tz_convert(tz)
         else:
-            idx = idx.tz_localize("America/New_York")
+            idx = idx.tz_localize(tz)
         out.index = idx.tz_localize(None).normalize()
         return out
 
-    @staticmethod
-    def _format_xaxis_months(axes, df: pd.DataFrame, timeframe: str) -> None:
+    def _format_xaxis_months(self, axes, df: pd.DataFrame, timeframe: str) -> None:
         """
         Month labels on mplfinance's integer bar index (not matplotlib dates).
         mdates formatters mis-label the axis as Jan–Sep regardless of data range.
@@ -335,7 +334,7 @@ class ChartRenderer:
         if timeframe not in ("1d", "1W") or not isinstance(df.index, pd.DatetimeIndex):
             return
 
-        dates = ChartRenderer._normalize_session_index(df).index
+        dates = self._normalize_session_index(df).index
         date_axis = axes[2] if len(axes) > 2 else axes[-1]
 
         tick_positions: list[int] = []

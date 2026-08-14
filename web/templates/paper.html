@@ -2,7 +2,15 @@
 {% block title %}Paper — Trading Bot{% endblock %}
 {% block content %}
 <section class="toolbar">
-  <label>Symbols <input type="number" id="paper-n" value="100" min="5" max="5000" step="5" /></label>
+  <label>Market
+    <select id="paper-market">
+      {% for m in markets %}
+      <option value="{{ m.id }}" {% if m.id == default_market %}selected{% endif %}>{{ m.label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Symbols <input type="number" id="paper-n" value="{{ default_n_symbols }}" min="5" max="5000" step="5" /></label>
+  <label>Additional <input type="text" id="paper-extra" placeholder="DHI, AT" size="16" /></label>
   <button type="button" class="btn primary" id="paper-start">Start</button>
   <button type="button" class="btn" id="paper-stop" disabled>Stop</button>
   <button type="button" class="btn" id="paper-reset">Reset account</button>
@@ -37,7 +45,7 @@
           <thead>
             <tr>
               <th>Symbol</th><th>Status</th><th>Action</th><th>Qty</th>
-              <th>Entry</th><th>Current</th><th>Unrl%</th><th>MTM $</th>
+              <th>Entry</th><th>Current</th><th>Unrl%</th><th>MTM</th>
               <th>R</th><th>Days</th><th>Value</th><th>Port %</th><th>Pattern</th>
             </tr>
           </thead>
@@ -50,7 +58,7 @@
           <thead>
             <tr>
               <th>Opened</th><th>Closed</th><th>Held</th><th>Symbol</th><th>Action</th>
-              <th>Qty</th><th>Entry</th><th>Exit</th><th>P&L%</th><th>P&L $</th>
+              <th>Qty</th><th>Entry</th><th>Exit</th><th>P&L%</th><th>P&L</th>
               <th>R</th><th>Reason</th><th>Pattern</th>
             </tr>
           </thead>
@@ -88,5 +96,9 @@
 </section>
 {% endblock %}
 {% block scripts %}
-<script>window.TB_PAGE = "paper";</script>
+<script>
+  window.TB_PAGE = "paper";
+  window.TB_MARKETS = {{ markets | tojson }};
+  window.TB_DEFAULT_MARKET = {{ default_market | tojson }};
+</script>
 {% endblock %}
