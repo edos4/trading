@@ -10,7 +10,8 @@ Every SCAN_INTERVAL_SECONDS it:
         a. Kronos 1w forecast gate (if enabled) — direction + min move
         b. Renders a chart (if vision is enabled)
         c. Asks Claude vision to confirm the pattern
-        d. If confirmed: runs risk checks → places order
+        d. Risk gates (ATR trail / R:R) then Kronos/vision; queue pending
+           for next closed bar fill (same deferral as the backtester)
 
 Concurrency: symbols are processed in parallel across N MCP sessions
 (one session per worker, controlled by scanner_concurrency setting).
@@ -40,12 +41,13 @@ from analysis.vision_checker import VisionChecker, VisionVerdict
 from core.paper_trader import PaperAccount
 from core.kronos_gate import kronos_gate_check
 from core.kronos_rank_sleeve import is_kronos_rank_signal, run_sleeve
+from core.backtester import describe_risk_gate_rejection
 from core.engine_defaults import (
-    ENGINE,
     describe_confidence_rejection,
     describe_cooldown_rejection,
     describe_regime_rejection,
     passes_min_confidence,
+    risk_gate_kwargs,
 )
 from analysis.price_volume import volume_confirm_gate
 
@@ -54,7 +56,13 @@ from analysis.price_volume import volume_confirm_gate
 # from broker.order_manager import OrderManager
 # from risk.risk_guard import RiskGuard, TradeIntent
 from config import settings
-from core.market import get_market
+from core.market import (
+    bar_identity,
+    get_market,
+    is_closed_session_bar,
+    is_swing_timeframe,
+    is_weekly_timeframe,
+)
 from utils.logger import log
 
 PATTERNS_DETECTED_FILE = Path("patterns_detected.md")
@@ -111,10 +119,10 @@ class MarketScanner:
         self._patterns: list[BasePattern] = []
         self._pattern_files: dict[str, str] = {}
         self._running = False
-        # Last bar timestamp seen per (symbol, timeframe) — a daily-timeframe
-        # pattern scanned hourly would otherwise re-detect the exact same
-        # unchanged bar every cycle and repeatedly open/close identical trades.
-        self._last_bar_ts: dict[tuple[str, str], datetime] = {}
+        # Last *session* bar identity per (symbol, timeframe) — daily/weekly
+        # keys are session dates, not last-print timestamps, so hourly scans
+        # of a forming 1d candle do not count as new bars.
+        self._last_bar_ts: dict[tuple[str, str], object] = {}
         # New-bar count per symbol this run — the paper trade stream server
         # advances each symbol's tape by exactly one row (= one day) per
         # scan tick, so counting new bars is counting simulated days.
@@ -270,6 +278,7 @@ class MarketScanner:
         # Latest detected signal per (symbol, timeframe) — its annotations are
         # drawn on the post-scan chart PNG so the pattern is easy to eyeball.
         latest_signals: dict[tuple[str, str], TradeSignal] = {}
+        new_closed_daily = False
 
         from tqdm import tqdm
 
@@ -281,6 +290,7 @@ class MarketScanner:
         pbar = tqdm(total=len(self._symbols), desc="Scanning", unit="sym", ncols=80)
 
         async def _drain(mcp) -> None:
+            nonlocal new_closed_daily
             while True:
                 try:
                     symbol = queue.get_nowait()
@@ -297,14 +307,30 @@ class MarketScanner:
 
                     bar_key = (symbol, timeframe)
                     bar_ts = snapshot.candle.timestamp
-                    is_new_bar = bar_ts is None or self._last_bar_ts.get(bar_key) != bar_ts
-                    if bar_ts is not None:
-                        self._last_bar_ts[bar_key] = bar_ts
+                    identity = bar_identity(
+                        timeframe, bar_ts, market=self._market,
+                    )
+                    closed_bar = is_closed_session_bar(
+                        timeframe, bar_ts, market=self._market,
+                    )
+                    is_new_bar = (
+                        closed_bar
+                        and identity is not None
+                        and self._last_bar_ts.get(bar_key) != identity
+                    )
+                    if identity is not None and closed_bar:
+                        self._last_bar_ts[bar_key] = identity
                     if is_new_bar and bar_ts is not None:
                         ticks = self._sim_ticks.get(symbol, 0) + 1
                         self._sim_ticks[symbol] = ticks
                         self._sim_days = max(self._sim_days, ticks)
                         self.stats["sim_days"] = self._sim_days
+                    if (
+                        is_new_bar
+                        and is_swing_timeframe(timeframe)
+                        and not is_weekly_timeframe(timeframe)
+                    ):
+                        new_closed_daily = True
 
                     if self._paper is not None:
                         closed = self._paper.on_bar(
@@ -317,11 +343,8 @@ class MarketScanner:
                             ] = (bar_idx, closed.pnl < 0)
 
                     if not is_new_bar:
-                        # Same bar as last scan (e.g. a daily pattern
-                        # polled hourly, market closed/quiet) — re-running
-                        # pattern detection on unchanged data would just
-                        # re-fire the same signal and reopen/close the
-                        # same trade every cycle.
+                        # Forming 1d/1w bar (cash session still open) or same
+                        # closed session as last scan — skip detect/fill.
                         continue
 
                     pending = self._pending_entries.pop(symbol, None)
@@ -367,7 +390,12 @@ class MarketScanner:
             pbar.close()
 
         if self._kronos_rank:
-            await self._run_kronos_rank_sleeve()
+            if new_closed_daily:
+                await self._run_kronos_rank_sleeve()
+            else:
+                log.debug(
+                    "KronosRank | skip — no new closed daily bar this scan"
+                )
 
         self._save_scan_charts(all_timeframes, latest_signals)
         self.stats["last_scan_at"] = datetime.now(timezone.utc).isoformat()
@@ -467,6 +495,19 @@ class MarketScanner:
             self._append_signal_log(signal, status="rejected", reason=reason)
             return
 
+        risk_reason = describe_risk_gate_rejection(
+            signal, self._store, signal.symbol, signal.timeframe,
+            **risk_gate_kwargs(),
+        )
+        if risk_reason is not None:
+            log.info(
+                f"Signal REJECTED by risk gates — {signal.symbol} "
+                f"{signal.pattern} | {risk_reason}"
+            )
+            self.stats["signals_rejected"] += 1
+            self._append_signal_log(signal, status="rejected", reason=risk_reason)
+            return
+
         # Step 0b — Kronos 1w confirm gate (direction + min move). Runs before
         # vision so we don't burn Claude tokens on forecasts that disagree.
         # Fail-open when weights missing — see core/kronos_gate.py.
@@ -554,17 +595,6 @@ class MarketScanner:
                 self.stats["signals_rejected"] += 1
                 self._append_signal_log(signal, status="rejected", reason=reason)
                 return
-
-        # Step 2 — Risk guard (disabled while IBKR is commented out)
-        # intent = TradeIntent(
-        #     symbol=signal.symbol,
-        #     action=signal.action,
-        #     qty=signal.qty,
-        #     estimated_price=signal.price,
-        #     pattern=signal.pattern,
-        # )
-        # if not self._risk.approve(intent):
-        #     return    # risk_guard already logged the block reason
 
         # Step 3 — Place the order (disabled while IBKR is commented out).
         # Not filled here: queued to fill on this symbol's *next* new bar,

@@ -7,8 +7,12 @@ from core.market import (
     PH,
     US,
     apply_lot_rounding,
+    bar_identity,
+    cash_session_closed,
     get_market,
+    is_closed_session_bar,
     is_ph_holiday,
+    last_closed_session_date,
     may_assume_fill,
     merge_extra_symbols,
     ohlcv_cache_key,
@@ -110,6 +114,29 @@ def test_merge_extra_symbols_skips_screener_dupes():
     assert merge_extra_symbols([("BDO", "PSE")], "", "ph") == [("BDO", "PSE")]
 
 
+def test_us_daily_bar_identity_ignores_intraday_prints():
+    tz = ZoneInfo("America/New_York")
+    rth = datetime(2026, 8, 14, 10, 0, tzinfo=tz)
+    t1 = datetime(2026, 8, 14, 10, 5, tzinfo=tz)
+    t2 = datetime(2026, 8, 14, 15, 55, tzinfo=tz)
+    assert not cash_session_closed("us", rth)
+    assert not is_closed_session_bar("1d", t1, market="us", now=rth)
+    assert bar_identity("1d", t1, market="us", now=rth) == bar_identity(
+        "1d", t2, market="us", now=rth,
+    )
+    assert bar_identity("1d", t1, market="us", now=rth) == last_closed_session_date(
+        "us", rth,
+    )
+    after = datetime(2026, 8, 14, 16, 5, tzinfo=tz)
+    assert cash_session_closed("us", after)
+    assert is_closed_session_bar("1d", t1, market="us", now=after)
+    assert bar_identity("1d", t1, market="us", now=after) == date(2026, 8, 14)
+    # Historical CSV row vs wall-clock now is always a closed bar.
+    old = datetime(2024, 1, 2, 15, 0, tzinfo=tz)
+    assert is_closed_session_bar("1d", old, market="us", now=after)
+    assert bar_identity("1d", old, market="us", now=after) == date(2024, 1, 2)
+
+
 def test_engine_kwargs_ph_overlay():
     from core.engine_defaults import backtest_kwargs, ENGINE
 
@@ -169,6 +196,7 @@ def demo():
     test_board_lots_and_ticks()
     test_session_clock_manila()
     test_ph_holiday_2026()
+    test_us_daily_bar_identity_ignores_intraday_prints()
     test_engine_kwargs_ph_overlay()
     test_paper_ledgers_do_not_mix()
     test_ph_skips_edgar()

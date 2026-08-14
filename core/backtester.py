@@ -602,7 +602,7 @@ def _check_exit(
     return None, ""
 
 
-def apply_risk_gates(
+def describe_risk_gate_rejection(
     signal: TradeSignal,
     store: OHLCVStore,
     symbol: str,
@@ -614,11 +614,9 @@ def apply_risk_gates(
     hard_stop_percentage: float | None = None,
     min_reward_risk_ratio: float | None = None,
     trailing_activation_default: float | None = None,
-) -> bool:
-    """Shared entry-gate/stop-backstop pipeline — same logic the backtester
-    applies per-signal, factored out so paper/live trading gets the same
-    safety net instead of running raw pattern stops. Mutates signal in
-    place; returns False if the signal should be dropped entirely."""
+) -> str | None:
+    """Mutate stop backstops in place. Return a reject reason, or None if the
+    setup clears the same filters the formal backtester uses."""
     if min_atr_stop_multiple is not None and signal.trailing_stop_pct is not None:
         df = store.get_df(symbol, timeframe, min_bars=1)
         if df is not None and len(df) >= 15:
@@ -634,7 +632,13 @@ def apply_risk_gates(
                         f"{signal.trailing_stop_pct:.2%} too thin vs "
                         f"ATR {atr_pct:.2%} — skip"
                     )
-                    return False
+                    return (
+                        f"Risk gate: ATR trail too thin — trailing "
+                        f"{signal.trailing_stop_pct:.2%} is below "
+                        f"{min_atr_stop_multiple:g}× ATR {atr_pct:.2%} "
+                        f"(need ≥ {min_required_trail:.2%}). Same filter as the "
+                        f"formal backtester."
+                    )
 
     if (
         synthetic_stop_multiple > 0
@@ -684,7 +688,11 @@ def apply_risk_gates(
                 f"RiskGate | {symbol} {timeframe} R:R "
                 f"{reward / risk:.2f} < min {min_reward_risk_ratio:.2f} — skip"
             )
-            return False
+            return (
+                f"Risk gate: reward:risk {reward / risk:.2f} is below min "
+                f"{min_reward_risk_ratio:.2f} after stop backstops (synthetic/"
+                f"ATR floor/hard stop). Same filter as the formal backtester."
+            )
 
     if (
         trailing_activation_default is not None
@@ -693,7 +701,20 @@ def apply_risk_gates(
     ):
         signal.trailing_activation_pct = trailing_activation_default
 
-    return True
+    return None
+
+
+def apply_risk_gates(
+    signal: TradeSignal,
+    store: OHLCVStore,
+    symbol: str,
+    timeframe: str,
+    **kwargs,
+) -> bool:
+    """Shared entry-gate/stop-backstop pipeline. Mutates signal; False = drop."""
+    return describe_risk_gate_rejection(
+        signal, store, symbol, timeframe, **kwargs,
+    ) is None
 
 
 def _open_trade(
@@ -931,6 +952,7 @@ def _apply_capital_ledger(
     risk_per_trade_pct: float,
     position_sizing: str,
     max_position_pct: float,
+    max_gross_exposure_pct: float = 0.0,
 ) -> tuple[list[BacktestTrade], int]:
     """Re-size every trade against one shared cash ledger, replayed in
     chronological order, instead of each trade being sized independently
@@ -962,11 +984,19 @@ def _apply_capital_ledger(
     accepted: list[BacktestTrade] = []
     opened: set[int] = set()
     rejected = 0
+    open_notional = 0.0
+    notional_by_id: dict[int, float] = {}
+    gross_cap = (
+        initial_capital * max_gross_exposure_pct
+        if max_gross_exposure_pct and max_gross_exposure_pct > 0
+        else 0.0
+    )
 
     for _, kind, t in events:
         if kind == 0:
             if id(t) in opened:
                 cash += t.qty * t.exit_price
+                open_notional -= notional_by_id.pop(id(t), t.qty * t.entry_price)
             continue
 
         if t.entry_price <= 0:
@@ -992,12 +1022,18 @@ def _apply_capital_ledger(
             desired_qty = t.qty
 
         qty = min(desired_qty, notional_max_shares, int(cash / t.entry_price))
+        if gross_cap > 0 and t.entry_price > 0:
+            room = gross_cap - open_notional
+            qty = min(qty, int(room / t.entry_price))
         if qty < 1:
             rejected += 1
             continue
 
         t.qty = qty
         cash -= qty * t.entry_price
+        notion = qty * t.entry_price
+        open_notional += notion
+        notional_by_id[id(t)] = notion
         opened.add(id(t))
         accepted.append(t)
 
@@ -1285,8 +1321,9 @@ class Backtester:
         account_value: float = ENGINE.account_value,
         risk_per_trade_pct: float = ENGINE.risk_per_trade_pct,
         max_position_pct: float = ENGINE.max_position_pct,
+        max_gross_exposure_pct: float = ENGINE.max_gross_exposure_pct,
         trailing_activation_default: float | None = ENGINE.trailing_activation_default,
-        max_open_positions: int = 0,
+        max_open_positions: int | None = None,
         min_hold_bars: int = ENGINE.min_hold_bars,
         breakeven_trigger_pct: float | None = ENGINE.breakeven_trigger_pct,
         breakeven_buffer_pct: float = ENGINE.breakeven_buffer_pct,
@@ -1340,8 +1377,11 @@ class Backtester:
         # account notional and made risk_per_trade_pct a no-op for any
         # realistic stop distance. Now a real, independent knob.
         self._max_position_pct = max_position_pct
+        self._max_gross_exposure_pct = max_gross_exposure_pct
         self._trailing_activation_default = trailing_activation_default
-        self._max_open_positions = max_open_positions
+        self._max_open_positions = (
+            settings.max_open_positions if max_open_positions is None else max_open_positions
+        )
         self._min_hold_bars = min_hold_bars
         # ── Execution-layer, non-pattern risk controls ──────────────────────
         # These sit on top of whatever stop/target/trailing values a pattern
@@ -1449,6 +1489,7 @@ class Backtester:
             "account_value": self._account_value,
             "risk_per_trade_pct": self._risk_per_trade_pct,
             "max_position_pct": self._max_position_pct,
+            "max_gross_exposure_pct": self._max_gross_exposure_pct,
             "trailing_activation_default": self._trailing_activation_default,
             "min_hold_bars": self._min_hold_bars,
             "breakeven_trigger_pct": self._breakeven_trigger_pct,
@@ -1575,6 +1616,7 @@ class Backtester:
         result.trades, result.capital_rejected = _apply_capital_ledger(
             result.trades, self._account_value, self._risk_per_trade_pct,
             self._position_sizing, self._max_position_pct,
+            max_gross_exposure_pct=self._max_gross_exposure_pct,
         )
         return result
 
@@ -1593,6 +1635,7 @@ class Backtester:
                 "account_value": self._account_value,
                 "risk_per_trade_pct": self._risk_per_trade_pct,
                 "max_position_pct": self._max_position_pct,
+                "max_gross_exposure_pct": self._max_gross_exposure_pct,
                 "trailing_activation_default": self._trailing_activation_default,
                 "min_hold_bars": self._min_hold_bars,
                 "breakeven_trigger_pct": self._breakeven_trigger_pct,

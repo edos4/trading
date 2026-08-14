@@ -101,6 +101,8 @@ def normalize_backtest_form(raw: dict[str, Any]) -> dict[str, Any]:
     market = p.pop("market", None) or default_market().id
     if "max_workers" in p and p["max_workers"] is not None:
         p["max_workers"] = int(p["max_workers"])
+    if "max_open_positions" in p and p["max_open_positions"] is not None:
+        p["max_open_positions"] = int(p["max_open_positions"])
     pattern_filter = p.pop("pattern_filter")
     disabled_raw = p.pop("disabled_patterns", None)
     if disabled_raw is None:

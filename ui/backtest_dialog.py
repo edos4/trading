@@ -77,7 +77,8 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
     ),
     (
         "regime_filter", "Regime filter (SMA200)",
-        "Only buy above 200-day SMA, only sell below it. Filters counter-trend trades.",
+        "Only buy above 200-day SMA, only sell below it (1.5% hysteresis band). "
+        "Filters counter-trend trades; near-misses within the band still pass.",
         "check", ENGINE.regime_filter, None,
     ),
     (
@@ -124,17 +125,22 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
     ),
     (
         "risk_per_trade_pct", "Risk per trade (%)",
-        "Fraction of account risked per trade when position_sizing='risk' (0.02 = 2%).",
-        "spin", (ENGINE.risk_per_trade_pct, 0.0, 0.1, 0.001), None,
+        "Fraction of account risked per trade when position_sizing='risk' (0.0075 = 0.75%).",
+        "spin", (ENGINE.risk_per_trade_pct, 0.0, 0.1, 0.0005), None,
     ),
     (
         "max_position_pct", "Max position (%)",
         "Diversification ceiling: largest fraction of account any single position may "
         "occupy, regardless of sizing mode. If tighter than what risk_per_trade_pct "
-        "implies for a given stop, every trade gets capped to this and "
-        "risk_per_trade_pct stops mattering. 0.33 lets a 2% risk_per_trade_pct fully "
-        "bind against a ~6% stop (0.02/0.06); lower it to trade smaller/more diversified.",
+        "implies for a given stop, every trade gets capped to this. 0.10 with 0.75% "
+        "risk keeps names from becoming 33% of the book against a 6% hard stop.",
         "spin", (ENGINE.max_position_pct, 0.01, 1.0, 0.01), None,
+    ),
+    (
+        "max_gross_exposure_pct", "Max gross exposure (%)",
+        "Cap on long+short notional as a fraction of equity (1.0 = 100%). "
+        "Blocks stacking 33% names into 160% gross. 0 = unlimited.",
+        "spin", (ENGINE.max_gross_exposure_pct, 0.0, 3.0, 0.05), None,
     ),
     (
         "trailing_activation_default", "Trailing activation (%)",
@@ -196,8 +202,8 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
     ),
     (
         "max_open_positions", "Max open positions",
-        "Maximum concurrent positions across all symbols.",
-        "spin", (settings.max_open_positions, 1, 50, 1), None,
+        "Maximum concurrent positions across all symbols. 0 = unlimited.",
+        "spin", (settings.max_open_positions, 0, 50, 1), None,
     ),
     (
         "max_workers", "CPU workers",
@@ -389,7 +395,7 @@ class BacktestDialog:
         extra_symbols = p.pop("extra_symbols", None) or ""
         market = p.pop("market", None) or default_market().id
         # Convert spinbox floats to ints where Backtester expects int
-        for int_key in ("max_workers",):
+        for int_key in ("max_workers", "max_open_positions"):
             if int_key in p and p[int_key] is not None:
                 p[int_key] = int(p[int_key])
         # pattern_filter maps to pattern arg, not constructor kwarg

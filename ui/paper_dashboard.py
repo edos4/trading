@@ -647,7 +647,7 @@ class PaperDashboard:
         exp = self._account.exposure()
         self._exposure_var.set(
             f"Long exposure: {exp['long_pct']:.1f}%   Short exposure: {exp['short_pct']:.1f}%   "
-            f"Net exposure: {exp['net_pct']:+.1f}%"
+            f"Net exposure: {exp['net_pct']:+.1f}%   Gross: {exp.get('gross_pct', 0):.1f}%"
         )
         stats = self._scanner.stats if self._scanner is not None else None
         if stats is None:

@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     market: str = "us"
     max_daily_loss_usd: float = 1500.0
     max_daily_loss_php: float = 15000.0
-    max_open_positions: int = 0  # <=0 means unlimited
+    max_open_positions: int = 8  # <=0 means unlimited
 
     # ── Paper trading ─────────────────────────────────────────────────────
     paper_initial_capital: float = 100_000.0

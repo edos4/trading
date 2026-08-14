@@ -37,7 +37,10 @@ class _Store:
 
 
 def demo():
-    assert ENGINE.max_position_pct == 0.33
+    assert ENGINE.max_position_pct == 0.10
+    assert ENGINE.risk_per_trade_pct == 0.0075
+    assert ENGINE.max_gross_exposure_pct == 1.0
+    assert ENGINE.regime_hysteresis_pct == 0.015
     assert ENGINE.min_confidence == 0.6
     assert ENGINE.regime_filter is True
     assert ENGINE.cooldown_bars == 10
@@ -48,7 +51,7 @@ def demo():
     # Short history → regime no-op (same as backtester).
     assert passes_regime_filter(_sig(), _Store())
 
-    # 200+ bars: BUY below SMA200 rejected.
+    # 200+ bars: BUY well below SMA200 rejected.
     below = [100.0] * 200 + [50.0]
     assert not passes_regime_filter(_sig(action="BUY"), _Store(below))
     buy_reason = describe_regime_rejection(_sig(action="BUY"), _Store(below))
@@ -66,6 +69,12 @@ def demo():
     assert "counter-trend SELL blocked" in sell_reason
     assert describe_regime_rejection(_sig(action="BUY"), _Store(above)) is None
 
+    # 1.5% hysteresis: ~1% the wrong side of SMA200 is a near-miss, not a block.
+    buy_near = [100.0] * 200 + [99.0]
+    assert passes_regime_filter(_sig(action="BUY"), _Store(buy_near))
+    sell_near = [50.0] * 200 + [50.6]
+    assert passes_regime_filter(_sig(action="SELL"), _Store(sell_near))
+
     tracker = {("TEST", "pattern_003_double_bottom"): (0, True)}
     assert not passes_cooldown(_sig(), bar_idx=5, cooldown_tracker=tracker)
     cool = describe_cooldown_rejection(_sig(), 5, tracker)
@@ -77,13 +86,15 @@ def demo():
     assert "max_position_pct" not in rg
 
     sk = sizing_kwargs(account_value=50_000.0)
-    assert sk["max_position_pct"] == 0.33
-    assert sk["risk_per_trade_pct"] == 0.02
+    assert sk["max_position_pct"] == 0.10
+    assert sk["risk_per_trade_pct"] == 0.0075
     assert sk["account_value"] == 50_000.0
 
     bt = backtest_kwargs(pattern_filter="double_bottom", market="us")
     assert bt["min_confidence"] == 0.6
-    assert bt["max_position_pct"] == 0.33
+    assert bt["max_position_pct"] == 0.10
+    assert bt["max_gross_exposure_pct"] == 1.0
+    assert "regime_hysteresis_pct" not in bt
     assert bt["pattern_filter"] == "double_bottom"
     assert bt["market"] == "us"
     assert bt["long_only"] is False

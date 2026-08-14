@@ -380,7 +380,8 @@ function initPaper() {
     exposure.textContent =
       `Long exposure: ${(exp.long_pct || 0).toFixed(1)}%   ` +
       `Short exposure: ${(exp.short_pct || 0).toFixed(1)}%   ` +
-      `Net exposure: ${(exp.net_pct || 0) >= 0 ? "+" : ""}${(exp.net_pct || 0).toFixed(1)}%`;
+      `Net exposure: ${(exp.net_pct || 0) >= 0 ? "+" : ""}${(exp.net_pct || 0).toFixed(1)}%   ` +
+      `Gross: ${(exp.gross_pct || 0).toFixed(1)}%`;
     const st = s.scan_stats;
     if (!st) {
       scan.textContent = "Last scan: —";

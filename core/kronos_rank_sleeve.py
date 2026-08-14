@@ -262,6 +262,7 @@ def backtest_rank_sleeve(
         apply_risk_gates,
     )
     from core.engine_defaults import (
+        ENGINE,
         passes_cooldown,
         passes_min_confidence,
         passes_regime_filter,
@@ -402,9 +403,9 @@ def backtest_rank_sleeve(
             _apply_sizing(
                 signal, store, signal.symbol, "1d",
                 config.get("account_value", 100_000.0),
-                config.get("risk_per_trade_pct", 0.02),
+                config.get("risk_per_trade_pct", ENGINE.risk_per_trade_pct),
                 config.get("position_sizing", "risk"),
-                max_position_pct=config.get("max_position_pct", 0.33),
+                max_position_pct=config.get("max_position_pct", ENGINE.max_position_pct),
             )
             pending[signal.symbol] = signal
 

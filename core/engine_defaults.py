@@ -3,7 +3,7 @@ core/engine_defaults.py — Single source of truth for entry/sizing/exit-engine
 knobs used by Backtester, MarketScanner, and PaperAccount.
 
 Issue this fixes: paper/live were missing min_confidence, SMA200 regime,
-cooldown, and used max_position_pct=0.10 while CLI/UI backtests used 0.33 —
+cooldown, and used a different max_position_pct than CLI/UI backtests —
 so "validated" backtests did not describe what paper actually traded.
 
 Callers must pull from ENGINE / helper functions rather than hardcoding
@@ -26,13 +26,18 @@ class EngineDefaults:
 
     min_confidence: float = 0.6
     regime_filter: bool = True
+    # Allow BUY/SELL within this band of SMA200 (1.5% near-misses); still
+    # block names 20%+ the wrong side of the average.
+    regime_hysteresis_pct: float = 0.015
     cooldown_bars: int = 10
     txn_cost_pct: float = 0.001
     position_sizing: str = "risk"
     account_value: float = 100_000.0
-    risk_per_trade_pct: float = 0.02
-    # 0.33 lets 2% risk bind against a ~6% hard stop (0.02/0.06).
-    max_position_pct: float = 0.33
+    # 0.75% risk + 10% notional cap: 2%/6% hard-stop used to force 33% names.
+    risk_per_trade_pct: float = 0.0075
+    max_position_pct: float = 0.10
+    # Long+short notional / equity. 0 = unlimited.
+    max_gross_exposure_pct: float = 1.0
     trailing_activation_default: float = 0.02
     breakeven_trigger_pct: float | None = None
     breakeven_buffer_pct: float = 0.0015
@@ -59,6 +64,9 @@ def backtest_kwargs(**overrides: Any) -> dict[str, Any]:
 
     d = asdict(ENGINE)
     d["max_open_positions"] = settings.max_open_positions
+    # regime_hysteresis_pct is consumed by passes_regime_filter via ENGINE,
+    # not Backtester.__init__. Drop it from constructor kwargs.
+    d.pop("regime_hysteresis_pct", None)
     market = overrides.pop("market", None)
     profile = get_market(market)
     d["market"] = profile.id
@@ -127,7 +135,7 @@ def passes_regime_filter(
     *,
     enabled: bool | None = None,
 ) -> bool:
-    """BUY only above SMA200, SELL only below. No-op if <200 bars."""
+    """BUY only above SMA200 (within hysteresis), SELL only below. No-op if <200 bars."""
     return describe_regime_rejection(signal, store, enabled=enabled) is None
 
 
@@ -151,8 +159,9 @@ def describe_regime_rejection(
     if current_sma200 <= 0:
         return None
     pct_vs = (current_close - current_sma200) / current_sma200 * 100.0
+    band = ENGINE.regime_hysteresis_pct * 100.0
 
-    if signal.action == "BUY" and current_close < current_sma200:
+    if signal.action == "BUY" and pct_vs < -band:
         log.debug(
             f"EntryGate | {signal.symbol} {signal.timeframe} BUY below SMA200 — skip"
         )
@@ -162,7 +171,7 @@ def describe_regime_rejection(
             f"${current_close:.2f} is {abs(pct_vs):.2f}% below SMA200 "
             f"${current_sma200:.2f} — counter-trend BUY blocked."
         )
-    if signal.action == "SELL" and current_close > current_sma200:
+    if signal.action == "SELL" and pct_vs > band:
         log.debug(
             f"EntryGate | {signal.symbol} {signal.timeframe} SELL above SMA200 — skip"
         )

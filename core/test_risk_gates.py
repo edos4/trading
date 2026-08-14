@@ -50,6 +50,11 @@ def demo():
 
     # Reward:risk below the minimum -> signal dropped.
     sig = _signal(stop_loss=95.0, take_profit=102.0)  # R:R = 2/5 = 0.4
+    from core.backtester import describe_risk_gate_rejection
+    reason = describe_risk_gate_rejection(
+        sig, store, "TEST", "1d", min_reward_risk_ratio=1.5,
+    )
+    assert reason is not None and "reward:risk" in reason
     assert not apply_risk_gates(sig, store, "TEST", "1d", min_reward_risk_ratio=1.5)
 
     # Reward:risk at/above the minimum -> signal kept.

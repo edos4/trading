@@ -4,7 +4,8 @@ instead of the same candle whose close produced the signal."""
 
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from core.paper_trader import PaperAccount
 from core.scanner import MarketScanner
@@ -42,8 +43,12 @@ class _FakeFeed:
 
     def __init__(self):
         self.bar = 0
-        base = datetime(2024, 1, 1, tzinfo=timezone.utc)
-        self.candles = [_candle(100.0, base), _candle(110.0, base + timedelta(days=1))]
+        tz = ZoneInfo("America/New_York")
+        # After 16:00 ET so 1d bars count as closed sessions.
+        self.candles = [
+            _candle(100.0, datetime(2024, 1, 2, 16, 5, tzinfo=tz)),
+            _candle(110.0, datetime(2024, 1, 3, 16, 5, tzinfo=tz)),
+        ]
 
     @asynccontextmanager
     async def mcp_session(self):
@@ -63,13 +68,17 @@ class _FakeFeed:
 def demo():
     feed = _FakeFeed()
     paper = PaperAccount(initial_capital=100_000.0, slippage_pct=0.0)
-    scanner = MarketScanner(symbols=["TEST"], paper_account=paper, data_feed=feed)
+    scanner = MarketScanner(
+        symbols=["TEST"], paper_account=paper, data_feed=feed,
+        kronos_gate=False, volume_gate=False, kronos_rank=False,
+    )
     scanner._patterns = [_FirstBarBuyPattern()]
 
     asyncio.run(scanner._scan_all())
     assert "TEST" not in paper.positions, (
         "signal on bar 1 must NOT fill on bar 1 (same-bar execution)"
     )
+    assert scanner._last_bar_ts.get(("TEST", "1d")) == date(2024, 1, 2)
 
     feed.bar = 1
     asyncio.run(scanner._scan_all())
@@ -77,6 +86,11 @@ def demo():
     assert paper.positions["TEST"].entry_price == 110.0, (
         f"expected fill at bar 2's close (110.0), got {paper.positions['TEST'].entry_price}"
     )
+
+    # Same session date, later last-print time is not a new daily bar.
+    feed.candles[1] = _candle(112.0, datetime(2024, 1, 3, 18, 0, tzinfo=ZoneInfo("America/New_York")))
+    asyncio.run(scanner._scan_all())
+    assert paper.positions["TEST"].entry_price == 110.0
 
     print("deferred entry fill: all checks passed")
 

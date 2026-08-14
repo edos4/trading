@@ -396,6 +396,112 @@ def may_assume_fill(market: str | None = None, now: datetime | None = None) -> b
     return session_window(market, now) in ("am", "pm")
 
 
+def _session_now(market: str | None = None, now: datetime | None = None) -> datetime:
+    profile = get_market(market)
+    tz = ZoneInfo(profile.session_tz)
+    if now is None:
+        return datetime.now(tz)
+    if now.tzinfo is None:
+        return now.replace(tzinfo=tz)
+    return now.astimezone(tz)
+
+
+def is_swing_timeframe(timeframe: str) -> bool:
+    """Daily/weekly bars whose identity is a session date, not last-print time."""
+    t = (timeframe or "").strip().lower().replace(" ", "")
+    return t in {"1d", "d", "day", "daily", "1w", "w", "wk", "1wk", "week", "weekly"}
+
+
+def is_weekly_timeframe(timeframe: str) -> bool:
+    t = (timeframe or "").strip().lower().replace(" ", "")
+    return t in {"1w", "w", "wk", "1wk", "week", "weekly"}
+
+
+def cash_session_closed(market: str | None = None, now: datetime | None = None) -> bool:
+    """True after the listing's cash session (US 16:00 ET, PSE after TAL / weekend)."""
+    profile = get_market(market)
+    if profile.id == MARKET_PH:
+        return session_window(market, now) == "closed"
+    local = _session_now(market, now)
+    if local.weekday() >= 5:
+        return True
+    return local.time() >= time(16, 0)
+
+
+def last_closed_session_date(
+    market: str | None = None, now: datetime | None = None,
+) -> date:
+    """Most recent fully closed cash session (skips weekends; PH holidays)."""
+    local = _session_now(market, now)
+    d = local.date()
+    if not cash_session_closed(market, now):
+        d -= timedelta(days=1)
+    profile = get_market(market)
+    for _ in range(14):
+        if d.weekday() >= 5:
+            d -= timedelta(days=1)
+            continue
+        if profile.id == MARKET_PH and is_ph_holiday(d):
+            d -= timedelta(days=1)
+            continue
+        return d
+    return d
+
+
+def is_closed_session_bar(
+    timeframe: str,
+    ts: datetime | None,
+    *,
+    market: str | None = None,
+    now: datetime | None = None,
+) -> bool:
+    """Whether this snapshot is a completed swing bar (not a forming RTH print).
+
+    Historical bars (session date before today) are always closed — paper
+    stream replay uses wall-clock 'now' years after the CSV row.
+    """
+    if not is_swing_timeframe(timeframe):
+        return True
+    if ts is None:
+        return True
+    local_now = _session_now(market, now)
+    ts_local = ts if ts.tzinfo is not None else ts.replace(tzinfo=local_now.tzinfo)
+    bar_date = ts_local.astimezone(local_now.tzinfo).date()
+    if bar_date < local_now.date():
+        return True
+    return cash_session_closed(market, now)
+
+
+def bar_identity(
+    timeframe: str,
+    ts: datetime | None,
+    *,
+    market: str | None = None,
+    now: datetime | None = None,
+):
+    """Stable key for 'is this a new bar?' across hourly scans of 1d/1w.
+
+    Intraday: the candle timestamp. Swing: session-local date (or ISO week),
+    and while today's cash session is still open the key stays on the last
+    *closed* session so last-print timestamp churn is not a new daily bar.
+    """
+    if ts is None:
+        return None
+    if not is_swing_timeframe(timeframe):
+        return ts
+    local_now = _session_now(market, now)
+    closed = is_closed_session_bar(timeframe, ts, market=market, now=now)
+    if closed:
+        ts_local = ts if ts.tzinfo is not None else ts.replace(tzinfo=local_now.tzinfo)
+        d = ts_local.astimezone(local_now.tzinfo).date()
+    else:
+        d = last_closed_session_date(market, now)
+    if is_weekly_timeframe(timeframe):
+        iso = d.isocalendar()
+        return (iso.year, iso.week)
+    return d
+
+
 def session_label(market: str | None = None, now: datetime | None = None) -> str:
     w = session_window(market, now)
     return {

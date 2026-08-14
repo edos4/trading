@@ -27,11 +27,10 @@ from core.backtester import (
     _close_trade,
     _open_trade,
     _update_trailing_reference,
-    apply_risk_gates,
     trade_r_multiple,
     trade_risk_dollars,
 )
-from core.engine_defaults import ENGINE, risk_gate_kwargs, sizing_kwargs
+from core.engine_defaults import ENGINE, sizing_kwargs
 from core.market import (
     apply_lot_rounding,
     format_money,
@@ -194,10 +193,19 @@ class PaperAccount:
                 for sym, p in self.positions.items() if p.action == "SELL"
             )
             if equity <= 0:
-                return {"long_pct": 0.0, "short_pct": 0.0, "net_pct": 0.0}
+                return {
+                    "long_pct": 0.0, "short_pct": 0.0,
+                    "net_pct": 0.0, "gross_pct": 0.0,
+                }
             long_pct = long_value / equity * 100
             short_pct = short_value / equity * 100
-            return {"long_pct": long_pct, "short_pct": short_pct, "net_pct": long_pct - short_pct}
+            gross_pct = (long_value + short_value) / equity * 100
+            return {
+                "long_pct": long_pct,
+                "short_pct": short_pct,
+                "net_pct": long_pct - short_pct,
+                "gross_pct": gross_pct,
+            }
 
     def positions_snapshot(self) -> list[tuple[str, BacktestTrade]]:
         """Thread-safe copy for callers (the UI) that iterate positions from
@@ -271,24 +279,34 @@ class PaperAccount:
                 f"at or beyond {format_money(-self.max_daily_loss, self.market)}."
             )
 
-        # Same stop-backstop/R:R gates + sizing caps as Backtester / main.py
-        # (via core.engine_defaults) — without these, paper traded a different
-        # strategy than the backtest that supposedly validated it.
-        if not apply_risk_gates(
-            signal, store, signal.symbol, signal.timeframe,
-            **risk_gate_kwargs(),
-        ):
-            return False, (
-                "Risk gates rejected the setup (ATR trail too thin, synthetic/ATR "
-                "stop floor, hard stop, or min reward:risk) — same filters as the "
-                "formal backtester."
-            )
+        # Stop backstops / R:R already ran in MarketScanner before the
+        # pending queue (same moment the backtester gates, on the signal
+        # bar). Re-running here on the fill bar would diverge from BT.
 
         _apply_sizing(
             signal, store, signal.symbol, signal.timeframe,
             entry_price=candle.close,
             **sizing_kwargs(account_value=self.equity()),
         )
+        fill_px = candle.close
+        if fill_px > 0 and ENGINE.max_gross_exposure_pct > 0:
+            eq = self.equity()
+            gross_now = sum(
+                self._last_price.get(sym, p.entry_price) * p.qty
+                for sym, p in self.positions.items()
+            )
+            cap = eq * ENGINE.max_gross_exposure_pct
+            room = cap - gross_now
+            max_qty = int(room / fill_px) if room > 0 else 0
+            if signal.qty > max_qty:
+                signal.qty = max_qty
+            if signal.qty < 1:
+                return False, (
+                    f"Gross exposure cap: open notional already "
+                    f"{format_money(gross_now, self.market)} vs "
+                    f"{ENGINE.max_gross_exposure_pct:.0%} of equity "
+                    f"({format_money(eq, self.market)}) — skipped."
+                )
         if profile.lot_round:
             signal.price = candle.close
             if not apply_lot_rounding(signal):
@@ -379,8 +397,9 @@ class PaperAccount:
         self, symbol: str, candle: OHLCVCandle, timeframe: str | None, is_new_bar: bool,
     ) -> BacktestTrade | None:
         self._last_price[symbol] = candle.close
-        if is_new_bar:
-            self._bar_count[symbol] = self._bar_count.get(symbol, 0) + 1
+        if not is_new_bar:
+            return None
+        self._bar_count[symbol] = self._bar_count.get(symbol, 0) + 1
         position = self.positions.get(symbol)
         if position is None:
             return None
