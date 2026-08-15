@@ -186,17 +186,20 @@ class BacktestResult:
 
     @property
     def sharpe_ratio(self) -> float:
-        if len(self.trades) < 2:
+        """Annualized Sharpe from the realized daily equity series.
+
+        Trade returns are not time-normalized: a 2-day trade and a 60-day
+        trade are not equivalent observations. The backtest currently stores
+        closed trades rather than full daily portfolio marks, so do not report
+        a fabricated Sharpe from per-trade percentages.
+        """
+        returns = _realized_daily_returns(self.trades, self.initial_capital)
+        if len(returns) < 2:
             return 0.0
-        returns = np.array([t.pnl_pct for t in self.trades])
-        mean = returns.mean()
         std = returns.std(ddof=1)
-        # Guard against near-zero std (e.g. all trades have identical P&L)
         if std < 1e-10:
             return 0.0
-        # Annualize using sqrt(n_trades) — each trade is an independent unit
-        n = len(returns)
-        return float(mean / std * np.sqrt(n))
+        return float(returns.mean() / std * np.sqrt(252))
 
     @property
     def account_weighted_pnl_pct(self) -> float:
@@ -408,6 +411,34 @@ def trade_risk_dollars(trade: BacktestTrade) -> float | None:
     return abs(trade.entry_price - trade.stop_loss) * trade.qty
 
 
+def _realized_daily_returns(
+    trades: list[BacktestTrade], initial_capital: float,
+) -> np.ndarray:
+    """Build daily returns from realized P&L only.
+
+    This intentionally does not claim to be mark-to-market portfolio Sharpe:
+    open-position equity is unavailable at this reporting layer. Keeping the
+    calculation daily and explicitly realized avoids the old per-trade
+    sqrt(n_trades) annualization error.
+    """
+    if not trades or initial_capital <= 0:
+        return np.array([], dtype=float)
+    pnl_by_day: dict[datetime.date, float] = defaultdict(float)
+    for trade in trades:
+        if trade.qty <= 0:
+            continue
+        pnl_by_day[trade.exit_date.date()] += trade.pnl * trade.qty
+    capital = float(initial_capital)
+    returns: list[float] = []
+    for day in sorted(pnl_by_day):
+        if capital <= 0:
+            break
+        pnl = pnl_by_day[day]
+        returns.append(pnl / capital)
+        capital += pnl
+    return np.asarray(returns, dtype=float)
+
+
 def _drawdown_pct(trades: list[BacktestTrade], initial_capital: float) -> float:
     if not trades:
         return 0.0
@@ -545,6 +576,34 @@ def _trailing_stop_price(position: BacktestTrade, is_short: bool) -> float | Non
     return None if ref is None else ref * (1 - pct)
 
 
+def _gap_aware_trigger_fill(
+    candle: OHLCVCandle,
+    trigger: float,
+    *,
+    is_short: bool,
+    favorable: bool,
+) -> float | None:
+    """Return a realistic daily-bar fill for a triggered stop/target.
+
+    If the session opens through the trigger, the order cannot be filled at
+    the stale trigger price; it is assumed filled at the open. Otherwise the
+    trigger price is used once the intrabar range crosses it.
+    """
+    if trigger <= 0 or candle.open <= 0:
+        return None
+
+    if is_short:
+        crossed = candle.low <= trigger if favorable else candle.high >= trigger
+        gapped = candle.open <= trigger if favorable else candle.open >= trigger
+    else:
+        crossed = candle.high >= trigger if favorable else candle.low <= trigger
+        gapped = candle.open >= trigger if favorable else candle.open <= trigger
+
+    if not crossed and not gapped:
+        return None
+    return candle.open if gapped else trigger
+
+
 def _check_exit(
     candle: OHLCVCandle,
     position: BacktestTrade,
@@ -579,19 +638,20 @@ def _check_exit(
     if candidates:
         if is_short:
             eff, reason = min(candidates, key=lambda c: c[0])
-            if candle.high >= eff:
-                return eff, reason
         else:
             eff, reason = max(candidates, key=lambda c: c[0])
-            if candle.low <= eff:
-                return eff, reason
+        fill = _gap_aware_trigger_fill(
+            candle, eff, is_short=is_short, favorable=False,
+        )
+        if fill is not None:
+            return fill, reason
+
     if position.take_profit is not None:
-        if is_short:
-            if candle.low <= position.take_profit:
-                return position.take_profit, "take_profit"
-        else:
-            if candle.high >= position.take_profit:
-                return position.take_profit, "take_profit"
+        fill = _gap_aware_trigger_fill(
+            candle, position.take_profit, is_short=is_short, favorable=True,
+        )
+        if fill is not None:
+            return fill, "take_profit"
     if (
         position.neckline_break_bar_idx is not None
         and position.exit_bars_after_neckline_break is not None
@@ -715,6 +775,21 @@ def apply_risk_gates(
     return describe_risk_gate_rejection(
         signal, store, symbol, timeframe, **kwargs,
     ) is None
+
+
+def _execution_reward_risk_ok(
+    position: BacktestTrade, minimum_rr: float | None,
+) -> bool:
+    """Validate reward/risk again using the actual simulated fill price."""
+    if minimum_rr is None or minimum_rr <= 0:
+        return True
+    if position.stop_loss is None or position.take_profit is None:
+        return False
+    risk = abs(position.entry_price - position.stop_loss)
+    reward = abs(position.take_profit - position.entry_price)
+    if risk <= 0:
+        return False
+    return reward / risk >= minimum_rr
 
 
 def _open_trade(
@@ -953,6 +1028,7 @@ def _apply_capital_ledger(
     position_sizing: str,
     max_position_pct: float,
     max_gross_exposure_pct: float = 0.0,
+    txn_cost_pct: float = 0.0,
 ) -> tuple[list[BacktestTrade], int]:
     """Re-size every trade against one shared cash ledger, replayed in
     chronological order, instead of each trade being sized independently
@@ -984,7 +1060,8 @@ def _apply_capital_ledger(
     accepted: list[BacktestTrade] = []
     opened: set[int] = set()
     rejected = 0
-    open_notional = 0.0
+    long_notional = 0.0
+    short_notional = 0.0
     notional_by_id: dict[int, float] = {}
     gross_cap = (
         initial_capital * max_gross_exposure_pct
@@ -992,18 +1069,36 @@ def _apply_capital_ledger(
         else 0.0
     )
 
+    def equity() -> float:
+        # At an entry/exit event the open positions are marked at their
+        # entry/exit prices. Short-sale proceeds are liabilities, not free
+        # equity, so they are excluded from equity via short_notional.
+        return cash + long_notional - short_notional
+
     for _, kind, t in events:
         if kind == 0:
             if id(t) in opened:
-                cash += t.qty * t.exit_price
-                open_notional -= notional_by_id.pop(id(t), t.qty * t.entry_price)
+                gross = notional_by_id.pop(id(t), t.qty * t.entry_price)
+                if t.action == "BUY":
+                    long_notional -= gross
+                    total_cost = (t.entry_price + t.exit_price) * t.qty * txn_cost_pct
+                    cash += t.qty * t.exit_price - total_cost
+                else:
+                    short_notional -= gross
+                    total_cost = (t.entry_price + t.exit_price) * t.qty * txn_cost_pct
+                    cash -= t.qty * t.exit_price + total_cost
             continue
 
         if t.entry_price <= 0:
             rejected += 1
             continue
 
-        notional_max_shares = int((cash * max_position_pct) / t.entry_price)
+        account_equity = equity()
+        if account_equity <= 0:
+            rejected += 1
+            continue
+
+        notional_max_shares = int((account_equity * max_position_pct) / t.entry_price)
         if position_sizing == "risk":
             stop_distance = None
             if t.stop_loss is not None:
@@ -1011,28 +1106,38 @@ def _apply_capital_ledger(
             elif t.trailing_stop_pct is not None:
                 stop_distance = t.entry_price * t.trailing_stop_pct
             if stop_distance and stop_distance > 0:
-                desired_qty = int((cash * risk_per_trade_pct) / stop_distance)
+                desired_qty = int((account_equity * risk_per_trade_pct) / stop_distance)
             else:
                 desired_qty = notional_max_shares
         else:
             # pattern/notional/atr modes: keep the signal-time qty from
-            # _apply_sizing (their sizing basis isn't reproducible here
-            # without the original OHLCV/ATR data); still subject to the
-            # ledger's compounding notional cap and cash affordability.
+            # _apply_sizing; still subject to the current account-equity cap.
             desired_qty = t.qty
 
-        qty = min(desired_qty, notional_max_shares, int(cash / t.entry_price))
+        qty = min(desired_qty, notional_max_shares)
+        if t.action == "BUY":
+            qty = min(qty, int(cash / t.entry_price))
+
         if gross_cap > 0 and t.entry_price > 0:
-            room = gross_cap - open_notional
-            qty = min(qty, int(room / t.entry_price))
+            room = gross_cap - (long_notional + short_notional)
+            qty = min(qty, int(room / t.entry_price)) if room > 0 else 0
+
         if qty < 1:
             rejected += 1
             continue
 
         t.qty = qty
-        cash -= qty * t.entry_price
         notion = qty * t.entry_price
-        open_notional += notion
+        if t.action == "BUY":
+            cash -= notion
+            long_notional += notion
+        else:
+            # Short-sale proceeds increase cash, but the matching short
+            # liability is recorded separately and therefore does not
+            # increase equity. This avoids treating short proceeds as
+            # deployable capital.
+            cash += notion
+            short_notional += notion
         notional_by_id[id(t)] = notion
         opened.add(id(t))
         accepted.append(t)
@@ -1105,10 +1210,18 @@ def _core_backtest_symbol(
             continue
 
         if pending_entry is not None:
-            open_position = _open_trade(pending_entry, candles[i], i)
+            candidate = _open_trade(pending_entry, candles[i], i)
+            pending_entry = None
+            if not _execution_reward_risk_ok(
+                candidate, config.get("min_reward_risk_ratio")
+            ):
+                # A gap between signal and fill can change the actual R:R.
+                # Do not enter a trade that only passed the gate at signal time.
+                i += 1
+                continue
+            open_position = candidate
             open_position.breakeven_trigger_pct = config["breakeven_trigger_pct"]
             open_position.breakeven_buffer_pct = config["breakeven_buffer_pct"]
-            pending_entry = None
             i += 1
             continue
 
@@ -1263,7 +1376,9 @@ def _save_cached_ohlcv(
     )
 
 
-def _derive_weekly_from_daily(daily: list[OHLCVCandle]) -> list[OHLCVCandle]:
+def _derive_weekly_from_daily(
+    daily: list[OHLCVCandle], session_tz: str = "America/New_York",
+) -> list[OHLCVCandle]:
     if len(daily) < 5:
         return []
     df = pd.DataFrame([
@@ -1275,8 +1390,9 @@ def _derive_weekly_from_daily(daily: list[OHLCVCandle]) -> list[OHLCVCandle]:
         for c in daily
     ])
     df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+    df["timestamp"] = df["timestamp"].dt.tz_convert(session_tz)
     df = df.set_index("timestamp").sort_index()
-    weekly = df.resample("W").agg({
+    weekly = df.resample("W-FRI", label="right", closed="right").agg({
         "open": "first",
         "high": "max",
         "low": "min",
@@ -1460,7 +1576,9 @@ class Backtester:
             if candles:
                 ohlcv_data[(symbol, "1d")] = candles
                 if need_weekly:
-                    weekly = _derive_weekly_from_daily(candles)
+                    weekly = _derive_weekly_from_daily(
+                        candles, get_market(self._market).session_tz
+                    )
                     if weekly:
                         ohlcv_data[(symbol, "1W")] = weekly
 
@@ -1617,6 +1735,7 @@ class Backtester:
             result.trades, self._account_value, self._risk_per_trade_pct,
             self._position_sizing, self._max_position_pct,
             max_gross_exposure_pct=self._max_gross_exposure_pct,
+            txn_cost_pct=self._txn_cost_pct,
         )
         return result
 

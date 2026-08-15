@@ -85,6 +85,9 @@ class Settings(BaseSettings):
     kronos_min_move_pct: float = 0.06
     kronos_sample_count: int = 3
     kronos_gate_enabled: bool = True
+    # Safety default: an enabled Kronos gate must not silently disappear if
+    # its model/data path is unavailable. Set true only for research runs.
+    kronos_gate_fail_open: bool = False
     # Load finetuned weights from ~/Kronos/finetuned when present; else base.
     kronos_use_finetuned: bool = False
     # Off by default: rewriting pattern TP/SL from the 1w forecast made paper

@@ -108,14 +108,14 @@ def test_gate_skips_close():
     assert result.passed and result.reason == "skipped"
 
 
-def test_gate_fail_open_no_weights():
+def test_gate_fail_closed_no_weights():
     gate = KronosGate()
     # No predictor, MODEL_PATH may or may not exist — force missing path behavior
     # by marking load failed after ensuring we don't try real load.
     gate._load_failed = True
     result = gate.check(_signal(), _fill_store())
-    assert result.passed
-    assert "fail-open" in result.reason
+    assert not result.passed
+    assert "fail-closed" in result.reason
 
 
 if __name__ == "__main__":

@@ -111,12 +111,24 @@ class KronosGate:
             return KronosGateResult(passed=True, reason="non-daily skip")
 
         if not self._ensure_loaded():
-            return KronosGateResult(passed=True, reason="model unavailable (fail-open)")
+            if settings.kronos_gate_fail_open:
+                return KronosGateResult(
+                    passed=True, reason="model unavailable (fail-open)"
+                )
+            return KronosGateResult(
+                passed=False, reason="model unavailable (fail-closed)"
+            )
 
         lookback = _context_lookback()
         df = store.get_df(signal.symbol, signal.timeframe, min_bars=lookback)
         if df is None:
-            return KronosGateResult(passed=True, reason="insufficient bars (fail-open)")
+            if settings.kronos_gate_fail_open:
+                return KronosGateResult(
+                    passed=True, reason="insufficient bars (fail-open)"
+                )
+            return KronosGateResult(
+                passed=False, reason="insufficient bars (fail-closed)"
+            )
 
         out = predict_1w_return(
             self._predictor,
@@ -125,7 +137,13 @@ class KronosGate:
             lookback=lookback,
         )
         if out is None:
-            return KronosGateResult(passed=True, reason="predict error (fail-open)")
+            if settings.kronos_gate_fail_open:
+                return KronosGateResult(
+                    passed=True, reason="predict error (fail-open)"
+                )
+            return KronosGateResult(
+                passed=False, reason="predict error (fail-closed)"
+            )
 
         pred_1w, last_close = out
         min_move = settings.kronos_min_move_pct

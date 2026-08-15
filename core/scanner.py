@@ -132,7 +132,7 @@ class MarketScanner:
         # backtester's pending_entry deferral (core/backtester.py) so paper/
         # live trading isn't more optimistic than the backtest that validated
         # the strategy (filling on the very candle whose close triggered it).
-        self._pending_entries: dict[str, TradeSignal] = {}
+        self._pending_entries: dict[tuple[str, str], TradeSignal] = {}
         # Same (symbol, pattern) → (exit_bar_count, was_loss) cooldown map the
         # backtester uses — without this, paper re-entered losers immediately
         # while backtests waited cooldown_bars.
@@ -347,7 +347,7 @@ class MarketScanner:
                         # closed session as last scan — skip detect/fill.
                         continue
 
-                    pending = self._pending_entries.pop(symbol, None)
+                    pending = self._pending_entries.pop((symbol, timeframe), None)
                     if pending is not None and self._paper is not None:
                         opened, fill_reason = self._paper.open_position(
                             pending, snapshot.candle, self._store
@@ -601,7 +601,7 @@ class MarketScanner:
         # same one-bar deferral the backtester's pending_entry uses — see
         # self._pending_entries.
         if self._paper is not None and candle is not None:
-            self._pending_entries[signal.symbol] = signal
+            self._pending_entries[(signal.symbol, signal.timeframe)] = signal
             self._append_signal_log(
                 signal,
                 status="accepted",
