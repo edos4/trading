@@ -10,15 +10,16 @@ through when:
 Used as a veto/confirm layer on top of Toby patterns, not as a standalone
 entry (unlike the Kronos repo's finetune top-K demo).
 
-If weights are missing or predict fails, the gate fails open (passes the
-signal) so a broken Kronos install cannot freeze the scanner.
+If weights are missing or predict fails, the gate is fail-closed by default
+(`settings.kronos_gate_fail_open=False`): the signal is rejected so a broken
+Kronos install cannot silently let un-vetted signals through. Set
+`kronos_gate_fail_open=True` only for research runs that should tolerate a
+missing model.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-import pandas as pd
 
 from patterns.base_pattern import TradeSignal
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
@@ -70,7 +71,7 @@ class KronosGate:
             if not self._warned_missing:
                 log.warning(
                     "KronosGate | weights missing at "
-                    f"{MODEL_PATH} — gate disabled (fail-open). "
+                    f"{MODEL_PATH} — gate disabled (fail-closed by default). "
                     "See README Kronos setup."
                 )
                 self._warned_missing = True
@@ -84,7 +85,10 @@ class KronosGate:
                 use_finetuned=settings.kronos_use_finetuned,
             )
         except Exception:
-            log.exception("KronosGate | failed to load Kronos — fail-open for this run")
+            log.exception(
+                "KronosGate | failed to load Kronos — gate unavailable "
+                "(fail-closed by default) for this run"
+            )
             self._load_failed = True
             return False
         return True

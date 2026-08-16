@@ -211,9 +211,10 @@ Implemented in `core/kronos_gate.py`. After a pattern emits BUY/SELL on the
 6. On **PASS**, optionally overwrite take-profit / stop-loss from the
    forecast (`KRONOS_GATE_ADJUST_EXITS=true`).
 
-Fail-open: if `~/Kronos` weights are missing, history is shorter than
-lookback, or `predict()` errors, the signal is allowed through (with a
-one-time warning) so a broken install cannot freeze the scanner.
+Fail-closed by default: if `~/Kronos` weights are missing, history is shorter
+than lookback, or `predict()` errors, the signal is rejected so a broken
+install cannot silently pass un-vetted trades. Set `KRONOS_GATE_FAIL_OPEN=true`
+to pass signals through instead (research only).
 
 Skipped: `CLOSE` actions and non-daily timeframes.
 
@@ -244,6 +245,9 @@ KRONOS_MIN_MOVE_PCT=0.06
 KRONOS_SAMPLE_COUNT=3
 # Prefer finetuned weights under ~/Kronos/finetuned (falls back to base)
 KRONOS_USE_FINETUNED=false
+# Pass signals through when the model/data is unavailable (research only).
+# Default false = fail-closed (reject when Kronos can't be consulted).
+KRONOS_GATE_FAIL_OPEN=false
 # Daily history pull — must be ≥400 for full official lookback (clamped ≤512)
 TV_HISTORY_DAYS=450
 ```

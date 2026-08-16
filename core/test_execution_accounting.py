@@ -72,7 +72,10 @@ def test_short_ledger_uses_equity_not_short_sale_proceeds():
 
 
 def test_ledger_accounts_for_transaction_costs_on_both_legs():
-    trade = _trade("BUY", 100, 90, 120, qty=10)
+    # 2% notional on $100k at $100 = 20 shares. BacktestTrade.pnl is a
+    # per-share figure (net of entry + exit txn costs), independent of qty —
+    # _apply_capital_ledger resizes qty but must not rescale per-share pnl.
+    trade = _trade("BUY", 100, 90, 120, qty=20)
     trade.exit_price = 120
     trade.pnl = 20.0 - (100.0 + 120.0) * 0.001
     accepted, rejected = _apply_capital_ledger(
@@ -81,7 +84,30 @@ def test_ledger_accounts_for_transaction_costs_on_both_legs():
     )
     assert rejected == 0
     assert accepted == [trade]
-    # 2% notional => 20 shares; realized capital includes both entry and exit fees.
+    assert trade.qty == 20
+    # Realized capital includes both entry and exit fees on the resized qty.
     expected = 100_000 + (120 - 100) * 20 - (100 + 120) * 20 * 0.001
     actual = 100_000 + trade.pnl * trade.qty
     assert abs(actual - expected) < 1e-9
+
+
+def test_long_multiple_stops_fill_worst_plausible():
+    trade = _trade("BUY", 100, 95, None)
+    trade.breakeven_trigger_pct = 0.0
+    trade._best_pnl_pct = 0.0
+    # Open above both levels, low crossing both the breakeven floor (100.15)
+    # and the hard stop (95) in one bar. Worst plausible protective fill is 95.
+    price, reason = _check_exit(_candle(102, 103, 93, 94), trade, 2)
+    assert reason == "stop_loss"
+    assert price == 95
+
+
+def test_short_multiple_stops_fill_worst_plausible():
+    trade = _trade("SELL", 100, 105, None)
+    trade.breakeven_trigger_pct = 0.0
+    trade._best_pnl_pct = 0.0
+    # Open below both levels, high crossing both the breakeven floor (99.85)
+    # and the hard stop (105) in one bar. Worst plausible protective fill is 105.
+    price, reason = _check_exit(_candle(98, 107, 97, 106), trade, 2)
+    assert reason == "stop_loss"
+    assert price == 105

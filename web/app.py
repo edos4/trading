@@ -202,8 +202,15 @@ def create_app() -> FastAPI:
                 volume_gate=payload.volume_gate,
                 market=payload.market,
             )
-        except Exception as exc:
+        except ValueError as exc:
+            # Safe, user-facing message (bad timeframe, no history, etc.).
             return JSONResponse({"detail": str(exc)}, status_code=400)
+        except Exception:
+            log.exception("Web explorer | load_symbol failed")
+            return JSONResponse(
+                {"detail": "Failed to load symbol. Check server logs."},
+                status_code=400,
+            )
         return result
 
     # ── Backtest API ──────────────────────────────────────────────────────

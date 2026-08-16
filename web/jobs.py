@@ -235,7 +235,10 @@ class BacktestJob:
                 n_symbols, kwargs.get("market"), extra_symbols=extra_symbols,
             )
             if not symbol_rows:
-                raise RuntimeError("No symbols from screener or additional list.")
+                with self.lock:
+                    self.error = "No symbols from screener or additional list."
+                    self.status = self.error
+                return
             symbols = [s for s, _ex in symbol_rows]
             backtester = Backtester(
                 symbols,
@@ -251,11 +254,11 @@ class BacktestJob:
                     f"({result.win_count}W / {result.loss_count}L / {len(result.trades)} total)"
                 )
                 self.completed = self.total or self.completed
-        except Exception as exc:
-            log.error(f"Web Backtest | {exc}")
+        except Exception:
+            log.exception("Web Backtest | failed")
             with self.lock:
-                self.error = str(exc)
-                self.status = f"ERROR: {exc}"
+                self.error = "Backtest failed. Check server logs for details."
+                self.status = "ERROR: backtest failed"
         finally:
             with self.lock:
                 self.busy = False
@@ -270,7 +273,10 @@ class BacktestJob:
                 n_symbols, kwargs.get("market"), extra_symbols=extra_symbols,
             )
             if not symbol_rows:
-                raise RuntimeError("No symbols from screener or additional list.")
+                with self.lock:
+                    self.error = "No symbols from screener or additional list."
+                    self.status = self.error
+                return
             symbols = [s for s, _ex in symbol_rows]
 
             off_bt = Backtester(
@@ -295,11 +301,11 @@ class BacktestJob:
                 self.result = _result_to_payload(result_on)
                 self.ab = {"off": off_m, "on": on_m}
                 self.status = "Volume A/B complete."
-        except Exception as exc:
-            log.error(f"Web Backtest A/B | {exc}")
+        except Exception:
+            log.exception("Web Backtest A/B | failed")
             with self.lock:
-                self.error = str(exc)
-                self.status = f"ERROR: {exc}"
+                self.error = "Backtest A/B failed. Check server logs for details."
+                self.status = "ERROR: backtest A/B failed"
         finally:
             with self.lock:
                 self.busy = False
@@ -515,22 +521,25 @@ class PaperSession:
         except OSError:
             return False
 
-    @staticmethod
-    def _kill_whatever_is_on(port: int) -> None:
-        try:
-            subprocess.run(
-                ["fuser", "-k", f"{port}/tcp"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=3,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
-
     def _ensure_stream_server(self, start_date: Optional[str] = None) -> Optional[str]:
         host, port = settings.papertrade_stream_host, settings.papertrade_stream_port
-        self._kill_whatever_is_on(port)
-        time.sleep(0.3)
+        # Only ever stop a stream process this app spawned — never blindly
+        # kill whatever holds the port (that could be an unrelated service on
+        # a shared host). If a previous child is still alive, stop it first.
+        if self._stream_proc is not None and self._stream_proc.poll() is None:
+            self._stream_proc.terminate()
+            try:
+                self._stream_proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self._stream_proc.kill()
+                self._stream_proc.wait()
+        # Probe before spawning: if something else is already listening,
+        # refuse with a clear error instead of terminating it.
+        if self._port_open(host, port):
+            return (
+                f"Port {port} is already in use on {host} by another process. "
+                "Stop it or change PAPERTRADE_STREAM_PORT."
+            )
         with self.lock:
             self.status = (
                 f"Starting paper trade stream server (from {start_date})..."
@@ -624,12 +633,9 @@ class PaperSession:
             loop.run_until_complete(self.task)
         except asyncio.CancelledError:
             pass
-        except BaseException as exc:
-            root = exc
-            while getattr(root, "exceptions", None):
-                root = root.exceptions[0]
-            error_msg = f"Crashed: {root}"
-            log.error(f"Web Paper | scanner crashed: {root}", exc_info=root)
+        except BaseException:
+            log.exception("Web Paper | scanner crashed")
+            error_msg = "Scanner crashed. Check server logs for details."
         finally:
             self.account.save()
             loop.close()

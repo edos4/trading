@@ -172,6 +172,10 @@ class PaperAccount:
 
     def equity(self) -> float:
         with self._lock:
+            # Longs contribute positive market value; shorts contribute
+            # negative (a short is a liability — the shares must be bought
+            # back). Because opening a short also credits cash by its sale
+            # proceeds, the two cancel at entry and only P&L moves equity.
             open_value = sum(
                 self._last_price.get(sym, p.entry_price) * p.qty * (1 if p.action == "BUY" else -1)
                 for sym, p in self.positions.items()

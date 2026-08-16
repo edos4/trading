@@ -123,5 +123,5 @@ if __name__ == "__main__":
     test_gate_reject_wrong_direction()
     test_gate_reject_small_move()
     test_gate_skips_close()
-    test_gate_fail_open_no_weights()
+    test_gate_fail_closed_no_weights()
     print("kronos_gate tests OK")

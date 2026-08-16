@@ -304,7 +304,11 @@ class BacktestResult:
             f"  Avg loser:         {self.avg_loss_pct:+.2f}%",
             f"  Largest win:       {self.largest_win_pct:+.2f}%",
             f"  Largest loss:      {self.largest_loss_pct:+.2f}%",
-            f"  Profit factor:     {self.profit_factor:.2f}" if self.profit_factor != float("inf") else "  Profit factor:     inf (no losers)",
+            (
+                f"  Profit factor:     {self.profit_factor:.2f}"
+                if self.profit_factor != float("inf")
+                else "  Profit factor:     inf (no losers)"
+            ),
             f"  Expectancy/trade:  {self.expectancy_pct:+.2f}%",
             f"  Max drawdown:      {self.max_drawdown_pct:+.2f}%",
             f"  Sharpe ratio:      {self.sharpe_ratio:.2f}",
@@ -344,7 +348,11 @@ class BacktestResult:
             "avg_loss_pct": round(self.avg_loss_pct, 4),
             "largest_win_pct": round(self.largest_win_pct, 4),
             "largest_loss_pct": round(self.largest_loss_pct, 4),
-            "profit_factor": round(self.profit_factor, 4) if self.profit_factor != float("inf") else None,
+            "profit_factor": (
+                round(self.profit_factor, 4)
+                if self.profit_factor != float("inf")
+                else None
+            ),
             "expectancy_pct": round(self.expectancy_pct, 4),
             "max_drawdown_pct": round(self.max_drawdown_pct, 4),
             "sharpe_ratio": round(self.sharpe_ratio, 4),
@@ -636,14 +644,23 @@ def _check_exit(
             )
             candidates.append((breakeven_price, "breakeven_stop"))
     if candidates:
-        if is_short:
-            eff, reason = min(candidates, key=lambda c: c[0])
-        else:
-            eff, reason = max(candidates, key=lambda c: c[0])
-        fill = _gap_aware_trigger_fill(
-            candle, eff, is_short=is_short, favorable=False,
-        )
-        if fill is not None:
+        fills = []
+        for level, reason in candidates:
+            fill = _gap_aware_trigger_fill(
+                candle, level, is_short=is_short, favorable=False,
+            )
+            if fill is not None:
+                fills.append((fill, reason))
+        if fills:
+            # A single daily bar can cross several protective levels (hard
+            # stop, trailing stop, breakeven floor). Without intrabar
+            # sequencing we cannot know which one actually filled first, so
+            # model the worst plausible protective fill for the trade
+            # direction instead of the most favourable one.
+            if is_short:
+                fill, reason = max(fills, key=lambda f: f[0])
+            else:
+                fill, reason = min(fills, key=lambda f: f[0])
             return fill, reason
 
     if position.take_profit is not None:
@@ -1931,22 +1948,28 @@ class Backtester:
                 candidates.append((breakeven_price, "breakeven_stop"))
 
         if candidates:
-            if is_short:
-                eff, reason = min(candidates, key=lambda c: c[0])
-                if candle.high >= eff:
-                    return eff, reason
-            else:
-                eff, reason = max(candidates, key=lambda c: c[0])
-                if candle.low <= eff:
-                    return eff, reason
+            fills = []
+            for level, reason in candidates:
+                fill = _gap_aware_trigger_fill(
+                    candle, level, is_short=is_short, favorable=False,
+                )
+                if fill is not None:
+                    fills.append((fill, reason))
+            if fills:
+                # Mirror module-level _check_exit: pick the worst plausible
+                # protective fill when several stops are crossed in one bar.
+                if is_short:
+                    fill, reason = max(fills, key=lambda f: f[0])
+                else:
+                    fill, reason = min(fills, key=lambda f: f[0])
+                return fill, reason
 
         if position.take_profit is not None:
-            if is_short:
-                if candle.low <= position.take_profit:
-                    return position.take_profit, "take_profit"
-            else:
-                if candle.high >= position.take_profit:
-                    return position.take_profit, "take_profit"
+            fill = _gap_aware_trigger_fill(
+                candle, position.take_profit, is_short=is_short, favorable=True,
+            )
+            if fill is not None:
+                return fill, "take_profit"
 
         if (
             position.neckline_break_bar_idx is not None

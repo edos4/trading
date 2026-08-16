@@ -510,7 +510,8 @@ class MarketScanner:
 
         # Step 0b — Kronos 1w confirm gate (direction + min move). Runs before
         # vision so we don't burn Claude tokens on forecasts that disagree.
-        # Fail-open when weights missing — see core/kronos_gate.py.
+        # Fail-closed by default when weights are missing — see
+        # core/kronos_gate.py (KRONOS_GATE_FAIL_OPEN opts into fail-open).
         # Skip for pattern_kronos_rank — the forecast *is* the entry signal.
         if self._kronos_gate and not is_kronos_rank_signal(signal):
             gate = kronos_gate_check(signal, self._store)

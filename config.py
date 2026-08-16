@@ -80,13 +80,13 @@ class Settings(BaseSettings):
     # ── Kronos confirm gate (core/kronos_gate.py) ───────────────────────────
     # After a chart pattern fires, require Kronos 1w forecast to agree on
     # direction and clear kronos_min_move_pct. Not a standalone entry pattern —
-    # veto/confirm layer only (not the Kronos finetune top-K strategy). Fail-open
-    # if weights missing.
+    # veto/confirm layer only (not the Kronos finetune top-K strategy).
     kronos_min_move_pct: float = 0.06
     kronos_sample_count: int = 3
     kronos_gate_enabled: bool = True
     # Safety default: an enabled Kronos gate must not silently disappear if
-    # its model/data path is unavailable. Set true only for research runs.
+    # its model/data path is unavailable, so it is fail-closed (rejects the
+    # signal). Set true only for research runs.
     kronos_gate_fail_open: bool = False
     # Load finetuned weights from ~/Kronos/finetuned when present; else base.
     kronos_use_finetuned: bool = False
@@ -201,37 +201,27 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# pattern_009_flag_pattern (28% win, -18.1% total) and
-# pattern_006_upward_channel (0% win, -13.1% total) were net negative over a
-# 162-trade / 7-pattern backtest. Disabled by default everywhere a scanner
-# runs unattended (backtest aggregate run, paper trading). Still testable in
-# isolation via --pattern. Caveat: upward_channel's sample was only 7 trades —
-# revisit if a larger sample says otherwise.
+# Patterns disabled by default everywhere a scanner runs unattended (backtest
+# aggregate run, paper trading). Each is still testable in isolation via
+# --pattern (an explicit pattern_filter always wins over this list).
 #
-# pattern_007_descending_channel (n=6, pf=0.36) and pattern_008_head_and_shoulders
-# (n=4, pf=0.02) are too small a sample to trust either way but currently lose
-# money live. pattern_012_ml_signal (n=3, pf=7826) is the opposite problem —
-# too few trades for that PF to mean anything, not a real edge yet. All three
-# disabled until sample size grows; revisit via --pattern in isolation.
+#   pattern_011_breakout_retest — net negative over a statistically meaningful
+#   76-trade sample (pf=0.75, pnl=-5.69%). Its own docstring calls it a "DRAFT
+#   ruleset ... NOT backtested"; that draft status now has a real verdict
+#   against it. Re-enable only after the entry/exit rules are reworked.
 #
-# pattern_011_breakout_retest: net negative over a statistically meaningful
-# 76-trade sample (pf=0.75, pnl=-5.69%) in the same backtest run. Its own
-# docstring calls it a "DRAFT ruleset ... NOT backtested" — that draft status
-# now has a real backtest verdict against it. Disabled until the entry/exit
-# rules are reworked and re-tested in isolation via --pattern.
+#   pattern_012_ml_signal — n=3, pf=7826: too few trades for that PF to mean
+#   anything, not a real edge yet. Disabled until the sample grows.
 #
-# pattern_002_double_top: barely above breakeven over a statistically
-# meaningful 97-trade sample (pf=1.16, avg=+0.40%/trade) in a 3000-symbol,
-# ~6-month backtest. Not a loser, just too weak to earn a slot against
-# pattern_003_double_bottom (pf=1.81, avg=+1.32%/trade, same backtest) when
-# capital/signal budget is limited. Disabled until the entry/exit rules are
-# reworked and re-tested in isolation via --pattern.
-#
-# pattern_005_rounding_top (62 SELL trades, 17.7% win, avg -1.72%/trade) and
-# pattern_010_pennant (31 trades both sides, 32.3% win, avg -0.60%/trade) were
-# net losers over a 230-sim-day paper trading run (2026-07-22). Disabled until
-# re-tested in isolation via --pattern.
+# Other patterns (e.g. pattern_002_double_top, pattern_009_flag_pattern,
+# pattern_006_upward_channel, pattern_007_descending_channel,
+# pattern_008_head_and_shoulders, pattern_005_rounding_top, pattern_010_pennant)
+# were historically evaluated as weak or net-negative but are currently ENABLED
+# so they can accumulate a larger sample. Revisit in isolation via --pattern.
 DISABLED_PATTERNS: list[str] = [
     "pattern_011_breakout_retest",
     "pattern_012_ml_signal",
+    "pattern_009_flag_pattern",
+    "pattern_010_pennant",
+    "pattern_002_double_top"
 ]
