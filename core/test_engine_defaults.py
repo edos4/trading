@@ -69,15 +69,17 @@ def demo():
     assert "counter-trend SELL blocked" in sell_reason
     assert describe_regime_rejection(_sig(action="BUY"), _Store(above)) is None
 
-    # Channel patterns are exempt — 006 shorts strength, 007 longs weakness.
+    # Channel patterns used to skip SMA200; they no longer do.
     assert describe_regime_rejection(
         _sig(pattern="pattern_007_descending_channel", action="BUY"),
         _Store(below),
-    ) is None
+    ) is not None
     assert describe_regime_rejection(
         _sig(pattern="pattern_006_upward_channel", action="SELL"),
         _Store(above),
-    ) is None
+    ) is not None
+    assert ENGINE.regime_exempt_patterns == ()
+    assert ENGINE.breakeven_trigger_pct == 0.015
 
     # 1.5% hysteresis: ~1% the wrong side of SMA200 is a near-miss, not a block.
     buy_near = [100.0] * 200 + [99.0]
@@ -104,6 +106,7 @@ def demo():
     assert bt["min_confidence"] == 0.6
     assert bt["max_position_pct"] == 0.10
     assert bt["max_gross_exposure_pct"] == 1.0
+    assert bt["breakeven_trigger_pct"] == 0.015
     assert "regime_hysteresis_pct" not in bt
     assert "regime_exempt_patterns" not in bt
     assert bt["pattern_filter"] == "double_bottom"
@@ -111,6 +114,10 @@ def demo():
     assert bt["long_only"] is False
 
     print("engine_defaults: all checks passed")
+
+
+def test_engine_defaults_parity():
+    demo()
 
 
 if __name__ == "__main__":

@@ -399,8 +399,8 @@ class PaperSession:
                     "time_exit_bars_elapsed": t.time_exit_bars_elapsed,
                     "time_exit_bars_configured": t.exit_bars_after_neckline_break,
                     "reason": t.exit_reason,
-                    "opened": t.entry_date.strftime("%Y-%m-%d") if t.entry_date else "",
-                    "closed": t.exit_date.strftime("%Y-%m-%d") if t.exit_date else "",
+                    "opened": t.entry_date.isoformat() if t.entry_date else "",
+                    "closed": t.exit_date.isoformat() if t.exit_date else "",
                     "timeframe": t.timeframe,
                 }
             )

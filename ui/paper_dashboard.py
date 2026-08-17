@@ -43,6 +43,14 @@ from core.scanner import MarketScanner
 from data.stream_client import StreamClient
 from data.tv_client import TVClient
 from utils.logger import log
+from utils.trade_display import (
+    format_closed_stats,
+    format_exit_reason,
+    format_hold,
+    format_pattern_name,
+    format_stamp,
+    pnl_dollars,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -68,14 +76,28 @@ class _SortableTree(ttk.Treeview):
     """Treeview whose columns sort (toggling asc/desc) when the header is
     clicked; the actual sort key per column lives in the caller's
     _refresh_* method so it can sort by the underlying trade data, not the
-    formatted cell text."""
+    formatted cell text.
 
-    def __init__(self, master, columns: list[tuple[str, int, str]], on_sort, **kw):
+    Column spec: (id, width, label[, anchor]).
+    """
+
+    def __init__(self, master, columns: list[tuple], on_sort, **kw):
         col_ids = [c[0] for c in columns]
         super().__init__(master, columns=col_ids, show="headings", **kw)
-        for col_id, width, label in columns:
+        self._col_labels = {}
+        for spec in columns:
+            col_id, width, label = spec[0], spec[1], spec[2]
+            anchor = spec[3] if len(spec) > 3 else tk.W
+            self._col_labels[col_id] = label
             self.heading(col_id, text=label, command=lambda c=col_id: on_sort(c))
-            self.column(col_id, width=width)
+            self.column(col_id, width=width, anchor=anchor, stretch=False)
+
+    def set_sort(self, col: str, descending: bool) -> None:
+        for cid, label in self._col_labels.items():
+            mark = ""
+            if cid == col:
+                mark = " ▼" if descending else " ▲"
+            self.heading(cid, text=f"{label}{mark}")
 
 
 class PaperDashboard:
@@ -96,6 +118,14 @@ class PaperDashboard:
 
         self._pos_sort = ("unrl_pct", True)     # (column, descending)
         self._closed_sort = ("closed", True)
+        self._closed_reason_filter = {
+            "ALL": None,
+            "Stop": "stop_loss",
+            "Target": "take_profit",
+            "Trail": "trailing_stop",
+            "Time": "time_exit",
+            "BE": "breakeven_stop",
+        }
 
         top_bar = ttk.Frame(self._top, padding=(8, 6))
         top_bar.pack(side=tk.TOP, fill=tk.X)
@@ -219,23 +249,75 @@ class PaperDashboard:
         self._pos_tree.bind("<Double-1>", self._on_position_double_click)
         self._configure_color_tags(self._pos_tree)
         self._pos_rows: dict[str, tuple[str, BacktestTrade]] = {}
+        self._pos_tree.set_sort(*self._pos_sort)
 
-        closed_frame = ttk.LabelFrame(body, text="Closed trades (double-click a row for chart)")
+        closed_frame = ttk.LabelFrame(body, text="Latest trades (double-click a row for chart)")
         body.add(closed_frame, weight=2)
+
+        closed_meta = ttk.Frame(closed_frame)
+        closed_meta.pack(fill=tk.X, padx=4, pady=(4, 0))
+        self._closed_stats_var = tk.StringVar(value="No closed trades yet.")
+        ttk.Label(
+            closed_meta, textvariable=self._closed_stats_var, foreground=COLOR_MUTED,
+        ).pack(side=tk.LEFT)
+
+        closed_filters = ttk.Frame(closed_frame)
+        closed_filters.pack(fill=tk.X, padx=4, pady=(2, 4))
+        ttk.Label(closed_filters, text="Symbol").pack(side=tk.LEFT)
+        self._closed_symbol_var = tk.StringVar()
+        ttk.Entry(closed_filters, textvariable=self._closed_symbol_var, width=8).pack(
+            side=tk.LEFT, padx=(4, 10),
+        )
+        ttk.Label(closed_filters, text="Reason").pack(side=tk.LEFT)
+        self._closed_reason_var = tk.StringVar(value="ALL")
+        ttk.Combobox(
+            closed_filters, textvariable=self._closed_reason_var,
+            values=list(self._closed_reason_filter),
+            state="readonly", width=8,
+        ).pack(side=tk.LEFT, padx=(4, 10))
+        ttk.Label(closed_filters, text="Pattern").pack(side=tk.LEFT)
+        self._closed_pattern_var = tk.StringVar()
+        ttk.Entry(closed_filters, textvariable=self._closed_pattern_var, width=16).pack(
+            side=tk.LEFT, padx=(4, 10),
+        )
+        ttk.Label(closed_filters, text="Search").pack(side=tk.LEFT)
+        self._closed_search_var = tk.StringVar()
+        ttk.Entry(closed_filters, textvariable=self._closed_search_var, width=18).pack(
+            side=tk.LEFT, padx=(4, 8),
+        )
+        ttk.Button(closed_filters, text="Clear", command=self._clear_closed_filters).pack(
+            side=tk.LEFT,
+        )
+
         closed_cols = [
-            ("opened", 125, "Opened"), ("closed", 125, "Closed"),
-            ("held", 68, "Cal Days"), ("bars", 58, "Held Bars"),
-            ("stop_bars", 68, "Stop Bars"), ("symbol", 65, "Symbol"),
-            ("action", 55, "Action"), ("entry", 75, "Entry"), ("exit", 75, "Exit"),
-            ("pnl", 65, "P&L"), ("r", 50, "R"), ("reason", 100, "Reason"),
-            ("pattern", 190, "Pattern"),
+            ("closed", 92, "Closed", tk.W),
+            ("symbol", 62, "Symbol", tk.W),
+            ("action", 50, "Side", tk.CENTER),
+            ("qty", 48, "Qty", tk.E),
+            ("entry", 68, "Entry", tk.E),
+            ("exit", 68, "Exit", tk.E),
+            ("pnl_d", 88, "P&L $", tk.E),
+            ("pnl", 62, "P&L %", tk.E),
+            ("r", 48, "R", tk.E),
+            ("reason", 92, "Reason", tk.W),
+            ("hold", 82, "Hold", tk.E),
+            ("pattern", 170, "Pattern", tk.W),
         ]
-        self._closed_tree = self._add_scrollbar(closed_frame, _SortableTree(
-            closed_frame, closed_cols, self._on_sort_closed, height=10,
+        tree_wrap = ttk.Frame(closed_frame)
+        tree_wrap.pack(fill=tk.BOTH, expand=True)
+        self._closed_tree = self._add_scrollbar(tree_wrap, _SortableTree(
+            tree_wrap, closed_cols, self._on_sort_closed, height=10,
         ))
+        self._closed_tree.column("pattern", stretch=True)
         self._closed_tree.bind("<Double-1>", self._on_closed_double_click)
         self._configure_color_tags(self._closed_tree)
         self._closed_rows: dict[str, BacktestTrade] = {}
+        self._closed_tree.set_sort(*self._closed_sort)
+        for var in (
+            self._closed_symbol_var, self._closed_reason_var,
+            self._closed_pattern_var, self._closed_search_var,
+        ):
+            var.trace_add("write", lambda *_args: self._refresh_closed())
 
     @staticmethod
     def _add_scrollbar(parent: ttk.Frame, tree: ttk.Treeview) -> ttk.Treeview:
@@ -688,6 +770,12 @@ class PaperDashboard:
         self._log_status_var.set("ALL")
         self._log_search_var.set("")
 
+    def _clear_closed_filters(self) -> None:
+        self._closed_symbol_var.set("")
+        self._closed_reason_var.set("ALL")
+        self._closed_pattern_var.set("")
+        self._closed_search_var.set("")
+
     # ── Row detail popups ─────────────────────────────────────────────────
     def _show_trade_details(self, t: BacktestTrade, current_price: Optional[float]) -> None:
         from analysis.chart_renderer import build_trade_viewer_payload
@@ -893,58 +981,115 @@ class PaperDashboard:
                 tags=(_pnl_tag(row["unrl"]), status_tag, action_tag),
             )
             self._pos_rows[item_id] = (sym, p)
+        self._pos_tree.set_sort(*self._pos_sort)
 
     def _refresh_closed(self) -> None:
+        y0 = self._closed_tree.yview()[0] if self._closed_tree.get_children() else 0.0
+        selected = None
+        sel = self._closed_tree.selection()
+        if sel:
+            prev = self._closed_rows.get(sel[0])
+            if prev is not None:
+                selected = (prev.symbol, prev.entry_date, prev.exit_date)
+
         self._closed_tree.delete(*self._closed_tree.get_children())
         self._closed_rows = {}
+        mkt = self._account.market
+        all_trades = list(self._account.closed_snapshot())
+
+        symbol_filter = self._closed_symbol_var.get().strip().lower()
+        reason_filter = self._closed_reason_filter.get(self._closed_reason_var.get(), None)
+        pattern_filter = self._closed_pattern_var.get().strip().lower()
+        search_filter = self._closed_search_var.get().strip().lower()
+
+        trades = all_trades
+        if symbol_filter or reason_filter or pattern_filter or search_filter:
+            filtered = []
+            for t in trades:
+                if symbol_filter and symbol_filter not in t.symbol.lower():
+                    continue
+                if reason_filter and t.exit_reason != reason_filter:
+                    continue
+                if pattern_filter and pattern_filter not in (t.pattern or "").lower():
+                    continue
+                if search_filter:
+                    hay = " ".join((
+                        t.symbol,
+                        t.action,
+                        t.exit_reason or "",
+                        format_exit_reason(t.exit_reason, t.time_exit_bars_elapsed),
+                        t.pattern or "",
+                        format_pattern_name(t.pattern),
+                    )).lower()
+                    if search_filter not in hay:
+                        continue
+                filtered.append(t)
+            trades = filtered
+
+        last_pnl = format_money(
+            sum(pnl_dollars(t) for t in sorted(
+                all_trades, key=lambda t: t.exit_date, reverse=True,
+            )[:10]),
+            mkt,
+            signed=True,
+        )
+        self._closed_stats_var.set(format_closed_stats(
+            all_trades, money=last_pnl, showing=len(trades),
+        ))
 
         sort_col, desc = self._closed_sort
         sort_key = {
-            "opened": lambda t: t.entry_date,
             "closed": lambda t: t.exit_date,
-            "held": lambda t: days_held(t),
-            "bars": lambda t: bars_held(t) if bars_held(t) is not None else -1,
-            "stop_bars": lambda t: (
-                t.time_exit_bars_elapsed
-                if t.time_exit_bars_elapsed is not None else -1
-            ),
             "symbol": lambda t: t.symbol,
             "action": lambda t: t.action,
+            "qty": lambda t: t.qty,
             "entry": lambda t: t.entry_price,
             "exit": lambda t: t.exit_price,
+            "pnl_d": lambda t: pnl_dollars(t),
             "pnl": lambda t: t.pnl_pct,
             "r": lambda t: (r_multiple(t, t.exit_price) or float("-inf")),
             "reason": lambda t: t.exit_reason,
+            "hold": lambda t: days_held(t),
             "pattern": lambda t: t.pattern,
         }.get(sort_col, lambda t: t.exit_date)
-        trades = sorted(self._account.closed_snapshot(), key=sort_key, reverse=desc)[:200]
+        trades = sorted(trades, key=sort_key, reverse=desc)[:200]
 
+        restore_id = None
         for t in trades:
             r = r_multiple(t, t.exit_price)
-            held_days = days_held(t)
-            held_str = f"{held_days:.1f}d" if held_days >= 1 else f"{held_days * 24:.1f}h"
-            action_tag = "buy" if t.action == "BUY" else "sell"
+            dollars = pnl_dollars(t)
+            qty = t.qty
+            qty_str = f"{qty:.0f}" if float(qty).is_integer() else f"{qty:.2f}"
             item_id = self._closed_tree.insert(
                 "", tk.END,
                 values=(
-                    t.entry_date.strftime("%Y-%m-%d %H:%M:%S"),
-                    t.exit_date.strftime("%Y-%m-%d %H:%M:%S"),
-                    held_str,
-                    str(bars_held(t)) if bars_held(t) is not None else "-",
-                    (
-                        str(t.time_exit_bars_elapsed)
-                        if t.time_exit_bars_elapsed is not None
-                        else "-"
-                    ),
-                    t.symbol, t.action,
-                    f"{t.entry_price:.2f}", f"{t.exit_price:.2f}",
+                    format_stamp(t.exit_date),
+                    t.symbol,
+                    t.action,
+                    qty_str,
+                    f"{t.entry_price:.2f}",
+                    f"{t.exit_price:.2f}",
+                    format_money(dollars, mkt, signed=True),
                     f"{t.pnl_pct:+.2f}%",
-                    f"{r:+.2f}" if r is not None else "-",
-                    t.exit_reason, t.pattern,
+                    f"{r:+.2f}" if r is not None else "—",
+                    format_exit_reason(
+                        t.exit_reason,
+                        t.time_exit_bars_elapsed,
+                        t.exit_bars_after_neckline_break,
+                    ),
+                    format_hold(days_held(t), bars_held(t)),
+                    format_pattern_name(t.pattern),
                 ),
-                tags=(_pnl_tag(t.pnl_pct), action_tag),
+                tags=(_pnl_tag(dollars if dollars != 0 else t.pnl_pct),),
             )
             self._closed_rows[item_id] = t
+            if selected == (t.symbol, t.entry_date, t.exit_date):
+                restore_id = item_id
+
+        if restore_id:
+            self._closed_tree.selection_set(restore_id)
+        self._closed_tree.yview_moveto(y0)
+        self._closed_tree.set_sort(*self._closed_sort)
 
     def _refresh_logs(self) -> None:
         """Refresh the Logs tab from the same scanner signal buffer used by
@@ -954,6 +1099,7 @@ class PaperDashboard:
         self._log_rows = {}
 
         if self._scanner is None:
+            self._log_tree.set_sort(*self._log_sort)
             return
 
         rows = list(reversed(self._scanner.signal_log_snapshot()))
@@ -1046,6 +1192,7 @@ class PaperDashboard:
                 tags=(status,) if status in {"accepted", "filled", "rejected"} else (),
             )
             self._log_rows[item_id] = row
+        self._log_tree.set_sort(*self._log_sort)
 
     # ── Performance tab ───────────────────────────────────────────────────
     def _refresh_performance(self) -> None:

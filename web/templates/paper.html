@@ -41,7 +41,7 @@
     <div class="panel grow">
       <h2>Open positions</h2>
       <p class="muted small">Double-click a row to open the chart.</p>
-      <div class="table-wrap">
+      <div class="table-wrap open-wrap">
         <table id="paper-pos">
           <thead>
             <tr>
@@ -53,15 +53,44 @@
           <tbody></tbody>
         </table>
       </div>
-      <h2>Closed</h2>
-      <p class="muted small">Double-click a row to open the chart.</p>
-      <div class="table-wrap">
-        <table id="paper-closed">
+      <div class="blotter-head">
+        <div>
+          <h2>Latest trades</h2>
+          <p id="paper-closed-stats" class="muted small">No closed trades yet.</p>
+        </div>
+        <p class="muted small">Click a header to sort. Double-click a row for the chart.</p>
+      </div>
+      <div class="toolbar compact" id="paper-closed-filters">
+        <label>Symbol <input type="text" id="paper-closed-symbol" size="8" /></label>
+        <label>Reason
+          <select id="paper-closed-reason">
+            <option value="">All</option>
+            <option value="stop_loss">Stop</option>
+            <option value="take_profit">Target</option>
+            <option value="trailing_stop">Trail</option>
+            <option value="time_exit">Time</option>
+            <option value="breakeven_stop">BE</option>
+          </select>
+        </label>
+        <label>Pattern <input type="text" id="paper-closed-pattern" size="16" /></label>
+        <label>Search <input type="text" id="paper-closed-search" size="16" /></label>
+      </div>
+      <div class="table-wrap closed-wrap" id="paper-closed-wrap">
+        <table id="paper-closed" class="blotter">
           <thead>
             <tr>
-              <th>Opened</th><th>Closed</th><th>Sim Days</th><th>Held Bars</th><th>Stop Bars</th><th>Symbol</th><th>Action</th>
-              <th>Qty</th><th>Entry</th><th>Exit</th><th>P&L%</th><th>P&L</th>
-              <th>R</th><th>Reason</th><th>Pattern</th>
+              <th data-col="closed" class="sortable">Closed</th>
+              <th data-col="symbol" class="sortable">Symbol</th>
+              <th data-col="action" class="sortable">Side</th>
+              <th data-col="qty" class="sortable num">Qty</th>
+              <th data-col="entry" class="sortable num">Entry</th>
+              <th data-col="exit" class="sortable num">Exit</th>
+              <th data-col="pnl" class="sortable num">P&amp;L $</th>
+              <th data-col="pnl_pct" class="sortable num">P&amp;L %</th>
+              <th data-col="r" class="sortable num">R</th>
+              <th data-col="reason" class="sortable">Reason</th>
+              <th data-col="hold" class="sortable num">Hold</th>
+              <th data-col="pattern" class="sortable">Pattern</th>
             </tr>
           </thead>
           <tbody></tbody>

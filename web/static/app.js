@@ -302,6 +302,11 @@ function initPaper() {
   const streamDateWrap = document.getElementById("stream-date-wrap");
   const posBody = document.querySelector("#paper-pos tbody");
   const closedBody = document.querySelector("#paper-closed tbody");
+  const closedStats = document.getElementById("paper-closed-stats");
+  const closedSymbol = document.getElementById("paper-closed-symbol");
+  const closedReason = document.getElementById("paper-closed-reason");
+  const closedPattern = document.getElementById("paper-closed-pattern");
+  const closedSearch = document.getElementById("paper-closed-search");
   const logsBody = document.querySelector("#paper-logs tbody");
 
   const esc = (value) => String(value ?? "")
@@ -371,6 +376,171 @@ function initPaper() {
     const v = Number(n);
     if (!Number.isFinite(v)) return "—";
     return `${v >= 0 ? "+" : ""}${v.toFixed(digits)}${suffix}`;
+  }
+
+  const REASON_LABELS = {
+    stop_loss: "Stop",
+    take_profit: "Target",
+    trailing_stop: "Trail",
+    time_exit: "Time",
+    breakeven_stop: "BE",
+  };
+
+  function fmtStamp(iso) {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mi = String(d.getMinutes()).padStart(2, "0");
+    return `${mm}-${dd} ${hh}:${mi}`;
+  }
+
+  function fmtPattern(name) {
+    const raw = String(name || "").trim();
+    if (!raw) return "—";
+    const m = raw.match(/^pattern_(\d+)_(.+)$/);
+    if (m) return `${m[1]} ${m[2].replace(/_/g, " ")}`;
+    return raw.replace(/_/g, " ");
+  }
+
+  function fmtReason(t) {
+    const raw = String(t.reason || "").trim();
+    if (!raw) return "—";
+    const label = REASON_LABELS[raw] || raw.replace(/_/g, " ");
+    if (raw === "time_exit" && t.time_exit_bars_elapsed != null) {
+      const conf = t.time_exit_bars_configured;
+      return conf != null ? `${label} ${t.time_exit_bars_elapsed}/${conf}b` : `${label} ${t.time_exit_bars_elapsed}b`;
+    }
+    return label;
+  }
+
+  function reasonClass(reason) {
+    if (reason === "stop_loss") return "reason-loss";
+    if (reason === "take_profit" || reason === "trailing_stop") return "reason-gain";
+    if (reason === "breakeven_stop") return "reason-flat";
+    return "reason-muted";
+  }
+
+  function fmtHold(days, bars) {
+    const parts = [];
+    if (Number.isFinite(Number(days))) {
+      const d = Number(days);
+      parts.push(d < 1 ? `${(d * 24).toFixed(1)}h` : `${d.toFixed(1)}d`);
+    }
+    if (bars != null && Number.isFinite(Number(bars))) parts.push(`${bars}b`);
+    return parts.join(" · ") || "—";
+  }
+
+  let closedRows = [];
+  let closedSort = { col: "closed", desc: true };
+
+  function closedSortValue(t, col) {
+    if (col === "closed") return Date.parse(t.closed || "") || 0;
+    if (col === "symbol") return String(t.symbol || "");
+    if (col === "action") return String(t.action || "");
+    if (col === "qty") return Number(t.qty) || 0;
+    if (col === "entry") return Number(t.entry) || 0;
+    if (col === "exit") return Number(t.exit) || 0;
+    if (col === "pnl") return Number(t.pnl) || 0;
+    if (col === "pnl_pct") return Number(t.pnl_pct) || 0;
+    if (col === "r") return t.r == null ? Number.NEGATIVE_INFINITY : Number(t.r);
+    if (col === "reason") return String(t.reason || "");
+    if (col === "hold") return Number(t.days) || 0;
+    if (col === "pattern") return String(t.pattern || "");
+    return 0;
+  }
+
+  function closedBookStats(rows) {
+    const n = rows.length;
+    if (!n) return "No closed trades yet.";
+    const dollars = (t) => Number(t.pnl) || 0;
+    const wins = rows.filter((t) => dollars(t) > 0).length;
+    const losses = rows.filter((t) => dollars(t) < 0).length;
+    const last = [...rows].sort((a, b) => (Date.parse(b.closed || "") || 0) - (Date.parse(a.closed || "") || 0)).slice(0, 10);
+    const lastW = last.filter((t) => dollars(t) > 0).length;
+    const lastL = last.filter((t) => dollars(t) < 0).length;
+    const lastR = last.reduce((s, t) => s + (t.r == null ? 0 : Number(t.r) || 0), 0);
+    const lastPnl = last.reduce((s, t) => s + dollars(t), 0);
+    return (
+      `${n} closed · ${wins}W / ${losses}L (${Math.round((100 * wins) / n)}%) · ` +
+      `last ${last.length}: ${lastW}W ${lastL}L · ${fmtSigned(lastR)}R · ${fmtMoney(lastPnl, { signed: true })}`
+    );
+  }
+
+  function renderClosed() {
+    if (!closedBody) return;
+    const symbolF = (closedSymbol?.value || "").trim().toLowerCase();
+    const reasonF = (closedReason?.value || "").trim();
+    const patternF = (closedPattern?.value || "").trim().toLowerCase();
+    const searchF = (closedSearch?.value || "").trim().toLowerCase();
+    let rows = closedRows.filter((t) => {
+      if (symbolF && !String(t.symbol || "").toLowerCase().includes(symbolF)) return false;
+      if (reasonF && String(t.reason || "") !== reasonF) return false;
+      if (patternF && !String(t.pattern || "").toLowerCase().includes(patternF)) return false;
+      if (searchF) {
+        const hay = [t.symbol, t.action, t.reason, fmtReason(t), t.pattern, fmtPattern(t.pattern)]
+          .map((v) => String(v || "")).join(" ").toLowerCase();
+        if (!hay.includes(searchF)) return false;
+      }
+      return true;
+    });
+    rows = [...rows].sort((a, b) => {
+      const av = closedSortValue(a, closedSort.col);
+      const bv = closedSortValue(b, closedSort.col);
+      if (av < bv) return closedSort.desc ? 1 : -1;
+      if (av > bv) return closedSort.desc ? -1 : 1;
+      return 0;
+    }).slice(0, 200);
+
+    if (closedStats) {
+      const base = closedBookStats(closedRows);
+      closedStats.textContent = rows.length !== closedRows.length ? `${base} · showing ${rows.length}` : base;
+    }
+
+    document.querySelectorAll("#paper-closed th.sortable").forEach((th) => {
+      const col = th.dataset.col;
+      const label = th.dataset.label || th.textContent.replace(/ [▲▼]$/, "");
+      th.dataset.label = label;
+      th.textContent = col === closedSort.col ? `${label} ${closedSort.desc ? "▼" : "▲"}` : label;
+    });
+
+    closedBody.innerHTML = "";
+    if (!rows.length) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td class="empty" colspan="12">${closedRows.length ? "No trades match filters." : "No closed trades yet."}</td>`;
+      closedBody.appendChild(tr);
+      return;
+    }
+    rows.forEach((t, idx) => {
+      const tr = document.createElement("tr");
+      const pnl = Number(t.pnl);
+      const cls = pnl > 0 || t.pnl_pct > 0 ? "gain" : pnl < 0 || t.pnl_pct < 0 ? "loss" : "";
+      tr.classList.toggle("gain-row", cls === "gain");
+      tr.classList.toggle("loss-row", cls === "loss");
+      const reasonTitle = t.time_exit_bars_elapsed != null
+        ? `Time-stop: ${t.time_exit_bars_elapsed} bars from breakout/signal (configured ${t.time_exit_bars_configured ?? "?"})`
+        : "";
+      const opened = t.opened ? `Opened ${fmtStamp(t.opened)}` : "";
+      tr.title = [opened, "Double-click to open chart"].filter(Boolean).join(" · ");
+      const srcIdx = closedRows.indexOf(t);
+      tr.innerHTML =
+        `<td>${esc(fmtStamp(t.closed))}</td>` +
+        `<td>${esc(t.symbol)}</td>` +
+        `<td><span class="pill ${t.action === "SELL" ? "side-sell" : "side-buy"}">${esc(t.action)}</span></td>` +
+        `<td class="num">${fmtQty(t.qty)}</td>` +
+        `<td class="num">${Number(t.entry).toFixed(2)}</td>` +
+        `<td class="num">${Number(t.exit).toFixed(2)}</td>` +
+        `<td class="num ${cls}">${fmtMoney(t.pnl, { signed: true })}</td>` +
+        `<td class="num ${cls}">${fmtSigned(t.pnl_pct, 2, "%")}</td>` +
+        `<td class="num">${t.r == null ? "—" : fmtSigned(t.r)}</td>` +
+        `<td title="${esc(reasonTitle)}"><span class="pill ${reasonClass(t.reason)}">${esc(fmtReason(t))}</span></td>` +
+        `<td class="num">${esc(fmtHold(t.days, t.bars))}</td>` +
+        `<td class="muted" title="${esc(t.pattern)}">${esc(fmtPattern(t.pattern))}</td>`;
+      tr.addEventListener("dblclick", () => openTradeChart("closed", t.symbol, srcIdx < 0 ? idx : srcIdx));
+      closedBody.appendChild(tr);
+    });
   }
 
   function render(s) {
@@ -457,28 +627,8 @@ function initPaper() {
       tr.addEventListener("dblclick", () => openTradeChart("open", p.symbol));
       posBody.appendChild(tr);
     }
-    closedBody.innerHTML = "";
-    (s.closed || []).forEach((t, idx) => {
-      const tr = document.createElement("tr");
-      const cls = t.pnl_pct > 0 ? "gain" : t.pnl_pct < 0 ? "loss" : "";
-      const reasonTitle = t.time_exit_bars_elapsed != null
-        ? `Time-stop: ${t.time_exit_bars_elapsed} bars from breakout/signal (configured ${t.time_exit_bars_configured ?? "?"})`
-        : "";
-      tr.title = "Double-click to open chart";
-      tr.innerHTML =
-        `<td>${esc(t.opened)}</td><td>${esc(t.closed)}</td><td>${fmtDays(t.days)}</td>` +
-        `<td>${t.bars == null ? "—" : t.bars}</td>` +
-        `<td>${t.time_exit_bars_elapsed == null ? "—" : t.time_exit_bars_elapsed}</td>` +
-        `<td>${esc(t.symbol)}</td><td>${esc(t.action)}</td><td>${fmtQty(t.qty)}</td>` +
-        `<td>${Number(t.entry).toFixed(2)}</td><td>${Number(t.exit).toFixed(2)}</td>` +
-        `<td class="${cls}">${fmtSigned(t.pnl_pct, 2, "%")}</td>` +
-        `<td class="${cls}">${fmtMoney(t.pnl, { signed: true })}</td>` +
-        `<td>${t.r == null ? "—" : fmtSigned(t.r)}</td>` +
-        `<td title="${esc(reasonTitle)}">${esc(t.reason)}</td>` +
-        `<td>${esc(t.pattern)}</td>`;
-      tr.addEventListener("dblclick", () => openTradeChart("closed", t.symbol, idx));
-      closedBody.appendChild(tr);
-    });
+    closedRows = s.closed || [];
+    renderClosed();
     logsBody.innerHTML = "";
     const lfSymbol = (logSymbol?.value || "").trim().toLowerCase();
     const lfPattern = (logPattern?.value || "").trim().toLowerCase();
@@ -654,6 +804,23 @@ function initPaper() {
       }
     };
   }
+
+  document.querySelectorAll("#paper-closed th.sortable").forEach((th) => {
+    th.addEventListener("click", () => {
+      const col = th.dataset.col;
+      if (closedSort.col === col) closedSort.desc = !closedSort.desc;
+      else {
+        closedSort.col = col;
+        closedSort.desc = true;
+      }
+      renderClosed();
+    });
+  });
+  [closedSymbol, closedPattern, closedSearch].forEach((el) => {
+    el?.addEventListener("input", renderClosed);
+  });
+  closedReason?.addEventListener("change", renderClosed);
+
   poll().catch(console.error);
 }
 

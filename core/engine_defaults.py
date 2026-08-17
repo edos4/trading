@@ -39,7 +39,10 @@ class EngineDefaults:
     # Long+short notional / equity. 0 = unlimited.
     max_gross_exposure_pct: float = 1.0
     trailing_activation_default: float = 0.02
-    breakeven_trigger_pct: float | None = None
+    # Arm a ~entry floor once the trade has been +1.5%. Stops the common
+    # round-trip: +2–4% then full stop. Trailing still waits for each
+    # pattern's own activation (often 4%).
+    breakeven_trigger_pct: float | None = 0.015
     breakeven_buffer_pct: float = 0.0015
     min_atr_stop_multiple: float = 1.0
     synthetic_stop_multiple: float = 2.0
@@ -47,13 +50,10 @@ class EngineDefaults:
     hard_stop_percentage: float = 0.06
     min_reward_risk_ratio: float = 1.5
     min_hold_bars: int = 2
-    # Channel breakouts are defined against the trend that SMA200 would
-    # otherwise forbid (006 shorts strength, 007 longs weakness). Applying
-    # the regime filter there rejects ~90% of 006 and ~60% of 007.
-    regime_exempt_patterns: tuple[str, ...] = (
-        "pattern_006_upward_channel",
-        "pattern_007_descending_channel",
-    )
+    # Empty on purpose. 006/007 used to skip SMA200 (shorts of strength /
+    # longs of weakness) and then dominated the losing paper book. They are
+    # disabled by default; --pattern isolation still gets the regime filter.
+    regime_exempt_patterns: tuple[str, ...] = ()
 
 
 ENGINE = EngineDefaults()

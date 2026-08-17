@@ -229,15 +229,24 @@ settings = Settings()
 #   pattern_012_ml_signal — n=3, pf=7826: too few trades for that PF to mean
 #   anything, not a real edge yet. Disabled until the sample grows.
 #
-# Other patterns (e.g. pattern_002_double_top, pattern_009_flag_pattern,
-# pattern_006_upward_channel, pattern_007_descending_channel,
-# pattern_008_head_and_shoulders, pattern_005_rounding_top, pattern_010_pennant)
-# were historically evaluated as weak or net-negative but are currently ENABLED
-# so they can accumulate a larger sample. Revisit in isolation via --pattern.
+#   pattern_002_double_top / pattern_009_flag_pattern / pattern_010_pennant —
+#   previously isolated as weak; stay off.
+#
+#   pattern_005_rounding_top / pattern_006_upward_channel /
+#   pattern_007_descending_channel / pattern_008_head_and_shoulders —
+#   historically net-negative, then re-enabled "to accumulate sample".
+#   The 2026-08-17 US paper book (~32 closed, ~38% WR, −0.7% equity) was
+#   dominated by 006/007 stop-outs (and 008 givebacks) while 003 double
+#   bottom was the one hitting take_profit. Sample is in: keep them off.
+#   006/007 were also SMA200-exempt, so they were the counter-trend sleeve.
 DISABLED_PATTERNS: list[str] = [
     "pattern_011_breakout_retest",
     "pattern_012_ml_signal",
     "pattern_009_flag_pattern",
     "pattern_010_pennant",
-    "pattern_002_double_top"
+    "pattern_002_double_top",
+    "pattern_005_rounding_top",
+    "pattern_006_upward_channel",
+    "pattern_007_descending_channel",
+    "pattern_008_head_and_shoulders",
 ]
