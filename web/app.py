@@ -9,6 +9,7 @@ Run:
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -166,6 +167,7 @@ def create_app() -> FastAPI:
             default_market=default_market().id,
             default_n_symbols=default_market().default_n_symbols,
             markets=markets_payload(),
+            stream_start_default=_stream_start_default(),
         )
 
     # ── Explorer API ──────────────────────────────────────────────────────
@@ -302,6 +304,18 @@ def create_app() -> FastAPI:
         return {"ok": True}
 
     return app
+
+
+def _stream_start_default() -> str:
+    """Default stream start date — mirrors the tkinter UI datepicker:
+    PAPERTRADE_STREAM_START_DATE if set, else ~1 year ago."""
+    raw = settings.papertrade_stream_start_date
+    if raw:
+        try:
+            return date.fromisoformat(raw.strip()).isoformat()
+        except ValueError:
+            pass
+    return (date.today() - timedelta(days=365)).isoformat()
 
 
 def _safe_next(next_url: str) -> str:

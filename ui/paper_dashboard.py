@@ -159,9 +159,6 @@ class PaperDashboard:
             top_bar, text="Volume gate", variable=self._volume_gate_var,
         ).pack(side=tk.LEFT, padx=(12, 0))
 
-        self._status_var = tk.StringVar(value="Stopped.")
-        ttk.Label(top_bar, textvariable=self._status_var).pack(side=tk.LEFT, padx=(16, 0))
-
         equity_bar = ttk.Frame(self._top, padding=(8, 0))
         equity_bar.pack(side=tk.TOP, fill=tk.X)
         self._equity_var = tk.StringVar()
@@ -176,6 +173,11 @@ class PaperDashboard:
         scan_bar.pack(side=tk.TOP, fill=tk.X)
         self._scan_stats_var = tk.StringVar(value="Last scan: —   Patterns found: —   Trades opened: —   Rejected: —   Scan time: —")
         ttk.Label(scan_bar, textvariable=self._scan_stats_var, foreground=COLOR_MUTED).pack(side=tk.LEFT)
+
+        status_bar = ttk.Frame(self._top, padding=(8, 0, 8, 6))
+        status_bar.pack(side=tk.TOP, fill=tk.X)
+        self._status_var = tk.StringVar(value="Stopped.")
+        ttk.Label(status_bar, textvariable=self._status_var, foreground=COLOR_MUTED).pack(side=tk.LEFT)
 
         notebook = ttk.Notebook(self._top)
         notebook.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))

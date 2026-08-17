@@ -12,6 +12,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 import matplotlib
 
@@ -542,25 +543,32 @@ class PaperSession:
         except OSError:
             return False
 
-    def _ensure_stream_server(self, start_date: Optional[str] = None) -> Optional[str]:
-        host, port = settings.papertrade_stream_host, settings.papertrade_stream_port
-        # Only ever stop a stream process this app spawned — never blindly
-        # kill whatever holds the port (that could be an unrelated service on
-        # a shared host). If a previous child is still alive, stop it first.
-        if self._stream_proc is not None and self._stream_proc.poll() is None:
-            self._stream_proc.terminate()
-            try:
-                self._stream_proc.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                self._stream_proc.kill()
-                self._stream_proc.wait()
-        # Probe before spawning: if something else is already listening,
-        # refuse with a clear error instead of terminating it.
-        if self._port_open(host, port):
-            return (
-                f"Port {port} is already in use on {host} by another process. "
-                "Stop it or change PAPERTRADE_STREAM_PORT."
+    @staticmethod
+    def _kill_whatever_is_on(port: int) -> None:
+        """Force the stream server's port free before (re)launching — same
+        behavior as the tkinter UI.
+
+        A port-open check alone can't tell "healthy server" from "stale
+        process left over from a previous session, still running pre-fix
+        code and stuck serving corrupted replay data" — both look identical
+        from the outside. Always killing and relaunching removes that
+        ambiguity entirely.
+        """
+        try:
+            subprocess.run(
+                ["fuser", "-k", f"{port}/tcp"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3,
             )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+    def _ensure_stream_server(self, start_date: Optional[str] = None) -> Optional[str]:
+        """(Re)launch `main.py --papertrade-stream` fresh every time, so a
+        stale/outdated server process is never silently reused. Returns an
+        error message on failure, else None."""
+        host, port = settings.papertrade_stream_host, settings.papertrade_stream_port
+        self._kill_whatever_is_on(port)
+        time.sleep(0.3)  # let the kernel release the port before rebinding
         with self.lock:
             self.status = (
                 f"Starting paper trade stream server (from {start_date})..."
@@ -591,8 +599,37 @@ class PaperSession:
         market: Optional[str],
     ) -> None:
         data_feed = None
+        profile = get_market(market)
+        # Load the ledger before launching a historical stream so a restarted
+        # paper session can resume after the last simulated bar it actually
+        # processed (same as the tkinter UI). The old server always restarted
+        # at the configured stream_start date, which reset market data while
+        # the account kept its old positions/equity.
+        with self.lock:
+            self.account = PaperAccount.load(market=profile.id)
+        effective_stream_start = stream_start
+        if use_stream and self.account.sim_now() is not None:
+            resume_from = self.account.sim_now()
+            if resume_from is not None:
+                resume_date = resume_from.astimezone(
+                    ZoneInfo(profile.session_tz)
+                ).date()
+                configured_date = None
+                if stream_start:
+                    try:
+                        configured_date = datetime.strptime(
+                            stream_start, "%Y-%m-%d"
+                        ).date()
+                    except ValueError:
+                        configured_date = None
+                if configured_date is None or configured_date <= resume_date:
+                    # Start on/after the last processed session. The scanner's
+                    # persisted bar identity will reject a duplicate last bar,
+                    # then the stream advances to the next available bar.
+                    effective_stream_start = resume_date.isoformat()
+
         if use_stream:
-            error = self._ensure_stream_server(start_date=stream_start)
+            error = self._ensure_stream_server(start_date=effective_stream_start)
             if error:
                 with self.lock:
                     self.running = False
@@ -601,7 +638,6 @@ class PaperSession:
                 return
             data_feed = StreamClient()
 
-        profile = get_market(market)
         symbol_rows = TVClient.fetch_universe_cached(
             n_symbols, profile.id, extra_symbols=extra_symbols,
         )
@@ -640,13 +676,17 @@ class PaperSession:
                 if use_stream
                 else profile.scan_interval_seconds
             )
-            stream_note = f", stream from {stream_start}" if use_stream and stream_start else ""
+            stream_note = (
+                f", stream from {effective_stream_start}"
+                if use_stream and effective_stream_start else ""
+            )
             self.status = (
                 f"Running — {profile.label}, {len(symbols)} symbols, scanning every {interval}s"
                 f"{stream_note}"
                 f", Kronos gate={'ON' if kronos_gate else 'OFF'}"
                 f", Kronos rank={'ON' if kronos_rank else 'OFF'}"
                 f", Volume gate={'ON' if volume_gate else 'OFF'}"
+                f", session={session_label(profile.id)}"
             )
 
         error_msg: Optional[str] = None

@@ -16,7 +16,7 @@
   <button type="button" class="btn" id="paper-reset">Reset account</button>
   <label class="check"><input type="checkbox" id="paper-stream" /> Use paper trade stream</label>
   <label id="stream-date-wrap" hidden>Start date
-    <input type="date" id="paper-stream-start" />
+    <input type="date" id="paper-stream-start" value="{{ stream_start_default }}" />
   </label>
   <label class="check"><input type="checkbox" id="paper-kronos" {% if kronos_gate %}checked{% endif %} /> Kronos 1w gate</label>
   <label class="check"><input type="checkbox" id="paper-kronos-rank" {% if kronos_rank %}checked{% endif %} /> Kronos rank sleeve</label>
