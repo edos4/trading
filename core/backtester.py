@@ -9,6 +9,7 @@ no TradingView indicators — relies purely on IndicatorEngine-computed values.
 from __future__ import annotations
 
 import asyncio
+from bisect import bisect_right
 import importlib
 import json
 import multiprocessing as mp
@@ -17,7 +18,7 @@ import pkgutil
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Literal
 
@@ -89,6 +90,13 @@ class BacktestTrade:
     sim_entry_date: datetime | None = None
     sim_exit_date: datetime | None = None
 
+    # Execution diagnostics. These are populated when an exit is evaluated so
+    # paper/backtest runs can explain exactly how many strategy bars elapsed.
+    # A deferred next-bar fill can have fewer position-held bars than the
+    # pattern's neckline time-stop elapsed bars.
+    exit_bar_idx: int | None = None
+    time_exit_bars_elapsed: int | None = None
+
     # Engine-level (not pattern-level) breakeven protection. Once a trade has
     # been ahead by `breakeven_trigger_pct`, its protective floor is raised to
     # (roughly) entry price so a full round-trip back to red exits near
@@ -115,6 +123,10 @@ class BacktestTrade:
 class BacktestResult:
     trades: list[BacktestTrade] = field(default_factory=list)
     total_signals: int = 0
+    # Mark-to-market portfolio equity by session date. This is populated after
+    # the shared capital ledger is applied, so drawdown/Sharpe reflect actual
+    # concurrent positions rather than realized trade P&L alone.
+    equity_curve: list[tuple[str, float]] = field(default_factory=list)
     initial_capital: float = 100_000.0
     # Signals that had an otherwise-valid entry but were dropped by the
     # capital ledger (see _apply_capital_ledger) because the account was
@@ -162,6 +174,38 @@ class BacktestResult:
         return min(losses) if losses else 0.0
 
     @property
+    def avg_r(self) -> float:
+        values = [
+            r for t in self.trades
+            if (r := trade_r_multiple(t, t.exit_price)) is not None
+        ]
+        return float(np.mean(values)) if values else 0.0
+
+    @property
+    def median_r(self) -> float:
+        values = [
+            r for t in self.trades
+            if (r := trade_r_multiple(t, t.exit_price)) is not None
+        ]
+        return float(np.median(values)) if values else 0.0
+
+    @property
+    def exit_reason_breakdown(self) -> dict[str, int]:
+        counts: dict[str, int] = defaultdict(int)
+        for t in self.trades:
+            counts[t.exit_reason or "unknown"] += 1
+        return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+
+    @property
+    def avg_hold_bars(self) -> float:
+        values = [
+            t.exit_bar_idx - t.entry_bar_idx
+            for t in self.trades
+            if t.exit_bar_idx is not None and t.entry_bar_idx >= 0
+        ]
+        return float(np.mean(values)) if values else 0.0
+
+    @property
     def profit_factor(self) -> float:
         # t.pnl is a per-share $ diff — weight by qty so this reflects actual
         # position-sized dollar P&L, not raw share-price magnitude.
@@ -182,18 +226,26 @@ class BacktestResult:
 
     @property
     def max_drawdown_pct(self) -> float:
+        if self.equity_curve:
+            values = np.asarray([v for _, v in self.equity_curve], dtype=float)
+            peaks = np.maximum.accumulate(values)
+            valid = peaks > 0
+            if valid.any():
+                return float(np.min((values[valid] - peaks[valid]) / peaks[valid]) * 100)
         return _drawdown_pct(self.trades, self.initial_capital)
 
     @property
     def sharpe_ratio(self) -> float:
-        """Annualized Sharpe from the realized daily equity series.
-
-        Trade returns are not time-normalized: a 2-day trade and a 60-day
-        trade are not equivalent observations. The backtest currently stores
-        closed trades rather than full daily portfolio marks, so do not report
-        a fabricated Sharpe from per-trade percentages.
-        """
-        returns = _realized_daily_returns(self.trades, self.initial_capital)
+        """Annualized Sharpe from mark-to-market daily portfolio equity."""
+        if len(self.equity_curve) < 2:
+            return 0.0
+        values = np.asarray([v for _, v in self.equity_curve], dtype=float)
+        prev = values[:-1]
+        returns = np.divide(
+            values[1:] - prev, prev,
+            out=np.zeros_like(values[1:]),
+            where=np.abs(prev) > 1e-12,
+        )
         if len(returns) < 2:
             return 0.0
         std = returns.std(ddof=1)
@@ -310,6 +362,9 @@ class BacktestResult:
                 else "  Profit factor:     inf (no losers)"
             ),
             f"  Expectancy/trade:  {self.expectancy_pct:+.2f}%",
+            f"  Avg R:             {self.avg_r:+.2f}",
+            f"  Median R:          {self.median_r:+.2f}",
+            f"  Avg hold:          {self.avg_hold_bars:.1f} bars",
             f"  Max drawdown:      {self.max_drawdown_pct:+.2f}%",
             f"  Sharpe ratio:      {self.sharpe_ratio:.2f}",
             "=" * 60,
@@ -354,8 +409,16 @@ class BacktestResult:
                 else None
             ),
             "expectancy_pct": round(self.expectancy_pct, 4),
+            "avg_r": round(self.avg_r, 4),
+            "median_r": round(self.median_r, 4),
+            "avg_hold_bars": round(self.avg_hold_bars, 2),
+            "exit_reason_breakdown": dict(self.exit_reason_breakdown),
             "max_drawdown_pct": round(self.max_drawdown_pct, 4),
             "sharpe_ratio": round(self.sharpe_ratio, 4),
+            "equity_curve": [
+                {"date": ts, "equity": round(value, 4)}
+                for ts, value in self.equity_curve
+            ],
             "by_pattern": self.pattern_breakdown(),
             "trades": [
                 {
@@ -462,6 +525,101 @@ def _drawdown_pct(trades: list[BacktestTrade], initial_capital: float) -> float:
     drawdowns = (np.array(peaks) - peak_series) / peak_series
     return float(drawdowns.min() * 100)
 
+
+def _build_portfolio_equity_curve(
+    trades: list[BacktestTrade],
+    ohlcv_data: dict[tuple[str, str], list[OHLCVCandle]],
+    initial_capital: float,
+    txn_cost_pct: float,
+) -> list[tuple[str, float]]:
+    """Mark the post-ledger portfolio to market once per trading/session date.
+
+    Trades are generated independently per symbol for parallelism, then the
+    shared capital ledger assigns final quantities. Replaying those accepted
+    trades here with the original OHLCV lets reporting account for concurrent
+    long market value, short liabilities, entry/exit fees, and unrealized P&L.
+    """
+    if not trades or initial_capital <= 0:
+        return []
+
+    start = min(t.entry_date.date() for t in trades)
+    end = max(t.exit_date.date() for t in trades)
+    dates: set = set()
+    for candles in ohlcv_data.values():
+        for candle in candles:
+            if candle.timestamp is None:
+                continue
+            d = candle.timestamp.date()
+            if start <= d <= end:
+                dates.add(d)
+    dates.update(t.entry_date.date() for t in trades)
+    dates.update(t.exit_date.date() for t in trades)
+    if not dates:
+        return []
+
+    # Fast lookup of the latest available mark at or before each date.
+    mark_series: dict[tuple[str, str], list[tuple[object, float]]] = {}
+    for key, candles in ohlcv_data.items():
+        rows = [
+            (c.timestamp.date(), c.close)
+            for c in candles
+            if c.timestamp is not None and start <= c.timestamp.date() <= end
+        ]
+        if rows:
+            mark_series[key] = rows
+
+    def mark_for(trade: BacktestTrade, day):
+        rows = mark_series.get((trade.symbol, trade.timeframe), [])
+        if not rows:
+            return trade.entry_price
+        dates_only = [d for d, _ in rows]
+        idx = bisect_right(dates_only, day) - 1
+        return rows[idx][1] if idx >= 0 else trade.entry_price
+
+    by_entry: dict = defaultdict(list)
+    by_exit: dict = defaultdict(list)
+    for trade in trades:
+        by_entry[trade.entry_date.date()].append(trade)
+        by_exit[trade.exit_date.date()].append(trade)
+
+    cash = float(initial_capital)
+    open_trades: list[BacktestTrade] = []
+    curve: list[tuple[str, float]] = [
+        ((start - timedelta(days=1)).isoformat(), float(initial_capital))
+    ]
+
+    for day in sorted(dates):
+        # Same-day exits free capital before same-day entries, matching the
+        # shared capital ledger's event ordering.
+        for trade in by_exit.get(day, []):
+            if trade in open_trades:
+                open_trades.remove(trade)
+            exit_cost = trade.exit_price * trade.qty * txn_cost_pct
+            if trade.action == "BUY":
+                cash += trade.exit_price * trade.qty - exit_cost
+            else:
+                cash -= trade.exit_price * trade.qty + exit_cost
+
+        for trade in by_entry.get(day, []):
+            if trade.qty <= 0:
+                continue
+            entry_cost = trade.entry_price * trade.qty * txn_cost_pct
+            if trade.action == "BUY":
+                cash -= trade.entry_price * trade.qty + entry_cost
+            else:
+                cash += trade.entry_price * trade.qty - entry_cost
+            open_trades.append(trade)
+
+        equity = cash
+        for trade in open_trades:
+            mark = mark_for(trade, day)
+            if trade.action == "BUY":
+                equity += mark * trade.qty
+            else:
+                equity -= mark * trade.qty
+        curve.append((day.isoformat(), float(equity)))
+
+    return curve
 
 # ── Module-level backtest helpers ─────────────────────────────────────────────
 # These are picklable functions used by both Backtester (main process) and
@@ -661,6 +819,7 @@ def _check_exit(
                 fill, reason = max(fills, key=lambda f: f[0])
             else:
                 fill, reason = min(fills, key=lambda f: f[0])
+            position.exit_bar_idx = bar_idx
             return fill, reason
 
     if position.take_profit is not None:
@@ -668,6 +827,7 @@ def _check_exit(
             candle, position.take_profit, is_short=is_short, favorable=True,
         )
         if fill is not None:
+            position.exit_bar_idx = bar_idx
             return fill, "take_profit"
     if (
         position.neckline_break_bar_idx is not None
@@ -675,6 +835,8 @@ def _check_exit(
     ):
         elapsed = bar_idx - position.neckline_break_bar_idx
         if elapsed >= position.exit_bars_after_neckline_break:
+            position.exit_bar_idx = bar_idx
+            position.time_exit_bars_elapsed = elapsed
             return candle.close, "time_exit"
     return None, ""
 
@@ -883,7 +1045,18 @@ def _open_trade(
             candle.high if signal.trailing_stop_mode == "highest_high" else None
         ),
     )
-    if position.neckline is not None and position.neckline_break_bar_idx is None:
+    # The signal is generated on the breakout/confirmation bar, but this
+    # engine deliberately fills on the next bar. Preserve that event across
+    # the deferred entry so neckline time-stops start at the signal bar.
+    if (
+        position.neckline is not None
+        and position.neckline_break_bar_idx is None
+        and signal.signal_bar_idx is not None
+        and position.exit_bars_after_neckline_break is not None
+        and position.neckline_break_direction is not None
+    ):
+        position.neckline_break_bar_idx = signal.signal_bar_idx
+    elif position.neckline is not None and position.neckline_break_bar_idx is None:
         if (
             position.neckline_break_direction == "below"
             and candle.close < position.neckline
@@ -1080,11 +1253,9 @@ def _apply_capital_ledger(
     long_notional = 0.0
     short_notional = 0.0
     notional_by_id: dict[int, float] = {}
-    gross_cap = (
-        initial_capital * max_gross_exposure_pct
-        if max_gross_exposure_pct and max_gross_exposure_pct > 0
-        else 0.0
-    )
+    # Gross exposure is an equity percentage, so the cap compounds with the
+    # account instead of remaining frozen at the initial balance.
+    gross_cap = 0.0
 
     def equity() -> float:
         # At an entry/exit event the open positions are marked at their
@@ -1135,7 +1306,8 @@ def _apply_capital_ledger(
         if t.action == "BUY":
             qty = min(qty, int(cash / t.entry_price))
 
-        if gross_cap > 0 and t.entry_price > 0:
+        if max_gross_exposure_pct and max_gross_exposure_pct > 0 and t.entry_price > 0:
+            gross_cap = account_equity * max_gross_exposure_pct
             room = gross_cap - (long_notional + short_notional)
             qty = min(qty, int(room / t.entry_price)) if room > 0 else 0
 
@@ -1321,6 +1493,9 @@ def _core_backtest_symbol(
                 config["position_sizing"],
                 max_position_pct=config["max_position_pct"],
             )
+            # Record the event bar before deferring the entry to i+1.
+            signal.signal_bar_idx = i
+            signal.signal_bar_timestamp = candles[i].timestamp
             if config.get("lot_round"):
                 signal.price = signal.price or candles[i].close
                 if not apply_lot_rounding(signal):
@@ -1754,6 +1929,9 @@ class Backtester:
             max_gross_exposure_pct=self._max_gross_exposure_pct,
             txn_cost_pct=self._txn_cost_pct,
         )
+        result.equity_curve = _build_portfolio_equity_curve(
+            result.trades, ohlcv_data, self._account_value, self._txn_cost_pct,
+        )
         return result
 
     def _backtest_symbol(
@@ -2054,7 +2232,16 @@ class Backtester:
                 candle.high if signal.trailing_stop_mode == "highest_high" else None
             ),
         )
-        if position.neckline is not None and position.neckline_break_bar_idx is None:
+        # Preserve the breakout event across the deferred next-bar fill.
+        if (
+            position.neckline is not None
+            and position.neckline_break_bar_idx is None
+            and signal.signal_bar_idx is not None
+            and position.exit_bars_after_neckline_break is not None
+            and position.neckline_break_direction is not None
+        ):
+            position.neckline_break_bar_idx = signal.signal_bar_idx
+        elif position.neckline is not None and position.neckline_break_bar_idx is None:
             if (
                 position.neckline_break_direction == "below"
                 and candle.close < position.neckline

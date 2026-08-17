@@ -1,24 +1,26 @@
 """
 data/stream_server.py — Paper trade stream server.
 
-Replays historical daily CSVs from settings.papertrade_stream_dir over a
-WebSocket so paper trading can run when US markets are closed. Each symbol
-gets its own cursor into its CSV; a background loop advances every cursor by
-one bar every settings.papertrade_stream_interval_seconds, wrapping to the
-start once a CSV is exhausted so a session can run indefinitely.
+Replays historical daily bars over a WebSocket so paper trading can run when
+US markets are closed. Each symbol gets its own cursor into its data. The
+scanner advances the entire replay atomically once a complete scan cycle
+finishes, so all symbols in a cycle see the same simulated market bar.
+
+Bars come from the stocks_history database (data/db.py) — this is what the
+"Use paper trade stream" option serves. If a symbol isn't in the database
+(or the DB is unreachable) it falls back to the CSV layout
+<papertrade_stream_dir>/<FIRST_LETTER>/<SYMBOL>.csv with columns
+low,open,volume,high,close,timestamp (unix seconds, one row per day).
 
 Optional start_date (YYYY-MM-DD) sets the initial cursor to the first bar
-on/after that date. Without it, each tape starts near the end of its CSV
+on/after that date. Without it, each tape starts near the end of its data
 (last papertrade_stream_lookback_bars).
-
-CSV layout: <dir>/<FIRST_LETTER>/<SYMBOL>.csv with columns
-low,open,volume,high,close,timestamp (unix seconds, one row per day).
 
 Protocol: client connects, sends one JSON object per request
     {"symbol": "AAPL", "timeframe": "1d"}
 server replies with one JSON object
     {"candle": {...}, "history": [{...}, ...]}  # history ends at candle
-or {"error": "..."} if the symbol has no CSV.
+or {"error": "..."} if the symbol has no data.
 """
 
 from __future__ import annotations
@@ -105,6 +107,45 @@ def _load_symbol_csv(base_dir: Path, symbol: str) -> list[dict] | None:
     return rows or None
 
 
+def _load_symbol_db(symbol: str) -> list[dict] | None:
+    """Load a symbol's full daily history from the stocks_history database.
+
+    Primary source for the paper stream: the DB holds every CSV bar plus any
+    bars pulled fresh by `--update-db`, so the replay is always current.
+    Returns the same row shape as `_load_symbol_csv`.
+    """
+    try:
+        from data import db
+    except ImportError:
+        return None
+    try:
+        conn = db.get_conn()
+    except Exception:
+        log.warning("StreamServer | DB unavailable — falling back to CSVs")
+        return None
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT ts, open, high, low, close, volume "
+                "FROM daily_bars WHERE symbol = %s ORDER BY ts",
+                (symbol,),
+            )
+            rows = [{
+                "open": float(o),
+                "high": float(h),
+                "low": float(l),
+                "close": float(c),
+                "volume": float(v),
+                "timestamp": int(ts),
+            } for ts, o, h, l, c, v in cur.fetchall()]
+        return rows or None
+    except Exception as exc:
+        log.warning(f"StreamServer | DB read failed for {symbol}: {exc}")
+        return None
+    finally:
+        conn.close()
+
+
 class StreamServer:
     def __init__(self, base_dir: str | None = None, start_date: str | None = None):
         self._base_dir = Path(base_dir or settings.papertrade_stream_dir)
@@ -118,23 +159,31 @@ class StreamServer:
         tape = self._tapes.get(symbol)
         if tape is not None:
             return tape
-        rows = _load_symbol_csv(self._base_dir, symbol)
+        rows = _load_symbol_db(symbol) or _load_symbol_csv(self._base_dir, symbol)
         if rows is None:
             return None
         tape = _SymbolTape(rows, start_ts=self._start_ts)
         self._tapes[symbol] = tape
         return tape
 
-    async def _advance_loop(self) -> None:
-        while True:
-            await asyncio.sleep(settings.papertrade_stream_interval_seconds)
-            for symbol, tape in list(self._tapes.items()):
-                try:
-                    tape.advance()
-                except Exception:
-                    log.exception(f"StreamServer | failed to advance {symbol} — dropping it")
-                    del self._tapes[symbol]
-            log.debug(f"StreamServer | advanced {len(self._tapes)} symbol(s) to next bar")
+    def advance(self) -> int:
+        """Advance every loaded tape exactly one bar.
+
+        This is deliberately synchronous and atomic from the server's event
+        loop perspective. The scanner calls it only after it has completed a
+        full universe scan, eliminating wall-clock drift when a scan takes
+        longer than the old fixed 60-second stream interval.
+        """
+        advanced = 0
+        for symbol, tape in list(self._tapes.items()):
+            try:
+                tape.advance()
+                advanced += 1
+            except Exception:
+                log.exception(f"StreamServer | failed to advance {symbol} — dropping it")
+                del self._tapes[symbol]
+        log.debug(f"StreamServer | advanced {advanced} symbol(s) to next bar")
+        return advanced
 
     async def _handle(self, ws) -> None:
         # A single bad request/symbol must never take the whole connection
@@ -146,8 +195,21 @@ class StreamServer:
             try:
                 try:
                     req = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    await ws.send(json.dumps({"error": "bad request"}))
+                    continue
+
+                # Replay control is owned by the scanner, not by a background
+                # wall-clock timer. This keeps every symbol on one simulated
+                # date even when a 1,000-symbol scan takes >60 seconds.
+                if req.get("action") == "advance":
+                    advanced = self.advance()
+                    await ws.send(json.dumps({"advanced": advanced}))
+                    continue
+
+                try:
                     symbol = req["symbol"]
-                except (json.JSONDecodeError, KeyError, TypeError):
+                except (KeyError, TypeError):
                     await ws.send(json.dumps({"error": "bad request"}))
                     continue
                 tape = self._tape_for(symbol)
@@ -169,10 +231,10 @@ class StreamServer:
         async with websockets.serve(self._handle, host, port):
             log.info(
                 f"Paper trade stream server | {host}:{port} | "
-                f"source={self._base_dir} | start={start_note} | advancing every "
-                f"{settings.papertrade_stream_interval_seconds}s"
+                f"source=database (CSV fallback: {self._base_dir}) | "
+                f"start={start_note} | scanner-controlled atomic advancement"
             )
-            await self._advance_loop()
+            await asyncio.Future()
 
 
 async def run_stream_server(start_date: str | None = None) -> None:

@@ -17,6 +17,7 @@ import threading
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from config import settings
 from core.backtester import (
@@ -27,6 +28,7 @@ from core.backtester import (
     _close_trade,
     _open_trade,
     _update_trailing_reference,
+    _execution_reward_risk_ok,
     trade_r_multiple,
     trade_risk_dollars,
 )
@@ -71,6 +73,28 @@ def days_held(position: BacktestTrade, as_of: datetime | None = None) -> float:
     start = position.sim_entry_date or position.entry_date
     end = position.sim_exit_date or position.exit_date or datetime.now(timezone.utc)
     return (end - start).total_seconds() / 86400
+
+
+def sim_days_held(
+    position: BacktestTrade,
+    as_of: datetime | None = None,
+) -> float:
+    """Elapsed holding time in simulated market days."""
+    start = position.sim_entry_date or position.entry_date
+    end = (
+        position.sim_exit_date or position.exit_date or datetime.now(timezone.utc)
+        if as_of is None else as_of
+    )
+    return max(0.0, (end - start).total_seconds() / 86400)
+
+
+def bars_held(position: BacktestTrade, current_bar_idx: int | None = None) -> int | None:
+    if position.entry_bar_idx < 0:
+        return None
+    end_idx = position.exit_bar_idx if current_bar_idx is None else current_bar_idx
+    if end_idx is None:
+        return None
+    return max(0, end_idx - position.entry_bar_idx)
 
 
 def position_status(position: BacktestTrade) -> str:
@@ -149,9 +173,24 @@ class PaperAccount:
         # timeframe), so counting scan cycles as "bars" would make
         # min_hold_bars arm in hours instead of days. Bumped from
         # MarketScanner via on_bar(..., is_new_bar=True).
+        # New-bar counters are keyed by symbol + timeframe. A symbol can be
+        # scanned on both 1d and 1W; sharing one counter makes a weekly candle
+        # advance a daily position's bar clock and can trigger time-stops,
+        # cooldowns, and trailing logic at the wrong time.
         self._bar_count: dict[str, int] = {}
         self._daily_key = ""
         self._daily_pnl = 0.0
+        # Stable per-symbol/timeframe identities of the last fully processed
+        # swing bar. Persisting these prevents a clean restart from replaying
+        # the same daily/weekly bar and incrementing bar counters twice.
+        self._processed_bar_ids: dict[str, str] = {}
+        # Latest market/bar timestamp observed by the paper account. This is
+        # the clock used by the UI for simulated age during replay.
+        self._sim_now: datetime | None = None
+        # Latest simulated timestamp per timeframe. The old single global
+        # clock could age a daily position using a different timeframe's
+        # latest candle, producing nonsensical open-position ages.
+        self._sim_now_by_timeframe: dict[str, datetime] = {}
         # The scanner runs in a background thread with its own asyncio loop
         # (see ui/paper_dashboard.py) while the UI polls this same account
         # from the Tk main thread every second. Without a lock, the UI's
@@ -165,10 +204,40 @@ class PaperAccount:
     def last_price(self, symbol: str, default: float) -> float:
         return self._last_price.get(symbol, default)
 
-    def bar_count(self, symbol: str) -> int:
-        """New-bar count for `symbol` — used by scanner cooldown (same units
-        as backtester bar_idx)."""
-        return self._bar_count.get(symbol, 0)
+    def bar_count(self, symbol: str, timeframe: str | None = None) -> int:
+        """New-bar count for a symbol/timeframe.
+
+        The timeframe is part of the clock because 1d and 1W bars must not
+        advance the same counter. `timeframe=None` is retained as a backwards-
+        compatible fallback for older callers/accounts.
+        """
+        if timeframe:
+            return self._bar_count.get(f"{symbol}|{timeframe}", 0)
+        exact = self._bar_count.get(symbol)
+        if exact is not None:
+            return exact
+        # Backwards-compatible convenience: if there is exactly one counter
+        # for this symbol, return it rather than silently returning zero.
+        prefix = f"{symbol}|"
+        matches = [
+            value for key, value in self._bar_count.items()
+            if key.startswith(prefix)
+        ]
+        return matches[0] if len(matches) == 1 else 0
+
+    def processed_bar_identities_snapshot(self) -> dict[str, str]:
+        with self._lock:
+            return dict(self._processed_bar_ids)
+
+    def mark_bar_processed(self, symbol: str, timeframe: str, identity_key: str) -> None:
+        with self._lock:
+            self._processed_bar_ids[f"{symbol}|{timeframe}"] = identity_key
+
+    def sim_now(self, timeframe: str | None = None) -> datetime | None:
+        with self._lock:
+            if timeframe:
+                return self._sim_now_by_timeframe.get(timeframe)
+            return self._sim_now
 
     def equity(self) -> float:
         with self._lock:
@@ -226,7 +295,11 @@ class PaperAccount:
             return list(self.equity_curve)
 
     def _reset_daily_if_needed(self, ts: datetime) -> None:
-        key = ts.strftime("%Y-%m-%d")
+        profile = get_market(self.market)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        local = ts.astimezone(ZoneInfo(profile.session_tz))
+        key = local.strftime("%Y-%m-%d")
         if key != self._daily_key:
             self._daily_key = key
             self._daily_pnl = 0.0
@@ -244,7 +317,7 @@ class PaperAccount:
         candle: OHLCVCandle,
         store: OHLCVStore,
     ) -> tuple[bool, str]:
-        self._reset_daily_if_needed(datetime.now(timezone.utc))
+        self._reset_daily_if_needed(candle.timestamp or datetime.now(timezone.utc))
 
         with self._lock:
             return self._open_position_locked(signal, candle, store)
@@ -356,7 +429,17 @@ class PaperAccount:
                     f"but cash is {format_money(self.cash, self.market)}."
                 )
 
-        position = _open_trade(signal, fill_candle, self._bar_count.get(signal.symbol, 0))
+        position = _open_trade(
+            signal,
+            fill_candle,
+            self.bar_count(signal.symbol, signal.timeframe),
+        )
+        if not _execution_reward_risk_ok(position, ENGINE.min_reward_risk_ratio):
+            return False, (
+                f"Execution R:R rejection: actual fill {position.entry_price:.4f} "
+                f"produced reward:risk below the engine minimum "
+                f"{ENGINE.min_reward_risk_ratio:.2f}."
+            )
         # _open_trade stamps entry_date from the OHLCV bar's timestamp, which
         # is just the trading day (correct for the backtester replaying
         # history). A live paper fill needs the real wall-clock moment it
@@ -401,9 +484,19 @@ class PaperAccount:
         self, symbol: str, candle: OHLCVCandle, timeframe: str | None, is_new_bar: bool,
     ) -> BacktestTrade | None:
         self._last_price[symbol] = candle.close
+        if candle.timestamp is not None:
+            if self._sim_now is None or candle.timestamp > self._sim_now:
+                self._sim_now = candle.timestamp
+            tf_key = timeframe or "1d"
+            previous_tf = self._sim_now_by_timeframe.get(tf_key)
+            if previous_tf is None or candle.timestamp > previous_tf:
+                self._sim_now_by_timeframe[tf_key] = candle.timestamp
         if not is_new_bar:
             return None
-        self._bar_count[symbol] = self._bar_count.get(symbol, 0) + 1
+
+        tf = timeframe or "1d"
+        counter_key = f"{symbol}|{tf}"
+        self._bar_count[counter_key] = self._bar_count.get(counter_key, 0) + 1
         position = self.positions.get(symbol)
         if position is None:
             return None
@@ -414,17 +507,34 @@ class PaperAccount:
         # daily entry.
         if timeframe is not None and timeframe != position.timeframe:
             return None
-        now = datetime.now(timezone.utc)
+        now = candle.timestamp or datetime.now(timezone.utc)
         self._reset_daily_if_needed(now)
 
         # Match ENGINE.min_hold_bars so trailing/breakeven don't arm earlier
         # here than in backtests — otherwise live and backtested results for
         # the same pattern diverge. bar_idx is per real new bar (see
         # _bar_count), not per scan cycle.
-        bar_idx = self._bar_count.get(symbol, 0)
+        bar_idx = self.bar_count(symbol, position.timeframe)
         exit_price, reason = _check_exit(
             candle, position, bar_idx, min_hold_bars=ENGINE.min_hold_bars,
         )
+        if reason == "time_exit":
+            elapsed = position.time_exit_bars_elapsed
+            configured = position.exit_bars_after_neckline_break
+            signal_or_break_idx = position.neckline_break_bar_idx
+            position_bars = (
+                bar_idx - position.entry_bar_idx
+                if position.entry_bar_idx >= 0 else None
+            )
+            log.info(
+                f"Paper | TIME_EXIT {symbol} | "
+                f"elapsed={elapsed} bars from breakout/signal "
+                f"(configured={configured}) | "
+                f"entry_bar={position.entry_bar_idx} "
+                f"breakout_bar={signal_or_break_idx} "
+                f"exit_bar={bar_idx} "
+                f"position_bars={position_bars}"
+            )
         if exit_price is None:
             _update_trailing_reference(position, candle)
             return None
@@ -455,11 +565,53 @@ class PaperAccount:
         self._daily_pnl += position.pnl * position.qty
         del self.positions[symbol]
         self.closed.append(position)
-        self.equity_curve.append((now.isoformat(), self.equity()))
+        self.mark_to_market(now)
         log.info(
             f"Paper | CLOSE {symbol} reason={reason} pnl={position.pnl_pct:+.2f}%"
         )
         return position
+
+    def mark_to_market(self, as_of: datetime | None = None) -> float:
+        """Record one portfolio equity mark per market session date.
+
+        The performance engine treats these marks as daily returns. Recording
+        one point per scan (e.g. every 60 seconds) would make Sharpe depend on
+        the scanner interval and be meaningless during compressed replay.
+        """
+        with self._lock:
+            ts = as_of or self._sim_now or datetime.now(timezone.utc)
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            tz = ZoneInfo(get_market(self.market).session_tz)
+            period_key = ts.astimezone(tz).strftime("%Y-%m-%d")
+            value = self.equity()
+            point = (ts.isoformat(), value)
+            if self.equity_curve:
+                try:
+                    last_ts = datetime.fromisoformat(self.equity_curve[-1][0])
+                    last_key = last_ts.astimezone(tz).strftime("%Y-%m-%d")
+                except (TypeError, ValueError):
+                    last_key = None
+                if last_key == period_key:
+                    self.equity_curve[-1] = point
+                    return value
+            self.equity_curve.append(point)
+            return value
+
+    def realized_pnl_dollars(self) -> float:
+        with self._lock:
+            return sum(t.pnl * t.qty for t in self.closed)
+
+    def unrealized_pnl_dollars(self) -> float:
+        with self._lock:
+            return sum(
+                (
+                    self._last_price.get(sym, p.entry_price) - p.entry_price
+                    if p.action == "BUY"
+                    else p.entry_price - self._last_price.get(sym, p.entry_price)
+                ) * p.qty
+                for sym, p in self.positions.items()
+            )
 
     # ── Reporting ─────────────────────────────────────────────────────────
     def to_result(self) -> BacktestResult:
@@ -468,6 +620,7 @@ class PaperAccount:
                 trades=list(self.closed),
                 total_signals=len(self.closed) + len(self.positions),
                 initial_capital=self.initial_capital,
+                equity_curve=list(self.equity_curve),
             )
 
     # ── Persistence ───────────────────────────────────────────────────────
@@ -481,8 +634,13 @@ class PaperAccount:
                 "max_daily_loss": self.max_daily_loss,
                 "tick": self._tick,
                 "bar_count": self._bar_count,
+                "sim_now_by_timeframe": {
+                    tf: ts.isoformat() for tf, ts in self._sim_now_by_timeframe.items()
+                },
                 "daily_key": self._daily_key,
                 "daily_pnl": self._daily_pnl,
+                "processed_bar_ids": dict(self._processed_bar_ids),
+                "sim_now": self._sim_now.isoformat() if self._sim_now else None,
                 "last_price": dict(self._last_price),
                 "positions": {
                     sym: _trade_to_dict(t) for sym, t in self.positions.items()
@@ -518,14 +676,62 @@ class PaperAccount:
         acct.txn_cost_pct = data.get("txn_cost_pct", acct.txn_cost_pct)
         acct.max_daily_loss = data.get("max_daily_loss", acct.max_daily_loss)
         acct._tick = data.get("tick", 0)
-        acct._bar_count = data.get("bar_count", {})
+        raw_bar_count = data.get("bar_count", {}) or {}
+        # Migrate pre-timeframe accounts whose counters were keyed only by
+        # symbol. Those counters represented the daily paper clock.
+        acct._bar_count = {}
+        for key, value in raw_bar_count.items():
+            key = str(key)
+            if "|" in key:
+                acct._bar_count[key] = int(value)
+            else:
+                acct._bar_count[f"{key}|1d"] = int(value)
+        acct._sim_now_by_timeframe = {}
+        for tf, raw_ts in (data.get("sim_now_by_timeframe") or {}).items():
+            try:
+                acct._sim_now_by_timeframe[str(tf)] = datetime.fromisoformat(raw_ts)
+            except (TypeError, ValueError):
+                continue
         acct._daily_key = data.get("daily_key", "")
         acct._daily_pnl = data.get("daily_pnl", 0.0)
+        acct._processed_bar_ids = {
+            str(k): str(v) for k, v in (data.get("processed_bar_ids") or {}).items()
+        }
+        if data.get("sim_now"):
+            try:
+                acct._sim_now = datetime.fromisoformat(data["sim_now"])
+            except (TypeError, ValueError):
+                acct._sim_now = None
         acct.positions = {
             sym: _trade_from_dict(d) for sym, d in data.get("positions", {}).items()
         }
         acct.closed = [_trade_from_dict(d) for d in data.get("closed", [])]
-        acct.equity_curve = [tuple(x) for x in data.get("equity_curve", [])]
+        raw_curve = [tuple(x) for x in data.get("equity_curve", [])]
+        # Migrate older files that stored one mark per scan. Keep the latest
+        # mark for each market session so historical Sharpe is not contaminated
+        # by the old polling frequency.
+        tz = ZoneInfo(profile.session_tz)
+        deduped_curve: list[tuple[str, float]] = []
+        seen_keys: set[str] = set()
+        for ts_raw, value in raw_curve:
+            try:
+                ts = datetime.fromisoformat(ts_raw)
+                key = ts.astimezone(tz).strftime("%Y-%m-%d")
+            except (TypeError, ValueError):
+                continue
+            if key in seen_keys:
+                for i in range(len(deduped_curve) - 1, -1, -1):
+                    try:
+                        old_ts = datetime.fromisoformat(deduped_curve[i][0])
+                        if old_ts.astimezone(tz).strftime("%Y-%m-%d") == key:
+                            deduped_curve[i] = (ts.isoformat(), float(value))
+                            break
+                    except (TypeError, ValueError):
+                        continue
+            else:
+                deduped_curve.append((ts.isoformat(), float(value)))
+                seen_keys.add(key)
+        acct.equity_curve = deduped_curve
         # Prefer persisted marks so equity/MTM survive process restarts.
         # Fall back to entry (flat unrealized) for older account files that
         # never stored last_price.

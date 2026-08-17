@@ -27,6 +27,7 @@ import time
 from collections import deque
 from contextlib import asynccontextmanager, AsyncExitStack
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 import pandas as pd
@@ -123,10 +124,20 @@ class MarketScanner:
         # keys are session dates, not last-print timestamps, so hourly scans
         # of a forming 1d candle do not count as new bars.
         self._last_bar_ts: dict[tuple[str, str], object] = {}
-        # New-bar count per symbol this run — the paper trade stream server
-        # advances each symbol's tape by exactly one row (= one day) per
-        # scan tick, so counting new bars is counting simulated days.
-        self._sim_ticks: dict[str, int] = {}
+        # Persisted bar identities prevent a clean restart from processing
+        # the same completed daily/weekly bar twice. Keep the in-memory object
+        # representation above for existing tests, and compare a stable string
+        # key against the persisted ledger state.
+        self._persisted_bar_ids: dict[str, str] = (
+            paper_account.processed_bar_identities_snapshot()
+            if paper_account is not None
+            and hasattr(paper_account, "processed_bar_identities_snapshot")
+            else {}
+        )
+        # Unique completed daily-session dates observed in this scanner run.
+        # Counting per symbol/timeframe was wrong: 1,000 symbols would advance
+        # the replay-day counter 1,000 times in a single market session.
+        self._sim_day_keys: set[str] = set()
         self._sim_days: int = 0
         # Signal detected on bar i, filled on bar i+1's close — mirrors the
         # backtester's pending_entry deferral (core/backtester.py) so paper/
@@ -151,6 +162,21 @@ class MarketScanner:
             "kronos_rank_emitted": 0,
             "trades_opened": 0,
             "sim_days": 0,
+            # Rejection counts are grouped by the first gate that vetoed the
+            # signal. This makes a high aggregate "Rejected" count actionable
+            # without requiring a user to grep bot.log.
+            "rejection_by_gate": {},
+            # Scan-health counters make a suspiciously fast "0 patterns"
+            # cycle diagnosable without reading the raw log.
+            "symbols_total": len(self._symbols),
+            "symbols_with_snapshot": 0,
+            "snapshot_errors": 0,
+            "timeframe_requests": 0,
+            "timeframe_snapshots_ok": 0,
+            "new_bars": 0,
+            "pattern_evaluations": 0,
+            "daily_date_skew": 0,
+            "daily_dates_seen": 0,
         }
         # Ring buffer of per-signal accept/reject decisions for the web Paper
         # Logs tab (newest last). Thread-safe — scan workers run concurrently.
@@ -178,9 +204,50 @@ class MarketScanner:
             "price": round(float(signal.price), 4) if signal.price is not None else None,
             "status": status,
             "reason": reason,
+            "sim_bar": (
+                signal.signal_bar_timestamp.isoformat()
+                if signal.signal_bar_timestamp is not None else None
+            ),
+            "sim_bar_idx": signal.signal_bar_idx,
         }
         with self._signal_log_lock:
             self._signal_log.append(entry)
+
+        if status == "rejected":
+            reason_lower = reason.lower()
+            if reason_lower.startswith("execution r:r rejection"):
+                gate = "execution_rr"
+            elif "portfolio full" in reason_lower:
+                gate = "max_positions"
+            elif "gross exposure cap" in reason_lower:
+                gate = "gross_exposure"
+            elif "insufficient cash" in reason_lower:
+                gate = "cash"
+            elif "lot rounding" in reason_lower:
+                gate = "lot_rounding"
+            elif "session " in reason_lower:
+                gate = "session"
+            elif "confidence" in reason_lower:
+                gate = "confidence"
+            elif "regime" in reason_lower or "sma200" in reason_lower:
+                gate = "regime"
+            elif "cooldown" in reason_lower:
+                gate = "cooldown"
+            elif "long-only" in reason_lower:
+                gate = "long_only"
+            elif "kronos" in reason_lower:
+                gate = "kronos"
+            elif "volume" in reason_lower:
+                gate = "volume"
+            elif "vision" in reason_lower:
+                gate = "vision"
+            elif "risk gate" in reason_lower:
+                gate = "risk"
+            else:
+                gate = "other"
+            self.stats["rejection_by_gate"][gate] = (
+                self.stats["rejection_by_gate"].get(gate, 0) + 1
+            )
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
     def start(self) -> None:
@@ -263,6 +330,7 @@ class MarketScanner:
         self.stats["patterns_found"] = 0
         self.stats["signals_rejected"] = 0
         self.stats["trades_opened"] = 0
+        self.stats["rejection_by_gate"] = {}
 
         all_timeframes: set[str] = set()
         for p in self._patterns:
@@ -279,6 +347,8 @@ class MarketScanner:
         # drawn on the post-scan chart PNG so the pattern is easy to eyeball.
         latest_signals: dict[tuple[str, str], TradeSignal] = {}
         new_closed_daily = False
+        self._scan_snapshot_symbols: set[str] = set()
+        self._scan_daily_dates: set[str] = set()
 
         from tqdm import tqdm
 
@@ -298,12 +368,25 @@ class MarketScanner:
                     return
 
                 for timeframe in all_timeframes:
-                    snapshot = await self._tv.fetch_snapshot(
-                        symbol, timeframe,
-                        store=self._store, mcp_session=mcp,
-                    )
-                    if snapshot is None:
+                    self.stats["timeframe_requests"] += 1
+                    try:
+                        snapshot = await self._tv.fetch_snapshot(
+                            symbol, timeframe,
+                            store=self._store, mcp_session=mcp,
+                        )
+                    except Exception as exc:
+                        self.stats["snapshot_errors"] += 1
+                        log.warning(
+                            f"Scan | snapshot failed {symbol} {timeframe}: {exc}"
+                        )
                         continue
+                    if snapshot is None:
+                        self.stats["snapshot_errors"] += 1
+                        continue
+                    self.stats["timeframe_snapshots_ok"] += 1
+                    # Count a symbol once if at least one timeframe produced a
+                    # usable snapshot in this cycle.
+                    self._scan_snapshot_symbols.add(symbol)
 
                     bar_key = (symbol, timeframe)
                     bar_ts = snapshot.candle.timestamp
@@ -313,18 +396,32 @@ class MarketScanner:
                     closed_bar = is_closed_session_bar(
                         timeframe, bar_ts, market=self._market,
                     )
+                    identity_key = repr(identity) if identity is not None else None
+                    persisted_key = self._persisted_bar_ids.get(f"{symbol}|{timeframe}")
                     is_new_bar = (
                         closed_bar
                         and identity is not None
                         and self._last_bar_ts.get(bar_key) != identity
+                        and identity_key != persisted_key
                     )
                     if identity is not None and closed_bar:
                         self._last_bar_ts[bar_key] = identity
+                        if identity_key is not None and self._paper is not None:
+                            self._paper.mark_bar_processed(symbol, timeframe, identity_key)
+                            self._persisted_bar_ids[f"{symbol}|{timeframe}"] = identity_key
                     if is_new_bar and bar_ts is not None:
-                        ticks = self._sim_ticks.get(symbol, 0) + 1
-                        self._sim_ticks[symbol] = ticks
-                        self._sim_days = max(self._sim_days, ticks)
-                        self.stats["sim_days"] = self._sim_days
+                        self.stats["new_bars"] += 1
+                        # One simulated day per unique daily session, not one
+                        # day per symbol or per timeframe.
+                        if is_swing_timeframe(timeframe) and not is_weekly_timeframe(timeframe):
+                            local_ts = bar_ts.astimezone(
+                                ZoneInfo(get_market(self._market).session_tz)
+                            )
+                            session_date = local_ts.strftime("%Y-%m-%d")
+                            self._scan_daily_dates.add(session_date)
+                            self._sim_day_keys.add(session_date)
+                            self._sim_days = len(self._sim_day_keys)
+                            self.stats["sim_days"] = self._sim_days
                     if (
                         is_new_bar
                         and is_swing_timeframe(timeframe)
@@ -337,7 +434,9 @@ class MarketScanner:
                             symbol, snapshot.candle, timeframe, is_new_bar,
                         )
                         if closed is not None:
-                            bar_idx = self._paper.bar_count(closed.symbol)
+                            bar_idx = self._paper.bar_count(
+                                closed.symbol, closed.timeframe,
+                            )
                             self._cooldown_tracker[
                                 (closed.symbol, closed.pattern)
                             ] = (bar_idx, closed.pnl < 0)
@@ -366,6 +465,7 @@ class MarketScanner:
                     for pattern in self._patterns:
                         if timeframe not in pattern.timeframes:
                             continue
+                        self.stats["pattern_evaluations"] += 1
                         signal = pattern.analyze(snapshot, self._store)
                         if signal:
                             self.stats["patterns_found"] += 1
@@ -389,6 +489,23 @@ class MarketScanner:
         finally:
             pbar.close()
 
+        # Mark equity against the completed simulated bar BEFORE advancing the
+        # replay. PaperAccount deduplicates marks to one point per market
+        # session, so Sharpe is a daily/session statistic rather than a
+        # function of the scanner's 60-second polling interval.
+        if self._paper is not None:
+            self._paper.mark_to_market(self._paper.sim_now())
+
+        # Historical stream replay is advanced only after every symbol has
+        # been scanned. A 1,000-symbol scan can take >60s, so a wall-clock
+        # stream timer would otherwise make different symbols see different
+        # simulated dates within the same scan.
+        advance_replay = getattr(self._tv, "advance_replay", None)
+        if advance_replay is not None:
+            control_session = feed_sessions[0] if feed_sessions else None
+            if not await advance_replay(control_session):
+                log.warning("Scanner | paper replay did not advance after scan")
+
         if self._kronos_rank:
             if new_closed_daily:
                 await self._run_kronos_rank_sleeve()
@@ -398,6 +515,19 @@ class MarketScanner:
                 )
 
         self._save_scan_charts(all_timeframes, latest_signals)
+        self.stats["symbols_with_snapshot"] = len(self._scan_snapshot_symbols)
+        self.stats["daily_dates_seen"] = len(self._scan_daily_dates)
+        if len(self._scan_daily_dates) > 1:
+            # The stream server is supposed to advance all loaded tapes
+            # atomically. Missing/irregular symbol histories can still cause a
+            # date skew; surface it rather than silently mixing market days.
+            self.stats["daily_date_skew"] = (
+                len(self._scan_daily_dates) - 1
+            )
+            log.warning(
+                f"Scan | replay date skew detected: "
+                f"daily dates={sorted(self._scan_daily_dates)}"
+            )
         self.stats["last_scan_at"] = datetime.now(timezone.utc).isoformat()
         self.stats["scan_duration_s"] = round(time.monotonic() - scan_start, 2)
         log.info("Scan complete")
@@ -442,6 +572,15 @@ class MarketScanner:
             f"{signal.action} | pattern={signal.pattern} | "
             f"confidence={signal.confidence:.2f}"
         )
+        # Stamp the signal event before any gate can reject it, so the Logs
+        # tab can correlate both accepted and rejected decisions to the
+        # simulated market bar during replay.
+        if candle is not None:
+            signal.signal_bar_idx = (
+                self._paper.bar_count(signal.symbol, signal.timeframe)
+                if self._paper is not None else None
+            )
+            signal.signal_bar_timestamp = candle.timestamp
 
         # Step 0 — Same entry gates the backtester applies before Kronos/volume
         # (min_confidence + SMA200 regime + post-loss cooldown). Without these,
@@ -467,7 +606,8 @@ class MarketScanner:
             return
 
         bar_idx = (
-            self._paper.bar_count(signal.symbol) if self._paper is not None else 0
+            self._paper.bar_count(signal.symbol, signal.timeframe)
+            if self._paper is not None else 0
         )
         cooldown_reason = describe_cooldown_rejection(
             signal, bar_idx, self._cooldown_tracker,
@@ -602,6 +742,9 @@ class MarketScanner:
         # same one-bar deferral the backtester's pending_entry uses — see
         # self._pending_entries.
         if self._paper is not None and candle is not None:
+            # The signal bar is one bar before the deferred fill. Carry its
+            # identity into the position so event-based time stops (notably
+            # neckline/channel exits) start from the breakout bar.
             self._pending_entries[(signal.symbol, signal.timeframe)] = signal
             self._append_signal_log(
                 signal,

@@ -46,7 +46,7 @@
             <tr>
               <th>Symbol</th><th>Status</th><th>Action</th><th>Qty</th>
               <th>Entry</th><th>Current</th><th>Unrl%</th><th>MTM</th>
-              <th>R</th><th>Days</th><th>Value</th><th>Port %</th><th>Pattern</th>
+              <th>R</th><th>Sim Days</th><th>Bars</th><th>Value</th><th>Port %</th><th>Pattern</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -57,7 +57,7 @@
         <table id="paper-closed">
           <thead>
             <tr>
-              <th>Opened</th><th>Closed</th><th>Held</th><th>Symbol</th><th>Action</th>
+              <th>Opened</th><th>Closed</th><th>Sim Days</th><th>Held Bars</th><th>Stop Bars</th><th>Symbol</th><th>Action</th>
               <th>Qty</th><th>Entry</th><th>Exit</th><th>P&L%</th><th>P&L</th>
               <th>R</th><th>Reason</th><th>Pattern</th>
             </tr>
@@ -73,11 +73,22 @@
   <div class="panel">
     <h2>Signal log</h2>
     <p class="muted small">Detected pattern signals with accept/reject outcome and reason.</p>
+    <div class="toolbar compact">
+      <label>Symbol <input type="text" id="paper-log-symbol" size="10" /></label>
+      <label>Pattern <input type="text" id="paper-log-pattern" size="24" /></label>
+      <label>Status
+        <select id="paper-log-status">
+          <option value="">All</option><option value="accepted">Accepted</option>
+          <option value="filled">Filled</option><option value="rejected">Rejected</option>
+        </select>
+      </label>
+      <label>Search <input type="text" id="paper-log-search" size="28" /></label>
+    </div>
     <div class="table-wrap tall">
       <table id="paper-logs">
         <thead>
           <tr>
-            <th>Time</th><th>Symbol</th><th>TF</th><th>Action</th><th>Pattern</th>
+            <th>Time</th><th>Sim Bar</th><th>Symbol</th><th>TF</th><th>Action</th><th>Pattern</th>
             <th>Conf</th><th>Price</th><th>Status</th><th>Reason</th>
           </tr>
         </thead>
@@ -90,6 +101,7 @@
 <section class="tab-panel" id="tab-performance" hidden>
   <div class="panel">
     <h2>Performance</h2>
+    <div id="paper-metrics" class="summary">No closed trades yet.</div>
     <pre id="paper-summary" class="summary">No closed trades yet.</pre>
     <img id="paper-equity-chart" alt="equity" hidden />
   </div>

@@ -40,8 +40,9 @@ class Settings(BaseSettings):
     papertrade_stream_port: int = 8765
     # Warm enough for Kronos gate LOOKBACK=400 when replaying near CSV end.
     papertrade_stream_lookback_bars: int = 420
-    # Streamed bars are historical, not live — scan far faster than the
-    # settings.scan_interval_seconds cadence used for real market data.
+    # Legacy pacing knob retained for .env compatibility. Replay advancement
+    # is now scanner-controlled and happens once per completed universe scan,
+    # so scan duration can never desynchronize symbols.
     papertrade_stream_interval_seconds: int = 60
     # YYYY-MM-DD cursor start for CSV replay. None = near end of each CSV
     # (last papertrade_stream_lookback_bars). UI datepicker overrides this
@@ -129,6 +130,16 @@ class Settings(BaseSettings):
     # ── Notifications ──────────────────────────────────────────────────────
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+
+    # ── PostgreSQL (stock history DB, python main.py --ingest-db/--check-db) ─
+    # Local socket + peer auth (OS user r00t → role r00t), no password.
+    # Discrete fallbacks below are used only when DATABASE_URL is empty.
+    database_url: str = "postgresql://r00t@/stocks_history?host=/var/run/postgresql"
+    db_host: str = "/var/run/postgresql"
+    db_port: int = 5432
+    db_name: str = "stocks_history"
+    db_user: str = "r00t"
+    db_password: str = ""
 
     # ── Web UI (python main.py --web) ───────────────────────────────────────
     # Session login. WEB_UI_PASSWORD is required — the server refuses to bind

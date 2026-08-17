@@ -198,7 +198,6 @@ def _candles_from_yahoo_payload(
             )
             return []
         quote = result0["indicators"]["quote"][0]
-        adjclose = result0["indicators"].get("adjclose", [{}])[0].get("adjclose", [])
     except (KeyError, IndexError, TypeError) as exc:
         log.warning(
             f"TVClient | Chart history parse failed for {chart_symbol} {timeframe}: {exc}"
@@ -214,17 +213,11 @@ def _candles_from_yahoo_payload(
         v = quote["volume"][i]
         if None in (o, h, l, c):
             continue
-        adj = adjclose[i] if i < len(adjclose) else None
-        if adj is not None and c:
-            factor = float(adj) / float(c)
-            o, h, l, c = (
-                float(o) * factor,
-                float(h) * factor,
-                float(l) * factor,
-                float(adj),
-            )
-        else:
-            o, h, l, c = float(o), float(h), float(l), float(c)
+        # Keep OHLC on the raw trading-price basis. The live TradingView
+        # screener candle is raw as well; mixing adjusted Yahoo history with
+        # raw live prices creates artificial dividend/split discontinuities
+        # at the history/live boundary and can fabricate chart patterns.
+        o, h, l, c = float(o), float(h), float(l), float(c)
         candles.append(
             OHLCVCandle(
                 open=o,
@@ -604,8 +597,31 @@ class TVClient:
                     symbol, exchange, timeframe, latest=candle
                 )
                 if history:
+                    # The history source supplies the stable session timestamp
+                    # that TradingView screener's OHLC response omits. Use it
+                    # for the current candle so bar_identity() can distinguish
+                    # one completed daily/weekly bar from the next.
+                    candle = OHLCVCandle(
+                        open=candle.open, high=candle.high, low=candle.low,
+                        close=candle.close, volume=candle.volume,
+                        timestamp=history[-1].timestamp,
+                    )
+                    history[-1] = candle
                     store.replace_all(symbol, timeframe, history)
                 else:
+                    # Screener responses do not reliably expose a bar
+                    # timestamp. For swing timeframes, a wall-clock fallback
+                    # is still stable at the session-date level because
+                    # bar_identity()/is_closed_session_bar() deliberately map
+                    # forming bars to the last closed session. Intraday bars
+                    # remain timestamp-less rather than pretending every scan
+                    # is a distinct completed bar.
+                    if candle.timestamp is None and timeframe in {"1d", "1W"}:
+                        candle = OHLCVCandle(
+                            open=candle.open, high=candle.high, low=candle.low,
+                            close=candle.close, volume=candle.volume,
+                            timestamp=datetime.now(timezone.utc),
+                        )
                     store.push(
                         MarketSnapshot(
                             symbol=symbol,

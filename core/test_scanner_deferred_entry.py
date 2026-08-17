@@ -35,6 +35,8 @@ class _FirstBarBuyPattern(BasePattern):
         return TradeSignal(
             symbol=snapshot.symbol, action="BUY", pattern=self.name,
             timeframe="1d", confidence=0.9, price=snapshot.candle.close, qty=10,
+            stop_loss=snapshot.candle.close * 0.90,
+            take_profit=snapshot.candle.close * 1.20,
         )
 
 

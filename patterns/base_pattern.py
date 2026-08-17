@@ -18,6 +18,7 @@ How to add a new pattern (one per file):
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Literal
 
 from data.tv_client import MarketSnapshot
@@ -71,6 +72,11 @@ class TradeSignal:
     neckline: float | None = None
     neckline_break_direction: Literal["below", "above"] | None = None
     exit_bars_after_neckline_break: int | None = None
+    # Set by the scanner/backtester to the bar on which this signal was
+    # detected.  A deferred next-bar fill must retain that event so
+    # neckline-based time stops start at the breakout bar, not the fill bar.
+    signal_bar_idx: int | None = None
+    signal_bar_timestamp: datetime | None = None
     trailing_activation_pct: float | None = None
     notes:       str = ""
     chart_annotations: list[dict] = field(default_factory=list)

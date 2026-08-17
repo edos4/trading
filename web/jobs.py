@@ -25,6 +25,8 @@ from core.market import default_market, get_market, session_label
 from core.paper_trader import (
     PaperAccount,
     days_held,
+    sim_days_held,
+    bars_held,
     position_status,
     r_multiple,
     risk_dollars,
@@ -364,7 +366,8 @@ class PaperSession:
                     "current": current,
                     "unrl_pct": unrealized_pct(p, current),
                     "r": r,
-                    "days": days_held(p, now),
+                    "days": sim_days_held(p, account.sim_now() or now),
+                    "bars": bars_held(p, account.bar_count(sym)),
                     "value": value,
                     "mtm": mtm,
                     "port_pct": (value / equity * 100) if equity > 0 else 0.0,
@@ -390,6 +393,9 @@ class PaperSession:
                     "pnl": t.pnl * t.qty,
                     "r": r_multiple(t, exit_px),
                     "days": days_held(t),
+                    "bars": bars_held(t),
+                    "time_exit_bars_elapsed": t.time_exit_bars_elapsed,
+                    "time_exit_bars_configured": t.exit_bars_after_neckline_break,
                     "reason": t.exit_reason,
                     "opened": t.entry_date.strftime("%Y-%m-%d") if t.entry_date else "",
                     "closed": t.exit_date.strftime("%Y-%m-%d") if t.exit_date else "",
@@ -405,6 +411,20 @@ class PaperSession:
         )
         curve_b64 = self._equity_chart_b64(account)
 
+        total_pnl = equity - account.initial_capital
+        metrics = {
+            "total_pnl_dollars": total_pnl,
+            "total_pnl_pct": (total_pnl / account.initial_capital * 100)
+            if account.initial_capital else 0.0,
+            "realized_pnl_dollars": account.realized_pnl_dollars(),
+            "unrealized_pnl_dollars": account.unrealized_pnl_dollars(),
+            "avg_r": result.avg_r,
+            "median_r": result.median_r,
+            "avg_hold_bars": result.avg_hold_bars,
+            "exit_reason_breakdown": result.exit_reason_breakdown,
+            "max_drawdown_pct": result.max_drawdown_pct,
+            "sharpe_ratio": result.sharpe_ratio,
+        }
         return {
             "running": running,
             "status": status,
@@ -420,6 +440,7 @@ class PaperSession:
             "closed": closed,
             "signal_logs": signal_logs,
             "summary": result.summary() if result.trades else "No closed trades yet.",
+            "metrics": metrics,
             "equity_png_b64": curve_b64,
             "market": profile.id,
             "currency": profile.currency,

@@ -76,3 +76,27 @@ class StreamClient:
             oscillators={},
             moving_avgs={},
         )
+    async def advance_replay(self, mcp_session=None) -> bool:
+        """Advance the historical replay by exactly one bar after a full scan."""
+        if mcp_session is None:
+            # Use a short-lived control connection when the scanner's worker
+            # sessions are not available. This method is normally called with
+            # the scanner's first persistent session.
+            try:
+                async with self.mcp_session() as ws:
+                    await ws.send(json.dumps({"action": "advance"}))
+                    reply = json.loads(await ws.recv())
+                    return "error" not in reply
+            except Exception as exc:
+                log.error(f"StreamClient | replay advance failed: {exc}")
+                return False
+        try:
+            await mcp_session.send(json.dumps({"action": "advance"}))
+            reply = json.loads(await mcp_session.recv())
+            if "error" in reply:
+                log.error(f"StreamClient | replay advance failed: {reply['error']}")
+                return False
+            return True
+        except Exception as exc:
+            log.error(f"StreamClient | replay advance failed: {exc}")
+            return False

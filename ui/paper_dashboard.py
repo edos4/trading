@@ -36,8 +36,8 @@ from config import settings, DISABLED_PATTERNS
 from core.backtester import BacktestTrade
 from core.market import default_market, format_money, get_market, session_label
 from core.paper_trader import (
-    PaperAccount, days_held, position_status, r_multiple,
-    risk_dollars, unrealized_pct,
+    PaperAccount, days_held, sim_days_held, bars_held, position_status,
+    r_multiple, risk_dollars, unrealized_pct,
 )
 from core.scanner import MarketScanner
 from data.stream_client import StreamClient
@@ -182,10 +182,13 @@ class PaperDashboard:
 
         positions_tab = ttk.Frame(notebook)
         notebook.add(positions_tab, text="Positions")
+        logs_tab = ttk.Frame(notebook)
+        notebook.add(logs_tab, text="Logs")
         perf_tab = ttk.Frame(notebook)
         notebook.add(perf_tab, text="Performance")
 
         self._build_positions_tab(positions_tab)
+        self._build_logs_tab(logs_tab)
         self._build_performance_tab(perf_tab)
 
         self._refresh_all()
@@ -201,7 +204,9 @@ class PaperDashboard:
         pos_cols = [
             ("opened", 125, "Opened"), ("symbol", 65, "Symbol"), ("status", 85, "Status"),
             ("action", 55, "Action"), ("entry", 75, "Entry"), ("current", 75, "Current"),
-            ("unrl_pct", 70, "Unrl %"), ("r", 50, "R"), ("days", 45, "Days"),
+            ("unrl_pct", 70, "Unrl %"), ("r", 50, "R"),
+            ("days", 68, "Cal Days"), ("bars", 58, "Bars"),
+            ("signal_bars", 75, "Signal Bars"),
             ("stop", 110, "Stop"), ("target", 110, "Target"),
             ("value", 85, "Value"), ("mtm", 85, "MTM"), ("port_pct", 60, "Port %"), ("risk", 70, "Risk"),
             ("pattern", 190, "Pattern"),
@@ -216,10 +221,12 @@ class PaperDashboard:
         closed_frame = ttk.LabelFrame(body, text="Closed trades")
         body.add(closed_frame, weight=2)
         closed_cols = [
-            ("opened", 125, "Opened"), ("closed", 125, "Closed"), ("held", 65, "Held"),
-            ("symbol", 65, "Symbol"), ("action", 55, "Action"), ("entry", 75, "Entry"),
-            ("exit", 75, "Exit"), ("pnl", 65, "P&L"), ("r", 50, "R"),
-            ("reason", 100, "Reason"), ("pattern", 190, "Pattern"),
+            ("opened", 125, "Opened"), ("closed", 125, "Closed"),
+            ("held", 68, "Cal Days"), ("bars", 58, "Held Bars"),
+            ("stop_bars", 68, "Stop Bars"), ("symbol", 65, "Symbol"),
+            ("action", 55, "Action"), ("entry", 75, "Entry"), ("exit", 75, "Exit"),
+            ("pnl", 65, "P&L"), ("r", 50, "R"), ("reason", 100, "Reason"),
+            ("pattern", 190, "Pattern"),
         ]
         self._closed_tree = self._add_scrollbar(closed_frame, _SortableTree(
             closed_frame, closed_cols, self._on_sort_closed, height=10,
@@ -246,6 +253,80 @@ class PaperDashboard:
         tree.tag_configure("trailing", foreground=COLOR_TRAILING)
         tree.tag_configure("breakeven", foreground=COLOR_BREAKEVEN)
 
+    # ── Logs tab ──────────────────────────────────────────────────────────
+    def _build_logs_tab(self, parent: ttk.Frame) -> None:
+        """Mirror the web Paper Logs tab: show the scanner's newest signal
+        decisions, including the exact gate/rejection reason.
+
+        The scanner keeps a thread-safe ring buffer, so this is safe to poll
+        from Tk's main thread while the asyncio scanner runs in its worker
+        thread.  Keep the same columns/order as web/templates/paper.html so
+        the two UIs tell the same story.
+        """
+        frame = ttk.LabelFrame(parent, text="Signal log")
+        frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+        filters = ttk.Frame(frame)
+        filters.pack(fill=tk.X, padx=6, pady=(4, 2))
+        ttk.Label(filters, text="Symbol").pack(side=tk.LEFT)
+        self._log_symbol_var = tk.StringVar()
+        ttk.Entry(filters, textvariable=self._log_symbol_var, width=10).pack(side=tk.LEFT, padx=(4, 10))
+        ttk.Label(filters, text="Pattern").pack(side=tk.LEFT)
+        self._log_pattern_var = tk.StringVar()
+        ttk.Entry(filters, textvariable=self._log_pattern_var, width=24).pack(side=tk.LEFT, padx=(4, 10))
+        ttk.Label(filters, text="Status").pack(side=tk.LEFT)
+        self._log_status_var = tk.StringVar(value="ALL")
+        ttk.Combobox(
+            filters, textvariable=self._log_status_var,
+            values=["ALL", "accepted", "filled", "rejected"],
+            state="readonly", width=10,
+        ).pack(side=tk.LEFT, padx=(4, 10))
+        ttk.Label(filters, text="Search").pack(side=tk.LEFT)
+        self._log_search_var = tk.StringVar()
+        ttk.Entry(filters, textvariable=self._log_search_var, width=28).pack(side=tk.LEFT, padx=(4, 8))
+        ttk.Button(filters, text="Clear", command=self._clear_log_filters).pack(side=tk.LEFT)
+
+        ttk.Label(
+            frame,
+            text="Detected pattern signals with accept/reject outcome and reason.",
+            foreground=COLOR_MUTED,
+        ).pack(anchor=tk.W, padx=6, pady=(4, 2))
+
+        log_cols = [
+            ("time", 145, "Time"),
+            ("sim_bar", 105, "Sim Bar"),
+            ("symbol", 70, "Symbol"),
+            ("timeframe", 55, "TF"),
+            ("action", 60, "Action"),
+            ("pattern", 205, "Pattern"),
+            ("confidence", 60, "Conf"),
+            ("price", 80, "Price"),
+            ("status", 85, "Status"),
+            ("reason", 520, "Reason"),
+        ]
+        self._log_tree = _SortableTree(
+            frame, log_cols, self._on_sort_logs, height=24,
+        )
+        self._log_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._log_tree.configure(show="headings")
+        vsb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self._log_tree.yview)
+        self._log_tree.configure(yscrollcommand=vsb.set)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        hsb = ttk.Scrollbar(parent, orient=tk.HORIZONTAL, command=self._log_tree.xview)
+        self._log_tree.configure(xscrollcommand=hsb.set)
+        hsb.pack(fill=tk.X, padx=4, pady=(0, 4))
+
+        self._log_tree.tag_configure("accepted", foreground=COLOR_GAIN)
+        self._log_tree.tag_configure("filled", foreground=COLOR_BUY)
+        self._log_tree.tag_configure("rejected", foreground=COLOR_LOSS)
+        self._log_rows: dict[str, dict] = {}
+        self._log_sort = ("time", True)
+        for var in (
+            self._log_symbol_var, self._log_pattern_var,
+            self._log_status_var, self._log_search_var,
+        ):
+            var.trace_add("write", lambda *_args: self._refresh_logs())
+
     # ── Performance tab ───────────────────────────────────────────────────
     def _build_performance_tab(self, parent: ttk.Frame) -> None:
         body = ttk.PanedWindow(parent, orient=tk.HORIZONTAL)
@@ -259,7 +340,7 @@ class PaperDashboard:
         self._summary_text = tk.Text(summary_frame, height=14, width=42, state=tk.DISABLED, font=("TkFixedFont", 9))
         self._summary_text.pack(fill=tk.BOTH, expand=True)
 
-        pattern_frame = ttk.LabelFrame(left, text="By pattern (disable losers)")
+        pattern_frame = ttk.LabelFrame(left, text="By pattern")
         pattern_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
         self._pattern_tree = ttk.Treeview(
             pattern_frame,
@@ -416,14 +497,41 @@ class PaperDashboard:
         market: str = "us",
     ) -> None:
         data_feed = None
+        profile = get_market(market)
+        # Load the ledger before launching a historical stream so a restarted
+        # paper session can resume after the last simulated bar it actually
+        # processed. The old server always restarted at the configured
+        # stream_start date, which reset market data while the account kept its
+        # old positions/equity.
+        self._account = PaperAccount.load(market=profile.id)
+        effective_stream_start = stream_start
+        if use_stream and self._account.sim_now() is not None:
+            resume_from = self._account.sim_now()
+            if resume_from is not None:
+                resume_date = resume_from.astimezone(
+                    ZoneInfo(profile.session_tz)
+                ).date()
+                configured_date = None
+                if stream_start:
+                    try:
+                        configured_date = datetime.strptime(
+                            stream_start, "%Y-%m-%d"
+                        ).date()
+                    except ValueError:
+                        configured_date = None
+                if configured_date is None or configured_date <= resume_date:
+                    # Start on/after the last processed session. The scanner's
+                    # persisted bar identity will reject a duplicate last bar,
+                    # then the stream advances to the next available bar.
+                    effective_stream_start = resume_date.isoformat()
+
         if use_stream:
-            error = self._ensure_stream_server(start_date=stream_start)
+            error = self._ensure_stream_server(start_date=effective_stream_start)
             if error:
                 self._top.after(0, lambda m=error: self._finish(m))
                 return
             data_feed = StreamClient()
 
-        profile = get_market(market)
         symbol_rows = TVClient.fetch_universe_cached(
             n_symbols, profile.id, extra_symbols=extra_symbols,
         )
@@ -436,7 +544,6 @@ class PaperDashboard:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         self._loop = loop
-        self._account = PaperAccount.load(market=profile.id)
         scanner = MarketScanner(
             symbols=symbols,
             exchange_overrides=exchange_overrides,
@@ -454,7 +561,10 @@ class PaperDashboard:
         self._scanner = scanner
         self._task = loop.create_task(scanner.run())
         interval = settings.papertrade_stream_interval_seconds if use_stream else profile.scan_interval_seconds
-        stream_note = f", stream from {stream_start}" if use_stream and stream_start else ""
+        stream_note = (
+            f", stream from {effective_stream_start}"
+            if use_stream and effective_stream_start else ""
+        )
         self._top.after(0, lambda: self._status_var.set(
             f"Running — {profile.label}, {len(symbols)} symbols, scanning every {interval}s"
             f"{stream_note}"
@@ -565,6 +675,17 @@ class PaperDashboard:
         self._closed_sort = (col, not cur_desc if col == cur_col else True)
         self._refresh_closed()
 
+    def _on_sort_logs(self, col: str) -> None:
+        cur_col, cur_desc = self._log_sort
+        self._log_sort = (col, not cur_desc if col == cur_col else True)
+        self._refresh_logs()
+
+    def _clear_log_filters(self) -> None:
+        self._log_symbol_var.set("")
+        self._log_pattern_var.set("")
+        self._log_status_var.set("ALL")
+        self._log_search_var.set("")
+
     # ── Row detail popups ─────────────────────────────────────────────────
     def _show_trade_details(self, t: BacktestTrade, current_price: Optional[float]) -> None:
         win = tk.Toplevel(self._top)
@@ -578,6 +699,8 @@ class PaperDashboard:
             f"Action:     {t.action}",
             f"Confidence: {t.confidence:.0%}",
             f"Opened:     {t.entry_date.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"Sim entry:  {(t.sim_entry_date or t.entry_date).strftime('%Y-%m-%d %H:%M:%S')}",
+            f"Entry bars: {bars_held(t, self._account.bar_count(t.symbol)) if current_price is not None else bars_held(t) or 0}",
             f"Entry:      {t.entry_price:.2f}",
             f"Stop:       {t.stop_loss:.2f}" if t.stop_loss else "Stop:       -",
             f"Target:     {t.take_profit:.2f}" if t.take_profit else "Target:     -",
@@ -594,6 +717,14 @@ class PaperDashboard:
             lines += [
                 f"Closed:     {t.exit_date.strftime('%Y-%m-%d %H:%M:%S')}",
                 f"Exit:       {t.exit_price:.2f}",
+                f"Bars held:  {t.exit_bar_idx - t.entry_bar_idx}" if t.exit_bar_idx is not None and t.entry_bar_idx >= 0 else "Bars held:  -",
+                (
+                    f"Time-stop:  {t.time_exit_bars_elapsed} bars from breakout/signal "
+                    f"(configured {t.exit_bars_after_neckline_break}); "
+                    f"signal_idx={t.neckline_break_bar_idx}"
+                    if t.time_exit_bars_elapsed is not None
+                    else ""
+                ),
                 f"P&L:        {t.pnl_pct:+.2f}%",
                 f"R:          {r:+.2f}" if r is not None else "R:          -",
                 f"Exit reason:{t.exit_reason}",
@@ -633,21 +764,30 @@ class PaperDashboard:
         self._refresh_header()
         self._refresh_positions()
         self._refresh_closed()
+        self._refresh_logs()
         self._refresh_performance()
 
     def _refresh_header(self) -> None:
         mkt = self._account.market
+        equity = self._account.equity()
+        total_pnl = equity - self._account.initial_capital
         self._equity_var.set(
             f"Market: {get_market(mkt).label}   "
             f"Cash: {format_money(self._account.cash, mkt)}   "
-            f"Equity: {format_money(self._account.equity(), mkt)}   "
+            f"Equity: {format_money(equity, mkt)}   "
+            f"Total P&L: {format_money(total_pnl, mkt, signed=True)} "
+            f"({total_pnl / self._account.initial_capital * 100:+.2f}%)   "
             f"Open: {len(self._account.positions)}   Closed: {len(self._account.closed)}"
             f"   Session: {session_label(mkt)}"
         )
         exp = self._account.exposure()
+        realized = self._account.realized_pnl_dollars()
+        unrealized = self._account.unrealized_pnl_dollars()
         self._exposure_var.set(
-            f"Long exposure: {exp['long_pct']:.1f}%   Short exposure: {exp['short_pct']:.1f}%   "
-            f"Net exposure: {exp['net_pct']:+.1f}%   Gross: {exp.get('gross_pct', 0):.1f}%"
+            f"Long: {exp['long_pct']:.1f}%   Short: {exp['short_pct']:.1f}%   "
+            f"Net: {exp['net_pct']:+.1f}%   Gross: {exp.get('gross_pct', 0):.1f}%   "
+            f"Realized: {format_money(realized, mkt, signed=True)}   "
+            f"Unrealized: {format_money(unrealized, mkt, signed=True)}"
         )
         stats = self._scanner.stats if self._scanner is not None else None
         if stats is None:
@@ -656,17 +796,28 @@ class PaperDashboard:
         last = stats["last_scan_at"]
         last_str = "—" if not last else datetime.fromisoformat(last).strftime("%H:%M:%S")
         sim_days_str = f"   Sim days: {stats['sim_days']}" if self._stream_var.get() else ""
+        rejection = stats.get("rejection_by_gate") or {}
+        rejection_str = ", ".join(
+            f"{k}={v}" for k, v in sorted(
+                rejection.items(), key=lambda kv: (-kv[1], kv[0])
+            )[:4]
+        ) or "none"
         self._scan_stats_var.set(
             f"Last scan: {last_str}   Patterns found: {stats['patterns_found']}   "
             f"Trades opened: {stats['trades_opened']}   Rejected: {stats['signals_rejected']}   "
             f"Vol reject: {stats.get('volume_gate_rejected', 0)}   "
-            f"Scan time: {stats['scan_duration_s']:.1f}s{sim_days_str}"
+            f"Data: {stats.get('symbols_with_snapshot', 0)}/{stats.get('symbols_total', 0)} symbols   "
+            f"New bars: {stats.get('new_bars', 0)}   "
+            f"Pattern evals: {stats.get('pattern_evaluations', 0)}   "
+            f"Replay skew: {stats.get('daily_date_skew', 0)}   "
+            f"Scan time: {stats['scan_duration_s']:.1f}s{sim_days_str}   "
+            f"Reject gates: {rejection_str}"
         )
 
     def _refresh_positions(self) -> None:
         self._pos_tree.delete(*self._pos_tree.get_children())
         self._pos_rows = {}
-        now = datetime.now(timezone.utc)
+        sim_now = self._account.sim_now() or datetime.now(timezone.utc)
         equity = self._account.equity()
         mkt = self._account.market
 
@@ -684,7 +835,19 @@ class PaperDashboard:
                 "sym": sym, "p": p, "current": current, "r": r, "risk": risk,
                 "value": value, "mtm": mtm, "port_pct": port_pct,
                 "stop_dist": stop_dist, "target_dist": target_dist,
-                "unrl": unrealized_pct(p, current), "days": days_held(p, now),
+                "unrl": unrealized_pct(p, current),
+                "days": sim_days_held(
+                    p,
+                    self._account.sim_now(p.timeframe) or sim_now,
+                ),
+                "bars": bars_held(
+                    p,
+                    self._account.bar_count(sym, p.timeframe),
+                ),
+                "signal_bars": (
+                    self._account.bar_count(sym, p.timeframe) - p.neckline_break_bar_idx
+                    if p.neckline_break_bar_idx is not None else None
+                ),
             })
 
         sort_col, desc = self._pos_sort
@@ -698,6 +861,8 @@ class PaperDashboard:
             "unrl_pct": lambda r: r["unrl"],
             "r": lambda r: r["r"] if r["r"] is not None else float("-inf"),
             "days": lambda r: r["days"],
+            "bars": lambda r: r["bars"] if r["bars"] is not None else -1,
+            "signal_bars": lambda r: r["signal_bars"] if r["signal_bars"] is not None else -1,
             "stop": lambda r: r["stop_dist"] if r["stop_dist"] is not None else float("inf"),
             "target": lambda r: r["target_dist"] if r["target_dist"] is not None else float("-inf"),
             "value": lambda r: r["value"],
@@ -721,6 +886,8 @@ class PaperDashboard:
                     p.entry_date.strftime("%Y-%m-%d %H:%M:%S"), sym, status, p.action,
                     f"{p.entry_price:.2f}", f"{current:.2f}", f"{row['unrl']:+.2f}%",
                     f"{r:+.2f}" if r is not None else "-", f"{row['days']:.1f}",
+                    str(row["bars"]) if row["bars"] is not None else "-",
+                    str(row["signal_bars"]) if row["signal_bars"] is not None else "-",
                     stop_str, target_str,
                     format_money(row["value"], mkt, signed=False),
                     format_money(row["mtm"], mkt, signed=True),
@@ -741,6 +908,11 @@ class PaperDashboard:
             "opened": lambda t: t.entry_date,
             "closed": lambda t: t.exit_date,
             "held": lambda t: days_held(t),
+            "bars": lambda t: bars_held(t) if bars_held(t) is not None else -1,
+            "stop_bars": lambda t: (
+                t.time_exit_bars_elapsed
+                if t.time_exit_bars_elapsed is not None else -1
+            ),
             "symbol": lambda t: t.symbol,
             "action": lambda t: t.action,
             "entry": lambda t: t.entry_price,
@@ -762,7 +934,14 @@ class PaperDashboard:
                 values=(
                     t.entry_date.strftime("%Y-%m-%d %H:%M:%S"),
                     t.exit_date.strftime("%Y-%m-%d %H:%M:%S"),
-                    held_str, t.symbol, t.action,
+                    held_str,
+                    str(bars_held(t)) if bars_held(t) is not None else "-",
+                    (
+                        str(t.time_exit_bars_elapsed)
+                        if t.time_exit_bars_elapsed is not None
+                        else "-"
+                    ),
+                    t.symbol, t.action,
                     f"{t.entry_price:.2f}", f"{t.exit_price:.2f}",
                     f"{t.pnl_pct:+.2f}%",
                     f"{r:+.2f}" if r is not None else "-",
@@ -772,6 +951,108 @@ class PaperDashboard:
             )
             self._closed_rows[item_id] = t
 
+    def _refresh_logs(self) -> None:
+        """Refresh the Logs tab from the same scanner signal buffer used by
+        the --web Paper Logs tab. Newest entries are shown first, matching
+        web/static/app.js."""
+        self._log_tree.delete(*self._log_tree.get_children())
+        self._log_rows = {}
+
+        if self._scanner is None:
+            return
+
+        rows = list(reversed(self._scanner.signal_log_snapshot()))
+        symbol_filter = self._log_symbol_var.get().strip().lower()
+        pattern_filter = self._log_pattern_var.get().strip().lower()
+        status_filter = self._log_status_var.get().strip().lower()
+        search_filter = self._log_search_var.get().strip().lower()
+        if symbol_filter or pattern_filter or status_filter != "all" or search_filter:
+            filtered = []
+            for row in rows:
+                if symbol_filter and symbol_filter not in str(row.get("symbol") or "").lower():
+                    continue
+                if pattern_filter and pattern_filter not in str(row.get("pattern") or "").lower():
+                    continue
+                if status_filter != "all" and str(row.get("status") or "").lower() != status_filter:
+                    continue
+                if search_filter:
+                    haystack = " ".join(
+                        str(row.get(k) or "") for k in
+                        ("symbol", "timeframe", "action", "pattern", "status", "reason")
+                    ).lower()
+                    if search_filter not in haystack:
+                        continue
+                filtered.append(row)
+            rows = filtered
+        sort_col, desc = self._log_sort
+
+        def _ts(row: dict) -> datetime:
+            raw = row.get("ts")
+            if not raw:
+                return datetime.min.replace(tzinfo=timezone.utc)
+            try:
+                return datetime.fromisoformat(raw)
+            except (TypeError, ValueError):
+                return datetime.min.replace(tzinfo=timezone.utc)
+
+        def _sim_ts(row: dict) -> datetime | None:
+            raw = row.get("sim_bar")
+            if not raw:
+                return None
+            try:
+                return datetime.fromisoformat(raw)
+            except (TypeError, ValueError):
+                return None
+
+        def _numeric(row: dict, key: str) -> float:
+            value = row.get(key)
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return float("-inf")
+
+        sort_key = {
+            "time": _ts,
+            "sim_bar": lambda r: _sim_ts(r) or datetime.min.replace(tzinfo=timezone.utc),
+            "symbol": lambda r: str(r.get("symbol") or ""),
+            "timeframe": lambda r: str(r.get("timeframe") or ""),
+            "action": lambda r: str(r.get("action") or ""),
+            "pattern": lambda r: str(r.get("pattern") or ""),
+            "confidence": lambda r: _numeric(r, "confidence"),
+            "price": lambda r: _numeric(r, "price"),
+            "status": lambda r: str(r.get("status") or ""),
+            "reason": lambda r: str(r.get("reason") or ""),
+        }.get(sort_col, _ts)
+        rows.sort(key=sort_key, reverse=desc)
+
+        for idx, row in enumerate(rows):
+            ts = _ts(row)
+            ts_str = ts.astimezone().strftime("%Y-%m-%d %H:%M:%S") if ts != datetime.min.replace(tzinfo=timezone.utc) else "—"
+            confidence = row.get("confidence")
+            price = row.get("price")
+            status = str(row.get("status") or "")
+            values = (
+                ts_str,
+                (
+                    _sim_ts(row).astimezone().strftime("%Y-%m-%d")
+                    if _sim_ts(row) is not None else "—"
+                ),
+                row.get("symbol") or "",
+                row.get("timeframe") or "",
+                row.get("action") or "",
+                row.get("pattern") or "",
+                f"{float(confidence):.2f}" if confidence is not None else "—",
+                f"{float(price):.2f}" if price is not None else "—",
+                status,
+                row.get("reason") or "",
+            )
+            item_id = self._log_tree.insert(
+                "", tk.END, iid=f"log-{idx}", values=values,
+                tags=(status,) if status in {"accepted", "filled", "rejected"} else (),
+            )
+            self._log_rows[item_id] = row
+
+    # ── Performance tab ───────────────────────────────────────────────────
     def _refresh_performance(self) -> None:
         result = self._account.to_result()
         self._summary_text.config(state=tk.NORMAL)
@@ -781,18 +1062,29 @@ class PaperDashboard:
         else:
             pf = result.profit_factor
             pf_str = f"{pf:.2f}" if pf != float("inf") else "inf"
+            total_pnl = self._account.equity() - result.initial_capital
+            realized = self._account.realized_pnl_dollars()
+            unrealized = self._account.unrealized_pnl_dollars()
+            exits = ", ".join(
+                f"{reason}={count}" for reason, count in result.exit_reason_breakdown.items()
+            ) or "—"
             self._summary_text.insert(tk.END, (
-                f"Trades:        {len(result.trades)}\n"
-                f"Win rate:      {result.win_rate:.1%}\n"
-                f"Net P&L:       {result.total_pnl_pct:+.2f}%\n"
-                f"Avg winner:    {result.avg_win_pct:+.2f}%\n"
-                f"Avg loser:     {result.avg_loss_pct:+.2f}%\n"
-                f"Largest win:   {result.largest_win_pct:+.2f}%\n"
-                f"Largest loss:  {result.largest_loss_pct:+.2f}%\n"
-                f"Profit factor: {pf_str}\n"
-                f"Expectancy:    {result.expectancy_pct:+.2f}%/trade\n"
-                f"Max drawdown:  {result.max_drawdown_pct:+.2f}%\n"
-                f"Sharpe:        {result.sharpe_ratio:.2f}\n"
+                f"Equity:         {format_money(self._account.equity(), self._account.market)}\n"
+                f"Total P&L:      {format_money(total_pnl, self._account.market, signed=True)} "
+                f"({(total_pnl / result.initial_capital * 100):+.2f}%)\n"
+                f"Realized P&L:   {format_money(realized, self._account.market, signed=True)}\n"
+                f"Unrealized P&L: {format_money(unrealized, self._account.market, signed=True)}\n"
+                f"Trades:         {len(result.trades)}\n"
+                f"Win rate:       {result.win_rate:.1%}\n"
+                f"Avg winner:     {result.avg_win_pct:+.2f}%\n"
+                f"Avg loser:      {result.avg_loss_pct:+.2f}%\n"
+                f"Profit factor:  {pf_str}\n"
+                f"Expectancy:     {result.expectancy_pct:+.2f}%/trade\n"
+                f"Avg R / Median: {result.avg_r:+.2f} / {result.median_r:+.2f}\n"
+                f"Avg hold:       {result.avg_hold_bars:.1f} bars\n"
+                f"Max drawdown:   {result.max_drawdown_pct:+.2f}%\n"
+                f"Sharpe:         {result.sharpe_ratio:.2f}\n"
+                f"Exit reasons:   {exits}\n"
             ))
         self._summary_text.config(state=tk.DISABLED)
 
@@ -823,7 +1115,7 @@ class PaperDashboard:
         ax.plot(xs, ys, color="#2962ff", linewidth=1.5)
         ax.axhline(self._account.initial_capital, color="#888", linestyle="--", linewidth=0.8)
         ax.set_title("Account equity", fontsize=10)
-        ax.set_xlabel("Closed trade #", fontsize=8)
+        ax.set_xlabel("Market session", fontsize=8)
         ax.tick_params(labelsize=7)
         fig.tight_layout()
         buf = io.BytesIO()

@@ -111,3 +111,31 @@ def test_short_multiple_stops_fill_worst_plausible():
     price, reason = _check_exit(_candle(98, 107, 97, 106), trade, 2)
     assert reason == "stop_loss"
     assert price == 105
+
+
+def test_deferred_neckline_time_stop_starts_on_signal_bar():
+    from core.backtester import _open_trade
+    from patterns.base_pattern import TradeSignal
+
+    signal = TradeSignal(
+        symbol="TEST", action="BUY", pattern="pattern_007_descending_channel",
+        timeframe="1d", confidence=0.9, price=100.0, qty=10,
+        stop_loss=90.0, take_profit=120.0,
+        neckline=99.0, neckline_break_direction="above",
+        exit_bars_after_neckline_break=3,
+        signal_bar_idx=10,
+    )
+    fill = OHLCVCandle(
+        open=101, high=105, low=100, close=102, volume=1000,
+        timestamp=datetime(2026, 1, 12, tzinfo=timezone.utc),
+    )
+    position = _open_trade(signal, fill, bar_idx=11)
+    assert position.entry_bar_idx == 11
+    assert position.neckline_break_bar_idx == 10
+
+    # Three bars after the signal bar is the time-stop, even though the fill
+    # itself occurred on the following bar.
+    later = _candle(102, 103, 101, 102)
+    price, reason = _check_exit(later, position, bar_idx=13, min_hold_bars=0)
+    assert reason == "time_exit"
+    assert price == 102

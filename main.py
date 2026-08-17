@@ -19,6 +19,9 @@ Usage:
     python main.py --kronos-test                    # Score Kronos-base +1d/+1w forecast accuracy (20 random symbols)
     python main.py --kronos-test 50                  # ...on 50 randomly sampled symbols
     python main.py --kronos-test 50 --kronos-liquid-only  # ...top 50 by $ volume instead of random
+    python main.py --ingest-db                       # Ingest /home/r00t/stocks_data CSVs into Postgres
+    python main.py --check-db                        # Verify DB is current (freshness / gap check)
+    python main.py --update-db                       # Daily incremental update: CSV sync + fetch all stale symbols
     python scripts/compare_patterns.py              # Cross-pattern comparison (parallel)
     python scripts/compare_patterns.py -p 4         # Limit to 4 concurrent backtests
 
@@ -515,6 +518,72 @@ def _parse_args() -> argparse.Namespace:
         "(first bar on/after). Default: PAPERTRADE_STREAM_START_DATE, or near "
         "the end of each CSV.",
     )
+    parser.add_argument(
+        "--ingest-db",
+        action="store_true",
+        help="Bulk-ingest the historical daily OHLCV CSVs into PostgreSQL "
+        "(stocks_history). Idempotent — safe to re-run.",
+    )
+    parser.add_argument(
+        "--ingest-db-dir",
+        type=str,
+        default=None,
+        metavar="DIR",
+        help="Override the CSV directory for --ingest-db (default: /home/r00t/stocks_data).",
+    )
+    parser.add_argument(
+        "--check-db",
+        action="store_true",
+        help="Check the stock-history DB is current: global + per-symbol stats, "
+        "CSV vs DB gap check, freshness. Non-zero exit if stale/missing.",
+    )
+    parser.add_argument(
+        "--check-db-dir",
+        type=str,
+        default=None,
+        metavar="DIR",
+        help="Override the CSV directory for --check-db (default: /home/r00t/stocks_data).",
+    )
+    parser.add_argument(
+        "--check-db-stale-days",
+        type=int,
+        default=7,
+        metavar="N",
+        help="With --check-db, flag the dataset as stale when the global last bar "
+        "is older than N days (default: 7).",
+    )
+    parser.add_argument(
+        "--check-db-fast",
+        action="store_true",
+        help="With --check-db, skip the per-CSV comparison (DB-only freshness).",
+    )
+    parser.add_argument(
+        "--update-db",
+        action="store_true",
+        help="Incremental daily update: CSV sync (new rows ts > max(ts)) plus "
+        "fetch fallback for every symbol whose last bar is older than the last "
+        "trading day (Yahoo v8 / PSE Edge). Unbounded — updates all symbols.",
+    )
+    parser.add_argument(
+        "--update-db-dir",
+        type=str,
+        default=None,
+        metavar="DIR",
+        help="Override the CSV directory for --update-db (default: /home/r00t/stocks_data).",
+    )
+    parser.add_argument(
+        "--update-db-no-fetch",
+        action="store_true",
+        help="With --update-db, skip the network fetch fallback (CSV sync only).",
+    )
+    parser.add_argument(
+        "--update-db-fetch-limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="With --update-db, cap the fetch fallback to the top N stale symbols "
+        "(by recency). Default: all stale symbols (no cap).",
+    )
     return parser.parse_args()
 
 
@@ -550,6 +619,32 @@ async def main(args: argparse.Namespace | None = None) -> None:
         from data.stream_server import run_stream_server
 
         await run_stream_server(start_date=args.papertrade_stream_start)
+        return
+
+    if args.ingest_db:
+        from data.ingest import run_ingest
+
+        run_ingest(args.ingest_db_dir or "/home/r00t/stocks_data")
+        return
+
+    if args.check_db:
+        from data.check import run_check
+
+        rc = run_check(
+            args.check_db_dir or "/home/r00t/stocks_data",
+            stale_days=args.check_db_stale_days,
+            compare_csv=not args.check_db_fast,
+        )
+        raise SystemExit(rc)
+
+    if args.update_db:
+        from data.update import run_update
+
+        run_update(
+            args.update_db_dir or "/home/r00t/stocks_data",
+            fetch=not args.update_db_no_fetch,
+            fetch_limit=args.update_db_fetch_limit,
+        )
         return
 
     if args.learn:

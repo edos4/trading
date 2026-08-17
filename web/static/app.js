@@ -290,7 +290,12 @@ function initPaper() {
   const exposure = document.getElementById("paper-exposure");
   const scan = document.getElementById("paper-scan");
   const summary = document.getElementById("paper-summary");
+  const metricsEl = document.getElementById("paper-metrics");
   const chart = document.getElementById("paper-equity-chart");
+  const logSymbol = document.getElementById("paper-log-symbol");
+  const logPattern = document.getElementById("paper-log-pattern");
+  const logStatus = document.getElementById("paper-log-status");
+  const logSearch = document.getElementById("paper-log-search");
   const startBtn = document.getElementById("paper-start");
   const stopBtn = document.getElementById("paper-stop");
   const streamCheck = document.getElementById("paper-stream");
@@ -298,6 +303,13 @@ function initPaper() {
   const posBody = document.querySelector("#paper-pos tbody");
   const closedBody = document.querySelector("#paper-closed tbody");
   const logsBody = document.querySelector("#paper-logs tbody");
+
+  const esc = (value) => String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 
   streamCheck.onchange = () => {
     streamDateWrap.hidden = !streamCheck.checked;
@@ -370,18 +382,23 @@ function initPaper() {
     moneySymbol = s.currency_symbol || "$";
     const marketLabel = s.market ? `Market: ${s.market.toUpperCase()}   ` : "";
     const session = s.session ? `   Session: ${s.session}` : "";
+    const totalPnl = Number(s.metrics?.total_pnl_dollars || 0);
+    const totalPnlPct = Number(s.metrics?.total_pnl_pct || 0);
     equity.textContent =
       marketLabel +
       `Cash: ${fmtMoney(s.cash, { digits: 2 })}   ` +
       `Equity: ${fmtMoney(s.equity, { digits: 2 })}   ` +
+      `Total P&L: ${fmtMoney(totalPnl, { signed: true })} (${fmtSigned(totalPnlPct, 2, "%")})   ` +
       `Open: ${s.open_count}   Closed: ${s.closed_count}` +
       session;
     const exp = s.exposure || {};
     exposure.textContent =
-      `Long exposure: ${(exp.long_pct || 0).toFixed(1)}%   ` +
-      `Short exposure: ${(exp.short_pct || 0).toFixed(1)}%   ` +
-      `Net exposure: ${(exp.net_pct || 0) >= 0 ? "+" : ""}${(exp.net_pct || 0).toFixed(1)}%   ` +
-      `Gross: ${(exp.gross_pct || 0).toFixed(1)}%`;
+      `Long: ${(exp.long_pct || 0).toFixed(1)}%   ` +
+      `Short: ${(exp.short_pct || 0).toFixed(1)}%   ` +
+      `Net: ${(exp.net_pct || 0) >= 0 ? "+" : ""}${(exp.net_pct || 0).toFixed(1)}%   ` +
+      `Gross: ${(exp.gross_pct || 0).toFixed(1)}%   ` +
+      `Realized: ${fmtMoney(s.metrics?.realized_pnl_dollars || 0, { signed: true })}   ` +
+      `Unrealized: ${fmtMoney(s.metrics?.unrealized_pnl_dollars || 0, { signed: true })}`;
     const st = s.scan_stats;
     if (!st) {
       scan.textContent = "Last scan: —";
@@ -389,14 +406,34 @@ function initPaper() {
       const last = st.last_scan_at
         ? new Date(st.last_scan_at).toLocaleTimeString()
         : "—";
+      const rejectGates = Object.entries(st.rejection_by_gate || {})
+        .sort((a, b) => Number(b[1]) - Number(a[1]))
+        .slice(0, 4)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(", ") || "none";
       scan.textContent =
         `Last scan: ${last}   Patterns found: ${st.patterns_found}   ` +
         `Trades opened: ${st.trades_opened}   Rejected: ${st.signals_rejected}   ` +
         `Vol reject: ${st.volume_gate_rejected || 0}   ` +
         `Scan time: ${(st.scan_duration_s || 0).toFixed(1)}s` +
-        (s.use_stream ? `   Sim days: ${st.sim_days}` : "");
+        (s.use_stream ? `   Sim days: ${st.sim_days}` : "") +
+        `   Reject gates: ${rejectGates}`;
     }
     summary.textContent = s.summary || "";
+    const m = s.metrics || {};
+    if (metricsEl) {
+      const exits = Object.entries(m.exit_reason_breakdown || {})
+        .map(([k, v]) => `${k}=${v}`).join(", ") || "—";
+      metricsEl.textContent = s.closed_count
+        ? [
+            `Total P&L: ${fmtMoney(m.total_pnl_dollars, { signed: true })} (${fmtSigned(m.total_pnl_pct, 2, "%")})`,
+            `Realized: ${fmtMoney(m.realized_pnl_dollars, { signed: true })}   Unrealized: ${fmtMoney(m.unrealized_pnl_dollars, { signed: true })}`,
+            `Avg R: ${fmtSigned(m.avg_r)}   Median R: ${fmtSigned(m.median_r)}   Avg hold: ${Number(m.avg_hold_bars || 0).toFixed(1)} bars`,
+            `Max DD: ${fmtSigned(m.max_drawdown_pct, 2, "%")}   Sharpe: ${fmtSigned(m.sharpe_ratio)}`,
+            `Exit reasons: ${exits}`,
+          ].join("\n")
+        : "No closed trades yet.";
+    }
     if (s.equity_png_b64) {
       chart.src = `data:image/png;base64,${s.equity_png_b64}`;
       chart.hidden = false;
@@ -406,46 +443,68 @@ function initPaper() {
       const tr = document.createElement("tr");
       const cls = p.unrl_pct > 0 ? "gain" : p.unrl_pct < 0 ? "loss" : "";
       tr.innerHTML =
-        `<td>${p.symbol}</td><td>${p.status}</td><td>${p.action}</td>` +
+        `<td>${esc(p.symbol)}</td><td>${esc(p.status)}</td><td>${esc(p.action)}</td>` +
         `<td>${fmtQty(p.qty)}</td>` +
         `<td>${Number(p.entry).toFixed(2)}</td><td>${Number(p.current).toFixed(2)}</td>` +
         `<td class="${cls}">${fmtSigned(p.unrl_pct, 2, "%")}</td>` +
         `<td class="${cls}">${fmtMoney(p.mtm, { signed: true })}</td>` +
         `<td>${p.r == null ? "—" : fmtSigned(p.r)}</td>` +
-        `<td>${fmtDays(p.days)}</td>` +
+        `<td>${fmtDays(p.days)}</td><td>${p.bars == null ? "—" : p.bars}</td>` +
         `<td>${fmtMoney(p.value)}</td>` +
         `<td>${p.port_pct == null ? "—" : `${Number(p.port_pct).toFixed(1)}%`}</td>` +
-        `<td>${p.pattern}</td>`;
+        `<td>${esc(p.pattern)}</td>`;
       posBody.appendChild(tr);
     }
     closedBody.innerHTML = "";
     for (const t of s.closed || []) {
       const tr = document.createElement("tr");
       const cls = t.pnl_pct > 0 ? "gain" : t.pnl_pct < 0 ? "loss" : "";
+      const reasonTitle = t.time_exit_bars_elapsed != null
+        ? `Time-stop: ${t.time_exit_bars_elapsed} bars from breakout/signal (configured ${t.time_exit_bars_configured ?? "?"})`
+        : "";
       tr.innerHTML =
-        `<td>${t.opened}</td><td>${t.closed}</td><td>${fmtDays(t.days)}</td>` +
-        `<td>${t.symbol}</td><td>${t.action}</td><td>${fmtQty(t.qty)}</td>` +
+        `<td>${esc(t.opened)}</td><td>${esc(t.closed)}</td><td>${fmtDays(t.days)}</td>` +
+        `<td>${t.bars == null ? "—" : t.bars}</td>` +
+        `<td>${t.time_exit_bars_elapsed == null ? "—" : t.time_exit_bars_elapsed}</td>` +
+        `<td>${esc(t.symbol)}</td><td>${esc(t.action)}</td><td>${fmtQty(t.qty)}</td>` +
         `<td>${Number(t.entry).toFixed(2)}</td><td>${Number(t.exit).toFixed(2)}</td>` +
         `<td class="${cls}">${fmtSigned(t.pnl_pct, 2, "%")}</td>` +
         `<td class="${cls}">${fmtMoney(t.pnl, { signed: true })}</td>` +
         `<td>${t.r == null ? "—" : fmtSigned(t.r)}</td>` +
-        `<td>${t.reason}</td><td>${t.pattern}</td>`;
+        `<td title="${esc(reasonTitle)}">${esc(t.reason)}</td>` +
+        `<td>${esc(t.pattern)}</td>`;
       closedBody.appendChild(tr);
     }
     logsBody.innerHTML = "";
-    for (const row of s.signal_logs || []) {
+    const lfSymbol = (logSymbol?.value || "").trim().toLowerCase();
+    const lfPattern = (logPattern?.value || "").trim().toLowerCase();
+    const lfStatus = (logStatus?.value || "").trim().toLowerCase();
+    const lfSearch = (logSearch?.value || "").trim().toLowerCase();
+    const logRows = (s.signal_logs || []).filter((row) => {
+      if (lfSymbol && !String(row.symbol || "").toLowerCase().includes(lfSymbol)) return false;
+      if (lfPattern && !String(row.pattern || "").toLowerCase().includes(lfPattern)) return false;
+      if (lfStatus && String(row.status || "").toLowerCase() !== lfStatus) return false;
+      if (lfSearch) {
+        const hay = ["symbol", "timeframe", "action", "pattern", "status", "reason"]
+          .map((k) => String(row[k] || "")).join(" ").toLowerCase();
+        if (!hay.includes(lfSearch)) return false;
+      }
+      return true;
+    });
+    for (const row of logRows) {
       const tr = document.createElement("tr");
       const stCls = `status-${row.status || ""}`;
       tr.innerHTML =
-        `<td>${fmtTime(row.ts)}</td>` +
-        `<td>${row.symbol || ""}</td>` +
-        `<td>${row.timeframe || ""}</td>` +
-        `<td>${row.action || ""}</td>` +
-        `<td>${row.pattern || ""}</td>` +
+        `<td>${esc(fmtTime(row.ts))}</td>` +
+        `<td>${esc(row.sim_bar ? fmtTime(row.sim_bar) : "—")}</td>` +
+        `<td>${esc(row.symbol)}</td>` +
+        `<td>${esc(row.timeframe)}</td>` +
+        `<td>${esc(row.action)}</td>` +
+        `<td>${esc(row.pattern)}</td>` +
         `<td>${row.confidence == null ? "—" : Number(row.confidence).toFixed(2)}</td>` +
         `<td>${row.price == null ? "—" : Number(row.price).toFixed(2)}</td>` +
-        `<td class="${stCls}">${row.status || ""}</td>` +
-        `<td title="${(row.reason || "").replace(/"/g, "&quot;")}">${row.reason || ""}</td>`;
+        `<td class="${stCls}">${esc(row.status)}</td>` +
+        `<td title="${esc(row.reason)}">${esc(row.reason)}</td>`;
       logsBody.appendChild(tr);
     }
   }
