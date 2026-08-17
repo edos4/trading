@@ -19,6 +19,7 @@ missing model.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 
 from patterns.base_pattern import TradeSignal
@@ -32,6 +33,13 @@ from core.kronos_eval import (
 )
 from config import settings
 from utils.logger import log
+
+_INFER_LOCK = threading.Lock()
+
+
+def kronos_infer_lock() -> threading.Lock:
+    """Process-wide GPU/CPU infer lock. US + PH threads must not overlap."""
+    return _INFER_LOCK
 
 
 def _context_lookback() -> int:
@@ -114,15 +122,6 @@ class KronosGate:
         if signal.timeframe != "1d":
             return KronosGateResult(passed=True, reason="non-daily skip")
 
-        if not self._ensure_loaded():
-            if settings.kronos_gate_fail_open:
-                return KronosGateResult(
-                    passed=True, reason="model unavailable (fail-open)"
-                )
-            return KronosGateResult(
-                passed=False, reason="model unavailable (fail-closed)"
-            )
-
         lookback = _context_lookback()
         df = store.get_df(signal.symbol, signal.timeframe, min_bars=lookback)
         if df is None:
@@ -134,12 +133,21 @@ class KronosGate:
                 passed=False, reason="insufficient bars (fail-closed)"
             )
 
-        out = predict_1w_return(
-            self._predictor,
-            df,
-            sample_count=settings.kronos_sample_count,
-            lookback=lookback,
-        )
+        with _INFER_LOCK:
+            if not self._ensure_loaded():
+                if settings.kronos_gate_fail_open:
+                    return KronosGateResult(
+                        passed=True, reason="model unavailable (fail-open)"
+                    )
+                return KronosGateResult(
+                    passed=False, reason="model unavailable (fail-closed)"
+                )
+            out = predict_1w_return(
+                self._predictor,
+                df,
+                sample_count=settings.kronos_sample_count,
+                lookback=lookback,
+            )
         if out is None:
             if settings.kronos_gate_fail_open:
                 return KronosGateResult(

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, Form, Request
@@ -35,7 +35,7 @@ from web.jobs import (
     backtest_job,
     backtest_param_schema,
     normalize_backtest_form,
-    paper_session,
+    paper_books,
 )
 from web.services import TIMEFRAMES, get_explorer
 
@@ -61,7 +61,16 @@ class PaperStartRequest(BaseModel):
     kronos_rank: bool = False
     volume_gate: bool = False
     stream_start: Optional[str] = None
-    market: Optional[str] = None
+    market: Optional[Literal["us", "ph"]] = None
+
+
+class PaperStopRequest(BaseModel):
+    market: Optional[Literal["us", "ph", "all"]] = "all"
+
+
+class PaperStartBothRequest(BaseModel):
+    us: Optional[PaperStartRequest] = None
+    ph: Optional[PaperStartRequest] = None
 
 
 async def _json_body(request: Request) -> dict[str, Any]:
@@ -157,16 +166,17 @@ def create_app() -> FastAPI:
 
     @app.get("/paper", response_class=HTMLResponse)
     async def paper_page(request: Request, _user: str = Depends(require_login)):
+        us = next(m for m in markets_payload() if m["id"] == "us")
+        ph = next(m for m in markets_payload() if m["id"] == "ph")
         return render(
             request,
             "paper.html",
             active="paper",
-            kronos_gate=default_market().kronos_gate_default,
-            kronos_rank=default_market().kronos_rank_default,
             volume_gate=settings.volume_gate_enabled,
-            default_market=default_market().id,
-            default_n_symbols=default_market().default_n_symbols,
             markets=markets_payload(),
+            us=us,
+            ph=ph,
+            book_cards=[us, ph],
             stream_start_default=_stream_start_default(),
         )
 
@@ -256,7 +266,21 @@ def create_app() -> FastAPI:
         request: Request, _user: str = Depends(require_login),
     ):
         market = request.query_params.get("market") or None
-        return paper_session.snapshot(market=market)
+        if market:
+            return paper_books.snapshot(market)
+        return paper_books.snapshot_all()
+
+    def _start_book(payload: PaperStartRequest, market: str) -> str | None:
+        return paper_books.start(
+            market,
+            payload.n_symbols,
+            extra_symbols=payload.extra_symbols,
+            use_stream=payload.use_stream,
+            kronos_gate=payload.kronos_gate,
+            kronos_rank=payload.kronos_rank,
+            volume_gate=payload.volume_gate,
+            stream_start=payload.stream_start,
+        )
 
     @app.post("/api/paper/start")
     async def api_paper_start(request: Request, _user: str = Depends(require_login)):
@@ -271,23 +295,55 @@ def create_app() -> FastAPI:
                 for e in exc.errors()
             )
             return JSONResponse({"detail": msgs}, status_code=400)
-        err = paper_session.start(
-            payload.n_symbols,
-            extra_symbols=payload.extra_symbols,
-            use_stream=payload.use_stream,
-            kronos_gate=payload.kronos_gate,
-            kronos_rank=payload.kronos_rank,
-            volume_gate=payload.volume_gate,
-            stream_start=payload.stream_start,
-            market=payload.market,
-        )
+        if not payload.market:
+            return JSONResponse({"detail": "market is required (us or ph)."}, status_code=400)
+        err = _start_book(payload, payload.market)
         if err:
             return JSONResponse({"detail": err}, status_code=409)
         return {"ok": True}
 
+    @app.post("/api/paper/start-both")
+    async def api_paper_start_both(request: Request, _user: str = Depends(require_login)):
+        try:
+            raw = await _json_body(request)
+            payload = PaperStartBothRequest.model_validate(raw)
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        except ValidationError as exc:
+            msgs = "; ".join(
+                f"{'.'.join(str(x) for x in e.get('loc', ()))}: {e.get('msg')}"
+                for e in exc.errors()
+            )
+            return JSONResponse({"detail": msgs}, status_code=400)
+        specs: dict[str, dict[str, Any]] = {}
+        if payload.us is not None:
+            specs["us"] = payload.us.model_dump()
+        if payload.ph is not None:
+            specs["ph"] = payload.ph.model_dump()
+        if not specs:
+            return JSONResponse({"detail": "us and/or ph start payload required."}, status_code=400)
+        errors = paper_books.start_both(specs)
+        if errors and len(errors) == len(specs):
+            return JSONResponse({"ok": False, "errors": errors}, status_code=409)
+        return {"ok": not errors, "errors": errors}
+
     @app.post("/api/paper/stop")
-    async def api_paper_stop(_user: str = Depends(require_login)):
-        paper_session.stop()
+    async def api_paper_stop(request: Request, _user: str = Depends(require_login)):
+        market = "all"
+        try:
+            raw = await _json_body(request)
+            if raw:
+                payload = PaperStopRequest.model_validate(raw)
+                market = payload.market or "all"
+        except ValueError:
+            market = "all"
+        except ValidationError as exc:
+            msgs = "; ".join(
+                f"{'.'.join(str(x) for x in e.get('loc', ()))}: {e.get('msg')}"
+                for e in exc.errors()
+            )
+            return JSONResponse({"detail": msgs}, status_code=400)
+        paper_books.stop(market)
         return {"ok": True}
 
     @app.post("/api/paper/reset")
@@ -298,7 +354,9 @@ def create_app() -> FastAPI:
             market = (raw or {}).get("market")
         except ValueError:
             market = None
-        err = paper_session.reset(market=market)
+        if not market:
+            return JSONResponse({"detail": "market is required (us or ph)."}, status_code=400)
+        err = paper_books.reset(market)
         if err:
             return JSONResponse({"detail": err}, status_code=409)
         return {"ok": True}
@@ -307,6 +365,9 @@ def create_app() -> FastAPI:
     async def api_paper_chart(
         request: Request, _user: str = Depends(require_login),
     ):
+        market = (request.query_params.get("market") or "").strip().lower()
+        if market not in ("us", "ph"):
+            return JSONResponse({"detail": "market is required (us or ph)."}, status_code=400)
         side = (request.query_params.get("side") or "").strip().lower()
         symbol = request.query_params.get("symbol") or None
         index_raw = request.query_params.get("index")
@@ -316,12 +377,25 @@ def create_app() -> FastAPI:
                 index = int(index_raw)
             except ValueError:
                 return JSONResponse({"detail": "index must be an integer"}, status_code=400)
-        result = paper_session.render_trade_chart(
-            side=side, symbol=symbol, index=index,
+        result = paper_books.chart(
+            market, side=side, symbol=symbol, index=index,
         )
         if result.get("error"):
             return JSONResponse({"detail": result["error"]}, status_code=404)
         return result
+
+    @app.get("/api/paper/export")
+    async def api_paper_export(
+        request: Request, _user: str = Depends(require_login),
+    ):
+        market = (request.query_params.get("market") or "all").strip().lower()
+        if market not in ("us", "ph", "all"):
+            return JSONResponse({"detail": "market must be us, ph, or all."}, status_code=400)
+        try:
+            payload = paper_books.export_trades(None if market == "all" else market)
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        return payload
 
     return app
 

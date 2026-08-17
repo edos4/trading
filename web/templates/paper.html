@@ -1,34 +1,71 @@
 {% extends "base.html" %}
 {% block title %}Paper — Trading Bot{% endblock %}
 {% block content %}
-<section class="toolbar">
-  <label>Market
-    <select id="paper-market">
-      {% for m in markets %}
-      <option value="{{ m.id }}" {% if m.id == default_market %}selected{% endif %}>{{ m.label }}</option>
-      {% endfor %}
-    </select>
-  </label>
-  <label>Symbols <input type="number" id="paper-n" value="{{ default_n_symbols }}" min="5" max="5000" step="5" /></label>
-  <label>Additional <input type="text" id="paper-extra" placeholder="DHI, AT" size="16" /></label>
-  <button type="button" class="btn primary" id="paper-start">Start</button>
-  <button type="button" class="btn" id="paper-stop" disabled>Stop</button>
-  <button type="button" class="btn" id="paper-reset">Reset account</button>
-  <label class="check"><input type="checkbox" id="paper-stream" /> Use paper trade stream</label>
-  <label id="stream-date-wrap" hidden>Start date
-    <input type="date" id="paper-stream-start" value="{{ stream_start_default }}" />
-  </label>
-  <label class="check"><input type="checkbox" id="paper-kronos" {% if kronos_gate %}checked{% endif %} /> Kronos 1w gate</label>
-  <label class="check"><input type="checkbox" id="paper-kronos-rank" {% if kronos_rank %}checked{% endif %} /> Kronos rank sleeve</label>
-  <label class="check"><input type="checkbox" id="paper-volume" {% if volume_gate %}checked{% endif %} /> Volume gate</label>
+<section class="session-strip" id="paper-session-strip">
+  <div class="clock-pair">
+    <div class="clock-card" data-book="us">
+      <span class="clock-name">US</span>
+      <span class="clock-time" id="clock-us-time">—</span>
+      <span class="clock-tz">ET</span>
+      <span class="session-pill" id="clock-us-session">—</span>
+      <span class="run-lamp" id="lamp-us" data-running="false">stopped</span>
+    </div>
+    <div class="clock-card" data-book="ph">
+      <span class="clock-name">PH</span>
+      <span class="clock-time" id="clock-ph-time">—</span>
+      <span class="clock-tz">PHT</span>
+      <span class="session-pill" id="clock-ph-session">—</span>
+      <span class="run-lamp" id="lamp-ph" data-running="false">stopped</span>
+    </div>
+  </div>
+  <div class="session-actions">
+    <button type="button" class="btn primary" id="paper-start-both">Start both</button>
+    <button type="button" class="btn" id="paper-stop-both">Stop both</button>
+  </div>
 </section>
 
-<section class="panel">
-  <p id="paper-equity" class="equity"></p>
-  <p id="paper-exposure" class="muted"></p>
-  <p id="paper-scan" class="muted"></p>
-  <p id="paper-status" class="status">Idle.</p>
+<section class="book-grid">
+  {% for book in book_cards %}
+  <article class="book-card book-{{ book.id }}" data-book="{{ book.id }}">
+    <header class="book-head">
+      <h2>{{ book.label }}</h2>
+      <span class="currency-badge">{{ book.currency_symbol }} {{ book.currency }}</span>
+    </header>
+    <p class="equity" id="{{ book.id }}-equity"></p>
+    <p class="muted" id="{{ book.id }}-exposure"></p>
+    <p class="muted small" id="{{ book.id }}-scan"></p>
+    <p class="status" id="{{ book.id }}-status">Idle.</p>
+    <div class="book-controls">
+      <label>Symbols <input type="number" id="{{ book.id }}-n" value="{{ book.default_n_symbols }}" min="5" max="5000" step="5" /></label>
+      <label>Additional <input type="text" id="{{ book.id }}-extra" placeholder="tickers" size="12" /></label>
+    </div>
+    <div class="book-actions">
+      <button type="button" class="btn primary book-start" data-book="{{ book.id }}">Start</button>
+      <button type="button" class="btn book-stop" data-book="{{ book.id }}" disabled>Stop</button>
+      <button type="button" class="btn book-reset" data-book="{{ book.id }}">Reset</button>
+    </div>
+    <div class="book-flags">
+      <label class="check"><input type="checkbox" id="{{ book.id }}-kronos" {% if book.kronos_gate %}checked{% endif %} /> Kronos 1w gate</label>
+      <label class="check"><input type="checkbox" id="{{ book.id }}-kronos-rank" {% if book.kronos_rank %}checked{% endif %} /> Kronos rank</label>
+      <label class="check"><input type="checkbox" id="{{ book.id }}-volume" {% if volume_gate %}checked{% endif %} /> Volume gate</label>
+      <label class="check"><input type="checkbox" id="{{ book.id }}-stream" /> Stream</label>
+      <label class="stream-date" id="{{ book.id }}-stream-date-wrap" hidden>Start
+        <input type="date" id="{{ book.id }}-stream-start" value="{{ stream_start_default }}" />
+      </label>
+    </div>
+  </article>
+  {% endfor %}
 </section>
+
+<div class="blotter-filter toolbar compact">
+  <span class="muted">Filter</span>
+  <div class="filter-pills" role="group" aria-label="Market filter">
+    <button type="button" class="pill-btn active" data-filter="all">All</button>
+    <button type="button" class="pill-btn" data-filter="us">US</button>
+    <button type="button" class="pill-btn" data-filter="ph">PH</button>
+  </div>
+  <p class="muted small" id="paper-sort-note">P&amp;L sort is per market — pick US or PH.</p>
+</div>
 
 <div class="tabs" role="tablist">
   <button type="button" class="tab active" data-tab="positions" role="tab" aria-selected="true">Positions</button>
@@ -39,13 +76,18 @@
 <section class="tab-panel active" id="tab-positions">
   <div class="split">
     <div class="panel grow">
-      <h2>Open positions</h2>
-      <p class="muted small">Double-click a row to open the chart.</p>
+      <div class="blotter-head">
+        <div>
+          <h2>Open positions</h2>
+          <p class="muted small">Double-click a row to open the chart.</p>
+        </div>
+        <button type="button" class="btn" id="paper-export-trades" title="Download open and closed trades as JSON for LLM review">Export Trades</button>
+      </div>
       <div class="table-wrap open-wrap">
         <table id="paper-pos">
           <thead>
             <tr>
-              <th>Symbol</th><th>Status</th><th>Action</th><th>Qty</th>
+              <th>Mkt</th><th>Symbol</th><th>Status</th><th>Action</th><th>Qty</th>
               <th>Entry</th><th>Current</th><th>Unrl%</th><th>MTM</th>
               <th>R</th><th>Sim Days</th><th>Bars</th><th>Value</th><th>Port %</th><th>Pattern</th>
             </tr>
@@ -79,13 +121,14 @@
         <table id="paper-closed" class="blotter">
           <thead>
             <tr>
+              <th data-col="market" class="sortable">Mkt</th>
               <th data-col="closed" class="sortable">Closed</th>
               <th data-col="symbol" class="sortable">Symbol</th>
               <th data-col="action" class="sortable">Side</th>
               <th data-col="qty" class="sortable num">Qty</th>
               <th data-col="entry" class="sortable num">Entry</th>
               <th data-col="exit" class="sortable num">Exit</th>
-              <th data-col="pnl" class="sortable num">P&amp;L $</th>
+              <th data-col="pnl" class="sortable num">P&amp;L</th>
               <th data-col="pnl_pct" class="sortable num">P&amp;L %</th>
               <th data-col="r" class="sortable num">R</th>
               <th data-col="reason" class="sortable">Reason</th>
@@ -119,7 +162,7 @@
       <table id="paper-logs">
         <thead>
           <tr>
-            <th>Time</th><th>Sim Bar</th><th>Symbol</th><th>TF</th><th>Action</th><th>Pattern</th>
+            <th>Mkt</th><th>Time</th><th>Sim Bar</th><th>Symbol</th><th>TF</th><th>Action</th><th>Pattern</th>
             <th>Conf</th><th>Price</th><th>Status</th><th>Reason</th>
           </tr>
         </thead>
@@ -130,11 +173,19 @@
 </section>
 
 <section class="tab-panel" id="tab-performance" hidden>
-  <div class="panel">
-    <h2>Performance</h2>
-    <div id="paper-metrics" class="summary">No closed trades yet.</div>
-    <pre id="paper-summary" class="summary">No closed trades yet.</pre>
-    <img id="paper-equity-chart" alt="equity" hidden />
+  <div class="perf-grid">
+    <div class="panel" data-perf="us">
+      <h2>US performance</h2>
+      <div id="paper-metrics-us" class="summary">No closed trades yet.</div>
+      <pre id="paper-summary-us" class="summary">No closed trades yet.</pre>
+      <img id="paper-equity-chart-us" alt="US equity" hidden />
+    </div>
+    <div class="panel" data-perf="ph">
+      <h2>PH performance</h2>
+      <div id="paper-metrics-ph" class="summary">No closed trades yet.</div>
+      <pre id="paper-summary-ph" class="summary">No closed trades yet.</pre>
+      <img id="paper-equity-chart-ph" alt="PH equity" hidden />
+    </div>
   </div>
 </section>
 
@@ -159,6 +210,5 @@
 <script>
   window.TB_PAGE = "paper";
   window.TB_MARKETS = {{ markets | tojson }};
-  window.TB_DEFAULT_MARKET = {{ default_market | tojson }};
 </script>
 {% endblock %}

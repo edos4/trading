@@ -517,6 +517,23 @@ def session_label(market: str | None = None, now: datetime | None = None) -> str
     }.get(w, w)
 
 
+def clock_payload(market: str | None = None, now: datetime | None = None) -> dict:
+    """Session strip / dual-book clocks. US paper is always 'open'."""
+    profile = get_market(market)
+    local = _session_now(profile.id, now)
+    window = session_window(profile.id, now)
+    tz_name = "PHT" if profile.id == MARKET_PH else "ET"
+    session_open = window in ("am", "pm") if profile.id == MARKET_PH else True
+    return {
+        "market": profile.id,
+        "local_time": local.strftime("%H:%M"),
+        "tz_name": tz_name,
+        "session": session_label(profile.id, now),
+        "session_open": session_open,
+        "running": False,
+    }
+
+
 def markets_payload() -> list[dict]:
     """JSON for web/UI dropdowns."""
     out = []

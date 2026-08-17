@@ -9,6 +9,7 @@ from core.market import (
     apply_lot_rounding,
     bar_identity,
     cash_session_closed,
+    clock_payload,
     get_market,
     is_closed_session_bar,
     is_ph_holiday,
@@ -172,6 +173,17 @@ def test_paper_ledgers_do_not_mix():
         assert mixed.cash == 1_000_000  # refused to mix USD ledger into PHP
 
 
+def test_clock_payload():
+    us = clock_payload("us")
+    assert us["tz_name"] == "ET"
+    assert us["session_open"] is True
+    assert len(us["local_time"]) == 5
+    sunday = datetime(2026, 8, 16, 12, 0, tzinfo=ZoneInfo("Asia/Manila"))
+    ph = clock_payload("ph", now=sunday)
+    assert ph["tz_name"] == "PHT"
+    assert ph["session_open"] is False
+
+
 def test_ph_skips_edgar():
     from datetime import date as d
 
@@ -199,6 +211,7 @@ def demo():
     test_us_daily_bar_identity_ignores_intraday_prints()
     test_engine_kwargs_ph_overlay()
     test_paper_ledgers_do_not_mix()
+    test_clock_payload()
     test_ph_skips_edgar()
     test_merge_extra_symbols_skips_screener_dupes()
     print("market: all checks passed")

@@ -227,7 +227,7 @@ Skipped: `CLOSE` actions and non-daily timeframes.
 | `python main.py --backtest` | same |
 | `python main.py --ui` → symbol explorer | toolbar checkbox **Kronos 1w gate** |
 | `python main.py --ui` → **Backtest** | form checkbox **Kronos 1w gate** |
-| `python main.py --ui` → **Paper Trading** | toolbar checkbox **Kronos 1w gate** |
+| `python main.py --ui` → **Paper Trading** | per-book **Kronos 1w gate** (US default ON, PH default OFF) |
 
 UI checkboxes default to the `.env` value but can override for that session.
 Startup logs print `Kronos gate: ON/OFF`.
@@ -389,7 +389,7 @@ records the metrics).
 | `python main.py --backtest` | same; add `--volume-gate-compare` for A/B |
 | `python main.py --ui` → symbol explorer | toolbar checkbox **Volume gate** |
 | `python main.py --ui` → **Backtest** | form checkbox **Volume gate (RVOL+OBV)** + **Compare A/B (Volume)** |
-| `python main.py --ui` → **Paper Trading** | toolbar checkbox **Volume gate** (rejection count in scan stats) |
+| `python main.py --ui` → **Paper Trading** | per-book **Volume gate** (rejection count in that book’s scan stats) |
 
 UI checkboxes default to the `.env` value but can override for that session.
 Startup logs print `Volume gate: ON/OFF`. Rejects log as
@@ -467,8 +467,10 @@ What both UIs support:
 - **Backtest**: parameter form (includes **Kronos 1w gate** and **Volume gate**,
   plus **Compare A/B (Volume)**) runs `Backtester` with the same engine as
   `python main.py --backtest`.
-- **Paper Trading**: live paper dashboard that runs `MarketScanner` with a
-  `PaperAccount` (same path as `python main.py --paper`).
+- **Paper Trading**: dual-book desk (US + PH) that runs two `MarketScanner`
+  threads, each with its own `PaperAccount` (`core/paper_books.py`). Ledgers
+  stay separate (`$` vs `₱`). CLI `python main.py --paper --market us|ph`
+  is still one market; dual is `--ui` / `--web` only.
 - Download the selected symbol's OHLCV data as CSV / save chart PNG.
 
 The explorer reuses the same data, pattern, chart-rendering, Kronos-gate,
@@ -516,6 +518,7 @@ trading_bot_v2/
 │
 ├── core/
 │   ├── scanner.py                       # Main scan loop — ties everything together
+│   ├── paper_books.py                   # Dual-market paper manager (US thread + PH thread)
 │   ├── backtester.py                    # Historical walk-forward backtest engine
 │   ├── test_volume_gate.py              # Unit tests for analysis.price_volume
 │   ├── kronos_eval.py                   # Kronos-base forecast accuracy test (--kronos-test)
@@ -526,13 +529,13 @@ trading_bot_v2/
 ├── ui/
 │   ├── app.py                           # Native tkinter symbol explorer (--ui)
 │   ├── backtest_dialog.py               # UI Backtest launcher (Kronos + Volume gates, A/B)
-│   └── paper_dashboard.py               # UI Paper Trading dashboard (Kronos + Volume gates)
+│   └── paper_dashboard.py               # Dual-book Paper desk (US + PH cards)
 │
 ├── web/
 │   ├── app.py                           # Authenticated FastAPI web UI (--web)
 │   ├── auth.py                          # Session login (WEB_UI_PASSWORD required)
 │   ├── services.py                      # Explorer data/pattern/chart helpers
-│   └── jobs.py                          # Background backtest + paper session
+│   └── jobs.py                          # Background backtest; paper delegates to paper_books
 │
 ├── scripts/
 │   └── compare_patterns.py             # Cross-pattern comparison backtest

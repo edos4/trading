@@ -24,6 +24,8 @@ Design:
 
 from __future__ import annotations
 
+from contextvars import ContextVar
+
 import json
 import os
 import urllib.error
@@ -155,17 +157,18 @@ class EdgarClient:
 
 # Module-level convenience instance so patterns can share the cache.
 _DEFAULT_CLIENT: EdgarClient | None = None
-_SKIP_EDGAR = False
+# Per-task / per-thread, not process-global — US and PH scanners can run
+# in the same process without the last writer winning.
+_SKIP_EDGAR: ContextVar[bool] = ContextVar("skip_edgar", default=False)
 
 
 def set_skip_edgar(skip: bool) -> None:
     """PH / non-US books must not query SEC EDGAR (ticker collisions like SM)."""
-    global _SKIP_EDGAR
-    _SKIP_EDGAR = bool(skip)
+    _SKIP_EDGAR.set(bool(skip))
 
 
 def skip_edgar_enabled() -> bool:
-    return _SKIP_EDGAR
+    return bool(_SKIP_EDGAR.get())
 
 
 def default_client() -> EdgarClient:

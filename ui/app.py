@@ -123,6 +123,14 @@ class TradingBotUI:
         ttk.Button(toolbar, text="Refresh symbols", command=self._load_symbols_threaded).pack(side=tk.LEFT)
         ttk.Button(toolbar, text="Backtest", command=self._open_backtest_dialog).pack(side=tk.LEFT, padx=(6, 0))
         ttk.Button(toolbar, text="Paper Trading", command=self._open_paper_dashboard).pack(side=tk.LEFT, padx=(6, 0))
+        self._lamp_us = tk.StringVar(value="US ○")
+        self._lamp_ph = tk.StringVar(value="PH ○")
+        ttk.Label(toolbar, textvariable=self._lamp_us, foreground="#1b6fc0").pack(
+            side=tk.LEFT, padx=(10, 0),
+        )
+        ttk.Label(toolbar, textvariable=self._lamp_ph, foreground="#b8860b").pack(
+            side=tk.LEFT, padx=(4, 0),
+        )
         ttk.Label(toolbar, text="Market:").pack(side=tk.LEFT, padx=(12, 2))
         self.market_var = tk.StringVar(value=default_market().id)
         market_combo = ttk.Combobox(
@@ -221,6 +229,7 @@ class TradingBotUI:
             status_frame, mode="indeterminate", length=120,
         )
         self.progress.pack(side=tk.RIGHT, padx=(4, 0))
+        self.root.after(1000, self._poll_book_lamps)
 
     # Symbol loading
     def _load_symbols_threaded(self) -> None:
@@ -416,6 +425,19 @@ class TradingBotUI:
     # Downloads / saves
     def _open_backtest_dialog(self) -> None:
         BacktestDialog(self.root)
+
+    def _poll_book_lamps(self) -> None:
+        if self._closed:
+            return
+        try:
+            from core.paper_books import paper_books
+            us_on = paper_books.books["us"].running
+            ph_on = paper_books.books["ph"].running
+            self._lamp_us.set("US ●" if us_on else "US ○")
+            self._lamp_ph.set("PH ●" if ph_on else "PH ○")
+        except Exception:
+            pass
+        self.root.after(10000, self._poll_book_lamps)
 
     def _open_paper_dashboard(self) -> None:
         from ui.paper_dashboard import PaperDashboard

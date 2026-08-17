@@ -97,24 +97,71 @@ def _api_json(
         return exc.code, data
 
 
-def _stub_status(running: bool = False, status: str = "Idle (e2e)") -> dict:
+def _book_stub(market: str, running: bool = False, status: str = "Idle (e2e)") -> dict:
+    us = market == "us"
     return {
         "running": running,
         "status": status,
         "error": None,
         "use_stream": False,
-        "cash": 100000,
-        "equity": 100000,
+        "cash": 100000 if us else 1_000_000,
+        "equity": 100000 if us else 1_000_000,
         "open_count": 0,
         "closed_count": 0,
-        "exposure": {"long_pct": 0, "short_pct": 0, "net_pct": 0},
+        "exposure": {"long_pct": 0, "short_pct": 0, "net_pct": 0, "gross_pct": 0},
         "scan_stats": None,
         "positions": [],
         "closed": [],
         "signal_logs": [],
         "summary": "No closed trades yet.",
+        "metrics": {
+            "total_pnl_dollars": 0,
+            "total_pnl_pct": 0,
+            "realized_pnl_dollars": 0,
+            "unrealized_pnl_dollars": 0,
+        },
         "equity_png_b64": None,
-        "defaults": {"kronos_gate": True, "volume_gate": False, "n_symbols": 100},
+        "market": market,
+        "label": "US" if us else "Philippines (PSE)",
+        "currency": "USD" if us else "PHP",
+        "currency_symbol": "$" if us else "₱",
+        "session": "RTH" if us else "closed",
+        "session_open": us,
+        "session_idle": False,
+        "local_time": "09:41" if us else "21:41",
+        "tz_name": "ET" if us else "PHT",
+        "long_only": not us,
+        "stream_blocked_by": None,
+        "defaults": {
+            "kronos_gate": us,
+            "kronos_rank": False,
+            "volume_gate": False,
+            "n_symbols": 100 if us else 30,
+        },
+    }
+
+
+def _stub_status(running: bool = False, status: str = "Idle (e2e)") -> dict:
+    us = _book_stub("us", running=running, status=status)
+    ph = _book_stub("ph", running=False, status="Idle (e2e)")
+    return {
+        "clocks": {
+            "us": {
+                "local_time": "09:41",
+                "tz_name": "ET",
+                "session": "RTH",
+                "session_open": True,
+                "running": running,
+            },
+            "ph": {
+                "local_time": "21:41",
+                "tz_name": "PHT",
+                "session": "closed",
+                "session_open": False,
+                "running": False,
+            },
+        },
+        "books": {"us": us, "ph": ph},
     }
 
 
@@ -139,6 +186,7 @@ def run_e2e(base_url: str, headed: bool = False) -> None:
         "POST",
         "/api/paper/start",
         {
+            "market": "us",
             "n_symbols": 1000,
             "use_stream": False,
             "kronos_gate": False,
@@ -367,28 +415,29 @@ def run_e2e(base_url: str, headed: bool = False) -> None:
         page.route("**/api/paper/status", handle_paper_status)
 
         page.goto(f"{base}/paper", wait_until="networkidle")
-        expect(page.locator("#stream-date-wrap")).to_be_hidden()
-        page.check("#paper-stream")
-        expect(page.locator("#stream-date-wrap")).to_be_visible()
-        page.uncheck("#paper-stream")
-        page.fill("#paper-n", "1000")
-        page.check("#paper-kronos")
-        page.uncheck("#paper-volume")
-        page.click("#paper-start")
+        expect(page.locator("#us-stream-date-wrap")).to_be_hidden()
+        page.check("#us-stream")
+        expect(page.locator("#us-stream-date-wrap")).to_be_visible()
+        page.uncheck("#us-stream")
+        page.fill("#us-n", "1000")
+        page.check("#us-kronos")
+        page.uncheck("#us-volume")
+        page.click('.book-start[data-book="us"]')
         page.wait_for_timeout(600)
         assert paper_hits["start"] is not None, "paper/start not called"
         assert paper_hits["start"]["n_symbols"] == 1000, paper_hits["start"]
+        assert paper_hits["start"]["market"] == "us"
         assert paper_hits["start"]["kronos_gate"] is True
         assert paper_hits["start"]["volume_gate"] is False
-        status_text = page.locator("#paper-status").inner_text()
+        status_text = page.locator("#us-status").inner_text()
         assert "less_than_equal" not in status_text
         assert "validation error" not in status_text.lower()
-        expect(page.locator("#paper-stop")).to_be_enabled(timeout=8000)
-        page.click("#paper-stop")
+        expect(page.locator('.book-stop[data-book="us"]')).to_be_enabled(timeout=8000)
+        page.click('.book-stop[data-book="us"]')
         page.wait_for_timeout(400)
         assert paper_hits["stop"] >= 1
         page.once("dialog", lambda d: d.accept())
-        page.click("#paper-reset")
+        page.click('.book-reset[data-book="us"]')
         page.wait_for_timeout(400)
         assert paper_hits["reset"] >= 1
         checks.append("paper_flow")

@@ -5,6 +5,7 @@
   --text: #e7ecf1;
   --muted: #8b9aab;
   --accent: #3d8bfd;
+  --ph: #d4a017;
   --danger: #e35d6a;
   --ok: #3dd68c;
   --font: "IBM Plex Sans", "Segoe UI", sans-serif;
@@ -142,6 +143,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
   gap: 1rem;
   margin: 1.1rem 0 0.35rem;
 }
+.panel > .blotter-head:first-child { margin-top: 0; }
 .blotter-head h2 { margin: 0; }
 .blotter-head .muted { margin: 0.2rem 0 0; }
 .toolbar.compact { margin: 0 0 0.55rem; }
@@ -295,3 +297,129 @@ progress { width: 180px; height: 0.7rem; }
   margin: 0;
   padding: 0 0.9rem 0.35rem;
 }
+
+.session-strip {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  position: sticky;
+  top: 3.4rem;
+  z-index: 8;
+}
+.clock-pair { display: flex; flex-wrap: wrap; gap: 1.25rem; }
+.clock-card {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  font-variant-numeric: tabular-nums;
+}
+.clock-name { font-weight: 700; }
+.clock-card[data-book="us"] .clock-name { color: var(--accent); }
+.clock-card[data-book="ph"] .clock-name { color: var(--ph); }
+.clock-time { font-size: 1.15rem; font-weight: 600; }
+.clock-tz { color: var(--muted); font-size: 0.8rem; }
+.session-pill {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.08rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.session-pill.open { color: var(--ok); border-color: #1f5c44; }
+.run-lamp {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.run-lamp[data-running="true"] { color: var(--ok); }
+.run-lamp[data-running="false"] { color: var(--muted); }
+.session-actions { display: flex; gap: 0.5rem; }
+
+.book-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+@media (max-width: 1100px) {
+  .book-grid { grid-template-columns: 1fr; }
+}
+.book-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+}
+.book-card.book-us { box-shadow: inset 3px 0 0 var(--accent); }
+.book-card.book-ph { box-shadow: inset 3px 0 0 var(--ph); }
+.book-card.session-idle #us-scan,
+.book-card.session-idle [id$="-scan"] { opacity: 0.65; }
+.book-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+.book-head h2 { margin: 0; font-size: 1.05rem; }
+.currency-badge { color: var(--muted); font-size: 0.8rem; }
+.book-controls, .book-flags, .book-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+  margin-top: 0.65rem;
+}
+.blotter-filter { align-items: center; }
+.filter-pills { display: flex; gap: 0.35rem; }
+.pill-btn {
+  background: #111821;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.2rem 0.7rem;
+  color: var(--muted);
+}
+.pill-btn.active { color: #fff; border-color: var(--accent); }
+.pill.mkt-us { color: var(--accent); border-color: #2d4d73; }
+.pill.mkt-ph { color: var(--ph); border-color: #5c4a12; }
+#paper-pos tbody tr.book-us,
+#paper-closed tbody tr.book-us,
+#paper-logs tbody tr.book-us { box-shadow: inset 3px 0 0 var(--accent); }
+#paper-pos tbody tr.book-ph,
+#paper-closed tbody tr.book-ph,
+#paper-logs tbody tr.book-ph { box-shadow: inset 3px 0 0 var(--ph); }
+.perf-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+@media (max-width: 1100px) {
+  .perf-grid { grid-template-columns: 1fr; }
+}
+.book-lamps {
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.book-lamps .lamp {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: #3a4654;
+  margin-left: 0.25rem;
+  vertical-align: middle;
+}
+.book-lamps .on .lamp { background: var(--ok); }
+.book-lamps [data-book="us"].on { color: var(--accent); }
+.book-lamps [data-book="ph"].on { color: var(--ph); }

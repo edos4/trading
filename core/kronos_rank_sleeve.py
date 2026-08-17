@@ -22,7 +22,7 @@ import pandas as pd
 
 from config import settings
 from core.kronos_eval import LOOKBACK, predict_1w_return
-from core.kronos_gate import get_kronos_gate
+from core.kronos_gate import get_kronos_gate, kronos_infer_lock
 from data.ohlcv_store import OHLCVStore
 from patterns.base_pattern import TradeSignal
 from utils.logger import log
@@ -91,29 +91,29 @@ def forecast_universe(
 ) -> list[ForecastRow]:
     """Forecast pred_1w for each symbol that has enough daily history in store."""
     gate = get_kronos_gate()
-    if not gate._ensure_loaded():
-        log.warning("KronosRank | predictor unavailable — sleeve emits nothing")
-        return []
-
     sc = settings.kronos_sample_count if sample_count is None else sample_count
     lb = LOOKBACK if lookback is None else lookback
     rows: list[ForecastRow] = []
-    for symbol in symbols:
-        df = store.get_df(symbol, "1d", min_bars=min(lb, 60))
-        if df is None or len(df) < 60:
-            continue
-        out = predict_1w_return(gate._predictor, df, sample_count=sc, lookback=lb)
-        if out is None:
-            continue
-        pred_1w, last_close = out
-        rows.append(
-            ForecastRow(
-                symbol=symbol,
-                pred_1w=pred_1w,
-                last_close=last_close,
-                asof=pd.Timestamp(df.index[-1]),
+    with kronos_infer_lock():
+        if not gate._ensure_loaded():
+            log.warning("KronosRank | predictor unavailable — sleeve emits nothing")
+            return []
+        for symbol in symbols:
+            df = store.get_df(symbol, "1d", min_bars=min(lb, 60))
+            if df is None or len(df) < 60:
+                continue
+            out = predict_1w_return(gate._predictor, df, sample_count=sc, lookback=lb)
+            if out is None:
+                continue
+            pred_1w, last_close = out
+            rows.append(
+                ForecastRow(
+                    symbol=symbol,
+                    pred_1w=pred_1w,
+                    last_close=last_close,
+                    asof=pd.Timestamp(df.index[-1]),
+                )
             )
-        )
     return rows
 
 
@@ -125,28 +125,28 @@ def forecast_from_frames(
 ) -> list[ForecastRow]:
     """Same as forecast_universe but from pre-sliced DataFrames (backtest)."""
     gate = get_kronos_gate()
-    if not gate._ensure_loaded():
-        log.warning("KronosRank | predictor unavailable — sleeve emits nothing")
-        return []
-
     sc = settings.kronos_sample_count if sample_count is None else sample_count
     lb = LOOKBACK if lookback is None else lookback
     rows: list[ForecastRow] = []
-    for symbol, df in frames.items():
-        if df is None or len(df) < 60:
-            continue
-        out = predict_1w_return(gate._predictor, df, sample_count=sc, lookback=lb)
-        if out is None:
-            continue
-        pred_1w, last_close = out
-        rows.append(
-            ForecastRow(
-                symbol=symbol,
-                pred_1w=pred_1w,
-                last_close=last_close,
-                asof=pd.Timestamp(df.index[-1]),
+    with kronos_infer_lock():
+        if not gate._ensure_loaded():
+            log.warning("KronosRank | predictor unavailable — sleeve emits nothing")
+            return []
+        for symbol, df in frames.items():
+            if df is None or len(df) < 60:
+                continue
+            out = predict_1w_return(gate._predictor, df, sample_count=sc, lookback=lb)
+            if out is None:
+                continue
+            pred_1w, last_close = out
+            rows.append(
+                ForecastRow(
+                    symbol=symbol,
+                    pred_1w=pred_1w,
+                    last_close=last_close,
+                    asof=pd.Timestamp(df.index[-1]),
+                )
             )
-        )
     return rows
 
 
