@@ -201,7 +201,7 @@ class PaperDashboard:
         body = ttk.PanedWindow(parent, orient=tk.VERTICAL)
         body.pack(fill=tk.BOTH, expand=True)
 
-        pos_frame = ttk.LabelFrame(body, text="Open positions (click a header to sort, double-click a row for details)")
+        pos_frame = ttk.LabelFrame(body, text="Open positions (click a header to sort, double-click a row for chart)")
         body.add(pos_frame, weight=1)
         pos_cols = [
             ("opened", 125, "Opened"), ("symbol", 65, "Symbol"), ("status", 85, "Status"),
@@ -220,7 +220,7 @@ class PaperDashboard:
         self._configure_color_tags(self._pos_tree)
         self._pos_rows: dict[str, tuple[str, BacktestTrade]] = {}
 
-        closed_frame = ttk.LabelFrame(body, text="Closed trades")
+        closed_frame = ttk.LabelFrame(body, text="Closed trades (double-click a row for chart)")
         body.add(closed_frame, weight=2)
         closed_cols = [
             ("opened", 125, "Opened"), ("closed", 125, "Closed"),
@@ -692,7 +692,7 @@ class PaperDashboard:
     def _show_trade_details(self, t: BacktestTrade, current_price: Optional[float]) -> None:
         win = tk.Toplevel(self._top)
         win.title(f"{t.symbol} — {t.pattern}")
-        text = tk.Text(win, width=64, height=20, font=("TkFixedFont", 9))
+        text = tk.Text(win, width=64, height=16, font=("TkFixedFont", 9))
         text.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
         lines = [
             f"Symbol:     {t.symbol}",
@@ -735,6 +735,54 @@ class PaperDashboard:
             lines += ["", "Notes:", t.notes]
         text.insert(tk.END, "\n".join(lines))
         text.config(state=tk.DISABLED)
+        self._attach_trade_chart(win, t, current_price)
+
+    def _attach_trade_chart(
+        self,
+        win: tk.Toplevel,
+        t: BacktestTrade,
+        current_price: Optional[float],
+    ) -> None:
+        from analysis.chart_renderer import ChartRenderer, trade_level_annotations
+        from data.db import load_daily_ohlcv_df
+
+        df = None
+        if self._scanner is not None:
+            df = self._scanner.ohlcv_frame(t.symbol, t.timeframe or "1d", min_bars=2)
+        if df is None or len(df) < 2:
+            df = load_daily_ohlcv_df(t.symbol)
+        if df is None or len(df) < 2:
+            ttk.Label(win, text="No OHLCV available to render this chart.").pack(
+                padx=8, pady=(0, 8),
+            )
+            return
+        renderer = ChartRenderer(
+            save_to_disk=False,
+            session_tz=get_market(self._account.market).session_tz,
+        )
+        anns = trade_level_annotations(
+            entry=t.entry_price,
+            stop=t.stop_loss,
+            target=t.take_profit,
+            exit_price=t.exit_price if current_price is None else None,
+            exit_reason=t.exit_reason if current_price is None else None,
+            current=current_price,
+        )
+        try:
+            png = renderer.render_with_ema(
+                t.symbol, t.timeframe or "1d", df, annotations=anns,
+            )
+        except Exception as exc:
+            ttk.Label(win, text=f"Chart render failed: {exc}").pack(
+                padx=8, pady=(0, 8),
+            )
+            return
+        img = Image.open(io.BytesIO(png))
+        img.thumbnail((920, 520))
+        photo = ImageTk.PhotoImage(img)
+        lbl = ttk.Label(win, image=photo)
+        lbl.image = photo
+        lbl.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
 
     def _on_position_double_click(self, _event) -> None:
         sel = self._pos_tree.selection()

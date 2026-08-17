@@ -259,6 +259,38 @@ def today_date() -> date:
     return datetime.now(tz=ZoneInfo(_NY_TZ)).date()
 
 
+def load_daily_ohlcv_df(symbol: str):
+    """Pandas OHLCV frame for on-demand charts. None if DB/symbol missing."""
+    try:
+        import pandas as pd
+    except ImportError:
+        return None
+    try:
+        conn = get_conn()
+    except Exception:
+        return None
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT bar_date, open, high, low, close, volume "
+                "FROM daily_bars WHERE symbol = %s ORDER BY ts",
+                (symbol.upper(),),
+            )
+            rows = cur.fetchall()
+        if not rows:
+            return None
+        df = pd.DataFrame(
+            rows, columns=["bar_date", "open", "high", "low", "close", "volume"]
+        )
+        df.index = pd.to_datetime(df["bar_date"])
+        return df[["open", "high", "low", "close", "volume"]]
+    except Exception:
+        log.exception(f"DB | load_daily_ohlcv_df failed for {symbol}")
+        return None
+    finally:
+        conn.close()
+
+
 def bar_date_from_ts(ts: int) -> date:
     from zoneinfo import ZoneInfo
 

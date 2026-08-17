@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     max_daily_loss_usd: float = 1500.0
     max_daily_loss_php: float = 15000.0
     max_open_positions: int = 8  # <=0 means unlimited
+    # Cap concurrent seats in any one pattern so the book cannot collapse
+    # into a single setup (paper was 8/10 descending-channel). 0 = unlimited.
+    max_open_per_pattern: int = 4
+    # Skip leftover crumbs after risk/exposure caps (e.g. BUY 1 share).
+    min_position_notional: float = 1000.0
 
     # ── Paper trading ─────────────────────────────────────────────────────
     paper_initial_capital: float = 100_000.0

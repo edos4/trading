@@ -47,6 +47,13 @@ class EngineDefaults:
     hard_stop_percentage: float = 0.06
     min_reward_risk_ratio: float = 1.5
     min_hold_bars: int = 2
+    # Channel breakouts are defined against the trend that SMA200 would
+    # otherwise forbid (006 shorts strength, 007 longs weakness). Applying
+    # the regime filter there rejects ~90% of 006 and ~60% of 007.
+    regime_exempt_patterns: tuple[str, ...] = (
+        "pattern_006_upward_channel",
+        "pattern_007_descending_channel",
+    )
 
 
 ENGINE = EngineDefaults()
@@ -67,6 +74,7 @@ def backtest_kwargs(**overrides: Any) -> dict[str, Any]:
     # regime_hysteresis_pct is consumed by passes_regime_filter via ENGINE,
     # not Backtester.__init__. Drop it from constructor kwargs.
     d.pop("regime_hysteresis_pct", None)
+    d.pop("regime_exempt_patterns", None)
     market = overrides.pop("market", None)
     profile = get_market(market)
     d["market"] = profile.id
@@ -148,6 +156,8 @@ def describe_regime_rejection(
     """Human-readable regime reject, or None if the signal clears the filter."""
     use = ENGINE.regime_filter if enabled is None else enabled
     if not use or signal.action == "CLOSE":
+        return None
+    if signal.pattern in ENGINE.regime_exempt_patterns:
         return None
     df = store.get_df(signal.symbol, signal.timeframe, min_bars=1)
     if df is None or len(df) < 200:

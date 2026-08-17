@@ -303,6 +303,26 @@ def create_app() -> FastAPI:
             return JSONResponse({"detail": err}, status_code=409)
         return {"ok": True}
 
+    @app.get("/api/paper/chart")
+    async def api_paper_chart(
+        request: Request, _user: str = Depends(require_login),
+    ):
+        side = (request.query_params.get("side") or "").strip().lower()
+        symbol = request.query_params.get("symbol") or None
+        index_raw = request.query_params.get("index")
+        index = None
+        if index_raw not in (None, ""):
+            try:
+                index = int(index_raw)
+            except ValueError:
+                return JSONResponse({"detail": "index must be an integer"}, status_code=400)
+        result = paper_session.render_trade_chart(
+            side=side, symbol=symbol, index=index,
+        )
+        if result.get("error"):
+            return JSONResponse({"detail": result["error"]}, status_code=404)
+        return result
+
     return app
 
 

@@ -19,6 +19,14 @@ from data.tv_client import MarketSnapshot, OHLCVCandle
 from utils.logger import log
 
 
+class FetchSkip(Exception):
+    """Stream snapshot skipped — not a transport failure."""
+
+    def __init__(self, code: str, message: str):
+        self.code = code
+        super().__init__(message)
+
+
 def _candle_from_row(row: dict) -> OHLCVCandle:
     return OHLCVCandle(
         open=row["open"], high=row["high"], low=row["low"],
@@ -58,8 +66,13 @@ class StreamClient:
             return None
 
         if "error" in reply:
-            log.warning(f"StreamClient | {symbol}: {reply['error']}")
-            return None
+            code = str(reply.get("code") or "no_data")
+            message = str(reply["error"])
+            if code == "asof_mismatch":
+                log.debug(f"StreamClient | {symbol}: {message}")
+            else:
+                log.warning(f"StreamClient | {symbol}: {message}")
+            raise FetchSkip(code, message)
 
         candle = _candle_from_row(reply["candle"])
         if store is not None:
@@ -76,6 +89,24 @@ class StreamClient:
             oscillators={},
             moving_avgs={},
         )
+
+    async def pin_replay_asof(self, symbol: str, mcp_session=None) -> str | None:
+        """Pin the stream server's control date to `symbol`'s current bar."""
+        if mcp_session is None:
+            log.error("StreamClient | pin_replay_asof called without a session")
+            return None
+        try:
+            await mcp_session.send(json.dumps({"action": "pin_asof", "symbol": symbol}))
+            reply = json.loads(await mcp_session.recv())
+        except Exception as exc:
+            log.error(f"StreamClient | pin_asof failed: {exc}")
+            return None
+        if "error" in reply:
+            log.warning(f"StreamClient | pin_asof {symbol}: {reply['error']}")
+            return None
+        asof_day = reply.get("asof_day")
+        return str(asof_day) if asof_day is not None else None
+
     async def advance_replay(self, mcp_session=None) -> bool:
         """Advance the historical replay by exactly one bar after a full scan."""
         if mcp_session is None:

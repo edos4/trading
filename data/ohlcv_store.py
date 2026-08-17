@@ -15,7 +15,6 @@ from dataclasses import asdict
 import pandas as pd
 
 from data.tv_client import OHLCVCandle, MarketSnapshot
-from utils.logger import log
 
 # How many candles to keep in memory per symbol/timeframe
 # Sized for Kronos gate LOOKBACK=400 (+ headroom) and TV history ≤512.
@@ -104,7 +103,6 @@ class OHLCVStore:
         key = (symbol, timeframe)
         candles = self._store.get(key)
         if not candles or len(candles) < min_bars:
-            log.debug(f"OHLCVStore | Not enough history for {symbol} {timeframe} yet")
             return None
         version = self._version.get(key, 0)
         cached = self._df_cache.get(key)

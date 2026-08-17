@@ -376,6 +376,7 @@ class PaperSession:
                     "stop": p.stop_loss,
                     "target": p.take_profit,
                     "opened": p.entry_date.isoformat(),
+                    "timeframe": p.timeframe,
                 }
             )
 
@@ -400,6 +401,7 @@ class PaperSession:
                     "reason": t.exit_reason,
                     "opened": t.entry_date.strftime("%Y-%m-%d") if t.entry_date else "",
                     "closed": t.exit_date.strftime("%Y-%m-%d") if t.exit_date else "",
+                    "timeframe": t.timeframe,
                 }
             )
 
@@ -483,6 +485,71 @@ class PaperSession:
         except Exception:
             log.exception("Web Paper | equity chart failed")
             return None
+
+    def render_trade_chart(
+        self,
+        *,
+        side: str,
+        symbol: str | None = None,
+        index: int | None = None,
+    ) -> dict[str, Any]:
+        """On-demand PNG for an open position or closed trade row click."""
+        from analysis.chart_renderer import ChartRenderer, trade_level_annotations
+        from core.market import get_market
+
+        with self.lock:
+            account = self.account
+            scanner = self.scanner
+
+        trade = None
+        current = None
+        if side == "open":
+            if not symbol:
+                return {"error": "symbol is required for open charts"}
+            trade = account.positions.get(symbol.upper()) or account.positions.get(symbol)
+            if trade is None:
+                return {"error": f"no open position in {symbol}"}
+            current = account.last_price(trade.symbol, trade.entry_price)
+        elif side == "closed":
+            closed = account.closed
+            if index is None or index < 0 or index >= len(closed):
+                return {"error": "closed chart needs a valid row index"}
+            trade = closed[index]
+        else:
+            return {"error": "side must be open or closed"}
+
+        timeframe = trade.timeframe or "1d"
+        df = None
+        session_tz = get_market(account.market).session_tz
+        if scanner is not None:
+            df = scanner.ohlcv_frame(trade.symbol, timeframe, min_bars=2)
+        if df is None or len(df) < 2:
+            from data.db import load_daily_ohlcv_df
+            df = load_daily_ohlcv_df(trade.symbol)
+        if df is None or len(df) < 2:
+            return {"error": f"no OHLCV for {trade.symbol} {timeframe}"}
+
+        renderer = ChartRenderer(save_to_disk=False, session_tz=session_tz)
+        anns = trade_level_annotations(
+            entry=trade.entry_price,
+            stop=trade.stop_loss,
+            target=trade.take_profit,
+            exit_price=trade.exit_price if side == "closed" else None,
+            exit_reason=trade.exit_reason if side == "closed" else None,
+            current=current,
+        )
+        try:
+            png = renderer.render_with_ema(
+                trade.symbol, timeframe, df, annotations=anns,
+            )
+        except Exception as exc:
+            log.exception("Web Paper | trade chart failed")
+            return {"error": f"chart render failed: {exc}"}
+        title = f"{trade.symbol} {timeframe} · {trade.pattern} · {trade.action}"
+        return {
+            "title": title,
+            "chart_png_b64": base64.b64encode(png).decode("ascii"),
+        }
 
     def start(
         self,

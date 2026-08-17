@@ -194,3 +194,49 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 progress { width: 180px; height: 0.7rem; }
 .gain { color: var(--ok); }
 .loss { color: var(--danger); }
+
+#paper-pos tbody tr,
+#paper-closed tbody tr {
+  cursor: pointer;
+}
+#paper-pos tbody tr:hover,
+#paper-closed tbody tr:hover {
+  background: #243041;
+}
+
+#paper-chart-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+}
+#paper-chart-modal .modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 12, 18, 0.72);
+}
+#paper-chart-modal .modal-card {
+  position: relative;
+  z-index: 1;
+  width: min(960px, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+}
+#paper-chart-modal header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+#paper-chart-img {
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+  background: #131722;
+}

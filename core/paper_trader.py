@@ -336,6 +336,20 @@ class PaperAccount:
                 f"Portfolio full: {len(self.positions)} open positions already at the "
                 f"MAX_OPEN_POSITIONS cap ({settings.max_open_positions})."
             )
+        if settings.max_open_per_pattern > 0:
+            pattern_open = sum(
+                1 for p in self.positions.values() if p.pattern == signal.pattern
+            )
+            if pattern_open >= settings.max_open_per_pattern:
+                log.info(
+                    f"Paper | max_open_per_pattern reached for {signal.pattern} "
+                    f"({pattern_open}/{settings.max_open_per_pattern}) — skipping "
+                    f"{signal.symbol}"
+                )
+                return False, (
+                    f"Pattern cap: {pattern_open} open {signal.pattern} seats already "
+                    f"at MAX_OPEN_PER_PATTERN ({settings.max_open_per_pattern})."
+                )
         profile = get_market(self.market)
         if profile.long_only and signal.action == "SELL":
             return False, (
@@ -428,6 +442,22 @@ class PaperAccount:
                     f"{signal.symbol} at ~{format_money(fill_candle.close, self.market)}, "
                     f"but cash is {format_money(self.cash, self.market)}."
                 )
+        if (
+            settings.min_position_notional > 0
+            and fill_candle.close > 0
+            and signal.qty * fill_candle.close < settings.min_position_notional
+        ):
+            log.info(
+                f"Paper | skip {signal.symbol} — notional "
+                f"{signal.qty * fill_candle.close:.2f} below "
+                f"MIN_POSITION_NOTIONAL {settings.min_position_notional:.0f}"
+            )
+            return False, (
+                f"Min notional: sized {signal.qty:g} {signal.symbol} "
+                f"({format_money(signal.qty * fill_candle.close, self.market)}) "
+                f"is below MIN_POSITION_NOTIONAL "
+                f"{format_money(settings.min_position_notional, self.market)}."
+            )
 
         position = _open_trade(
             signal,

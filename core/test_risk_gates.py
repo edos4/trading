@@ -66,6 +66,27 @@ def demo():
     apply_risk_gates(sig, store, "TEST", "1d", trailing_activation_default=0.02)
     assert sig.trailing_activation_pct == 0.02, sig.trailing_activation_pct
 
+    # Thin trail is widened to 1× ATR instead of rejecting the signal.
+    class _AtrStore:
+        def get_df(self, symbol, timeframe, min_bars=1):
+            import pandas as pd
+            n = 30
+            return pd.DataFrame({
+                "open": [100.0] * n,
+                "high": [108.0] * n,
+                "low": [92.0] * n,
+                "close": [100.0] * n,
+                "volume": [1_000_000.0] * n,
+            })
+
+    sig = _signal(trailing_stop_pct=0.025, take_profit=120.0, stop_loss=94.0)
+    assert apply_risk_gates(
+        sig, _AtrStore(), "TEST", "1d",
+        min_atr_stop_multiple=1.0, min_reward_risk_ratio=1.5,
+    )
+    assert sig.trailing_stop_pct is not None
+    assert sig.trailing_stop_pct > 0.025, sig.trailing_stop_pct
+
     print("apply_risk_gates: all checks passed")
 
     # A stream replay: bars are days apart in sim time but the fills all

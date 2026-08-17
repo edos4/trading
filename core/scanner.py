@@ -37,6 +37,7 @@ from patterns.base_pattern import BasePattern, TradeSignal
 
 from data.tv_client import TVClient, MarketSnapshot
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
+from data.stream_client import FetchSkip
 from analysis.chart_renderer import ChartRenderer
 from analysis.vision_checker import VisionChecker, VisionVerdict
 from core.paper_trader import PaperAccount
@@ -111,7 +112,7 @@ class MarketScanner:
             window=max(DEFAULT_WINDOW, settings.tv_history_days),
             session_tz=profile.session_tz,
         )
-        self._renderer = ChartRenderer(save_to_disk=True, session_tz=profile.session_tz)
+        self._renderer = ChartRenderer(save_to_disk=False, session_tz=profile.session_tz)
         self._vision = VisionChecker()
         # self._client   = IBKRClient()
         # self._orders   = OrderManager(self._client)
@@ -139,6 +140,8 @@ class MarketScanner:
         # the replay-day counter 1,000 times in a single market session.
         self._sim_day_keys: set[str] = set()
         self._sim_days: int = 0
+        self._dead_symbols: set[str] = set()
+        self._thin_logged: set[tuple[str, str]] = set()
         # Signal detected on bar i, filled on bar i+1's close — mirrors the
         # backtester's pending_entry deferral (core/backtester.py) so paper/
         # live trading isn't more optimistic than the backtest that validated
@@ -177,6 +180,8 @@ class MarketScanner:
             "pattern_evaluations": 0,
             "daily_date_skew": 0,
             "daily_dates_seen": 0,
+            "asof_skipped": 0,
+            "dead_symbols": 0,
         }
         # Ring buffer of per-signal accept/reject decisions for the web Paper
         # Logs tab (newest last). Thread-safe — scan workers run concurrently.
@@ -245,9 +250,11 @@ class MarketScanner:
                 gate = "risk"
             else:
                 gate = "other"
-            self.stats["rejection_by_gate"][gate] = (
-                self.stats["rejection_by_gate"].get(gate, 0) + 1
-            )
+            stats = getattr(self, "stats", None)
+            if not isinstance(stats, dict):
+                return
+            by_gate = stats.setdefault("rejection_by_gate", {})
+            by_gate[gate] = by_gate.get(gate, 0) + 1
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
     def start(self) -> None:
@@ -274,6 +281,48 @@ class MarketScanner:
         # self._client.disconnect()
         log.info("Scanner stopped")
 
+    async def _sleep_until_next_scan(self) -> None:
+        """Sleep only the unused remainder of the scan interval.
+
+        Stream replay already advances once per completed scan. Sleeping a
+        full 60s after a 111s scan just idles the replay.
+        """
+        elapsed = float(self.stats.get("scan_duration_s") or 0.0)
+        remaining = self._scan_interval - elapsed
+        if remaining > 0:
+            await asyncio.sleep(remaining)
+            return
+        log.info(
+            f"Scan | skip interval sleep — {elapsed:.1f}s >= {self._scan_interval}s"
+        )
+
+    def _reference_symbol(self) -> str | None:
+        if not self._symbols:
+            return None
+        wanted = {s.upper() for s in self._symbols}
+        for symbol in ("SPY", "AAPL", "MSFT", "QQQ"):
+            if symbol in wanted:
+                return next(s for s in self._symbols if s.upper() == symbol)
+        return self._symbols[0]
+
+    def _note_dead_symbol(self, symbol: str, reason: str) -> None:
+        if symbol in self._dead_symbols:
+            return
+        self._dead_symbols.add(symbol)
+        self.stats["dead_symbols"] = len(self._dead_symbols)
+        log.warning(f"Scan | drop {symbol} for this run — {reason}")
+
+    async def _pin_replay_asof(self, feed_sessions: list | None) -> None:
+        pin = getattr(self._tv, "pin_replay_asof", None)
+        if pin is None or not feed_sessions:
+            return
+        ref = self._reference_symbol()
+        if ref is None:
+            return
+        asof_day = await pin(ref, feed_sessions[0])
+        if asof_day:
+            log.info(f"Scan | replay asof pinned to {asof_day} via {ref}")
+
     # ── Main async loop ────────────────────────────────────────────────────────
     async def run(self) -> None:
         self.start()
@@ -296,7 +345,7 @@ class MarketScanner:
                                     "Scanner | scan cycle failed — restarting data sessions"
                                 )
                                 break
-                            await asyncio.sleep(self._scan_interval)
+                            await self._sleep_until_next_scan()
                 except Exception:
                     log.exception(
                         "Scanner | failed to open data sessions — retrying next interval"
@@ -343,12 +392,13 @@ class MarketScanner:
             f"concurrency={concurrency}"
         )
 
-        # Latest detected signal per (symbol, timeframe) — its annotations are
-        # drawn on the post-scan chart PNG so the pattern is easy to eyeball.
-        latest_signals: dict[tuple[str, str], TradeSignal] = {}
+        # Latest detected signal per (symbol, timeframe) — unused for disk
+        # charts (those render on dashboard click) but kept for vision checks.
         new_closed_daily = False
         self._scan_snapshot_symbols: set[str] = set()
         self._scan_daily_dates: set[str] = set()
+        self.stats["asof_skipped"] = 0
+        await self._pin_replay_asof(feed_sessions)
 
         from tqdm import tqdm
 
@@ -366,6 +416,9 @@ class MarketScanner:
                     symbol = queue.get_nowait()
                 except asyncio.QueueEmpty:
                     return
+                if symbol in self._dead_symbols:
+                    pbar.update(1)
+                    continue
 
                 for timeframe in all_timeframes:
                     self.stats["timeframe_requests"] += 1
@@ -374,6 +427,12 @@ class MarketScanner:
                             symbol, timeframe,
                             store=self._store, mcp_session=mcp,
                         )
+                    except FetchSkip as exc:
+                        if exc.code == "no_data":
+                            self._note_dead_symbol(symbol, str(exc))
+                        else:
+                            self.stats["asof_skipped"] += 1
+                        continue
                     except Exception as exc:
                         self.stats["snapshot_errors"] += 1
                         log.warning(
@@ -462,15 +521,24 @@ class MarketScanner:
                                 pending, status="rejected", reason=fill_reason,
                             )
 
+                    n_bars = self._store.available(symbol, timeframe)
                     for pattern in self._patterns:
                         if timeframe not in pattern.timeframes:
+                            continue
+                        min_bars = int(getattr(pattern, "MIN_BARS", 2) or 2)
+                        if n_bars < min_bars:
+                            if (symbol, timeframe) not in self._thin_logged:
+                                self._thin_logged.add((symbol, timeframe))
+                                log.debug(
+                                    f"Scan | {symbol} {timeframe} has {n_bars} bars "
+                                    f"(need {min_bars}) — skip patterns this run"
+                                )
                             continue
                         self.stats["pattern_evaluations"] += 1
                         signal = pattern.analyze(snapshot, self._store)
                         if signal:
                             self.stats["patterns_found"] += 1
                             self._record_detection(signal)
-                            latest_signals[(symbol, timeframe)] = signal
                             await self._process_signal(signal, pattern, snapshot.candle)
 
                 pbar.update(1)
@@ -514,9 +582,9 @@ class MarketScanner:
                     "KronosRank | skip — no new closed daily bar this scan"
                 )
 
-        self._save_scan_charts(all_timeframes, latest_signals)
         self.stats["symbols_with_snapshot"] = len(self._scan_snapshot_symbols)
         self.stats["daily_dates_seen"] = len(self._scan_daily_dates)
+        self.stats["dead_symbols"] = len(self._dead_symbols)
         if len(self._scan_daily_dates) > 1:
             # The stream server is supposed to advance all loaded tapes
             # atomically. Missing/irregular symbol histories can still cause a
@@ -783,44 +851,9 @@ class MarketScanner:
         # elif signal.action == "CLOSE":
         #     self._orders.close_position(signal.symbol, signal.qty, signal.pattern)
 
-    def _save_scan_charts(
-        self,
-        timeframes: set[str],
-        latest_signals: dict[tuple[str, str], TradeSignal] | None = None,
-    ) -> None:
-        """Write PNG charts for symbols that had a signal detected this scan.
-
-        Annotations are drawn on the PNG so the setup is easy to see/check.
-        Previously this rendered every symbol, but with thousands of symbols
-        that is no longer practical — only symbols with active signals get charts.
-        """
-        latest_signals = latest_signals or {}
-        chart_timeframes = {tf for tf in timeframes if tf != "1W"}
-        items = [
-            (symbol, tf, sig)
-            for (symbol, tf), sig in latest_signals.items()
-            if tf in chart_timeframes
-        ]
-        if not items:
-            return
-
-        from tqdm import tqdm
-
-        for symbol, timeframe, signal in tqdm(
-            items, desc="Saving charts", unit="chart", ncols=80
-        ):
-            df = self._store.get_df(symbol, timeframe, min_bars=1)
-            if df is None:
-                continue
-            try:
-                self._renderer.render_with_ema(
-                    symbol, timeframe, df,
-                    annotations=signal.chart_annotations if signal else None,
-                )
-            except Exception as exc:
-                log.warning(
-                    f"Scanner | Chart render failed for {symbol} {timeframe}: {exc}"
-                )
+    def ohlcv_frame(self, symbol: str, timeframe: str, min_bars: int = 2):
+        """OHLCV for on-demand chart rendering (open/closed row click)."""
+        return self._store.get_df(symbol, timeframe, min_bars=min_bars)
 
     async def _run_vision_check(
         self, signal: TradeSignal, pattern: BasePattern

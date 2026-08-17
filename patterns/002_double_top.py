@@ -6,7 +6,7 @@ Rules from patterns/double_top.md:
   valley depth, volume weakness on leg 2, and no post-H2 breach before entry.
   Entry C14: short on bar 7 after H2 OR neckline-break bar, whichever is first.
   Exit hints on TradeSignal: take_profit 7% below neckline, trailing stop
-  3% above lowest close since entry, and a 5-bar exit after neckline break.
+  3% above lowest close since entry, and a 15-bar exit after neckline break.
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ class DoubleTopPattern(BasePattern):
     TAKE_PROFIT_BELOW_NK = 0.07      # cover 7% below neckline
     TRAILING_STOP_PCT    = 0.03      # 3% above lowest close since entry (acts as stop loss)
     TRAILING_ACTIVATION_PCT = 0.04   # trail doesn't arm until 4% favorable move (was clipping winners at entry)
-    EXIT_BARS_AFTER_NECK_BREAK = 5
+    EXIT_BARS_AFTER_NECK_BREAK = 15
     SWING_LOOKBACK       = 2
     MIN_BARS             = 120
     SHARES               = 25

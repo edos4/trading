@@ -40,6 +40,7 @@
   <div class="split">
     <div class="panel grow">
       <h2>Open positions</h2>
+      <p class="muted small">Click a row to render the chart.</p>
       <div class="table-wrap">
         <table id="paper-pos">
           <thead>
@@ -53,6 +54,7 @@
         </table>
       </div>
       <h2>Closed</h2>
+      <p class="muted small">Click a row to render the chart.</p>
       <div class="table-wrap">
         <table id="paper-closed">
           <thead>
@@ -106,6 +108,18 @@
     <img id="paper-equity-chart" alt="equity" hidden />
   </div>
 </section>
+
+<div id="paper-chart-modal" hidden>
+  <div class="modal-backdrop" id="paper-chart-backdrop"></div>
+  <div class="modal-card">
+    <header>
+      <strong id="paper-chart-title">Chart</strong>
+      <button type="button" class="btn ghost" id="paper-chart-close">Close</button>
+    </header>
+    <p id="paper-chart-status" class="muted">Loading…</p>
+    <img id="paper-chart-img" alt="trade chart" hidden />
+  </div>
+</div>
 {% endblock %}
 {% block scripts %}
 <script>

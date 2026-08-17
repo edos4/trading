@@ -20,7 +20,12 @@ Protocol: client connects, sends one JSON object per request
     {"symbol": "AAPL", "timeframe": "1d"}
 server replies with one JSON object
     {"candle": {...}, "history": [{...}, ...]}  # history ends at candle
-or {"error": "..."} if the symbol has no data.
+or {"error": "...", "code": "no_data"|"asof_mismatch"} if the symbol
+has no data / no bar on the pinned replay date.
+
+Replay control:
+    {"action": "pin_asof", "symbol": "AAPL"}  # pin control date to that tape
+    {"action": "advance"}                     # move control date one session
 """
 
 from __future__ import annotations
@@ -46,6 +51,17 @@ def _parse_start_ts(start_date: str | None) -> int | None:
         log.warning(f"StreamServer | invalid start_date {start_date!r} — ignoring")
         return None
     return int(dt.timestamp())
+
+
+# Real daily bars are unix seconds (~1.7e9 in 2026). Unit tests use tiny
+# integers as sequential bar ids — those must match exactly, not by calendar day.
+_UNIX_TS_FLOOR = 1_000_000_000
+
+
+def asof_key(ts: int) -> int | str:
+    if ts >= _UNIX_TS_FLOOR:
+        return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
+    return int(ts)
 
 
 class _SymbolTape:
@@ -74,12 +90,40 @@ class _SymbolTape:
         if self.cursor >= len(self.rows):
             self.cursor = self.start
 
-    def snapshot(self) -> dict:
+    def snapshot(self, asof_ts: int | None = None) -> dict | None:
         lookback = settings.papertrade_stream_lookback_bars
+        if asof_ts is not None:
+            idx = self.index_for_asof(asof_ts)
+            if idx is None:
+                return None
+            end = idx + 1
+            start = max(0, end - lookback)
+            history = self.rows[start:end]
+            return {"candle": history[-1], "history": history}
         end = self.cursor + 1
         start = max(0, end - lookback)
         history = self.rows[start:end]
         return {"candle": history[-1], "history": history}
+
+    def index_for_asof(self, asof_ts: int) -> int | None:
+        key = asof_key(asof_ts)
+        idx = None
+        for i, row in enumerate(self.rows):
+            row_key = asof_key(row["timestamp"])
+            if row_key == key:
+                idx = i
+            elif idx is not None:
+                break
+            elif row_key > key:
+                break
+        return idx
+
+    def next_ts_after(self, asof_ts: int) -> int | None:
+        key = asof_key(asof_ts)
+        for row in self.rows:
+            if asof_key(row["timestamp"]) > key:
+                return int(row["timestamp"])
+        return None
 
 
 def _load_symbol_csv(base_dir: Path, symbol: str) -> list[dict] | None:
@@ -153,6 +197,7 @@ class StreamServer:
             start_date if start_date is not None else settings.papertrade_stream_start_date
         )
         self._tapes: dict[str, _SymbolTape] = {}
+        self._asof_ts: int | None = None
 
     def _tape_for(self, symbol: str) -> _SymbolTape | None:
         symbol = symbol.upper()
@@ -166,6 +211,19 @@ class StreamServer:
         self._tapes[symbol] = tape
         return tape
 
+    def pin_asof(self, symbol: str) -> int | None:
+        """Pin the replay control date to `symbol`'s current cursor bar."""
+        tape = self._tape_for(symbol)
+        if tape is None or not tape.rows:
+            return None
+        if self._asof_ts is None:
+            self._asof_ts = int(tape.rows[tape.cursor]["timestamp"])
+            log.info(
+                f"StreamServer | pinned asof={asof_key(self._asof_ts)} "
+                f"from {symbol.upper()}"
+            )
+        return self._asof_ts
+
     def advance(self) -> int:
         """Advance every loaded tape exactly one bar.
 
@@ -174,6 +232,26 @@ class StreamServer:
         full universe scan, eliminating wall-clock drift when a scan takes
         longer than the old fixed 60-second stream interval.
         """
+        if self._asof_ts is not None:
+            nxt = None
+            on_asof = 0
+            for tape in self._tapes.values():
+                if tape.index_for_asof(self._asof_ts) is None:
+                    continue
+                on_asof += 1
+                cand = tape.next_ts_after(self._asof_ts)
+                if cand is not None and (nxt is None or cand < nxt):
+                    nxt = cand
+            if nxt is None:
+                log.debug("StreamServer | asof advance: no later bar among pinned tapes")
+                return 0
+            self._asof_ts = nxt
+            log.debug(
+                f"StreamServer | advanced asof to {asof_key(nxt)} "
+                f"({on_asof} tape(s) were on the prior date)"
+            )
+            return on_asof
+
         advanced = 0
         for symbol, tape in list(self._tapes.items()):
             try:
@@ -204,7 +282,26 @@ class StreamServer:
                 # date even when a 1,000-symbol scan takes >60 seconds.
                 if req.get("action") == "advance":
                     advanced = self.advance()
-                    await ws.send(json.dumps({"advanced": advanced}))
+                    payload: dict = {"advanced": advanced}
+                    if self._asof_ts is not None:
+                        payload["asof"] = self._asof_ts
+                        payload["asof_day"] = asof_key(self._asof_ts)
+                    await ws.send(json.dumps(payload))
+                    continue
+
+                if req.get("action") == "pin_asof":
+                    symbol = str(req.get("symbol") or "")
+                    ts = self.pin_asof(symbol) if symbol else None
+                    if ts is None:
+                        await ws.send(json.dumps({
+                            "error": f"no data for {symbol}",
+                            "code": "no_data",
+                        }))
+                    else:
+                        await ws.send(json.dumps({
+                            "asof": ts,
+                            "asof_day": asof_key(ts),
+                        }))
                     continue
 
                 try:
@@ -214,9 +311,22 @@ class StreamServer:
                     continue
                 tape = self._tape_for(symbol)
                 if tape is None:
-                    await ws.send(json.dumps({"error": f"no data for {symbol}"}))
+                    await ws.send(json.dumps({
+                        "error": f"no data for {symbol}",
+                        "code": "no_data",
+                    }))
                     continue
-                await ws.send(json.dumps(tape.snapshot()))
+                snap = tape.snapshot(self._asof_ts)
+                if snap is None:
+                    await ws.send(json.dumps({
+                        "error": (
+                            f"asof mismatch: {symbol} has no bar on "
+                            f"{asof_key(self._asof_ts) if self._asof_ts is not None else '?'}"
+                        ),
+                        "code": "asof_mismatch",
+                    }))
+                    continue
+                await ws.send(json.dumps(snap))
             except Exception as exc:
                 log.exception(f"StreamServer | request handling failed: {raw!r}")
                 await ws.send(json.dumps({"error": f"server error: {exc}"}))

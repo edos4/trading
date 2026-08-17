@@ -69,6 +69,16 @@ def demo():
     assert "counter-trend SELL blocked" in sell_reason
     assert describe_regime_rejection(_sig(action="BUY"), _Store(above)) is None
 
+    # Channel patterns are exempt — 006 shorts strength, 007 longs weakness.
+    assert describe_regime_rejection(
+        _sig(pattern="pattern_007_descending_channel", action="BUY"),
+        _Store(below),
+    ) is None
+    assert describe_regime_rejection(
+        _sig(pattern="pattern_006_upward_channel", action="SELL"),
+        _Store(above),
+    ) is None
+
     # 1.5% hysteresis: ~1% the wrong side of SMA200 is a near-miss, not a block.
     buy_near = [100.0] * 200 + [99.0]
     assert passes_regime_filter(_sig(action="BUY"), _Store(buy_near))
@@ -95,6 +105,7 @@ def demo():
     assert bt["max_position_pct"] == 0.10
     assert bt["max_gross_exposure_pct"] == 1.0
     assert "regime_hysteresis_pct" not in bt
+    assert "regime_exempt_patterns" not in bt
     assert bt["pattern_filter"] == "double_bottom"
     assert bt["market"] == "us"
     assert bt["long_only"] is False

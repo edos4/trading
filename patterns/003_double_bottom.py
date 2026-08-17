@@ -6,7 +6,7 @@ Inverse of patterns/pattern_002_double_top.py:
   peak height, volume weakness on leg 2, and no post-L2 breach before entry.
   Entry: long on bar 7 after L2 OR neckline-break bar, whichever is first.
   Exit hints on TradeSignal: take_profit 7% above neckline, trailing stop
-  3% below highest close since entry, and a 5-bar exit after neckline break.
+  3% below highest close since entry, and a 15-bar exit after neckline break.
 """
 
 from __future__ import annotations
@@ -81,7 +81,7 @@ class DoubleBottomPattern(BasePattern):
     TAKE_PROFIT_ABOVE_NK = 0.07      # sell 7% above neckline
     TRAILING_STOP_PCT    = 0.03      # 3% below highest close since entry (acts as stop loss)
     TRAILING_ACTIVATION_PCT = 0.04   # trail doesn't arm until 4% favorable move (was clipping winners at entry)
-    EXIT_BARS_AFTER_NECK_BREAK = 5
+    EXIT_BARS_AFTER_NECK_BREAK = 15
     SWING_LOOKBACK       = 2
     MIN_BARS             = 120
     SHARES               = 25

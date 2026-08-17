@@ -39,7 +39,7 @@ TV_EMA_COLORS = ["#2962ff", "#ff9800"]
 
 
 class ChartRenderer:
-    def __init__(self, save_to_disk: bool = True, session_tz: str = "America/New_York"):
+    def __init__(self, save_to_disk: bool = False, session_tz: str = "America/New_York"):
         self._save = save_to_disk
         self._session_tz = session_tz or "America/New_York"
         if save_to_disk:
@@ -541,3 +541,43 @@ class ChartRenderer:
         if abs_value >= 1_000:
             return f"{value / 1_000:.1f}K"
         return f"{value:.0f}"
+
+
+def trade_level_annotations(
+    *,
+    entry: float,
+    stop: float | None = None,
+    target: float | None = None,
+    exit_price: float | None = None,
+    exit_reason: str | None = None,
+    current: float | None = None,
+) -> list[dict]:
+    """Hlines for an open/closed paper trade — used by on-click chart render."""
+    from patterns.base_pattern import ANN_ENTRY, ANN_STOP, ANN_TARGET
+
+    anns: list[dict] = [
+        {"type": "hline", "price": float(entry), "label": "entry",
+         "color": ANN_ENTRY, "style": "--"},
+    ]
+    if stop is not None:
+        anns.append({
+            "type": "hline", "price": float(stop), "label": "stop",
+            "color": ANN_STOP, "style": "--",
+        })
+    if target is not None:
+        anns.append({
+            "type": "hline", "price": float(target), "label": "target",
+            "color": ANN_TARGET, "style": "--",
+        })
+    if exit_price is not None:
+        anns.append({
+            "type": "hline", "price": float(exit_price),
+            "label": exit_reason or "exit",
+            "color": TV_TEXT, "style": ":",
+        })
+    elif current is not None:
+        anns.append({
+            "type": "hline", "price": float(current), "label": "last",
+            "color": TV_TEXT, "style": ":",
+        })
+    return anns

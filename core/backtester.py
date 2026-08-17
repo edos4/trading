@@ -866,18 +866,12 @@ def describe_risk_gate_rejection(
                 atr_pct = atr_val / current_close
                 min_required_trail = atr_pct * min_atr_stop_multiple
                 if signal.trailing_stop_pct < min_required_trail:
-                    log.debug(
-                        f"RiskGate | {symbol} {timeframe} trailing "
-                        f"{signal.trailing_stop_pct:.2%} too thin vs "
-                        f"ATR {atr_pct:.2%} — skip"
+                    log.info(
+                        f"RiskGate | {symbol} {timeframe} widen trail "
+                        f"{signal.trailing_stop_pct:.2%} → {min_required_trail:.2%} "
+                        f"(1× ATR {atr_pct:.2%})"
                     )
-                    return (
-                        f"Risk gate: ATR trail too thin — trailing "
-                        f"{signal.trailing_stop_pct:.2%} is below "
-                        f"{min_atr_stop_multiple:g}× ATR {atr_pct:.2%} "
-                        f"(need ≥ {min_required_trail:.2%}). Same filter as the "
-                        f"formal backtester."
-                    )
+                    signal.trailing_stop_pct = min_required_trail
 
     if (
         synthetic_stop_multiple > 0
@@ -1188,7 +1182,9 @@ def discover_pattern_names() -> list[str]:
 
 
 def _enforce_max_open_positions(
-    trades: list[BacktestTrade], max_open_positions: int,
+    trades: list[BacktestTrade],
+    max_open_positions: int,
+    max_open_per_pattern: int = 0,
 ) -> list[BacktestTrade]:
     """Cap portfolio-wide concurrent positions across all symbols/patterns.
 
@@ -1198,16 +1194,22 @@ def _enforce_max_open_positions(
     the concurrently-open count above the cap — highest-confidence
     entries win ties on the same bar.
     """
-    if max_open_positions <= 0:
+    if max_open_positions <= 0 and max_open_per_pattern <= 0:
         return trades
     ordered = sorted(trades, key=lambda t: (t.entry_date, -t.confidence))
     accepted: list[BacktestTrade] = []
     open_exits: list[datetime] = []
+    open_by_pattern: dict[str, list[datetime]] = {}
     for t in ordered:
         open_exits = [d for d in open_exits if d > t.entry_date]
-        if len(open_exits) < max_open_positions:
-            open_exits.append(t.exit_date)
-            accepted.append(t)
+        pat_open = [d for d in open_by_pattern.get(t.pattern, []) if d > t.entry_date]
+        if max_open_positions > 0 and len(open_exits) >= max_open_positions:
+            continue
+        if max_open_per_pattern > 0 and len(pat_open) >= max_open_per_pattern:
+            continue
+        open_exits.append(t.exit_date)
+        open_by_pattern.setdefault(t.pattern, []).append(t.exit_date)
+        accepted.append(t)
     return accepted
 
 
@@ -1312,6 +1314,12 @@ def _apply_capital_ledger(
             qty = min(qty, int(room / t.entry_price)) if room > 0 else 0
 
         if qty < 1:
+            rejected += 1
+            continue
+        if (
+            settings.min_position_notional > 0
+            and qty * t.entry_price < settings.min_position_notional
+        ):
             rejected += 1
             continue
 
@@ -1921,7 +1929,9 @@ class Backtester:
             )
 
         result.trades = _enforce_max_open_positions(
-            result.trades, self._max_open_positions
+            result.trades,
+            self._max_open_positions,
+            max_open_per_pattern=settings.max_open_per_pattern,
         )
         result.trades, result.capital_rejected = _apply_capital_ledger(
             result.trades, self._account_value, self._risk_per_trade_pct,

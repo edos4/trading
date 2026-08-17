@@ -157,3 +157,47 @@ def test_sim_clock_isolated_by_timeframe():
     assert acct.sim_now("1d") == daily_ts
     assert acct.sim_now("1W") == weekly_ts
     assert acct.sim_now() == weekly_ts
+
+
+class _EmptyStore:
+    def get_df(self, symbol, timeframe, min_bars=1):
+        return None
+
+
+def test_pattern_cap_and_min_notional_skip_fill():
+    from config import settings
+    from data.tv_client import OHLCVCandle
+    from patterns.base_pattern import TradeSignal
+
+    candle = OHLCVCandle(
+        open=100, high=100, low=100, close=100, volume=1,
+        timestamp=datetime(2026, 1, 2, tzinfo=timezone.utc),
+    )
+
+    def _buy(symbol: str) -> TradeSignal:
+        return TradeSignal(
+            symbol=symbol, timeframe="1d", pattern="test",
+            action="BUY", price=100.0, confidence=0.9, qty=10,
+            stop_loss=94.0, take_profit=120.0,
+        )
+
+    old_cap = settings.max_open_per_pattern
+    old_min = settings.min_position_notional
+    try:
+        settings.max_open_per_pattern = 1
+        settings.min_position_notional = 0
+        acct = PaperAccount(initial_capital=100_000.0, market="us", slippage_pct=0.0)
+        acct.positions["AAA"] = _short()
+        ok, reason = acct.open_position(_buy("BBB"), candle, _EmptyStore())
+        assert not ok, reason
+        assert "Pattern cap" in reason
+
+        settings.max_open_per_pattern = 0
+        settings.min_position_notional = 1_000_000_000
+        acct2 = PaperAccount(initial_capital=100_000.0, market="us", slippage_pct=0.0)
+        ok, reason = acct2.open_position(_buy("CCC"), candle, _EmptyStore())
+        assert not ok, reason
+        assert "Min notional" in reason
+    finally:
+        settings.max_open_per_pattern = old_cap
+        settings.min_position_notional = old_min
