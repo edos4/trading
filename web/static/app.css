@@ -198,6 +198,7 @@ progress { width: 180px; height: 0.7rem; }
 #paper-pos tbody tr,
 #paper-closed tbody tr {
   cursor: pointer;
+  user-select: none;
 }
 #paper-pos tbody tr:hover,
 #paper-closed tbody tr:hover {
@@ -219,24 +220,43 @@ progress { width: 180px; height: 0.7rem; }
 #paper-chart-modal .modal-card {
   position: relative;
   z-index: 1;
-  width: min(960px, calc(100vw - 2rem));
-  max-height: calc(100vh - 2rem);
-  overflow: auto;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1rem;
+  width: min(1200px, calc(100vw - 1.5rem));
+  height: min(780px, calc(100vh - 1.5rem));
+  overflow: hidden;
+  background: #131722;
+  border: 1px solid #2a2e39;
+  border-radius: 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
 }
 #paper-chart-modal header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 1rem;
-  margin-bottom: 0.75rem;
+  margin: 0;
+  padding: 0.7rem 0.9rem 0.45rem;
+  border-bottom: 1px solid #2a2e39;
 }
-#paper-chart-img {
+.tv-chart-header strong {
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+}
+.tv-ohlc {
+  margin: 0.2rem 0 0;
+  font-family: "Trebuchet MS", "IBM Plex Mono", monospace;
+  font-size: 0.8rem;
+  color: #787b86;
+}
+.tv-chart-host {
+  flex: 1;
+  min-height: 0;
   width: 100%;
-  height: auto;
-  border-radius: 8px;
   background: #131722;
+}
+#paper-chart-status {
+  margin: 0;
+  padding: 0 0.9rem 0.35rem;
 }

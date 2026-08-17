@@ -493,8 +493,8 @@ class PaperSession:
         symbol: str | None = None,
         index: int | None = None,
     ) -> dict[str, Any]:
-        """On-demand PNG for an open position or closed trade row click."""
-        from analysis.chart_renderer import ChartRenderer, trade_level_annotations
+        """On-demand OHLCV payload for the TradingView-style trade viewer."""
+        from analysis.chart_renderer import build_trade_viewer_payload
         from core.market import get_market
 
         with self.lock:
@@ -529,27 +529,29 @@ class PaperSession:
         if df is None or len(df) < 2:
             return {"error": f"no OHLCV for {trade.symbol} {timeframe}"}
 
-        renderer = ChartRenderer(save_to_disk=False, session_tz=session_tz)
-        anns = trade_level_annotations(
-            entry=trade.entry_price,
-            stop=trade.stop_loss,
-            target=trade.take_profit,
-            exit_price=trade.exit_price if side == "closed" else None,
-            exit_reason=trade.exit_reason if side == "closed" else None,
-            current=current,
-        )
         try:
-            png = renderer.render_with_ema(
-                trade.symbol, timeframe, df, annotations=anns,
+            return build_trade_viewer_payload(
+                df,
+                symbol=trade.symbol,
+                timeframe=timeframe,
+                pattern=trade.pattern,
+                action=trade.action,
+                session_tz=session_tz,
+                entry=trade.entry_price,
+                stop=trade.stop_loss,
+                target=trade.take_profit,
+                exit_price=trade.exit_price if side == "closed" else None,
+                exit_reason=trade.exit_reason if side == "closed" else None,
+                current=current,
+                entry_time=trade.sim_entry_date or trade.entry_date,
+                exit_time=(
+                    None if side == "open"
+                    else (trade.sim_exit_date or trade.exit_date)
+                ),
             )
         except Exception as exc:
-            log.exception("Web Paper | trade chart failed")
-            return {"error": f"chart render failed: {exc}"}
-        title = f"{trade.symbol} {timeframe} · {trade.pattern} · {trade.action}"
-        return {
-            "title": title,
-            "chart_png_b64": base64.b64encode(png).decode("ascii"),
-        }
+            log.exception("Web Paper | trade chart payload failed")
+            return {"error": f"chart data failed: {exc}"}
 
     def start(
         self,

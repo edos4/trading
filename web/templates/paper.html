@@ -40,7 +40,7 @@
   <div class="split">
     <div class="panel grow">
       <h2>Open positions</h2>
-      <p class="muted small">Click a row to render the chart.</p>
+      <p class="muted small">Double-click a row to open the chart.</p>
       <div class="table-wrap">
         <table id="paper-pos">
           <thead>
@@ -54,7 +54,7 @@
         </table>
       </div>
       <h2>Closed</h2>
-      <p class="muted small">Click a row to render the chart.</p>
+      <p class="muted small">Double-click a row to open the chart.</p>
       <div class="table-wrap">
         <table id="paper-closed">
           <thead>
@@ -111,17 +111,22 @@
 
 <div id="paper-chart-modal" hidden>
   <div class="modal-backdrop" id="paper-chart-backdrop"></div>
-  <div class="modal-card">
-    <header>
-      <strong id="paper-chart-title">Chart</strong>
+  <div class="modal-card tv-chart-card">
+    <header class="tv-chart-header">
+      <div>
+        <strong id="paper-chart-title">Chart</strong>
+        <p id="paper-chart-ohlc" class="tv-ohlc"></p>
+      </div>
       <button type="button" class="btn ghost" id="paper-chart-close">Close</button>
     </header>
     <p id="paper-chart-status" class="muted">Loading…</p>
-    <img id="paper-chart-img" alt="trade chart" hidden />
+    <div id="paper-chart-host" class="tv-chart-host"></div>
   </div>
 </div>
 {% endblock %}
 {% block scripts %}
+<script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+<script src="/static/tv_chart.js?v=1"></script>
 <script>
   window.TB_PAGE = "paper";
   window.TB_MARKETS = {{ markets | tojson }};

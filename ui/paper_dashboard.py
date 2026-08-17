@@ -690,101 +690,44 @@ class PaperDashboard:
 
     # ── Row detail popups ─────────────────────────────────────────────────
     def _show_trade_details(self, t: BacktestTrade, current_price: Optional[float]) -> None:
-        win = tk.Toplevel(self._top)
-        win.title(f"{t.symbol} — {t.pattern}")
-        text = tk.Text(win, width=64, height=16, font=("TkFixedFont", 9))
-        text.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
-        lines = [
-            f"Symbol:     {t.symbol}",
-            f"Pattern:    {t.pattern}",
-            f"Timeframe:  {t.timeframe}",
-            f"Action:     {t.action}",
-            f"Confidence: {t.confidence:.0%}",
-            f"Opened:     {t.entry_date.strftime('%Y-%m-%d %H:%M:%S')}",
-            f"Sim entry:  {(t.sim_entry_date or t.entry_date).strftime('%Y-%m-%d %H:%M:%S')}",
-            f"Entry bars: {bars_held(t, self._account.bar_count(t.symbol)) if current_price is not None else bars_held(t) or 0}",
-            f"Entry:      {t.entry_price:.2f}",
-            f"Stop:       {t.stop_loss:.2f}" if t.stop_loss else "Stop:       -",
-            f"Target:     {t.take_profit:.2f}" if t.take_profit else "Target:     -",
-        ]
-        if current_price is not None:
-            r = r_multiple(t, current_price)
-            lines += [
-                f"Current:    {current_price:.2f}",
-                f"Unrealized: {unrealized_pct(t, current_price):+.2f}%",
-                f"R:          {r:+.2f}" if r is not None else "R:          -",
-            ]
-        else:
-            r = r_multiple(t, t.exit_price)
-            lines += [
-                f"Closed:     {t.exit_date.strftime('%Y-%m-%d %H:%M:%S')}",
-                f"Exit:       {t.exit_price:.2f}",
-                f"Bars held:  {t.exit_bar_idx - t.entry_bar_idx}" if t.exit_bar_idx is not None and t.entry_bar_idx >= 0 else "Bars held:  -",
-                (
-                    f"Time-stop:  {t.time_exit_bars_elapsed} bars from breakout/signal "
-                    f"(configured {t.exit_bars_after_neckline_break}); "
-                    f"signal_idx={t.neckline_break_bar_idx}"
-                    if t.time_exit_bars_elapsed is not None
-                    else ""
-                ),
-                f"P&L:        {t.pnl_pct:+.2f}%",
-                f"R:          {r:+.2f}" if r is not None else "R:          -",
-                f"Exit reason:{t.exit_reason}",
-            ]
-        if t.notes:
-            lines += ["", "Notes:", t.notes]
-        text.insert(tk.END, "\n".join(lines))
-        text.config(state=tk.DISABLED)
-        self._attach_trade_chart(win, t, current_price)
-
-    def _attach_trade_chart(
-        self,
-        win: tk.Toplevel,
-        t: BacktestTrade,
-        current_price: Optional[float],
-    ) -> None:
-        from analysis.chart_renderer import ChartRenderer, trade_level_annotations
+        from analysis.chart_renderer import build_trade_viewer_payload
         from data.db import load_daily_ohlcv_df
+        from ui.tv_chart import open_trade_viewer
 
+        timeframe = t.timeframe or "1d"
         df = None
         if self._scanner is not None:
-            df = self._scanner.ohlcv_frame(t.symbol, t.timeframe or "1d", min_bars=2)
+            df = self._scanner.ohlcv_frame(t.symbol, timeframe, min_bars=2)
         if df is None or len(df) < 2:
             df = load_daily_ohlcv_df(t.symbol)
         if df is None or len(df) < 2:
-            ttk.Label(win, text="No OHLCV available to render this chart.").pack(
-                padx=8, pady=(0, 8),
+            messagebox.showinfo(
+                "Chart",
+                f"No OHLCV available for {t.symbol} {timeframe}.",
+                parent=self._top,
             )
             return
-        renderer = ChartRenderer(
-            save_to_disk=False,
+        payload = build_trade_viewer_payload(
+            df,
+            symbol=t.symbol,
+            timeframe=timeframe,
+            pattern=t.pattern,
+            action=t.action,
             session_tz=get_market(self._account.market).session_tz,
-        )
-        anns = trade_level_annotations(
             entry=t.entry_price,
             stop=t.stop_loss,
             target=t.take_profit,
             exit_price=t.exit_price if current_price is None else None,
             exit_reason=t.exit_reason if current_price is None else None,
             current=current_price,
+            entry_time=t.sim_entry_date or t.entry_date,
+            exit_time=None if current_price is not None else (t.sim_exit_date or t.exit_date),
         )
-        try:
-            png = renderer.render_with_ema(
-                t.symbol, t.timeframe or "1d", df, annotations=anns,
-            )
-        except Exception as exc:
-            ttk.Label(win, text=f"Chart render failed: {exc}").pack(
-                padx=8, pady=(0, 8),
-            )
-            return
-        img = Image.open(io.BytesIO(png))
-        img.thumbnail((920, 520))
-        photo = ImageTk.PhotoImage(img)
-        lbl = ttk.Label(win, image=photo)
-        lbl.image = photo
-        lbl.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
+        open_trade_viewer(self._top, payload)
 
-    def _on_position_double_click(self, _event) -> None:
+    def _on_position_double_click(self, event) -> None:
+        if self._pos_tree.identify_region(event.x, event.y) != "cell":
+            return
         sel = self._pos_tree.selection()
         if not sel:
             return
@@ -794,7 +737,9 @@ class PaperDashboard:
         sym, t = entry
         self._show_trade_details(t, self._account.last_price(sym, t.entry_price))
 
-    def _on_closed_double_click(self, _event) -> None:
+    def _on_closed_double_click(self, event) -> None:
+        if self._closed_tree.identify_region(event.x, event.y) != "cell":
+            return
         sel = self._closed_tree.selection()
         if not sel:
             return

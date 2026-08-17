@@ -442,7 +442,7 @@ function initPaper() {
     for (const p of s.positions || []) {
       const tr = document.createElement("tr");
       const cls = p.unrl_pct > 0 ? "gain" : p.unrl_pct < 0 ? "loss" : "";
-      tr.title = "Click to render chart";
+      tr.title = "Double-click to open chart";
       tr.innerHTML =
         `<td>${esc(p.symbol)}</td><td>${esc(p.status)}</td><td>${esc(p.action)}</td>` +
         `<td>${fmtQty(p.qty)}</td>` +
@@ -454,7 +454,7 @@ function initPaper() {
         `<td>${fmtMoney(p.value)}</td>` +
         `<td>${p.port_pct == null ? "—" : `${Number(p.port_pct).toFixed(1)}%`}</td>` +
         `<td>${esc(p.pattern)}</td>`;
-      tr.addEventListener("click", () => openTradeChart("open", p.symbol));
+      tr.addEventListener("dblclick", () => openTradeChart("open", p.symbol));
       posBody.appendChild(tr);
     }
     closedBody.innerHTML = "";
@@ -464,7 +464,7 @@ function initPaper() {
       const reasonTitle = t.time_exit_bars_elapsed != null
         ? `Time-stop: ${t.time_exit_bars_elapsed} bars from breakout/signal (configured ${t.time_exit_bars_configured ?? "?"})`
         : "";
-      tr.title = "Click to render chart";
+      tr.title = "Double-click to open chart";
       tr.innerHTML =
         `<td>${esc(t.opened)}</td><td>${esc(t.closed)}</td><td>${fmtDays(t.days)}</td>` +
         `<td>${t.bars == null ? "—" : t.bars}</td>` +
@@ -476,7 +476,7 @@ function initPaper() {
         `<td>${t.r == null ? "—" : fmtSigned(t.r)}</td>` +
         `<td title="${esc(reasonTitle)}">${esc(t.reason)}</td>` +
         `<td>${esc(t.pattern)}</td>`;
-      tr.addEventListener("click", () => openTradeChart("closed", t.symbol, idx));
+      tr.addEventListener("dblclick", () => openTradeChart("closed", t.symbol, idx));
       closedBody.appendChild(tr);
     });
     logsBody.innerHTML = "";
@@ -523,34 +523,81 @@ function initPaper() {
 
   const chartModal = document.getElementById("paper-chart-modal");
   const chartTitle = document.getElementById("paper-chart-title");
+  const chartOhlc = document.getElementById("paper-chart-ohlc");
   const chartStatus = document.getElementById("paper-chart-status");
-  const chartImg = document.getElementById("paper-chart-img");
+  const chartHost = document.getElementById("paper-chart-host");
+
+  function fmtTvOhlc(data) {
+    const o = data && data.ohlc;
+    if (!o) return "";
+    const sign = o.change >= 0 ? "+" : "";
+    return (
+      `O ${Number(o.open).toFixed(2)}  H ${Number(o.high).toFixed(2)}  ` +
+      `L ${Number(o.low).toFixed(2)}  C ${Number(o.close).toFixed(2)}  ` +
+      `${sign}${Number(o.change).toFixed(2)} (${sign}${Number(o.change_pct).toFixed(2)}%)`
+    );
+  }
 
   function closeTradeChart() {
     if (!chartModal) return;
     chartModal.hidden = true;
-    if (chartImg) chartImg.hidden = true;
+    if (window.TVChart) window.TVChart.unmount();
+    if (chartOhlc) chartOhlc.textContent = "";
   }
 
   async function openTradeChart(side, symbol, index) {
     if (!chartModal) return;
     chartModal.hidden = false;
     if (chartTitle) chartTitle.textContent = symbol || "Chart";
-    if (chartStatus) chartStatus.textContent = "Rendering…";
-    if (chartImg) chartImg.hidden = true;
+    if (chartOhlc) chartOhlc.textContent = "";
+    if (chartStatus) {
+      chartStatus.hidden = false;
+      chartStatus.textContent = "Loading…";
+    }
     const params = new URLSearchParams({ side });
     if (symbol) params.set("symbol", symbol);
     if (index != null) params.set("index", String(index));
     try {
       const data = await api(`/api/paper/chart?${params.toString()}`);
       if (chartTitle) chartTitle.textContent = data.title || symbol || "Chart";
-      if (chartImg && data.chart_png_b64) {
-        chartImg.src = `data:image/png;base64,${data.chart_png_b64}`;
-        chartImg.hidden = false;
+      if (chartOhlc) {
+        chartOhlc.textContent = fmtTvOhlc(data);
+        chartOhlc.classList.toggle("gain", Number(data.ohlc && data.ohlc.change) >= 0);
+        chartOhlc.classList.toggle("loss", Number(data.ohlc && data.ohlc.change) < 0);
       }
-      if (chartStatus) chartStatus.textContent = "";
+      if (window.TVChart && chartHost) {
+        window.TVChart.mount(chartHost, data, {
+          onCandle(bar) {
+            if (!chartOhlc) return;
+            if (!bar) {
+              chartOhlc.textContent = fmtTvOhlc(data);
+              chartOhlc.classList.toggle("gain", Number(data.ohlc && data.ohlc.change) >= 0);
+              chartOhlc.classList.toggle("loss", Number(data.ohlc && data.ohlc.change) < 0);
+              return;
+            }
+            const prev = (data.candles || []).findIndex((c) => c.time === bar.time);
+            const prevClose = prev > 0 ? data.candles[prev - 1].close : bar.open;
+            const change = bar.close - prevClose;
+            const pct = prevClose ? (change / prevClose) * 100 : 0;
+            const sign = change >= 0 ? "+" : "";
+            chartOhlc.textContent =
+              `${bar.time}  O ${Number(bar.open).toFixed(2)}  H ${Number(bar.high).toFixed(2)}  ` +
+              `L ${Number(bar.low).toFixed(2)}  C ${Number(bar.close).toFixed(2)}  ` +
+              `${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)`;
+            chartOhlc.classList.toggle("gain", change >= 0);
+            chartOhlc.classList.toggle("loss", change < 0);
+          },
+        });
+      }
+      if (chartStatus) {
+        chartStatus.textContent = "";
+        chartStatus.hidden = true;
+      }
     } catch (e) {
-      if (chartStatus) chartStatus.textContent = String(e.message || e);
+      if (chartStatus) {
+        chartStatus.hidden = false;
+        chartStatus.textContent = String(e.message || e);
+      }
     }
   }
 

@@ -543,6 +543,167 @@ class ChartRenderer:
         return f"{value:.0f}"
 
 
+def _viewer_bar_time(idx) -> str:
+    ts = pd.Timestamp(idx)
+    if ts.tzinfo is not None:
+        ts = ts.tz_convert("UTC")
+    return ts.strftime("%Y-%m-%d")
+
+
+def _viewer_finite(value) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(number):
+        return None
+    return number
+
+
+def _nearest_viewer_time(index: pd.Index, when) -> str | None:
+    if when is None or len(index) == 0:
+        return None
+    ts = pd.Timestamp(when)
+    idx_tz = getattr(index, "tz", None)
+    if idx_tz is not None and ts.tzinfo is None:
+        ts = ts.tz_localize(idx_tz)
+    elif idx_tz is None and ts.tzinfo is not None:
+        ts = ts.tz_convert("UTC").tz_localize(None)
+    try:
+        loc = index.get_indexer([ts], method="nearest")[0]
+    except Exception:
+        return None
+    if loc < 0:
+        return None
+    return _viewer_bar_time(index[loc])
+
+
+def build_trade_viewer_payload(
+    ohlcv_df: pd.DataFrame,
+    *,
+    symbol: str,
+    timeframe: str = "1d",
+    pattern: str | None = None,
+    action: str | None = None,
+    session_tz: str = "America/New_York",
+    entry: float | None = None,
+    stop: float | None = None,
+    target: float | None = None,
+    exit_price: float | None = None,
+    exit_reason: str | None = None,
+    current: float | None = None,
+    entry_time=None,
+    exit_time=None,
+    ema_periods: tuple[int, ...] = (20, 50),
+) -> dict:
+    """OHLCV + levels for an interactive TradingView-style viewer (no PNG)."""
+    renderer = ChartRenderer(save_to_disk=False, session_tz=session_tz)
+    df = renderer._prepare_df(ohlcv_df, timeframe)
+    df = renderer._trim_to_visible(df, timeframe)
+    close = df["Close"]
+    emas: dict[str, pd.Series] = {}
+    for period in ema_periods:
+        emas[f"ema_{period}"] = close.ewm(span=period, adjust=False).mean()
+
+    candles = []
+    volume = []
+    ema_series: dict[str, list] = {name: [] for name in emas}
+    for idx, row in df.iterrows():
+        t = _viewer_bar_time(idx)
+        o = _viewer_finite(row["Open"])
+        h = _viewer_finite(row["High"])
+        low = _viewer_finite(row["Low"])
+        c = _viewer_finite(row["Close"])
+        v = _viewer_finite(row["Volume"]) or 0.0
+        if None in (o, h, low, c):
+            continue
+        candles.append({"time": t, "open": o, "high": h, "low": low, "close": c})
+        up = c >= o
+        volume.append({
+            "time": t,
+            "value": v,
+            "color": "rgba(38,166,154,0.55)" if up else "rgba(239,83,80,0.55)",
+        })
+        for name, series in emas.items():
+            val = _viewer_finite(series.loc[idx])
+            if val is not None:
+                ema_series[name].append({"time": t, "value": val})
+
+    if len(candles) < 2:
+        raise ValueError(f"not enough valid bars for {symbol} {timeframe}")
+    last = candles[-1]
+    prev_close = candles[-2]["close"]
+    change = last["close"] - prev_close
+    change_pct = (change / prev_close * 100.0) if prev_close else 0.0
+
+    from patterns.base_pattern import ANN_ENTRY, ANN_STOP, ANN_TARGET
+
+    levels = []
+    if entry is not None:
+        levels.append({"price": float(entry), "title": "entry", "color": ANN_ENTRY})
+    if stop is not None:
+        levels.append({"price": float(stop), "title": "stop", "color": ANN_STOP})
+    if target is not None:
+        levels.append({"price": float(target), "title": "target", "color": ANN_TARGET})
+    if exit_price is not None:
+        levels.append({
+            "price": float(exit_price),
+            "title": exit_reason or "exit",
+            "color": TV_TEXT,
+        })
+    elif current is not None:
+        levels.append({"price": float(current), "title": "last", "color": TV_TEXT})
+
+    markers = []
+    entry_bar = _nearest_viewer_time(df.index, entry_time)
+    if entry_bar and action:
+        is_buy = str(action).upper() == "BUY"
+        markers.append({
+            "time": entry_bar,
+            "position": "belowBar" if is_buy else "aboveBar",
+            "color": ANN_ENTRY,
+            "shape": "arrowUp" if is_buy else "arrowDown",
+            "text": str(action).upper(),
+        })
+    exit_bar = _nearest_viewer_time(df.index, exit_time)
+    if exit_bar and exit_price is not None:
+        markers.append({
+            "time": exit_bar,
+            "position": "aboveBar",
+            "color": TV_TEXT,
+            "shape": "circle",
+            "text": exit_reason or "exit",
+        })
+
+    title = f"{symbol} {renderer._tv_timeframe_label(timeframe)}"
+    if pattern:
+        title = f"{title} · {pattern}"
+    if action:
+        title = f"{title} · {action}"
+    return {
+        "title": title,
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "timeframe_label": renderer._tv_timeframe_label(timeframe),
+        "pattern": pattern,
+        "action": action,
+        "ohlc": {
+            "open": last["open"],
+            "high": last["high"],
+            "low": last["low"],
+            "close": last["close"],
+            "change": change,
+            "change_pct": change_pct,
+        },
+        "candles": candles,
+        "volume": volume,
+        "ema20": ema_series.get("ema_20", []),
+        "ema50": ema_series.get("ema_50", []),
+        "levels": levels,
+        "markers": markers,
+    }
+
+
 def trade_level_annotations(
     *,
     entry: float,
