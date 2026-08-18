@@ -72,6 +72,10 @@ class TradeSignal:
     neckline: float | None = None
     neckline_break_direction: Literal["below", "above"] | None = None
     exit_bars_after_neckline_break: int | None = None
+    # When True, the neckline time-stop only fires if the close is still
+    # underwater (long: close < entry; short: close > entry). Winners keep
+    # running to trail/target instead of being cut at the bar count.
+    time_exit_only_unfavorable: bool = False
     # Set by the scanner/backtester to the bar on which this signal was
     # detected.  A deferred next-bar fill must retain that event so
     # neckline-based time stops start at the breakout bar, not the fill bar.

@@ -119,11 +119,9 @@ class Settings(BaseSettings):
     # ── Volume confirm gate (analysis/price_volume.py) ─────────────────────
     # After a chart pattern fires, require relative volume (signal bar /
     # SMA20) ≥ volume_gate_rvol_min AND OBV slope over volume_gate_obv_bars
-    # to agree with BUY/SELL. Off by default: 2026-07-26 A/B (25 symbols)
-    # showed gate ON → 0 trades and gate OFF → PF 0.046 — neither is an edge.
-    # Re-enable only after --volume-gate-compare shows OOS expectancy lift.
-    # Fail-open on short history.
-    volume_gate_enabled: bool = False
+    # to agree with BUY/SELL. On for paper/scan after the 2026-08-17 US book
+    # (Kronos 6% already passed every 003 loser). Fail-open on short history.
+    volume_gate_enabled: bool = True
     volume_gate_rvol_min: float = 1.5
     volume_gate_obv_bars: int = 5
 
@@ -234,11 +232,10 @@ settings = Settings()
 #
 #   pattern_005_rounding_top / pattern_006_upward_channel /
 #   pattern_007_descending_channel / pattern_008_head_and_shoulders —
-#   historically net-negative, then re-enabled "to accumulate sample".
-#   The 2026-08-17 US paper book (~32 closed, ~38% WR, −0.7% equity) was
-#   dominated by 006/007 stop-outs (and 008 givebacks) while 003 double
-#   bottom was the one hitting take_profit. Sample is in: keep them off.
-#   006/007 were also SMA200-exempt, so they were the counter-trend sleeve.
+#   historically net-negative. Stay off.
+#
+#   pattern_003_double_bottom stays ON with neckline-break-only entry
+#   (2026-08-17 US paper: 79 day-7-without-break fills, PF 0.29).
 DISABLED_PATTERNS: list[str] = [
     "pattern_011_breakout_retest",
     "pattern_012_ml_signal",

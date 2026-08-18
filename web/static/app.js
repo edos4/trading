@@ -459,7 +459,7 @@ function initPaper() {
   function bookStartBody(id) {
     return {
       market: id,
-      n_symbols: Number(document.getElementById(`${id}-n`).value || 100),
+      n_symbols: Number(document.getElementById(`${id}-n`).value || 50),
       extra_symbols: (document.getElementById(`${id}-extra`) || {}).value || "",
       use_stream: !!(document.getElementById(`${id}-stream`) || {}).checked,
       kronos_gate: !!(document.getElementById(`${id}-kronos`) || {}).checked,

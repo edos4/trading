@@ -21,8 +21,11 @@ MarketId = Literal["us", "ph"]
 # PSETradeX target: board lot becomes 1 share for all names.
 _PSETRADEX_LOT1_ON = date(2026, 11, 23)
 
-# Starting PH sleeve: drop names below this  peso turnover (ADV proxy).
+# Starting PH sleeve: drop names below this peso turnover (ADV proxy).
 PH_MIN_ADV_PHP = 5_000_000.0
+# US paper 2026-08-17: 77 tickers off a huge tape, noise W-patterns on
+# names like CDE/NIO. Floor ~$20M dollar volume (TV `value`).
+US_MIN_ADV_USD = 20_000_000.0
 
 
 @dataclass(frozen=True)
@@ -67,9 +70,9 @@ US = MarketProfile(
     kronos_gate_default=True,
     kronos_rank_default=False,
     scan_interval_seconds=3600,
-    universe_order="market_cap_basic",
-    default_n_symbols=100,
-    min_adv=None,
+    universe_order="value",
+    default_n_symbols=50,
+    min_adv=US_MIN_ADV_USD,
     skip_edgar=False,
     lot_round=False,
 )

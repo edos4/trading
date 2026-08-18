@@ -64,6 +64,7 @@ class BacktestTrade:
     neckline: float | None = None
     neckline_break_direction: Literal["below", "above"] | None = None
     exit_bars_after_neckline_break: int | None = None
+    time_exit_only_unfavorable: bool = False
     trailing_stop_pct: float | None = None
     trailing_stop_mode: Literal["lowest_close", "highest_close"] | None = None
     trailing_activation_pct: float | None = None
@@ -770,6 +771,26 @@ def _gap_aware_trigger_fill(
     return candle.open if gapped else trigger
 
 
+def _time_exit_ready(position: BacktestTrade, candle, bar_idx: int) -> bool:
+    """True when the pattern time-stop is due. Optional underwater-only gate."""
+    if (
+        position.neckline_break_bar_idx is None
+        or position.exit_bars_after_neckline_break is None
+    ):
+        return False
+    elapsed = bar_idx - position.neckline_break_bar_idx
+    if elapsed < position.exit_bars_after_neckline_break:
+        return False
+    if position.time_exit_only_unfavorable:
+        is_short = position.action == "SELL"
+        if is_short:
+            if candle.close <= position.entry_price:
+                return False
+        elif candle.close >= position.entry_price:
+            return False
+    return True
+
+
 def _check_exit(
     candle: OHLCVCandle,
     position: BacktestTrade,
@@ -829,15 +850,11 @@ def _check_exit(
         if fill is not None:
             position.exit_bar_idx = bar_idx
             return fill, "take_profit"
-    if (
-        position.neckline_break_bar_idx is not None
-        and position.exit_bars_after_neckline_break is not None
-    ):
+    if _time_exit_ready(position, candle, bar_idx):
         elapsed = bar_idx - position.neckline_break_bar_idx
-        if elapsed >= position.exit_bars_after_neckline_break:
-            position.exit_bar_idx = bar_idx
-            position.time_exit_bars_elapsed = elapsed
-            return candle.close, "time_exit"
+        position.exit_bar_idx = bar_idx
+        position.time_exit_bars_elapsed = elapsed
+        return candle.close, "time_exit"
     return None, ""
 
 
@@ -1017,6 +1034,7 @@ def _open_trade(
         neckline=signal.neckline,
         neckline_break_direction=signal.neckline_break_direction,
         exit_bars_after_neckline_break=signal.exit_bars_after_neckline_break,
+        time_exit_only_unfavorable=signal.time_exit_only_unfavorable,
         trailing_stop_pct=signal.trailing_stop_pct,
         trailing_stop_mode=signal.trailing_stop_mode,
         trailing_activation_pct=signal.trailing_activation_pct,
@@ -2159,13 +2177,11 @@ class Backtester:
             if fill is not None:
                 return fill, "take_profit"
 
-        if (
-            position.neckline_break_bar_idx is not None
-            and position.exit_bars_after_neckline_break is not None
-        ):
-            elapsed = bar_idx - position.neckline_break_bar_idx
-            if elapsed >= position.exit_bars_after_neckline_break:
-                return candle.close, "time_exit"
+        if _time_exit_ready(position, candle, bar_idx):
+            position.time_exit_bars_elapsed = (
+                bar_idx - position.neckline_break_bar_idx
+            )
+            return candle.close, "time_exit"
 
         return None, ""
 
@@ -2222,6 +2238,7 @@ class Backtester:
             neckline=signal.neckline,
             neckline_break_direction=signal.neckline_break_direction,
             exit_bars_after_neckline_break=signal.exit_bars_after_neckline_break,
+            time_exit_only_unfavorable=signal.time_exit_only_unfavorable,
             trailing_stop_pct=signal.trailing_stop_pct,
             trailing_stop_mode=signal.trailing_stop_mode,
             trailing_activation_pct=signal.trailing_activation_pct,

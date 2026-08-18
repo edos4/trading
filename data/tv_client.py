@@ -332,7 +332,7 @@ class TVClient:
     ) -> list[tuple[str, str]]:
         """Return top N (symbol, exchange) pairs.
 
-        US default: market cap. PH: peso turnover (`Value.Traded` / 10d ADV),
+        US default: dollar volume (`value`) with a $20M ADV floor. PH: peso turnover (`Value.Traded` / 10d ADV),
         never share-volume (that ranks penny names). Optional ADV floor in pesos.
         """
         from core.market import get_market
@@ -458,7 +458,7 @@ class TVClient:
 
     @staticmethod
     def fetch_universe(n: int, market: str | None = None) -> list[tuple[str, str]]:
-        """Market-aware universe: US by cap, PH by peso volume + ADV floor."""
+        """Market-aware universe: US by dollar volume + ADV floor, PH by peso volume + ADV floor."""
         from core.market import get_market
 
         profile = get_market(market)

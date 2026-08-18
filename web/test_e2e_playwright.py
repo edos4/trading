@@ -136,7 +136,7 @@ def _book_stub(market: str, running: bool = False, status: str = "Idle (e2e)") -
             "kronos_gate": us,
             "kronos_rank": False,
             "volume_gate": False,
-            "n_symbols": 100 if us else 30,
+            "n_symbols": 50 if us else 30,
         },
     }
 

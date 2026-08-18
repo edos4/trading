@@ -80,9 +80,7 @@ cp .env.example .env
 # Fill in: IBKR settings, ANTHROPIC_API_KEY, WATCHLIST
 # Optional Kronos gate: KRONOS_GATE_ENABLED / KRONOS_MIN_MOVE_PCT
 #   (needs ~/Kronos weights — see "Kronos Confirm Gate" below)
-# Optional Volume gate: VOLUME_GATE_ENABLED / VOLUME_GATE_RVOL_MIN
-#   (default OFF — see "Volume Confirm Gate" below; measure with
-#    --volume-gate-compare before enabling)
+# Volume gate: VOLUME_GATE_ENABLED / VOLUME_GATE_RVOL_MIN (default ON)
 ```
 
 ### 4. Start TWS or IB Gateway
@@ -99,7 +97,7 @@ python main.py
 Test the strategy against historical data (no live connection needed):
 
 ```bash
-# Full backtest — all patterns, top 100 symbols
+# Full backtest — enabled patterns, top 50 US names (dollar volume + $20M ADV)
 python main.py --backtest
 
 # Quick test — top 10 symbols
@@ -398,8 +396,8 @@ Startup logs print `Volume gate: ON/OFF`. Rejects log as
 ### `.env` settings
 
 ```bash
-# Off until A/B shows an edge — do not enable blindly
-VOLUME_GATE_ENABLED=false
+# On after the 2026-08-17 US paper book (Kronos 6% already passed every 003 loser)
+VOLUME_GATE_ENABLED=true
 # Signal-bar volume must be at least this multiple of the 20-bar average
 VOLUME_GATE_RVOL_MIN=1.5
 # Bars used for OBV slope (BUY ≥ 0, SELL ≤ 0)
@@ -552,7 +550,7 @@ Every trade can pass up to **four** gates (then risk limits):
 |------|----------------|--------------|---------|
 | Pattern / indicator analysis | Chart structure + indicators → `TradeSignal` | No signal / confidence below engine threshold | always on |
 | Kronos 1w confirm | Forecast direction + `|pred_1w| ≥ KRONOS_MIN_MOVE_PCT` | Forecast disagrees or move too small | `KRONOS_GATE_ENABLED=true` |
-| Volume confirm | RVOL ≥ `VOLUME_GATE_RVOL_MIN` + OBV slope agrees with BUY/SELL | Weak volume or OBV against the trade | `VOLUME_GATE_ENABLED=false` |
+| Volume confirm | RVOL ≥ `VOLUME_GATE_RVOL_MIN` + OBV slope agrees with BUY/SELL | Weak volume or OBV against the trade | `VOLUME_GATE_ENABLED=true` |
 | Vision confirmation | Claude looks at the chart PNG | Pattern not visually present | `VISION_CONFIRMATION_ENABLED=false` |
 
 Then risk_guard / paper sizing add hard limits before any order fires.

@@ -89,6 +89,33 @@ def test_time_exit_records_signal_elapsed_bars():
     assert 115 - t.entry_bar_idx == 14
 
 
+def test_time_exit_skips_winners_when_unfavorable_only():
+    t = BacktestTrade(
+        symbol="TEST", timeframe="1d", pattern="pattern_003_double_bottom",
+        action="BUY",
+        entry_date=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        exit_date=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        entry_price=100.0, exit_price=100.0, pnl=0.0, pnl_pct=0.0,
+        qty=10, entry_bar_idx=101,
+        neckline=99.0, neckline_break_direction="above",
+        neckline_break_bar_idx=100, exit_bars_after_neckline_break=15,
+        time_exit_only_unfavorable=True,
+    )
+    winner = type("Candle", (), {
+        "open": 102.0, "high": 103.0, "low": 101.0, "close": 102.0,
+    })()
+    fill, reason = _check_exit(winner, t, 115)
+    assert fill is None
+    assert reason == ""
+
+    loser = type("Candle", (), {
+        "open": 99.0, "high": 99.5, "low": 98.0, "close": 98.5,
+    })()
+    fill, reason = _check_exit(loser, t, 115)
+    assert fill == 98.5
+    assert reason == "time_exit"
+
+
 def test_mark_to_market_deduplicates_session_marks():
     acct = PaperAccount(initial_capital=100_000.0, market="us", slippage_pct=0.0)
     acct.mark_to_market(datetime(2026, 8, 17, 13, 30, tzinfo=timezone.utc))

@@ -54,12 +54,12 @@ class SymbolRequest(BaseModel):
 
 
 class PaperStartRequest(BaseModel):
-    n_symbols: int = Field(100, ge=5, le=5000)
+    n_symbols: int = Field(50, ge=5, le=5000)
     extra_symbols: str = ""
     use_stream: bool = False
     kronos_gate: bool = True
     kronos_rank: bool = False
-    volume_gate: bool = False
+    volume_gate: bool = True
     stream_start: Optional[str] = None
     market: Optional[Literal["us", "ph"]] = None
 

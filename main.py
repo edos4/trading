@@ -5,12 +5,12 @@ Usage:
     python main.py                                  # Live/paper scan mode
     python main.py --backtest --market ph            # PSE / PHP / long-only
     python main.py --paper --market ph               # PHP paper ledger (separate file)
-    python main.py --backtest                       # Backtest all patterns (100 symbols)
+    python main.py --backtest                       # Backtest all patterns (50 liquid symbols)
     python main.py --backtest 10                    # Backtest all patterns (10 symbols)
     python main.py --backtest --pattern double_top  # Test one pattern only
     python main.py --backtest --volume-gate         # Backtest with volume confirm gate ON
     python main.py --backtest 50 --volume-gate-compare  # A/B: gate OFF vs ON
-    python main.py --paper                          # Paper trade top 100 symbols (simulated fills)
+    python main.py --paper                          # Paper trade top 50 liquid symbols (simulated fills)
     python main.py --paper --paper-reset            # ...starting from a fresh virtual account
     python main.py --ui                             # Launch the symbol explorer GUI
     python main.py --web                            # Launch the authenticated web UI (VPS)
@@ -55,7 +55,7 @@ from utils.logger import log
 
 
 async def run_scanner(
-    n_symbols: int = 100,
+    n_symbols: int = 50,
     *,
     volume_gate: bool | None = None,
     market: str | None = None,
@@ -106,7 +106,7 @@ async def run_scanner(
 
 
 async def run_paper(
-    n_symbols: int = 100,
+    n_symbols: int = 50,
     reset: bool = False,
     *,
     volume_gate: bool | None = None,
@@ -354,11 +354,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--backtest",
         nargs="?",
-        const=100,
+        const=50,
         type=int,
         default=None,
         metavar="N",
-        help="Run backtest on top N symbols (default: 100). "
+        help="Run backtest on top N liquid symbols (default: 50). "
         "Without --backtest, runs live/paper scan.",
     )
     parser.add_argument(
@@ -374,7 +374,7 @@ def _parse_args() -> argparse.Namespace:
         "--volume-gate",
         action="store_true",
         help="Enable the RVOL+OBV volume confirm gate for this run "
-        "(overrides VOLUME_GATE_ENABLED=false). Use with --backtest / --paper.",
+        "(overrides VOLUME_GATE_ENABLED). Use with --backtest / --paper.",
     )
     parser.add_argument(
         "--volume-gate-compare",
@@ -396,11 +396,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--paper",
         nargs="?",
-        const=100,
+        const=50,
         type=int,
         default=None,
         metavar="N",
-        help="Run paper trading on top N symbols (default: 100) — live scan, "
+        help="Run paper trading on top N liquid symbols (default: 50) — live scan, "
         "simulated fills, no real broker.",
     )
     parser.add_argument(

@@ -4,9 +4,12 @@ patterns/pattern_003_double_bottom.py — Double Bottom (W pattern) long setup.
 Inverse of patterns/pattern_002_double_top.py:
   Detection: two swing lows (L1, L2) with bullish RSI divergence,
   peak height, volume weakness on leg 2, and no post-L2 breach before entry.
-  Entry: long on bar 7 after L2 OR neckline-break bar, whichever is first.
-  Exit hints on TradeSignal: take_profit 7% above neckline, trailing stop
-  3% below highest close since entry, and a 15-bar exit after neckline break.
+  Entry: first close above the neckline (peak high). Day-7-without-break
+  entries are rejected — the 2026-08-17 US paper book (79 fills, PF 0.29)
+  was 100% unconfirmed W bounces because TP=neckline×1.07 + 6% hard stop
+  + min R:R 1.5 made confirmed breakouts illegal.
+  Exits: structural stop under L2, take-profit = max(measured move from
+  entry, +12%), 8% trail after +12%, 30-bar time-stop only if still red.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ import pandas as pd
 from patterns.base_pattern import (
     BasePattern, TradeSignal,
     ann_marker, ann_hline, ANN_PEAK, ANN_TROUGH, ANN_LINE, ANN_TARGET, ANN_ENTRY,
+    ANN_STOP,
 )
 from data.tv_client import MarketSnapshot
 from data.ohlcv_store import OHLCVStore
@@ -60,8 +64,7 @@ class DoubleBottomPattern(BasePattern):
             "height with a peak between them. L2 low is above L1 low, RSI at L2 "
             "is higher than at L1 (bullish divergence), and L1 RSI was oversold "
             "(≤30). The second leg down shows weak volume. Entry is a LONG on "
-            "day 7 after L2 or on the first close above the neckline (peak high), "
-            "whichever comes first."
+            "the first close above the neckline (peak high)."
         )
 
     # ── Parameters (inverse of double_top.py) ─────────────────────────────────
@@ -77,11 +80,14 @@ class DoubleBottomPattern(BasePattern):
     PEAK_HEIGHT_MIN      = 0.07      # 7% rise from L1 low to peak
     L1_L2_GAP_MIN        = 8
     L1_L2_GAP_MAX        = 90
-    ENTRY_BARS_AFTER_L2  = 7
-    TAKE_PROFIT_ABOVE_NK = 0.07      # sell 7% above neckline
-    TRAILING_STOP_PCT    = 0.03      # 3% below highest close since entry (acts as stop loss)
-    TRAILING_ACTIVATION_PCT = 0.04   # trail doesn't arm until 4% favorable move (was clipping winners at entry)
-    EXIT_BARS_AFTER_NECK_BREAK = 15
+    STOP_BELOW_L2        = 0.99      # 1% under L2 low (structure)
+    MIN_TARGET_PCT       = 0.12      # floor so R:R still clears 1.5 after 6% hard cap
+    TRAILING_STOP_PCT    = 0.08      # trail 8% below the peak once armed
+    # Arm the trail only after the +12% target floor. The old 8%/8% put the
+    # trail at entry*1.08*0.92 = entry*0.9936 on activation — below entry — so
+    # it could only ever exit at a loss (2026-08-18 paper: MATV +8.2% → -0.6%).
+    TRAILING_ACTIVATION_PCT = 0.12
+    EXIT_BARS_AFTER_NECK_BREAK = 30
     SWING_LOOKBACK       = 2
     MIN_BARS             = 120
     SHARES               = 25
@@ -130,13 +136,19 @@ class DoubleBottomPattern(BasePattern):
 
                 confidence = self._score_confidence(setup)
                 close = float(ind.close.iloc[cur])
+                stop, target = self._exit_levels(
+                    close, setup.neckline, setup.l1_low, setup.l2_low,
+                )
+                if stop >= close or target <= close:
+                    continue
 
                 log.info(
                     f"[{self.name}] {symbol} {timeframe} | "
-                    f"LONG entry | L1@{l1_idx} L2@{l2_idx} "
+                    f"LONG neckline-break | L1@{l1_idx} L2@{l2_idx} "
                     f"neckline={setup.neckline:.4f} "
                     f"peak_height={setup.peak_height_pct:.1%} "
                     f"RSI_div={setup.rsi_divergence:.1f} "
+                    f"stop={stop:.4f} tp={target:.4f} "
                     f"confidence={confidence:.2f}"
                 )
 
@@ -148,15 +160,15 @@ class DoubleBottomPattern(BasePattern):
                     confidence=confidence,
                     price=close,
                     qty=self.SHARES,
-                    take_profit=round(
-                        setup.neckline * (1 + self.TAKE_PROFIT_ABOVE_NK), 4
-                    ),
+                    stop_loss=stop,
+                    take_profit=target,
                     trailing_stop_pct=self.TRAILING_STOP_PCT,
                     trailing_stop_mode="highest_close",
                     trailing_activation_pct=self.TRAILING_ACTIVATION_PCT,
                     neckline=setup.neckline,
                     neckline_break_direction="above",
                     exit_bars_after_neckline_break=self.EXIT_BARS_AFTER_NECK_BREAK,
+                    time_exit_only_unfavorable=True,
                     notes=(
                         f"Double bottom L1→L2 gap={l2_idx - l1_idx}bars | "
                         f"neckline={setup.neckline:.2f} | "
@@ -168,7 +180,8 @@ class DoubleBottomPattern(BasePattern):
                         ann_marker(self.bar_date(df, l2_idx), setup.l2_low, "L2", ANN_TROUGH, "^", "below"),
                         ann_marker(self.bar_date(df, setup.peak_idx), setup.neckline, "neck", ANN_PEAK, "v", "above"),
                         ann_hline(setup.neckline, "neckline", ANN_LINE),
-                        ann_hline(setup.neckline * (1 + self.TAKE_PROFIT_ABOVE_NK), "TP", ANN_TARGET),
+                        ann_hline(stop, "stop", ANN_STOP),
+                        ann_hline(target, "TP", ANN_TARGET),
                         ann_marker(self.bar_date(df, cur), close, "entry", ANN_ENTRY, "o", "below"),
                     ],
                 )
@@ -252,20 +265,14 @@ class DoubleBottomPattern(BasePattern):
 
         neckline = peak_high
         neck_break_idx = self._neckline_break_idx(ind.close, l2_idx, cur, neckline)
-        day7_idx = l2_idx + self.ENTRY_BARS_AFTER_L2
-        if neck_break_idx is not None:
-            entry_idx = min(day7_idx, neck_break_idx)
-        else:
-            if day7_idx > cur:
-                return None
-            entry_idx = day7_idx
+        # Confirmed breakout only. Early day-7 entries sat 2–33% below the
+        # neckline and were the entire 2026-08-17 US paper loss.
+        if neck_break_idx is None:
+            return None
+        entry_idx = neck_break_idx
 
-        # C13 (inverse): cancel if any bar after L2 breaches L2 low before the
-        # neckline break. When entry is the neckline break this is l2+1..neck-1;
-        # when day-7 entry fires first the neckline has not broken yet by cur,
-        # so we monitor every available bar up to cur. (Checking up to entry
-        # is equivalent here because entry == min(day7, neck_break).)
-        post_l2_end = neck_break_idx if neck_break_idx is not None else cur
+        # Cancel if any bar after L2 undercuts L2 low before the neckline break.
+        post_l2_end = neck_break_idx
         post_l2 = ind.low.iloc[l2_idx + 1 : post_l2_end]
         if not post_l2.empty and post_l2.min() < l2_low:
             return None
@@ -301,6 +308,20 @@ class DoubleBottomPattern(BasePattern):
         if not up_vols or not down_vols:
             return False
         return sum(down_vols) / len(down_vols) < sum(up_vols) / len(up_vols)
+
+    def _exit_levels(
+        self,
+        close: float,
+        neckline: float,
+        l1_low: float,
+        l2_low: float,
+    ) -> tuple[float, float]:
+        """Structural stop under L2; TP is measured-move with a +12% floor."""
+        stop = round(l2_low * self.STOP_BELOW_L2, 4)
+        measured = close + (neckline - l1_low)
+        floor = close * (1.0 + self.MIN_TARGET_PCT)
+        target = round(max(measured, floor), 4)
+        return stop, target
 
     def _neckline_break_idx(
         self,
