@@ -5,9 +5,11 @@ from core.engine_defaults import (
     ENGINE,
     backtest_kwargs,
     describe_cooldown_rejection,
+    describe_min_share_price_rejection,
     describe_regime_rejection,
     passes_cooldown,
     passes_min_confidence,
+    passes_min_share_price,
     passes_regime_filter,
     risk_gate_kwargs,
     sizing_kwargs,
@@ -41,12 +43,18 @@ def demo():
     assert ENGINE.risk_per_trade_pct == 0.0075
     assert ENGINE.max_gross_exposure_pct == 1.0
     assert ENGINE.regime_hysteresis_pct == 0.015
-    assert ENGINE.min_confidence == 0.6
+    assert ENGINE.min_confidence == 0.65
     assert ENGINE.regime_filter is True
     assert ENGINE.cooldown_bars == 10
 
-    assert passes_min_confidence(_sig(confidence=0.6))
-    assert not passes_min_confidence(_sig(confidence=0.59))
+    assert passes_min_confidence(_sig(confidence=0.65))
+    assert not passes_min_confidence(_sig(confidence=0.64))
+
+    assert passes_min_share_price(_sig(price=5.0), min_share_price=5.0)
+    assert not passes_min_share_price(_sig(price=4.99), min_share_price=5.0)
+    price_reason = describe_min_share_price_rejection(_sig(price=2.0), 5.0)
+    assert price_reason is not None and "Min share-price gate" in price_reason
+    assert passes_min_share_price(_sig(price=2.0), min_share_price=None)
 
     # Short history → regime no-op (same as backtester).
     assert passes_regime_filter(_sig(), _Store())
@@ -79,7 +87,7 @@ def demo():
         _Store(above),
     ) is not None
     assert ENGINE.regime_exempt_patterns == ()
-    assert ENGINE.breakeven_trigger_pct == 0.015
+    assert ENGINE.breakeven_trigger_pct == 0.03
 
     # 1.5% hysteresis: ~1% the wrong side of SMA200 is a near-miss, not a block.
     buy_near = [100.0] * 200 + [99.0]
@@ -103,10 +111,11 @@ def demo():
     assert sk["account_value"] == 50_000.0
 
     bt = backtest_kwargs(pattern_filter="double_bottom", market="us")
-    assert bt["min_confidence"] == 0.6
+    assert bt["min_confidence"] == 0.65
     assert bt["max_position_pct"] == 0.10
     assert bt["max_gross_exposure_pct"] == 1.0
-    assert bt["breakeven_trigger_pct"] == 0.015
+    assert bt["breakeven_trigger_pct"] == 0.03
+    assert bt["min_share_price"] == 5.0
     assert "regime_hysteresis_pct" not in bt
     assert "regime_exempt_patterns" not in bt
     assert bt["pattern_filter"] == "double_bottom"

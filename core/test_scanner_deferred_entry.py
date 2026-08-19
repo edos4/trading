@@ -3,10 +3,13 @@ same one-bar deferral core/backtester.py's pending_entry gives backtests —
 instead of the same candle whose close produced the signal."""
 
 import asyncio
+import tempfile
 from contextlib import asynccontextmanager
 from datetime import date, datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from core import signal_log_store as sls
 from core.paper_trader import PaperAccount
 from core.scanner import MarketScanner
 from data.tv_client import MarketSnapshot, OHLCVCandle
@@ -68,6 +71,15 @@ class _FakeFeed:
 
 
 def demo():
+    prev = sls._log_dir
+    sls._log_dir = Path(tempfile.mkdtemp())
+    try:
+        _demo_body()
+    finally:
+        sls._log_dir = prev
+
+
+def _demo_body():
     feed = _FakeFeed()
     paper = PaperAccount(initial_capital=100_000.0, slippage_pct=0.0)
     scanner = MarketScanner(

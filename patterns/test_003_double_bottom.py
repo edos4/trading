@@ -25,6 +25,17 @@ def test_exit_levels_floor_is_twelve_percent():
     assert stop < 100.0
 
 
+def test_neckline_break_requires_buffer_above_peak():
+    import pandas as pd
+
+    p = DoubleBottomPattern()
+    close = pd.Series([90.0] * 30)
+    close.iloc[25] = 100.01  # barely above neckline 100
+    assert p._neckline_break_idx(close, l2_idx=20, cur=25, neckline=100.0) is None
+    close.iloc[26] = 100.6  # 0.6% above neckline
+    assert p._neckline_break_idx(close, l2_idx=20, cur=26, neckline=100.0) == 26
+
+
 def test_no_day7_entry_without_neckline_break():
     """Unconfirmed W (the 79-fill paper book) must not produce a setup."""
     import pandas as pd

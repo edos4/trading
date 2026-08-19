@@ -24,7 +24,7 @@ from utils.logger import log
 class EngineDefaults:
     """Canonical money-path defaults (CLI backtest + paper + scanner)."""
 
-    min_confidence: float = 0.6
+    min_confidence: float = 0.65
     regime_filter: bool = True
     # Allow BUY/SELL within this band of SMA200 (1.5% near-misses); still
     # block names 20%+ the wrong side of the average.
@@ -39,10 +39,9 @@ class EngineDefaults:
     # Long+short notional / equity. 0 = unlimited.
     max_gross_exposure_pct: float = 1.0
     trailing_activation_default: float = 0.02
-    # Arm a ~entry floor once the trade has been +1.5%. Stops the common
-    # round-trip: +2–4% then full stop. Trailing still waits for each
-    # pattern's own activation (often 4%).
-    breakeven_trigger_pct: float | None = 0.015
+    # Arm entry floor once +3%. 1.5% armed too early — 2026-08-18 paper had
+    # five breakeven_stop exits at ~−0.1% after a brief +1.5% flicker.
+    breakeven_trigger_pct: float | None = 0.03
     breakeven_buffer_pct: float = 0.0015
     min_atr_stop_multiple: float = 1.0
     synthetic_stop_multiple: float = 2.0
@@ -81,6 +80,7 @@ def backtest_kwargs(**overrides: Any) -> dict[str, Any]:
     d["txn_cost_pct"] = profile.txn_cost_pct
     d["account_value"] = profile.paper_initial_capital
     d["long_only"] = profile.long_only
+    d["min_share_price"] = profile.min_share_price
     d.update(overrides)
     return d
 
@@ -135,6 +135,35 @@ def describe_confidence_rejection(
         f"Min-confidence gate: pattern scored {signal.confidence:.2f} but the "
         f"engine floor is {thresh:.2f} — setup too weak to trade."
     )
+
+
+def passes_min_share_price(
+    signal: TradeSignal,
+    min_share_price: float | None = None,
+) -> bool:
+    return describe_min_share_price_rejection(signal, min_share_price) is None
+
+
+def describe_min_share_price_rejection(
+    signal: TradeSignal,
+    min_share_price: float | None = None,
+) -> str | None:
+    """Block entries on sub-floor share prices (gap/wick risk on OTC-style names)."""
+    if min_share_price is None or min_share_price <= 0:
+        return None
+    if signal.action == "CLOSE" or signal.price is None or signal.price <= 0:
+        return None
+    if signal.price < min_share_price:
+        log.debug(
+            f"EntryGate | {signal.symbol} {signal.pattern} price "
+            f"${signal.price:.4f} < min ${min_share_price:.2f} — skip"
+        )
+        return (
+            f"Min share-price gate: {signal.symbol} entry ${signal.price:.2f} is "
+            f"below the ${min_share_price:.2f} floor — sub-dollar/penny names "
+            f"are excluded after gap-risk losses on the US paper book."
+        )
+    return None
 
 
 def passes_regime_filter(

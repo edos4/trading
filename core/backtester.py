@@ -36,6 +36,7 @@ from core.engine_defaults import (
     ENGINE,
     passes_cooldown,
     passes_min_confidence,
+    passes_min_share_price,
     passes_regime_filter,
 )
 from core.kronos_gate import kronos_gate_check
@@ -1457,6 +1458,11 @@ def _core_backtest_symbol(
             if not passes_min_confidence(signal, config["min_confidence"]):
                 continue
 
+            if not passes_min_share_price(
+                signal, config.get("min_share_price"),
+            ):
+                continue
+
             if config.get("kronos_gate"):
                 gate = kronos_gate_check(signal, store)
                 if not gate.passed:
@@ -1849,6 +1855,7 @@ class Backtester:
             "kronos_rank_rebalance_bars": settings.kronos_rank_rebalance_bars,
             "max_open_positions": self._max_open_positions,
             "long_only": self._long_only,
+            "min_share_price": get_market(self._market).min_share_price,
             "skip_edgar": get_market(self._market).skip_edgar,
             "lot_round": get_market(self._market).lot_round,
             "session_tz": get_market(self._market).session_tz,
@@ -1992,6 +1999,7 @@ class Backtester:
                 "volume_gate_rvol_min": settings.volume_gate_rvol_min,
                 "volume_gate_obv_bars": settings.volume_gate_obv_bars,
                 "long_only": self._long_only,
+                "min_share_price": get_market(self._market).min_share_price,
                 "lot_round": get_market(self._market).lot_round,
                 "session_tz": get_market(self._market).session_tz,
                 "market": self._market,

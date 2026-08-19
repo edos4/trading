@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import tempfile
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
@@ -14,6 +16,7 @@ import pandas as pd
 from core.backtester import BacktestTrade
 from core.market import PH
 from core.paper_books import PaperBook, PaperBookManager
+from core import signal_log_store as sls
 
 
 START_KW = dict(
@@ -129,13 +132,29 @@ def test_start_twice_returns_already_running():
 
 def test_reset_ph_does_not_wipe_us():
     with patch("core.paper_books.PaperAccount.save"):
-        mgr = PaperBookManager()
-        mgr.books["us"].account.cash = 4242.0
-        err = mgr.reset("ph")
-        assert err is None
-        assert mgr.books["us"].account.cash == 4242.0
-        assert mgr.books["ph"].account.cash == PH.paper_initial_capital
-        assert mgr.books["ph"].account.positions == {}
+        with patch("core.paper_books.reset_signal_log"):
+            mgr = PaperBookManager()
+            mgr.books["us"].account.cash = 4242.0
+            err = mgr.reset("ph")
+            assert err is None
+            assert mgr.books["us"].account.cash == 4242.0
+            assert mgr.books["ph"].account.cash == PH.paper_initial_capital
+            assert mgr.books["ph"].account.positions == {}
+
+
+def test_snapshot_reads_and_resets_signal_log_file():
+    prev = sls._log_dir
+    sls._log_dir = Path(tempfile.mkdtemp())
+    try:
+        with patch("core.paper_books.PaperAccount.save"):
+            sls.append_signal_log("us", {"symbol": "TSLA", "status": "rejected", "reason": "gate"})
+            mgr = PaperBookManager()
+            snap = mgr.snapshot("us")
+            assert any(r["symbol"] == "TSLA" for r in snap["signal_logs"])
+            mgr.reset_logs("us")
+            assert mgr.snapshot("us")["signal_logs"] == []
+    finally:
+        sls._log_dir = prev
 
 
 def test_ticker_collision_chart_uses_market():

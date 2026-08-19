@@ -119,6 +119,11 @@ async def run_paper(
     if reset and profile.paper_account_path.exists():
         profile.paper_account_path.unlink()
         log.info(f"Paper | {profile.id} account reset")
+    if reset:
+        from core.signal_log_store import reset_signal_log
+
+        reset_signal_log(profile.id)
+        log.info(f"Paper | {profile.id} signal log reset")
 
     account = PaperAccount.load(market=profile.id)
     use_volume = (

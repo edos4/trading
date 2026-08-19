@@ -44,6 +44,7 @@ from core.paper_trader import (
     unrealized_pct,
 )
 from core.scanner import MarketScanner
+from core.signal_log_store import load_signal_log, reset_signal_log
 from data.edgar_client import set_skip_edgar
 from data.stream_client import StreamClient
 from data.tv_client import TVClient
@@ -152,11 +153,10 @@ class PaperBook:
         result = account.to_result()
         stats = scanner.stats if scanner is not None else None
         signal_logs = []
-        if scanner is not None:
-            for row in reversed(scanner.signal_log_snapshot()):
-                entry = dict(row)
-                entry["market"] = profile.id
-                signal_logs.append(entry)
+        for row in reversed(load_signal_log(profile.id)):
+            entry = dict(row)
+            entry["market"] = profile.id
+            signal_logs.append(entry)
         curve_b64 = self._equity_chart_b64(account)
 
         total_pnl = equity - account.initial_capital
@@ -357,7 +357,18 @@ class PaperBook:
             self.account.save()
             self.status = f"{profile.label} account reset."
             self.error = None
+            scanner = self.scanner
+        reset_signal_log(self.market)
+        if scanner is not None:
+            scanner.clear_signal_log_memory()
         return None
+
+    def reset_logs(self) -> None:
+        reset_signal_log(self.market)
+        with self.lock:
+            scanner = self.scanner
+        if scanner is not None:
+            scanner.clear_signal_log_memory()
 
     @staticmethod
     def _port_open(host: str, port: int) -> bool:
@@ -629,6 +640,13 @@ class PaperBookManager:
 
     def reset(self, market: str) -> str | None:
         return self._book(market).reset()
+
+    def reset_logs(self, market: str | None = "all") -> None:
+        if market in (None, "", "all"):
+            for book in self.books.values():
+                book.reset_logs()
+            return
+        self._book(market).reset_logs()
 
     def chart(
         self,
