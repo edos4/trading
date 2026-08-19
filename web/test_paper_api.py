@@ -145,6 +145,18 @@ class WebPaperApiTests(unittest.TestCase):
         r = self.client.get("/api/paper/export?market=eu")
         self.assertEqual(r.status_code, 400)
 
+    def test_reset_logs_validates_market(self) -> None:
+        self._login()
+        with patch("web.app.paper_books.reset_logs") as reset_logs:
+            bad = self.client.post("/api/paper/reset-logs", json={"market": "eu"})
+            self.assertEqual(bad.status_code, 400)
+            ok = self.client.post("/api/paper/reset-logs", json={"market": "ph"})
+            self.assertEqual(ok.status_code, 200)
+            reset_logs.assert_called_once_with("ph")
+            both = self.client.post("/api/paper/reset-logs", json={"market": "all"})
+            self.assertEqual(both.status_code, 200)
+            reset_logs.assert_called_with("all")
+
 
 if __name__ == "__main__":
     unittest.main()

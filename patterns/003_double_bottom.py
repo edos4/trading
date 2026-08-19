@@ -91,6 +91,9 @@ class DoubleBottomPattern(BasePattern):
     SWING_LOOKBACK       = 2
     MIN_BARS             = 120
     SHARES               = 25
+    # Require close ≥ neckline × (1+buffer). Barely-above breaks were still
+    # failing on the next bar in the 2026-08-18 US paper book (59% stop_loss).
+    NECKLINE_BREAK_BUFFER = 0.005
 
     # ── Core logic ─────────────────────────────────────────────────────────────
     def analyze(
@@ -331,7 +334,7 @@ class DoubleBottomPattern(BasePattern):
         neckline: float,
     ) -> int | None:
         for i in range(l2_idx + 1, cur + 1):
-            if float(close.iloc[i]) > neckline:
+            if float(close.iloc[i]) > neckline * (1.0 + self.NECKLINE_BREAK_BUFFER):
                 return i
         return None
 

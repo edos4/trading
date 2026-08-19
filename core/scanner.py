@@ -47,6 +47,7 @@ from core.backtester import describe_risk_gate_rejection
 from core.engine_defaults import (
     describe_confidence_rejection,
     describe_cooldown_rejection,
+    describe_min_share_price_rejection,
     describe_regime_rejection,
     passes_min_confidence,
     risk_gate_kwargs,
@@ -64,6 +65,11 @@ from core.market import (
     is_closed_session_bar,
     is_swing_timeframe,
     is_weekly_timeframe,
+)
+from core.signal_log_store import (
+    SIGNAL_LOG_MAX,
+    append_signal_log,
+    load_signal_log,
 )
 from utils.logger import log
 
@@ -89,6 +95,7 @@ class MarketScanner:
         self._disabled_patterns = set(disabled_patterns or [])
         profile = get_market(market if market is not None else getattr(paper_account, "market", None))
         self._market = profile.id
+        self._min_share_price = profile.min_share_price
         from data.edgar_client import set_skip_edgar
 
         set_skip_edgar(profile.skip_edgar)
@@ -183,14 +190,21 @@ class MarketScanner:
             "asof_skipped": 0,
             "dead_symbols": 0,
         }
-        # Ring buffer of per-signal accept/reject decisions for the web Paper
-        # Logs tab (newest last). Thread-safe — scan workers run concurrently.
-        self._signal_log: deque[dict] = deque(maxlen=1000)
+        # Ring buffer of per-signal accept/reject decisions. Persisted to
+        # logs/paper_signals_{market}.jsonl — the web Paper Logs tab reads
+        # that file, not this deque. Thread-safe — scan workers run concurrently.
+        self._signal_log: deque[dict] = deque(
+            load_signal_log(self._market), maxlen=SIGNAL_LOG_MAX,
+        )
         self._signal_log_lock = threading.Lock()
 
     def signal_log_snapshot(self) -> list[dict]:
         with self._signal_log_lock:
             return list(self._signal_log)
+
+    def clear_signal_log_memory(self) -> None:
+        with self._signal_log_lock:
+            self._signal_log.clear()
 
     def _append_signal_log(
         self,
@@ -201,6 +215,7 @@ class MarketScanner:
     ) -> None:
         entry = {
             "ts": datetime.now(timezone.utc).isoformat(),
+            "market": self._market,
             "symbol": signal.symbol,
             "timeframe": signal.timeframe,
             "action": signal.action,
@@ -217,6 +232,10 @@ class MarketScanner:
         }
         with self._signal_log_lock:
             self._signal_log.append(entry)
+        try:
+            append_signal_log(self._market, entry)
+        except OSError:
+            log.exception(f"Signal log | failed to persist {self._market} row")
 
         if status == "rejected":
             reason_lower = reason.lower()
@@ -234,6 +253,8 @@ class MarketScanner:
                 gate = "session"
             elif "confidence" in reason_lower:
                 gate = "confidence"
+            elif "share-price" in reason_lower or "share price" in reason_lower:
+                gate = "min_price"
             elif "regime" in reason_lower or "sma200" in reason_lower:
                 gate = "regime"
             elif "cooldown" in reason_lower:
@@ -661,6 +682,18 @@ class MarketScanner:
             )
             self.stats["signals_rejected"] += 1
             self._append_signal_log(signal, status="rejected", reason=reason)
+            return
+
+        price_reason = describe_min_share_price_rejection(
+            signal, self._min_share_price,
+        )
+        if price_reason is not None:
+            log.info(
+                f"Signal REJECTED by min share price — {signal.symbol} "
+                f"{signal.pattern} | {price_reason}"
+            )
+            self.stats["signals_rejected"] += 1
+            self._append_signal_log(signal, status="rejected", reason=price_reason)
             return
 
         regime_reason = describe_regime_rejection(signal, self._store)

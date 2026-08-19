@@ -122,7 +122,7 @@ class Settings(BaseSettings):
     # to agree with BUY/SELL. On for paper/scan after the 2026-08-17 US book
     # (Kronos 6% already passed every 003 loser). Fail-open on short history.
     volume_gate_enabled: bool = True
-    volume_gate_rvol_min: float = 1.5
+    volume_gate_rvol_min: float = 2.0
     volume_gate_obv_bars: int = 5
 
     # ── Vision ────────────────────────────────────────────────────────────
@@ -236,14 +236,12 @@ settings = Settings()
 #
 #   pattern_003_double_bottom stays ON with neckline-break-only entry
 #   (2026-08-17 US paper: 79 day-7-without-break fills, PF 0.29).
+#
+#   pattern_004_rounding_bottom — n=3, 0% win, pf=0.00 on 2026-08-18 US
+#   paper (−14% equal-weight). Disabled until the saucer rules are reworked.
 DISABLED_PATTERNS: list[str] = [
     "pattern_011_breakout_retest",
     "pattern_012_ml_signal",
     "pattern_009_flag_pattern",
-    "pattern_010_pennant",
-    "pattern_002_double_top",
-    "pattern_005_rounding_top",
     "pattern_006_upward_channel",
-    "pattern_007_descending_channel",
-    "pattern_008_head_and_shoulders",
 ]

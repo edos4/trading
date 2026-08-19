@@ -361,6 +361,22 @@ def create_app() -> FastAPI:
             return JSONResponse({"detail": err}, status_code=409)
         return {"ok": True}
 
+    @app.post("/api/paper/reset-logs")
+    async def api_paper_reset_logs(request: Request, _user: str = Depends(require_login)):
+        market = "all"
+        try:
+            raw = await _json_body(request)
+            if raw:
+                market = str((raw or {}).get("market") or "all").strip().lower()
+        except ValueError:
+            market = "all"
+        if market not in ("us", "ph", "all"):
+            return JSONResponse(
+                {"detail": "market must be us, ph, or all."}, status_code=400,
+            )
+        paper_books.reset_logs(market)
+        return {"ok": True}
+
     @app.get("/api/paper/chart")
     async def api_paper_chart(
         request: Request, _user: str = Depends(require_login),

@@ -925,7 +925,7 @@ function initPaper() {
   document.querySelectorAll(".book-reset").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const id = btn.dataset.book;
-      if (!confirm(`Wipe the ${id.toUpperCase()} paper account and start fresh?`)) return;
+      if (!confirm(`Wipe the ${id.toUpperCase()} paper account and signal log?`)) return;
       try {
         await api("/api/paper/reset", { method: "POST", body: JSON.stringify({ market: id }) });
         await poll();
@@ -974,6 +974,22 @@ function initPaper() {
     el?.addEventListener("input", renderLogs);
   });
   logStatus?.addEventListener("change", renderLogs);
+
+  document.getElementById("paper-reset-logs")?.addEventListener("click", async () => {
+    const m = marketFilter === "us" || marketFilter === "ph" ? marketFilter : "all";
+    const label = m === "all" ? "US and PH" : m.toUpperCase();
+    if (!confirm(`Clear the ${label} signal log file? Paper account stays.`)) return;
+    try {
+      await api("/api/paper/reset-logs", {
+        method: "POST",
+        body: JSON.stringify({ market: m }),
+      });
+      if (logsBody) logsBody.innerHTML = "";
+      await poll();
+    } catch (e) {
+      window.alert(String(e.message || e));
+    }
+  });
 
   document.getElementById("paper-export-trades")?.addEventListener("click", async () => {
     const m = marketFilter === "us" || marketFilter === "ph" ? marketFilter : "all";

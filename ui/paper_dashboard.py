@@ -423,7 +423,7 @@ class PaperDashboard:
         if paper_books.books[market].running:
             messagebox.showinfo("Paper trading", f"Stop the {market.upper()} session before resetting.")
             return
-        if not messagebox.askyesno("Reset account", f"Wipe the {market.upper()} paper account and start fresh?"):
+        if not messagebox.askyesno("Reset account", f"Wipe the {market.upper()} paper account and signal log?"):
             return
         err = paper_books.reset(market)
         if err:

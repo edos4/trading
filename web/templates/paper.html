@@ -146,7 +146,7 @@
 <section class="tab-panel" id="tab-logs" hidden>
   <div class="panel">
     <h2>Signal log</h2>
-    <p class="muted small">Detected pattern signals with accept/reject outcome and reason.</p>
+    <p class="muted small">Detected pattern signals with accept/reject outcome and reason. Stored in <code>logs/paper_signals_{us,ph}.jsonl</code>.</p>
     <div class="toolbar compact">
       <label>Symbol <input type="text" id="paper-log-symbol" size="10" /></label>
       <label>Pattern <input type="text" id="paper-log-pattern" size="24" /></label>
@@ -157,6 +157,7 @@
         </select>
       </label>
       <label>Search <input type="text" id="paper-log-search" size="28" /></label>
+      <button type="button" class="btn" id="paper-reset-logs">Reset logs</button>
     </div>
     <div class="table-wrap tall">
       <table id="paper-logs">
