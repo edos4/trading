@@ -26,11 +26,12 @@ from data.ohlcv_store import OHLCVStore
 from utils.logger import log
 
 
-# Swing setups typically take ~20 daily bars to develop. Chart explorer
-# scans this many recent closes so a pattern that is almost formed (or
-# triggered a few days ago) still shows — analyze() itself only fires on
-# the exact trigger bar, which is correct for the backtester/scanner.
-FORMATION_BARS = 20
+# Swing setups typically take ~1 month of daily bars to develop (21
+# trading sessions). Chart explorer scans this many recent closes so a
+# pattern that is almost formed (or triggered a few days ago) still shows
+# — analyze() itself only fires on the exact trigger bar, which is
+# correct for the backtester/scanner.
+FORMATION_BARS = 21
 
 
 def skip_pattern_module(name: str) -> bool:

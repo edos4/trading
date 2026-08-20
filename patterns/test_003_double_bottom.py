@@ -36,9 +36,9 @@ def test_neckline_break_requires_buffer_above_peak():
     assert p._neckline_break_idx(close, l2_idx=20, cur=26, neckline=100.0) == 26
 
 
-def test_w_requires_about_twenty_days_to_form():
+def test_w_requires_about_one_month_to_form():
     p = DoubleBottomPattern()
-    assert p.L1_L2_GAP_MIN == 20
+    assert p.L1_L2_GAP_MIN == 21
 
 
 def test_no_day7_entry_without_neckline_break():

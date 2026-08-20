@@ -70,7 +70,7 @@ class DoubleTopPattern(BasePattern):
     H2_RSI_MAX           = 61.0
     RSI_DIVERGENCE_MIN   = 3.0
     VALLEY_DEPTH_MIN     = 0.05      # 5% drop from H1 high to valley
-    H1_H2_GAP_MIN        = FORMATION_BARS  # M needs ~20 trading days to form
+    H1_H2_GAP_MIN        = FORMATION_BARS  # M needs ~1 month to form
     H1_H2_GAP_MAX        = 90
     ENTRY_BARS_AFTER_H2  = 7
     TAKE_PROFIT_BELOW_NK = 0.07      # cover 7% below neckline
