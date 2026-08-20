@@ -16,7 +16,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from patterns.base_pattern import (
-    BasePattern, TradeSignal,
+    BasePattern, TradeSignal, FORMATION_BARS,
     ann_marker, ann_hline, ANN_PEAK, ANN_TROUGH, ANN_LINE, ANN_TARGET, ANN_ENTRY,
 )
 from data.tv_client import MarketSnapshot
@@ -70,7 +70,7 @@ class DoubleTopPattern(BasePattern):
     H2_RSI_MAX           = 61.0
     RSI_DIVERGENCE_MIN   = 3.0
     VALLEY_DEPTH_MIN     = 0.05      # 5% drop from H1 high to valley
-    H1_H2_GAP_MIN        = 8
+    H1_H2_GAP_MIN        = FORMATION_BARS  # M needs ~20 trading days to form
     H1_H2_GAP_MAX        = 90
     ENTRY_BARS_AFTER_H2  = 7
     TAKE_PROFIT_BELOW_NK = 0.07      # cover 7% below neckline
@@ -319,7 +319,7 @@ class DoubleTopPattern(BasePattern):
         if setup.h2_rsi <= 58.0:
             score += 0.10
         gap = setup.h2_idx - setup.h1_idx
-        if 15 <= gap <= 60:
+        if FORMATION_BARS <= gap <= 60:
             score += 0.10
         height_ratio = setup.h2_high / setup.h1_high
         if height_ratio <= 0.98:

@@ -29,7 +29,7 @@ import patterns as patterns_pkg
 from config import settings
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
 from data.tv_client import TVClient, MarketSnapshot, OHLCVCandle, SCREENER_FIELDS
-from patterns.base_pattern import BasePattern, TradeSignal
+from patterns.base_pattern import BasePattern, TradeSignal, skip_pattern_module
 from analysis.indicator_engine import IndicatorEngine
 from analysis.price_volume import compute_volume_metrics, volume_confirm_gate
 from core.engine_defaults import (
@@ -1178,7 +1178,7 @@ def _iter_pattern_classes() -> list[tuple[str, type[BasePattern]]]:
     """Yield (module_name, class) for every BasePattern subclass in patterns/."""
     found: list[tuple[str, type[BasePattern]]] = []
     for module_info in pkgutil.iter_modules(patterns_pkg.__path__):
-        if module_info.name.startswith("_") or module_info.name == "base_pattern":
+        if skip_pattern_module(module_info.name):
             continue
         module = importlib.import_module(f"patterns.{module_info.name}")
         for attr_name in dir(module):

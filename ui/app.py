@@ -21,7 +21,6 @@ import pkgutil
 import queue
 import threading
 import tkinter as tk
-from datetime import datetime, timezone
 from tkinter import filedialog, messagebox, ttk
 from typing import Callable, Optional
 
@@ -38,8 +37,9 @@ from core.engine_defaults import passes_min_confidence, passes_regime_filter
 from core.market import default_market, get_market
 from analysis.price_volume import volume_confirm_gate
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
-from data.tv_client import MarketSnapshot, TVClient
-from patterns.base_pattern import BasePattern, TradeSignal
+from data.tv_client import TVClient
+from patterns.base_pattern import BasePattern, TradeSignal, skip_pattern_module
+from patterns.chart_scan import latest_signals_over_lookback
 from ui.backtest_dialog import BacktestDialog
 from utils.logger import log
 
@@ -51,7 +51,7 @@ def discover_patterns() -> list[BasePattern]:
     """Mirror core.scanner._discover_patterns - instantiate every pattern class."""
     found: list[BasePattern] = []
     for module_info in pkgutil.iter_modules(patterns_pkg.__path__):
-        if module_info.name.startswith("_") or module_info.name == "base_pattern":
+        if skip_pattern_module(module_info.name):
             continue
         try:
             module = importlib.import_module(f"patterns.{module_info.name}")
@@ -321,34 +321,15 @@ class TradingBotUI:
             self._safe_after(lambda: self._fail(f"Insufficient bars for {symbol} {timeframe}."))
             return
 
-        latest = candles[-1]
-        snapshot = MarketSnapshot(
-            symbol=symbol,
-            timeframe=timeframe,
-            timestamp=datetime.now(timezone.utc),
-            candle=latest,
-            indicators={},
-            summary={"RECOMMENDATION": "NEUTRAL"},
-            oscillators={},
-            moving_avgs={},
-        )
-
         signals: list[TradeSignal] = []
         if self.run_patterns_var.get():
             use_kronos = self.kronos_gate_var.get()
             use_volume = self.volume_gate_var.get()
-            for pattern in self._patterns:
-                if timeframe not in pattern.timeframes:
-                    continue
-                try:
-                    sig = pattern.analyze(snapshot, self._store)
-                except Exception as exc:
-                    log.warning(f"UI | {pattern.name} failed on {symbol} {timeframe}: {exc}")
-                    continue
-                if sig is None:
-                    continue
-                # Same confidence + regime gates as scanner/backtest so the
-                # explorer does not show setups paper would reject.
+            raw = latest_signals_over_lookback(
+                self._patterns, symbol, timeframe, candles,
+                session_tz=self._store._session_tz,
+            )
+            for sig in raw:
                 if not passes_min_confidence(sig):
                     continue
                 if not passes_regime_filter(sig, self._store):

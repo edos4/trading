@@ -15,9 +15,12 @@ Locked rules (2026-06-25):
                   RSI higher-low;
        fallback A — bottom close < cup-start close AND bottom RSI > cup-start RSI;
        fallback B — ≥ 70% of bars from bottom → entry trigger have rising RSI.
-  Entry: 2-day HH+HL+RSI confirmation (Day2 beats Day1 beats prior); enter on
-         Day-2 close. Scan up to 120 bars after the bottom.
-  Gate 2 upside: target = entry + 80% × (neckline − entry); require upside ≥ 23%.
+  Entry: wait ~20 trading days after the bottom so the right side of the
+         saucer can form; then 2-day HH+HL+RSI confirmation with price ≥60%
+         of the way back to the neckline (almost-formed, not day-1 bounce).
+         Scan up to 120 bars after the bottom.
+  Gate 2 upside: target = entry + 80% × (neckline − entry); require upside ≥ 5%
+         (the old 23% floor only passed early entries far from the neckline).
   Trade management: $10,000/trade, initial stop 5% below entry, trailing stop
          15% below the highest high since entry, active stop = max(initial,
          trailing), target as above. Hold until stop or target only.
@@ -31,7 +34,7 @@ import numpy as np
 import pandas as pd
 
 from patterns.base_pattern import (
-    BasePattern, TradeSignal,
+    BasePattern, TradeSignal, FORMATION_BARS,
     ann_marker, ann_hline,
     ANN_PEAK, ANN_TROUGH, ANN_LINE, ANN_TARGET, ANN_ENTRY, ANN_STOP,
 )
@@ -76,8 +79,10 @@ class RoundingBottomPattern(BasePattern):
             "rounds back up toward the prior neckline. The cup depth is 15–50%, "
             "the curve is concave-up with ≥70% of closes within 5% of a fitted "
             "parabola, and RSI shows bullish divergence or a rising recovery. "
-            "Entry is a LONG on the close of the second consecutive HH+HL+RSI "
-            "confirmation day after the bottom."
+            "Entry is a LONG after the saucer has had ~20 trading days to "
+            "round up from the bottom (not the first 1–2 recovery days), on "
+            "the close of the second consecutive HH+HL+RSI confirmation day, "
+            "with price at least 60% of the way back toward the neckline."
         )
 
     # ── Parameters (locked ruleset) ───────────────────────────────────────────
@@ -90,8 +95,10 @@ class RoundingBottomPattern(BasePattern):
     SHAPE_TOLERANCE         = 0.05        # 5% of fitted curve
     CUP_LOOKBACK            = 150         # search window for left neckline
     ENTRY_SCAN_MAX          = 120         # bars after bottom to find trigger
+    ENTRY_MIN_BARS_AFTER_BOTTOM = FORMATION_BARS  # skip day-1 recovery
+    RECOVERY_MIN            = 0.60        # almost formed: ≥60% back to neckline
     TARGET_FRACTION         = 0.80        # 80% of (neckline − entry)
-    MIN_UPSIDE              = 0.23
+    MIN_UPSIDE              = 0.05        # floor only; 23% rejected near-neckline
     INITIAL_STOP_PCT        = 0.05
     TRAILING_STOP_PCT       = 0.15
     TRAILING_ACTIVATION_PCT = 0.05
@@ -237,9 +244,12 @@ class RoundingBottomPattern(BasePattern):
         if fit_pct < self.SHAPE_FIT_MIN_PCT:
             return None  # too noisy
 
-        # Entry trigger: 2-day HH+HL+RSI confirmation (C3 + C4 baked in).
+        # Entry trigger: 2-day HH+HL+RSI confirmation after the saucer has
+        # had time to form (not the first bounce off the low).
         entry_idx = self._find_entry_trigger(ind, rsi, bottom_idx, cur)
         if entry_idx is None:
+            return None
+        if entry_idx - bottom_idx < self.ENTRY_MIN_BARS_AFTER_BOTTOM:
             return None
 
         # C6: RSI bullish divergence or uptrend.
@@ -247,10 +257,18 @@ class RoundingBottomPattern(BasePattern):
         if div_kind is None:
             return None
 
-        # Gate 2 upside + target.
+        # Almost-formed: price must have rounded most of the way back.
         entry_close = float(ind.close.iloc[entry_idx])
         if entry_close <= 0:
             return None
+        cup_span = neckline - bottom_close
+        if cup_span <= 0:
+            return None
+        recovery = (entry_close - bottom_close) / cup_span
+        if recovery < self.RECOVERY_MIN:
+            return None
+
+        # Gate 2 upside + target.
         target = entry_close + self.TARGET_FRACTION * (neckline - entry_close)
         upside = (target - entry_close) / entry_close
         if upside < self.MIN_UPSIDE:
@@ -304,10 +322,15 @@ class RoundingBottomPattern(BasePattern):
         bottom_idx: int,
         cur: int,
     ) -> int | None:
-        """First Day-2 of two consecutive HH+HL+RSI-rising bars after bottom."""
+        """First Day-2 of two consecutive HH+HL+RSI-rising bars after the
+        saucer has had ENTRY_MIN_BARS_AFTER_BOTTOM to round (not day-1 bounce).
+        """
         end = min(cur, bottom_idx + self.ENTRY_SCAN_MAX)
+        start = bottom_idx + self.ENTRY_MIN_BARS_AFTER_BOTTOM
+        if start > end:
+            return None
         day1: int | None = None
-        for k in range(bottom_idx + 1, end + 1):
+        for k in range(start, end + 1):
             beats_prior = (
                 float(ind.high.iloc[k]) > float(ind.high.iloc[k - 1])
                 and float(ind.low.iloc[k]) > float(ind.low.iloc[k - 1])
