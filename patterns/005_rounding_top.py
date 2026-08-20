@@ -15,7 +15,7 @@ Inverse of patterns/pattern_004_rounding_bottom.py:
                   and RSI lower-high;
        fallback A — top close > cup-start close AND top RSI < cup-start RSI;
        fallback B — ≥ 70% of bars from top → entry trigger have falling RSI.
-  Entry: wait ~20 trading days after the top so the right side of the dome
+  Entry: wait ~1 month after the top so the right side of the dome
          can form; then 2-day LH+LL+RSI-falling confirmation with price ≥60%
          of the way back to the neckline (almost-formed, not day-1 fade).
          Scan up to 120 bars after the top.
@@ -79,7 +79,7 @@ class RoundingTopPattern(BasePattern):
             "then rolls back down toward the prior neckline low. The dome depth "
             "is 15–50%, the curve is concave-down with ≥70% of closes within 5% "
             "of a fitted parabola, and RSI shows bearish divergence or a falling "
-            "decline. Entry is a SHORT after the dome has had ~20 trading days "
+            "decline. Entry is a SHORT after the dome has had ~1 month "
             "to roll over (not the first 1–2 decline days), on the close of the "
             "second consecutive LH+LL+RSI-falling confirmation day, with price "
             "at least 60% of the way back toward the neckline."

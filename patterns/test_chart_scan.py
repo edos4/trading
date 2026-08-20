@@ -1,4 +1,4 @@
-"""Chart explorer must look at ~20 recently formed bars, not only today."""
+"""Chart explorer must look at ~1 month of recently formed bars, not only today."""
 
 from __future__ import annotations
 
@@ -65,7 +65,7 @@ class ChartScanLookbackTests(unittest.TestCase):
         self.assertIn("5 bar", signals[0].notes)
 
     def test_lookback_is_twenty_days(self):
-        self.assertEqual(FORMATION_BARS, 20)
+        self.assertEqual(FORMATION_BARS, 21)
 
 
 if __name__ == "__main__":

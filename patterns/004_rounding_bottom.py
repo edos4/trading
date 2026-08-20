@@ -15,7 +15,7 @@ Locked rules (2026-06-25):
                   RSI higher-low;
        fallback A — bottom close < cup-start close AND bottom RSI > cup-start RSI;
        fallback B — ≥ 70% of bars from bottom → entry trigger have rising RSI.
-  Entry: wait ~20 trading days after the bottom so the right side of the
+  Entry: wait ~1 month after the bottom so the right side of the
          saucer can form; then 2-day HH+HL+RSI confirmation with price ≥60%
          of the way back to the neckline (almost-formed, not day-1 bounce).
          Scan up to 120 bars after the bottom.
@@ -79,7 +79,7 @@ class RoundingBottomPattern(BasePattern):
             "rounds back up toward the prior neckline. The cup depth is 15–50%, "
             "the curve is concave-up with ≥70% of closes within 5% of a fitted "
             "parabola, and RSI shows bullish divergence or a rising recovery. "
-            "Entry is a LONG after the saucer has had ~20 trading days to "
+            "Entry is a LONG after the saucer has had ~1 month to "
             "round up from the bottom (not the first 1–2 recovery days), on "
             "the close of the second consecutive HH+HL+RSI confirmation day, "
             "with price at least 60% of the way back toward the neckline."

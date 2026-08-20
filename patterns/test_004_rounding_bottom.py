@@ -1,4 +1,4 @@
-"""Rounding-bottom formation: wait ~20 days, not the day-1 bounce."""
+"""Rounding-bottom formation: wait ~1 month, not the day-1 bounce."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ class RoundingBottomFormationTests(unittest.TestCase):
 
     def test_gap_min_matches_formation_bars(self):
         p = RoundingBottomPattern()
-        self.assertEqual(p.ENTRY_MIN_BARS_AFTER_BOTTOM, 20)
+        self.assertEqual(p.ENTRY_MIN_BARS_AFTER_BOTTOM, 21)
         self.assertEqual(p.RECOVERY_MIN, 0.60)
         self.assertEqual(p.MIN_UPSIDE, 0.05)
 

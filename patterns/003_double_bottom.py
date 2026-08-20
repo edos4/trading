@@ -78,7 +78,7 @@ class DoubleBottomPattern(BasePattern):
     # divergence/height as the hard floor instead of just scoring it.
     RSI_DIVERGENCE_MIN   = 5.0
     PEAK_HEIGHT_MIN      = 0.07      # 7% rise from L1 low to peak
-    L1_L2_GAP_MIN        = FORMATION_BARS  # W needs ~20 trading days to form
+    L1_L2_GAP_MIN        = FORMATION_BARS  # W needs ~1 month to form
     L1_L2_GAP_MAX        = 90
     STOP_BELOW_L2        = 0.99      # 1% under L2 low (structure)
     MIN_TARGET_PCT       = 0.12      # floor so R:R still clears 1.5 after 6% hard cap
