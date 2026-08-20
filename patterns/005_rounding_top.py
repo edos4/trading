@@ -15,10 +15,12 @@ Inverse of patterns/pattern_004_rounding_bottom.py:
                   and RSI lower-high;
        fallback A — top close > cup-start close AND top RSI < cup-start RSI;
        fallback B — ≥ 70% of bars from top → entry trigger have falling RSI.
-  Entry: 2-day LH+LL+RSI-falling confirmation (Day2 beats Day1 beats prior);
-         enter SHORT on Day-2 close. Scan up to 120 bars after the top.
+  Entry: wait ~20 trading days after the top so the right side of the dome
+         can form; then 2-day LH+LL+RSI-falling confirmation with price ≥60%
+         of the way back to the neckline (almost-formed, not day-1 fade).
+         Scan up to 120 bars after the top.
   Gate 2 downside: target = entry − 80% × (entry − neckline); require downside
-         ≥ 23%.
+         ≥ 5% (the old 23% floor only passed early entries far from the neckline).
   Trade management: $10,000/trade, initial stop 5% above entry, trailing stop
          15% above the lowest low since entry, active stop = min(initial,
          trailing), target as above. Hold until stop or target only.
@@ -32,7 +34,7 @@ import numpy as np
 import pandas as pd
 
 from patterns.base_pattern import (
-    BasePattern, TradeSignal,
+    BasePattern, TradeSignal, FORMATION_BARS,
     ann_marker, ann_hline,
     ANN_PEAK, ANN_TROUGH, ANN_LINE, ANN_TARGET, ANN_ENTRY, ANN_STOP,
 )
@@ -77,8 +79,10 @@ class RoundingTopPattern(BasePattern):
             "then rolls back down toward the prior neckline low. The dome depth "
             "is 15–50%, the curve is concave-down with ≥70% of closes within 5% "
             "of a fitted parabola, and RSI shows bearish divergence or a falling "
-            "decline. Entry is a SHORT on the close of the second consecutive "
-            "LH+LL+RSI-falling confirmation day after the top."
+            "decline. Entry is a SHORT after the dome has had ~20 trading days "
+            "to roll over (not the first 1–2 decline days), on the close of the "
+            "second consecutive LH+LL+RSI-falling confirmation day, with price "
+            "at least 60% of the way back toward the neckline."
         )
 
     # ── Parameters (inverse of rounding_bottom.py) ────────────────────────────
@@ -91,8 +95,10 @@ class RoundingTopPattern(BasePattern):
     SHAPE_TOLERANCE         = 0.05
     CUP_LOOKBACK            = 150        # search window for left neckline low
     ENTRY_SCAN_MAX          = 120        # bars after top to find trigger
+    ENTRY_MIN_BARS_AFTER_TOP = FORMATION_BARS  # skip day-1 rollover
+    RECOVERY_MIN            = 0.60       # almost formed: ≥60% back to neckline
     TARGET_FRACTION         = 0.80       # 80% of (entry − neckline)
-    MIN_DOWNSIDE            = 0.23
+    MIN_DOWNSIDE            = 0.05       # floor only; 23% rejected near-neckline
     INITIAL_STOP_PCT        = 0.05
     TRAILING_STOP_PCT       = 0.15
     TRAILING_ACTIVATION_PCT = 0.05
@@ -236,9 +242,11 @@ class RoundingTopPattern(BasePattern):
         if fit_pct < self.SHAPE_FIT_MIN_PCT:
             return None  # too noisy
 
-        # Entry trigger: 2-day LH+LL+RSI-falling (C3 + C4 baked in).
+        # Entry trigger after the dome has had time to roll over.
         entry_idx = self._find_entry_trigger(ind, rsi, top_idx, cur)
         if entry_idx is None:
+            return None
+        if entry_idx - top_idx < self.ENTRY_MIN_BARS_AFTER_TOP:
             return None
 
         # C6: RSI bearish divergence or downtrend.
@@ -246,10 +254,17 @@ class RoundingTopPattern(BasePattern):
         if div_kind is None:
             return None
 
-        # Gate 2 downside + target.
         entry_close = float(ind.close.iloc[entry_idx])
         if entry_close <= 0:
             return None
+        dome_span = top_close - neckline
+        if dome_span <= 0:
+            return None
+        recovery = (top_close - entry_close) / dome_span
+        if recovery < self.RECOVERY_MIN:
+            return None
+
+        # Gate 2 downside + target.
         target = entry_close - self.TARGET_FRACTION * (entry_close - neckline)
         downside = (entry_close - target) / entry_close
         if downside < self.MIN_DOWNSIDE:
@@ -303,10 +318,15 @@ class RoundingTopPattern(BasePattern):
         top_idx: int,
         cur: int,
     ) -> int | None:
-        """First Day-2 of two consecutive LH+LL+RSI-falling bars after top."""
+        """First Day-2 of two consecutive LH+LL+RSI-falling bars after the
+        dome has had ENTRY_MIN_BARS_AFTER_TOP to roll (not day-1 fade).
+        """
         end = min(cur, top_idx + self.ENTRY_SCAN_MAX)
+        start = top_idx + self.ENTRY_MIN_BARS_AFTER_TOP
+        if start > end:
+            return None
         day1: int | None = None
-        for k in range(top_idx + 1, end + 1):
+        for k in range(start, end + 1):
             beats_prior = (
                 float(ind.high.iloc[k]) < float(ind.high.iloc[k - 1])
                 and float(ind.low.iloc[k]) < float(ind.low.iloc[k - 1])

@@ -21,14 +21,14 @@ import patterns as patterns_pkg
 from config import settings
 from core.backtester import Backtester
 from data.tv_client import TVClient
-from patterns.base_pattern import BasePattern
+from patterns.base_pattern import BasePattern, skip_pattern_module
 from utils.logger import log
 
 
 def discover_pattern_names() -> list[str]:
     names: list[str] = []
     for module_info in pkgutil.iter_modules(patterns_pkg.__path__):
-        if module_info.name.startswith("_") or module_info.name == "base_pattern":
+        if skip_pattern_module(module_info.name):
             continue
         module = importlib.import_module(f"patterns.{module_info.name}")
         for attr_name in dir(module):

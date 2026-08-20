@@ -6,7 +6,6 @@ import base64
 import importlib
 import io
 import pkgutil
-from datetime import datetime, timezone
 from typing import Any, Optional
 
 import patterns as patterns_pkg
@@ -17,8 +16,9 @@ from core.engine_defaults import passes_min_confidence, passes_regime_filter
 from core.kronos_gate import kronos_gate_check
 from core.market import get_market
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
-from data.tv_client import MarketSnapshot, TVClient
-from patterns.base_pattern import BasePattern, TradeSignal
+from data.tv_client import TVClient
+from patterns.base_pattern import BasePattern, TradeSignal, skip_pattern_module
+from patterns.chart_scan import latest_signals_over_lookback
 from utils.logger import log
 
 TIMEFRAMES = ["1d", "1W"]
@@ -35,7 +35,7 @@ def discover_patterns(
     disabled = set(disabled_patterns if disabled_patterns is not None else DISABLED_PATTERNS)
     found: list[BasePattern] = []
     for module_info in pkgutil.iter_modules(patterns_pkg.__path__):
-        if module_info.name.startswith("_") or module_info.name == "base_pattern":
+        if skip_pattern_module(module_info.name):
             continue
         try:
             module = importlib.import_module(f"patterns.{module_info.name}")
@@ -117,33 +117,16 @@ class ExplorerService:
         if df is None:
             raise ValueError(f"Insufficient bars for {symbol} {timeframe}.")
 
-        latest = candles[-1]
-        snapshot = MarketSnapshot(
-            symbol=symbol,
-            timeframe=timeframe,
-            timestamp=datetime.now(timezone.utc),
-            candle=latest,
-            indicators={},
-            summary={"RECOMMENDATION": "NEUTRAL"},
-            oscillators={},
-            moving_avgs={},
-        )
-
         use_kronos = settings.kronos_gate_enabled if kronos_gate is None else kronos_gate
         use_volume = settings.volume_gate_enabled if volume_gate is None else volume_gate
 
         signals: list[TradeSignal] = []
         if run_patterns:
-            for pattern in self._patterns:
-                if timeframe not in pattern.timeframes:
-                    continue
-                try:
-                    sig = pattern.analyze(snapshot, self._store)
-                except Exception as exc:
-                    log.warning(f"Web | {pattern.name} failed on {symbol} {timeframe}: {exc}")
-                    continue
-                if sig is None:
-                    continue
+            raw = latest_signals_over_lookback(
+                self._patterns, symbol, timeframe, candles,
+                session_tz=profile.session_tz,
+            )
+            for sig in raw:
                 if not passes_min_confidence(sig):
                     continue
                 if not passes_regime_filter(sig, self._store):

@@ -26,6 +26,22 @@ from data.ohlcv_store import OHLCVStore
 from utils.logger import log
 
 
+# Swing setups typically take ~20 daily bars to develop. Chart explorer
+# scans this many recent closes so a pattern that is almost formed (or
+# triggered a few days ago) still shows — analyze() itself only fires on
+# the exact trigger bar, which is correct for the backtester/scanner.
+FORMATION_BARS = 20
+
+
+def skip_pattern_module(name: str) -> bool:
+    """True for helpers/tests that live under patterns/ but are not setups."""
+    return (
+        name.startswith("_")
+        or name.startswith("test")
+        or name in {"base_pattern", "chart_scan"}
+    )
+
+
 # ── Chart annotation colors (shared so every pattern draws consistently) ──────
 ANN_PEAK   = "#ef5350"   # swing high / short-side structure
 ANN_TROUGH = "#26a69a"   # swing low  / long-side  structure

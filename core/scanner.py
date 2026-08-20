@@ -33,7 +33,7 @@ from pathlib import Path
 import pandas as pd
 
 import patterns as patterns_pkg
-from patterns.base_pattern import BasePattern, TradeSignal
+from patterns.base_pattern import BasePattern, skip_pattern_module, TradeSignal
 
 from data.tv_client import TVClient, MarketSnapshot
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
@@ -935,7 +935,7 @@ class MarketScanner:
 
     def _discover_patterns(self) -> None:
         for module_info in pkgutil.iter_modules(patterns_pkg.__path__):
-            if module_info.name.startswith("_") or module_info.name == "base_pattern":
+            if skip_pattern_module(module_info.name):
                 continue
             module = importlib.import_module(f"patterns.{module_info.name}")
             for attr_name in dir(module):
