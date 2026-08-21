@@ -228,6 +228,8 @@ def run_e2e(base_url: str, headed: bool = False) -> None:
         expect(page.locator("#bt-form")).to_be_visible(timeout=10000)
         page.click('a[href="/paper"]')
         expect(page.locator("#paper-start")).to_be_visible(timeout=10000)
+        page.click('a[href="/kronos"]')
+        expect(page.locator("#kronos-run")).to_be_visible(timeout=10000)
         page.click('a[href="/"]')
         expect(page.locator("#symbol-list")).to_be_visible(timeout=10000)
         checks.append("nav_all")

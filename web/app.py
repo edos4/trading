@@ -9,6 +9,7 @@ Run:
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Literal, Optional
@@ -71,6 +72,12 @@ class PaperStopRequest(BaseModel):
 class PaperStartBothRequest(BaseModel):
     us: Optional[PaperStartRequest] = None
     ph: Optional[PaperStartRequest] = None
+
+
+class KronosPredictRequest(BaseModel):
+    symbol: str
+    days: int = Field(5, ge=1, le=120)
+    market: Optional[Literal["us", "ph"]] = None
 
 
 async def _json_body(request: Request) -> dict[str, Any]:
@@ -178,6 +185,16 @@ def create_app() -> FastAPI:
             ph=ph,
             book_cards=[us, ph],
             stream_start_default=_stream_start_default(),
+        )
+
+    @app.get("/kronos", response_class=HTMLResponse)
+    async def kronos_page(request: Request, _user: str = Depends(require_login)):
+        return render(
+            request,
+            "kronos.html",
+            active="kronos",
+            default_market=default_market().id,
+            markets=markets_payload(),
         )
 
     # ── Explorer API ──────────────────────────────────────────────────────
@@ -399,6 +416,28 @@ def create_app() -> FastAPI:
         if result.get("error"):
             return JSONResponse({"detail": result["error"]}, status_code=404)
         return result
+
+    @app.post("/api/kronos/predict")
+    async def api_kronos_predict(request: Request, _user: str = Depends(require_login)):
+        try:
+            body = KronosPredictRequest.model_validate(await _json_body(request))
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        except ValidationError as exc:
+            msg = exc.errors()[0].get("msg") if exc.errors() else "Invalid request"
+            return JSONResponse({"detail": str(msg)}, status_code=400)
+        from core.kronos_forecast import forecast_symbol
+
+        try:
+            payload = await asyncio.to_thread(
+                forecast_symbol, body.symbol, body.days, market=body.market,
+            )
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        except Exception:
+            log.exception("Web | Kronos predict failed")
+            return JSONResponse({"detail": "Kronos prediction failed."}, status_code=500)
+        return payload
 
     @app.get("/api/paper/export")
     async def api_paper_export(

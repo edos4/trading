@@ -123,6 +123,7 @@ class TradingBotUI:
         ttk.Button(toolbar, text="Refresh symbols", command=self._load_symbols_threaded).pack(side=tk.LEFT)
         ttk.Button(toolbar, text="Backtest", command=self._open_backtest_dialog).pack(side=tk.LEFT, padx=(6, 0))
         ttk.Button(toolbar, text="Paper Trading", command=self._open_paper_dashboard).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(toolbar, text="Kronos", command=self._open_kronos_dialog).pack(side=tk.LEFT, padx=(6, 0))
         self._lamp_us = tk.StringVar(value="US ○")
         self._lamp_ph = tk.StringVar(value="PH ○")
         ttk.Label(toolbar, textvariable=self._lamp_us, foreground="#1b6fc0").pack(
@@ -423,6 +424,10 @@ class TradingBotUI:
     def _open_paper_dashboard(self) -> None:
         from ui.paper_dashboard import PaperDashboard
         PaperDashboard(self.root)
+
+    def _open_kronos_dialog(self) -> None:
+        from ui.kronos_dialog import KronosPredictDialog
+        KronosPredictDialog(self.root, market=self.market_var.get())
 
     def _download_csv(self) -> None:
         if self._current_df is None or self._current_symbol is None:

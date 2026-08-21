@@ -13,6 +13,9 @@ TV_UP = "#26a69a"
 TV_DOWN = "#ef5350"
 TV_EMA20 = "#2962ff"
 TV_EMA50 = "#ff9800"
+TV_KRONOS = "#e040fb"
+TV_KRONOS_UP = "#ce93d8"
+TV_KRONOS_DOWN = "#7b1fa2"
 TV_CROSS = "#9598a1"
 
 
@@ -39,6 +42,8 @@ class TradingViewChart(tk.Frame):
         self._ema50: dict[str, float] = {}
         self._levels: list[dict] = []
         self._markers: dict[str, dict] = {}
+        self._forecast: dict[str, float] = {}
+        self._forecast_color = TV_KRONOS
         self._start = 0
         self._visible = 120
         self._hover: Optional[int] = None
@@ -55,6 +60,7 @@ class TradingViewChart(tk.Frame):
         self._title_var = tk.StringVar()
         self._ohlc_var = tk.StringVar()
         self._legend_var = tk.StringVar(value="EMA 20    EMA 50    scroll to zoom · drag to pan")
+        self._default_legend = self._legend_var.get()
         tk.Label(
             self._header, textvariable=self._title_var, fg=TV_TEXT, bg=TV_BG,
             font=("Trebuchet MS", 13, "bold"), anchor="w",
@@ -88,16 +94,34 @@ class TradingViewChart(tk.Frame):
     def set_payload(self, payload: dict[str, Any]) -> None:
         self._payload = payload
         self._candles = list(payload.get("candles") or [])
+        seen = {row["time"] for row in self._candles}
+        for row in payload.get("pred_candles") or []:
+            if row.get("time") in seen:
+                continue
+            self._candles.append({**row, "predicted": True})
+            seen.add(row["time"])
         self._volume = {row["time"]: row for row in payload.get("volume") or []}
         self._ema20 = {row["time"]: row["value"] for row in payload.get("ema20") or []}
         self._ema50 = {row["time"]: row["value"] for row in payload.get("ema50") or []}
         self._levels = list(payload.get("levels") or [])
         self._markers = {row["time"]: row for row in payload.get("markers") or []}
+        self._forecast = {
+            row["time"]: row["value"] for row in payload.get("forecast") or []
+            if row.get("time") is not None and row.get("value") is not None
+        }
+        self._forecast_color = payload.get("forecast_color") or TV_KRONOS
         n = len(self._candles)
-        self._visible = min(max(n, 2), 180)
+        extra = len(payload.get("pred_candles") or [])
+        self._visible = min(max(n, 2), max(180, extra + 80))
         self._start = max(0, n - self._visible)
         title = payload.get("title") or payload.get("symbol") or "Chart"
         self._title_var.set(title)
+        if self._forecast:
+            self._legend_var.set(
+                "EMA 20    EMA 50    Kronos forecast    scroll to zoom · drag to pan"
+            )
+        else:
+            self._legend_var.set(self._default_legend)
         self._set_ohlc_label(self._candles[-1] if self._candles else None, from_last=True)
         self._redraw()
 
@@ -119,8 +143,9 @@ class TradingViewChart(tk.Frame):
         sign = "+" if change >= 0 else ""
         vol = (self._volume.get(candle["time"]) or {}).get("value")
         vol_s = _fmt_volume(vol) if vol is not None else "—"
+        prefix = "Kronos  " if candle.get("predicted") else ""
         self._ohlc_var.set(
-            f"{candle['time']}    O {_fmt_price(o)}  H {_fmt_price(h)}  "
+            f"{prefix}{candle['time']}    O {_fmt_price(o)}  H {_fmt_price(h)}  "
             f"L {_fmt_price(low)}  C {_fmt_price(c)}    "
             f"{sign}{_fmt_price(change)} ({sign}{pct:.2f}%)    Vol {vol_s}"
         )
@@ -149,6 +174,11 @@ class TradingViewChart(tk.Frame):
         for level in self._levels:
             lows.append(level["price"])
             highs.append(level["price"])
+        for row in visible:
+            val = self._forecast.get(row["time"])
+            if val is not None:
+                lows.append(val)
+                highs.append(val)
         self._price_lo = min(lows)
         self._price_hi = max(highs)
         pad = (self._price_hi - self._price_lo) * 0.04 or 0.01
@@ -162,6 +192,7 @@ class TradingViewChart(tk.Frame):
         self._draw_grid(visible)
         self._draw_emas(visible)
         self._draw_candles(visible)
+        self._draw_forecast(visible)
         self._draw_volume(visible)
         self._draw_levels()
         self._draw_axis(visible)
@@ -226,7 +257,10 @@ class TradingViewChart(tk.Frame):
         half = self._bar_w() / 2
         for i, row in enumerate(visible):
             x = self._x_for(i)
-            color = TV_UP if row["close"] >= row["open"] else TV_DOWN
+            if row.get("predicted"):
+                color = TV_KRONOS_UP if row["close"] >= row["open"] else TV_KRONOS_DOWN
+            else:
+                color = TV_UP if row["close"] >= row["open"] else TV_DOWN
             y_h = self._y_price(row["high"])
             y_l = self._y_price(row["low"])
             y_o = self._y_price(row["open"])
@@ -242,17 +276,26 @@ class TradingViewChart(tk.Frame):
         half = self._bar_w() / 2
         _, _, _, y1 = self._vol_plot
         for i, row in enumerate(visible):
+            if row.get("predicted"):
+                continue
             vol = (self._volume.get(row["time"]) or {}).get("value") or 0.0
             x = self._x_for(i)
             y = self._y_vol(vol)
             color = "#1f5c56" if row["close"] >= row["open"] else "#6e3331"
             c.create_rectangle(x - half, y, x + half, y1, outline="", fill=color)
 
+    def _draw_forecast(self, visible: list[dict]) -> None:
+        if not self._forecast:
+            return
+        self._polyline(visible, self._forecast, self._forecast_color, width=2)
+
     def _draw_emas(self, visible: list[dict]) -> None:
         self._polyline(visible, self._ema20, TV_EMA20)
         self._polyline(visible, self._ema50, TV_EMA50)
 
-    def _polyline(self, visible: list[dict], series: dict[str, float], color: str) -> None:
+    def _polyline(
+        self, visible: list[dict], series: dict[str, float], color: str, width: int = 1,
+    ) -> None:
         pts = []
         for i, row in enumerate(visible):
             val = series.get(row["time"])
@@ -260,7 +303,7 @@ class TradingViewChart(tk.Frame):
                 continue
             pts.extend([self._x_for(i), self._y_price(val)])
         if len(pts) >= 4:
-            self._canvas.create_line(*pts, fill=color, width=1, smooth=False)
+            self._canvas.create_line(*pts, fill=color, width=width, smooth=False)
 
     def _draw_levels(self) -> None:
         x0, _, x1, _ = self._plot
