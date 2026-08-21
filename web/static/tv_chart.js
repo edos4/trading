@@ -117,6 +117,37 @@ window.TVChart = (function () {
     if ((data.markers || []).length) {
       candleSeries.setMarkers(data.markers);
     }
+
+    let predSeries = null;
+    if ((data.pred_candles || []).length) {
+      predSeries = chart.addCandlestickSeries({
+        upColor: "#ce93d8",
+        downColor: "#7b1fa2",
+        wickUpColor: "#ce93d8",
+        wickDownColor: "#7b1fa2",
+        borderVisible: false,
+        title: "Kronos",
+      });
+      predSeries.setData(
+        (data.pred_candles || []).map((row) => ({
+          time: row.time,
+          open: row.open,
+          high: row.high,
+          low: row.low,
+          close: row.close,
+        }))
+      );
+    }
+    if ((data.forecast || []).length) {
+      const forecast = chart.addLineSeries({
+        color: data.forecast_color || "#e040fb",
+        lineWidth: 2,
+        priceLineVisible: false,
+        lastValueVisible: true,
+        title: "Kronos close",
+      });
+      forecast.setData(data.forecast);
+    }
     function fmtTime(time) {
       if (time == null) return "";
       if (typeof time === "string") return time;
@@ -137,17 +168,19 @@ window.TVChart = (function () {
         hooks.onCandle(null);
         return;
       }
-      const bar = param.seriesData.get(candleSeries);
+      const bar = param.seriesData.get(candleSeries) || (predSeries && param.seriesData.get(predSeries));
       if (!bar) {
         hooks.onCandle(null);
         return;
       }
+      const predicted = !!(predSeries && param.seriesData.get(predSeries) && !param.seriesData.get(candleSeries));
       hooks.onCandle({
         time: fmtTime(param.time),
         open: bar.open,
         high: bar.high,
         low: bar.low,
         close: bar.close,
+        predicted,
       });
     });
     chart.timeScale().fitContent();

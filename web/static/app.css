@@ -423,3 +423,19 @@ progress { width: 180px; height: 0.7rem; }
 .book-lamps .on .lamp { background: var(--ok); }
 .book-lamps [data-book="us"].on { color: var(--accent); }
 .book-lamps [data-book="ph"].on { color: var(--ph); }
+
+.kronos-chart-panel {
+  padding: 0;
+  overflow: hidden;
+  background: #131722;
+  min-height: 620px;
+  display: flex;
+  flex-direction: column;
+}
+.kronos-chart-host {
+  min-height: 540px;
+  height: min(70vh, 720px);
+}
+.tv-ohlc.gain { color: #26a69a; }
+.tv-ohlc.loss { color: #ef5350; }
+

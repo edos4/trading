@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Kronos — Trading Bot{% endblock %}
+{% block content %}
+<section class="toolbar">
+  <label>Symbol <input id="kronos-symbol" type="text" value="AAPL" maxlength="16" autocomplete="off" /></label>
+  <label>Days <input id="kronos-days" type="number" value="5" min="1" max="120" step="1" /></label>
+  <label>Market
+    <select id="kronos-market">
+      {% for m in markets %}
+      <option value="{{ m.id }}" {% if m.id == default_market %}selected{% endif %}>{{ m.label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button class="btn primary" id="kronos-run" type="button">Predict</button>
+  <span class="spacer"></span>
+  <span id="kronos-status" class="muted">Enter a ticker and how many trading days Kronos should forecast.</span>
+</section>
+
+<section class="panel kronos-chart-panel">
+  <header class="tv-chart-header">
+    <div>
+      <strong id="kronos-chart-title">Kronos forecast</strong>
+      <p id="kronos-chart-ohlc" class="tv-ohlc"></p>
+    </div>
+  </header>
+  <div id="kronos-chart-host" class="tv-chart-host kronos-chart-host"></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+<script src="/static/tv_chart.js?v=2"></script>
+<script>
+  window.TB_PAGE = "kronos";
+  window.TB_DEFAULT_MARKET = {{ default_market | tojson }};
+</script>
+{% endblock %}

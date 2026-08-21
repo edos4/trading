@@ -1009,10 +1009,106 @@ function initPaper() {
   poll().catch(console.error);
 }
 
+function initKronos() {
+  const symbolEl = document.getElementById("kronos-symbol");
+  const daysEl = document.getElementById("kronos-days");
+  const marketEl = document.getElementById("kronos-market");
+  const runBtn = document.getElementById("kronos-run");
+  const status = document.getElementById("kronos-status");
+  const title = document.getElementById("kronos-chart-title");
+  const ohlc = document.getElementById("kronos-chart-ohlc");
+  const host = document.getElementById("kronos-chart-host");
+
+  function fmtTvOhlc(data, bar) {
+    if (bar) {
+      const all = (data.candles || []).concat(data.pred_candles || []);
+      const prev = all.findIndex((c) => c.time === bar.time);
+      const prevClose = prev > 0 ? all[prev - 1].close : bar.open;
+      const change = bar.close - prevClose;
+      const pct = prevClose ? (change / prevClose) * 100 : 0;
+      const sign = change >= 0 ? "+" : "";
+      const tag = bar.predicted ? "Kronos  " : "";
+      return {
+        text:
+          `${tag}${bar.time}  O ${Number(bar.open).toFixed(2)}  H ${Number(bar.high).toFixed(2)}  ` +
+          `L ${Number(bar.low).toFixed(2)}  C ${Number(bar.close).toFixed(2)}  ` +
+          `${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)`,
+        gain: change >= 0,
+      };
+    }
+    const o = data && data.ohlc;
+    if (!o) return { text: "", gain: true };
+    const sign = o.change >= 0 ? "+" : "";
+    return {
+      text:
+        `O ${Number(o.open).toFixed(2)}  H ${Number(o.high).toFixed(2)}  ` +
+        `L ${Number(o.low).toFixed(2)}  C ${Number(o.close).toFixed(2)}  ` +
+        `${sign}${Number(o.change).toFixed(2)} (${sign}${Number(o.change_pct).toFixed(2)}%)`,
+      gain: Number(o.change) >= 0,
+    };
+  }
+
+  function setOhlc(data, bar) {
+    if (!ohlc) return;
+    const shown = fmtTvOhlc(data, bar);
+    ohlc.textContent = shown.text;
+    ohlc.classList.toggle("gain", shown.gain);
+    ohlc.classList.toggle("loss", !shown.gain);
+  }
+
+  async function run() {
+    const symbol = (symbolEl && symbolEl.value || "").trim();
+    const days = Number(daysEl && daysEl.value);
+    const market = (marketEl && marketEl.value) || "us";
+    if (!symbol) {
+      if (status) status.textContent = "Enter a ticker like AAPL.";
+      return;
+    }
+    if (runBtn) runBtn.disabled = true;
+    if (status) status.textContent = `Running Kronos on ${symbol.toUpperCase()} (${days}d)…`;
+    try {
+      const data = await api("/api/kronos/predict", {
+        method: "POST",
+        body: JSON.stringify({ symbol, days, market }),
+      });
+      if (title) title.textContent = data.title || `${symbol} Kronos`;
+      setOhlc(data, null);
+      if (window.TVChart && host) {
+        window.TVChart.mount(host, data, {
+          onCandle(bar) {
+            setOhlc(data, bar);
+          },
+        });
+      }
+      const pred = data.pred || {};
+      if (status) {
+        status.textContent =
+          `${data.symbol} from ${pred.origin}: last ${Number(pred.last_close).toFixed(2)} → ` +
+          `Kronos ${pred.days}d ${Number(pred.pred_close).toFixed(2)} ` +
+          `(${Number(pred.pred_return_pct) >= 0 ? "+" : ""}${Number(pred.pred_return_pct).toFixed(2)}%)`;
+      }
+    } catch (e) {
+      if (window.TVChart) window.TVChart.unmount();
+      if (status) status.textContent = String(e.message || e);
+    } finally {
+      if (runBtn) runBtn.disabled = false;
+    }
+  }
+
+  runBtn?.addEventListener("click", run);
+  symbolEl?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") run();
+  });
+  daysEl?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") run();
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   initBookLamps();
   if (window.TB_PAGE === "explorer") initExplorer();
   if (window.TB_PAGE === "backtest") initBacktest();
   if (window.TB_PAGE === "paper") initPaper();
+  if (window.TB_PAGE === "kronos") initKronos();
 });
 
