@@ -12,7 +12,6 @@ from config import settings
 from core.kronos_eval import LOOKBACK, MAX_CONTEXT, with_amount
 from core.kronos_gate import get_kronos_gate, kronos_infer_lock
 from core.market import get_market
-from data.tv_client import TVClient
 from utils.logger import log
 
 MIN_PRED_DAYS = 1
@@ -153,17 +152,9 @@ def forecast_symbol(
     symbol = normalize_symbol(symbol)
     days = clamp_pred_days(days)
     profile = get_market(market)
-    tv = TVClient(profile.tv_screener, profile.tv_exchange)
-    candles = tv._fetch_history_chart(symbol, "1d")
-    df = None
-    if candles:
-        from core.kronos_rank_sleeve import _candles_to_df
+    from data.history import load_daily_ohlcv_df
 
-        df = _candles_to_df(candles, profile.session_tz)
-    if df is None or len(df) < MIN_BARS:
-        from data.db import load_daily_ohlcv_df
-
-        df = load_daily_ohlcv_df(symbol)
+    df = load_daily_ohlcv_df(symbol, tv_fallback=True, limit=MAX_CONTEXT)
     if df is None or len(df) < MIN_BARS:
         raise ValueError(
             f"Not enough daily history for {symbol} (need ≥{MIN_BARS} bars)."

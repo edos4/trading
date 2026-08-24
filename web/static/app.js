@@ -296,9 +296,11 @@ function applyBookLamps(envelope) {
 function initBookLamps() {
   const host = document.getElementById("book-lamps");
   if (!host) return;
+  // Paper page already polls full status and calls applyBookLamps.
+  if (window.TB_PAGE === "paper") return;
   async function tick() {
     try {
-      const s = await api("/api/paper/status");
+      const s = await api("/api/paper/status?lamps=1");
       applyBookLamps(s);
     } catch {
       /* ignore */

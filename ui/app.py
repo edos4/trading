@@ -37,6 +37,7 @@ from core.engine_defaults import passes_min_confidence, passes_regime_filter
 from core.market import default_market, get_market
 from analysis.price_volume import volume_confirm_gate
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
+from data.history import fetch_ohlcv_candles
 from data.tv_client import TVClient
 from patterns.base_pattern import BasePattern, TradeSignal, skip_pattern_module
 from patterns.chart_scan import latest_signals_over_lookback
@@ -307,7 +308,9 @@ class TradingBotUI:
 
     def _load_symbol(self, symbol: str, exchange: str, timeframe: str) -> None:
         try:
-            candles = self._tv._fetch_history_screener(symbol, exchange, timeframe)
+            candles = fetch_ohlcv_candles(
+                symbol, timeframe, exchange=exchange, tv_client=self._tv,
+            )
         except Exception as exc:
             msg = f"History fetch failed for {symbol}: {exc}"
             self._safe_after(lambda: self._fail(msg))
@@ -523,6 +526,9 @@ class TradingBotUI:
 
 
 def run() -> None:
+    from data.history import enable_ui_web_history
+
+    enable_ui_web_history()
     root = tk.Tk()
     TradingBotUI(root)
     root.mainloop()

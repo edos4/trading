@@ -251,3 +251,22 @@ Scheduling options (choose one; both are documented):
 3. `--check-db` report (Step 2).
 4. `--update-db` incremental + fetch fallback + cron (Step 3).
 5. Verify against acceptance criteria (Section 5).
+
+## 8. Remote history API (local `--ui` / `--web` / Kronos)
+
+The VPS (`https://33ai.edos.uk`) is the only machine that should run Postgres
+and `--ingest-db` / `--update-db`. It exposes authenticated read-only endpoints:
+
+- `GET /api/history/symbols`
+- `GET /api/history/{symbol}` (optional `?after_ts=`)
+- `GET /api/history/{symbol}/meta`
+
+Auth: session cookie or HTTP Basic with `WEB_UI_USERNAME` as both user and
+password (default `admin` / `admin`). Dashboard login still uses
+`WEB_UI_PASSWORD`.
+
+Laptops set `STOCKS_HISTORY_URL=https://33ai.edos.uk`. History client Basic
+auth defaults to `WEB_UI_USERNAME`:`WEB_UI_USERNAME` unless
+`STOCKS_HISTORY_USERNAME` / `STOCKS_HISTORY_PASSWORD` are set. They must
+not set `STOCKS_HISTORY_URL` on the VPS itself (self-HTTP loop). Do not dump
+the whole universe in one response — clients fetch per symbol.

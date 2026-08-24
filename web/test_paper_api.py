@@ -157,6 +157,19 @@ class WebPaperApiTests(unittest.TestCase):
             self.assertEqual(both.status_code, 200)
             reset_logs.assert_called_with("all")
 
+    def test_lamps_status_is_light(self) -> None:
+        self._login()
+        r = self.client.get("/api/paper/status?lamps=1")
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+        self.assertIn("books", data)
+        self.assertNotIn("clocks", data)
+        self.assertEqual(set(data["books"]), {"us", "ph"})
+        for book in data["books"].values():
+            self.assertIn("running", book)
+            self.assertNotIn("positions", book)
+            self.assertNotIn("equity_png_b64", book)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -355,6 +355,30 @@ def majority_sign_baseline(results: list[WindowResult]) -> dict:
     }
 
 
+def _candidates_from_history_api(min_bars: int) -> list[tuple[str, pd.DataFrame]]:
+    """Load eval frames from GET /api/history when STOCKS_HISTORY_URL is set."""
+    from data.history import bars_to_df
+    from data.history_client import fetch_history_bars, fetch_history_symbols
+
+    metas = fetch_history_symbols() or []
+    eligible = [
+        m for m in metas
+        if (m.get("row_count") or 0) >= min_bars and m.get("symbol")
+    ]
+    # Cap fetches: full-universe HTTP would be huge. Rank by row_count then load.
+    eligible.sort(key=lambda m: int(m.get("row_count") or 0), reverse=True)
+    out: list[tuple[str, pd.DataFrame]] = []
+    for meta in eligible[:400]:
+        symbol = str(meta["symbol"]).upper()
+        bars = fetch_history_bars(symbol)
+        df = bars_to_df(bars)
+        if df is None or len(df) < min_bars:
+            continue
+        out.append((symbol, df))
+    log.info(f"Kronos-test | history API loaded {len(out)} tickers with >= {min_bars} bars")
+    return out
+
+
 def run_kronos_test(
     data_dir: Path = DEFAULT_DATA_DIR,
     n_symbols: int = 20,
@@ -381,12 +405,20 @@ def run_kronos_test(
     )
     start_ts = pd.Timestamp(start_date) if start_date else None
 
-    candidates = [
-        (symbol, df) for symbol, df in iter_ticker_frames(data_dir) if len(df) >= min_bars
-    ]
-    if not candidates:
-        log.error("Kronos-test | no tickers with enough history found — check data_dir")
-        return
+    from data.history_client import history_api_configured
+
+    if history_api_configured():
+        candidates = _candidates_from_history_api(min_bars)
+        if not candidates:
+            log.error("Kronos-test | history API returned no tickers with enough bars")
+            return
+    else:
+        candidates = [
+            (symbol, df) for symbol, df in iter_ticker_frames(data_dir) if len(df) >= min_bars
+        ]
+        if not candidates:
+            log.error("Kronos-test | no tickers with enough history found — check data_dir")
+            return
 
     if start_ts is not None:
         # Tickers whose data ends before start_date are stale/delisted — their

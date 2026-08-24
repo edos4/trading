@@ -251,3 +251,13 @@ def test_kronos_infer_lock_does_not_overlap():
     t1.join()
     t2.join()
     assert overlap == []
+
+
+def test_lamps_payload_is_running_flags_only() -> None:
+    with patch("core.paper_books.PaperAccount.save"):
+        mgr = PaperBookManager()
+        payload = mgr.lamps()
+    assert set(payload["books"]) == {"us", "ph"}
+    assert payload["books"]["us"] == {"running": False}
+    assert payload["books"]["ph"] == {"running": False}
+    assert "clocks" not in payload

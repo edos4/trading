@@ -152,12 +152,18 @@ def _load_symbol_csv(base_dir: Path, symbol: str) -> list[dict] | None:
 
 
 def _load_symbol_db(symbol: str) -> list[dict] | None:
-    """Load a symbol's full daily history from the stocks_history database.
+    """Load a symbol's full daily history from the stocks_history store.
 
-    Primary source for the paper stream: the DB holds every CSV bar plus any
-    bars pulled fresh by `--update-db`, so the replay is always current.
-    Returns the same row shape as `_load_symbol_csv`.
+    Uses the remote API when STOCKS_HISTORY_URL is set, else local Postgres.
     """
+    try:
+        from data.history import load_daily_tape_rows
+
+        tape = load_daily_tape_rows(symbol)
+        if tape:
+            return tape
+    except Exception as exc:
+        log.warning(f"StreamServer | history facade failed for {symbol}: {exc}")
     try:
         from data import db
     except ImportError:

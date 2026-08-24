@@ -126,6 +126,26 @@ def test_gate_fail_closed_no_weights():
     assert "fail-closed" in result.reason
 
 
+def test_gate_prefers_history_facade(monkeypatch):
+    from core import kronos_gate as kg
+
+    kg._facade_df_cache.clear()
+    idx = pd.bdate_range("2024-01-02", periods=LOOKBACK)
+    df = pd.DataFrame(
+        {"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 1e6},
+        index=idx,
+    )
+    monkeypatch.setattr(
+        "data.history.load_daily_ohlcv_df", lambda *_a, **_k: df,
+    )
+    gate = KronosGate()
+    gate._predictor = _FakePredictor(110.0)
+    empty = OHLCVStore(window=DEFAULT_WINDOW)
+    result = gate.check(_signal(action="BUY"), empty, adjust_exits=False)
+    assert result.passed, result
+    kg._facade_df_cache.clear()
+
+
 if __name__ == "__main__":
     test_gate_pass_aligned_buy()
     test_gate_reject_wrong_direction()
