@@ -89,12 +89,16 @@ def _csv_sync(conn, data_dir: Path, symbols) -> tuple[int, int]:
     return updated, new_bars
 
 
-def _fetch_symbol(conn, symbol: str, market: str) -> int:
+def _fetch_symbol(conn, symbol: str, market: str, *, fill_all: bool = False) -> int:
     candles = []
     if market == "ph":
         from data.pse_edge import fetch_daily
 
         candles = fetch_daily(symbol)
+    elif fill_all:
+        from data.tv_client import fetch_yahoo_daily_max
+
+        candles = fetch_yahoo_daily_max(symbol)
     else:
         from data.tv_client import TVClient
 
@@ -104,6 +108,10 @@ def _fetch_symbol(conn, symbol: str, market: str) -> int:
     rows = _candles_to_rows(candles)
     if not rows:
         return 0
+    if fill_all:
+        db.upsert_bars(conn, symbol, rows)
+        db.refresh_symbol_meta(conn, symbol)
+        return len(rows)
     last_ts = db.max_ts(conn, symbol) or 0
     new = [r for r in rows if r[0] > last_ts]
     if new:

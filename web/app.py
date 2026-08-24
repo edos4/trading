@@ -484,6 +484,9 @@ def _safe_next(next_url: str) -> str:
 def run() -> None:
     require_password_configured()
     import uvicorn
+    from data.ensure_history import start_web_history_backfill
+
+    start_web_history_backfill()
 
     host = settings.web_ui_host
     port = int(settings.web_ui_port)

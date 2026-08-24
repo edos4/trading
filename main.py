@@ -14,6 +14,8 @@ Usage:
     python main.py --paper --paper-reset            # ...starting from a fresh virtual account
     python main.py --ui                             # Launch the symbol explorer GUI
     python main.py --web                            # Launch the authenticated web UI (VPS)
+                                                    # On start: connect to stocks_history and
+                                                    # backfill missing/stale daily bars per symbol.
     python main.py --papertrade-stream              # Serve historical CSV bars for paper trading when markets are closed
     python main.py --papertrade-stream --papertrade-stream-start 2025-01-02  # Replay from a specific date
     python main.py --kronos-test                    # Score Kronos-base +1d/+1w forecast accuracy (20 random symbols)
@@ -34,7 +36,7 @@ Prerequisites:
     ~/Kronos with Kronos-base + Kronos-Tokenizer-base weights saved under
     ~/Kronos/weights/ (see README "Kronos Forecast Accuracy Test").
     When KRONOS_GATE_ENABLED=true, scanner / paper / UI backtest / UI paper
-    require a 1w Kronos forecast to agree with each chart-pattern signal.
+    require a 3-trading-day Kronos forecast to agree with each chart-pattern signal.
 """
 
 import argparse
