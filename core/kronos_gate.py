@@ -1,8 +1,8 @@
 """
-core/kronos_gate.py — Kronos 1-week forecast filter for chart-pattern signals.
+core/kronos_gate.py — Kronos 3-trading-day forecast filter for chart-pattern signals.
 
 Does NOT generate entries. After a real pattern emits BUY/SELL, this gate
-asks Kronos-base for a +1 week close forecast and only lets the signal
+asks Kronos-base for a +3 trading day close forecast and only lets the signal
 through when:
   - predicted move aligns with the signal action, AND
   - |pred_1w| >= settings.kronos_min_move_pct
@@ -108,7 +108,7 @@ class KronosGate:
         *,
         adjust_exits: bool | None = None,
     ) -> KronosGateResult:
-        """Return whether `signal` clears the 1w Kronos filter.
+        """Return whether `signal` clears the 3-trading-day Kronos filter.
 
         When passed and adjust_exits is True, mutates signal.take_profit /
         stop_loss from the forecast path (in place).
@@ -177,7 +177,7 @@ class KronosGate:
                 reason=f"pred_1w={pred_1w:+.2%} conflicts with {signal.action}",
             )
 
-        note = f"KronosGate 1w {pred_1w:+.2%}"
+        note = f"KronosGate 3d {pred_1w:+.2%}"
         signal.notes = f"{signal.notes} | {note}".strip(" |") if signal.notes else note
 
         if adjust_exits:

@@ -56,8 +56,8 @@ class _FakePredictor:
 
     def predict(self, **kwargs):
         self.last_kwargs = kwargs
-        # One row per forecast day; gate reads last close of week.
-        pred_len = kwargs.get("pred_len", 5)
+        # One row per forecast day; gate reads last close of the horizon.
+        pred_len = kwargs.get("pred_len", 3)
         closes = [self.pred_close] * pred_len
         return pd.DataFrame({"close": closes})
 
@@ -91,11 +91,19 @@ def test_gate_reject_wrong_direction():
 
 def test_gate_reject_small_move():
     gate = KronosGate()
-    gate._predictor = _FakePredictor(101.0)  # +1% < default 6%
+    gate._predictor = _FakePredictor(101.0)  # +1% < default 3%
     store = _fill_store()
     result = gate.check(_signal(action="BUY"), store, adjust_exits=False)
     assert not result.passed
     assert "min" in result.reason
+
+
+def test_gate_pass_three_pct():
+    gate = KronosGate()
+    gate._predictor = _FakePredictor(103.0)  # +3% meets default floor
+    store = _fill_store()
+    result = gate.check(_signal(action="BUY"), store, adjust_exits=False)
+    assert result.passed, result
 
 
 def test_gate_skips_close():
@@ -122,6 +130,7 @@ if __name__ == "__main__":
     test_gate_pass_aligned_buy()
     test_gate_reject_wrong_direction()
     test_gate_reject_small_move()
+    test_gate_pass_three_pct()
     test_gate_skips_close()
     test_gate_fail_closed_no_weights()
     print("kronos_gate tests OK")

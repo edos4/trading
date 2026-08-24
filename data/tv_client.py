@@ -231,6 +231,25 @@ def _candles_from_yahoo_payload(
     return candles
 
 
+def fetch_yahoo_daily_max(symbol: str) -> list[OHLCVCandle]:
+    """Full Yahoo daily series (range=max), not truncated to tv_history_days."""
+    from core.market import yahoo_chart_symbol
+
+    chart_symbol = yahoo_chart_symbol(symbol, screener="america")
+    url = f"{_CHART_API}/{chart_symbol}?interval=1d&range=max"
+    req = urllib.request.Request(url, headers={"User-Agent": _CHART_UA})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:
+        log.warning(f"TVClient | max-history failed for {chart_symbol}: {exc}")
+        return []
+    candles = _candles_from_yahoo_payload(payload, chart_symbol, "1d")
+    if candles:
+        log.debug(f"TVClient | max-history {symbol} → {len(candles)} bars")
+    return candles
+
+
 SYMBOL_EXCHANGE_OVERRIDES: dict[str, str] = {
     "SPY": "AMEX",
     "IVV": "AMEX",

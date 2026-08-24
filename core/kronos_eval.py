@@ -30,7 +30,7 @@ MAX_CONTEXT = 512
 LOOKBACK = 400
 
 DAY_AHEAD = 1
-WEEK_AHEAD = 5  # trading days — gate horizon (1w veto), not the demo pred_len=120
+WEEK_AHEAD = 3  # trading days — gate horizon (3d veto), not the demo pred_len=120
 
 
 def with_amount(df: pd.DataFrame) -> pd.DataFrame:

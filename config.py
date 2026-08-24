@@ -84,10 +84,10 @@ class Settings(BaseSettings):
     ml_confidence_threshold: float = 0.6
 
     # ── Kronos confirm gate (core/kronos_gate.py) ───────────────────────────
-    # After a chart pattern fires, require Kronos 1w forecast to agree on
-    # direction and clear kronos_min_move_pct. Not a standalone entry pattern —
+    # After a chart pattern fires, require Kronos 3-trading-day forecast to agree
+    # on direction and clear kronos_min_move_pct. Not a standalone entry pattern —
     # veto/confirm layer only (not the Kronos finetune top-K strategy).
-    kronos_min_move_pct: float = 0.06
+    kronos_min_move_pct: float = 0.03
     kronos_sample_count: int = 3
     kronos_gate_enabled: bool = True
     # Safety default: an enabled Kronos gate must not silently disappear if
@@ -120,7 +120,7 @@ class Settings(BaseSettings):
     # After a chart pattern fires, require relative volume (signal bar /
     # SMA20) ≥ volume_gate_rvol_min AND OBV slope over volume_gate_obv_bars
     # to agree with BUY/SELL. On for paper/scan after the 2026-08-17 US book
-    # (Kronos 6% already passed every 003 loser). Fail-open on short history.
+    # (Kronos 3% already passed every 003 loser). Fail-open on short history.
     volume_gate_enabled: bool = True
     volume_gate_rvol_min: float = 2.0
     volume_gate_obv_bars: int = 5
