@@ -16,7 +16,7 @@ from utils.logger import log
 
 MIN_PRED_DAYS = 1
 MAX_PRED_DAYS = 120
-DEFAULT_PRED_DAYS = 5
+DEFAULT_PRED_DAYS = 3
 MIN_BARS = 60
 _SYMBOL_RE = re.compile(r"^[A-Za-z][A-Za-z0-9.\-]{0,15}$")
 KRONOS_LINE = "#e040fb"

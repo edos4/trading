@@ -161,7 +161,7 @@ class TradingBotUI:
         self.run_patterns_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(toolbar, text="Run patterns", variable=self.run_patterns_var).pack(side=tk.LEFT, padx=(12, 0))
         self.kronos_gate_var = tk.BooleanVar(value=default_market().kronos_gate_default)
-        ttk.Checkbutton(toolbar, text="Kronos 1w gate", variable=self.kronos_gate_var).pack(side=tk.LEFT, padx=(12, 0))
+        ttk.Checkbutton(toolbar, text="Kronos 3d gate", variable=self.kronos_gate_var).pack(side=tk.LEFT, padx=(12, 0))
         self.volume_gate_var = tk.BooleanVar(value=settings.volume_gate_enabled)
         ttk.Checkbutton(toolbar, text="Volume gate", variable=self.volume_gate_var).pack(side=tk.LEFT, padx=(12, 0))
         ttk.Button(toolbar, text="Download CSV", command=self._download_csv).pack(side=tk.RIGHT)

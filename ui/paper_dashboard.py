@@ -127,7 +127,7 @@ class MarketBookFrame(ttk.LabelFrame):
 
         flags = ttk.Frame(self)
         flags.pack(fill=tk.X, padx=8, pady=(2, 8))
-        ttk.Checkbutton(flags, text="Kronos 1w gate", variable=self.kronos_gate_var).pack(side=tk.LEFT)
+        ttk.Checkbutton(flags, text="Kronos 3d gate", variable=self.kronos_gate_var).pack(side=tk.LEFT)
         ttk.Checkbutton(flags, text="Kronos rank", variable=self.kronos_rank_var).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Checkbutton(flags, text="Volume gate", variable=self.volume_gate_var).pack(side=tk.LEFT, padx=(8, 0))
         self.stream_check = ttk.Checkbutton(
