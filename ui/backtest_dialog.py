@@ -82,8 +82,8 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
         "check", ENGINE.regime_filter, None,
     ),
     (
-        "kronos_gate", "Kronos 1w gate",
-        "Require Kronos-base +1 week forecast to agree with the pattern's BUY/SELL "
+        "kronos_gate", "Kronos 3d gate",
+        "Require Kronos-base +3 trading-day forecast to agree with the pattern's BUY/SELL "
         "and clear KRONOS_MIN_MOVE_PCT before taking the trade. Fail-closed by "
         "default if weights are missing (set KRONOS_GATE_FAIL_OPEN=true to pass "
         "instead). Does not rewrite TP/SL unless KRONOS_GATE_ADJUST_EXITS=true.",
@@ -91,7 +91,7 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
     ),
     (
         "kronos_rank", "Kronos rank sleeve",
-        "Cross-sectional top-K by predicted 1w return (pattern_kronos_rank). "
+        "Cross-sectional top-K by predicted 3d return (pattern_kronos_rank). "
         "Runs beside Toby patterns — not a gate. Uses KRONOS_RANK_TOP_K / LONG_ONLY. "
         "GPU-heavy; rebalances every KRONOS_RANK_REBALANCE_BARS.",
         "check", settings.kronos_rank_enabled, None,
