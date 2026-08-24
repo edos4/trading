@@ -1,21 +1,17 @@
 """
-data/ensure_history.py — make stocks_history current when the web UI starts.
+data/ensure_history.py — Postgres ping on web start; optional Yahoo/PSE fill.
 
-For every symbol already in the database:
-  1. CSV sync if the local stocks_data tree exists.
-  2. If last bar is before the last US trading day (or row_count is 0),
-     download full Yahoo/PSE daily history and upsert so internal gaps fill.
-
-Runs in a daemon thread from `web.app.run()` so uvicorn still binds quickly.
+Web start only checks that stocks_history is reachable. It does not CSV-sync
+or Yahoo-walk the universe (those stall /paper). CLI `run_ensure_complete()`
+Yahoo/PSE-fills stale symbols when you actually want a full fetch.
 """
 
 from __future__ import annotations
 
 import threading
-from pathlib import Path
 
 from data import db
-from data.update import _csv_sync, _fetch_symbol, _last_trading_date
+from data.update import _fetch_symbol, _last_trading_date
 from utils.logger import log
 
 _started = False
@@ -34,12 +30,8 @@ def ping_db() -> None:
         conn.close()
 
 
-def run_ensure_complete(
-    data_dir: str | Path | None = None,
-    *,
-    fetch: bool = True,
-) -> dict[str, int]:
-    """Fill missing/stale bars for every symbol in stocks_history.
+def run_ensure_complete(*, fetch: bool = True) -> dict[str, int]:
+    """Yahoo/PSE-fill missing/stale bars for every symbol in stocks_history.
 
     Returns counts: symbols, incomplete, fetched, upserted_bars.
     """
@@ -47,7 +39,6 @@ def run_ensure_complete(
     from zoneinfo import ZoneInfo
 
     ny = ZoneInfo("America/New_York")
-    data_dir = Path(data_dir or "/home/r00t/stocks_data")
     conn = db.get_conn()
     try:
         db.ensure_schema(conn)
@@ -55,13 +46,6 @@ def run_ensure_complete(
         if not symbols:
             log.info("ensure-history | stocks_history has no symbols yet")
             return {"symbols": 0, "incomplete": 0, "fetched": 0, "upserted_bars": 0}
-
-        if data_dir.is_dir():
-            n_sync, sync_bars = _csv_sync(conn, data_dir, symbols)
-            log.info(
-                f"ensure-history | CSV sync {n_sync} file(s), {sync_bars} new bar(s)"
-            )
-            symbols = db.all_symbols(conn)
 
         last_trading = _last_trading_date()
         target_ts = int(
@@ -113,8 +97,8 @@ def run_ensure_complete(
         conn.close()
 
 
-def start_web_history_backfill(data_dir: str | Path | None = None) -> None:
-    """Ping Postgres synchronously; fill missing history in a daemon thread."""
+def start_web_history_backfill() -> None:
+    """Ping Postgres so --web fails fast if stocks_history is down. No sync."""
     global _started
     with _lock:
         if _started:
@@ -125,16 +109,5 @@ def start_web_history_backfill(data_dir: str | Path | None = None) -> None:
         log.info("Web UI | PostgreSQL connected (stocks_history)")
     except Exception:
         log.exception(
-            "Web UI | PostgreSQL not reachable — history backfill skipped"
+            "Web UI | PostgreSQL not reachable — history ping skipped"
         )
-        return
-
-    def _worker() -> None:
-        try:
-            run_ensure_complete(data_dir)
-        except Exception:
-            log.exception("Web UI | stocks_history backfill failed")
-
-    threading.Thread(
-        target=_worker, name="stocks-history-backfill", daemon=True
-    ).start()

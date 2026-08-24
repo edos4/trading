@@ -144,6 +144,13 @@ class Settings(BaseSettings):
     db_user: str = "r00t"
     db_password: str = ""
 
+    # ── Remote stocks_history API (local --ui / --web / Kronos) ─────────────
+    # Empty = read/write local Postgres (VPS). Set to https://33ai.edos.uk on
+    # laptops so they never need DATABASE_URL or a local stocks_history DB.
+    stocks_history_url: str = ""
+    stocks_history_username: str = ""
+    stocks_history_password: str = ""
+
     # ── Web UI (python main.py --web) ───────────────────────────────────────
     # Session login. WEB_UI_PASSWORD is required — the server refuses to bind
     # if it is empty so an open VPS dashboard cannot ship by accident.
@@ -189,6 +196,13 @@ class Settings(BaseSettings):
     @classmethod
     def _clamp_screener_backoff(cls, value: float) -> float:
         return max(0.1, value)
+
+    @property
+    def stocks_history_auth(self) -> tuple[str, str]:
+        """Basic auth for GET /api/history. Password defaults to WEB_UI_USERNAME."""
+        user = (self.stocks_history_username or self.web_ui_username or "").strip()
+        password = (self.stocks_history_password or self.web_ui_username or "").strip()
+        return user, password
 
     @property
     def is_live(self) -> bool:

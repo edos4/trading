@@ -259,6 +259,86 @@ def today_date() -> date:
     return datetime.now(tz=ZoneInfo(_NY_TZ)).date()
 
 
+def load_daily_ohlcv_rows(
+    symbol: str, after_ts: int | None = None, limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Raw daily bars for the history API. Empty list if DB/symbol missing."""
+    symbol = (symbol or "").upper().strip()
+    if not symbol:
+        return []
+    try:
+        conn = get_conn()
+    except Exception:
+        return []
+    try:
+        sql = (
+            "SELECT ts, bar_date, open, high, low, close, volume "
+            "FROM daily_bars WHERE symbol = %s"
+        )
+        params: list[Any] = [symbol]
+        if after_ts is not None:
+            sql += " AND ts > %s"
+            params.append(int(after_ts))
+        if limit is not None:
+            lim = max(1, int(limit))
+            sql += " ORDER BY ts DESC LIMIT %s"
+            params.append(lim)
+            sql = f"SELECT * FROM ({sql}) AS recent ORDER BY ts"
+        else:
+            sql += " ORDER BY ts"
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+        out: list[dict[str, Any]] = []
+        for ts, bar_date, o, h, l, c, v in rows:
+            out.append({
+                "ts": int(ts),
+                "date": bar_date.isoformat() if hasattr(bar_date, "isoformat") else str(bar_date),
+                "open": float(o),
+                "high": float(h),
+                "low": float(l),
+                "close": float(c),
+                "volume": int(v) if v is not None else 0,
+            })
+        return out
+    except Exception:
+        log.exception(f"DB | load_daily_ohlcv_rows failed for {symbol}")
+        return []
+    finally:
+        conn.close()
+
+
+def load_symbol_meta(symbol: str) -> dict[str, Any] | None:
+    symbol = (symbol or "").upper().strip()
+    if not symbol:
+        return None
+    try:
+        conn = get_conn()
+    except Exception:
+        return None
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT symbol, market, last_bar_ts, row_count FROM symbols "
+                "WHERE symbol = %s",
+                (symbol,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "symbol": row[0],
+            "market": row[1] or "us",
+            "last_bar_ts": row[2],
+            "row_count": int(row[3] or 0),
+        }
+    except Exception:
+        log.exception(f"DB | load_symbol_meta failed for {symbol}")
+        return None
+    finally:
+        conn.close()
+
+
 def load_daily_ohlcv_df(symbol: str):
     """Pandas OHLCV frame for on-demand charts. None if DB/symbol missing."""
     try:

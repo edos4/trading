@@ -21,7 +21,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from config import settings
-from core.kronos_eval import LOOKBACK, predict_1w_return
+from core.kronos_eval import LOOKBACK, MAX_CONTEXT, predict_1w_return
 from core.kronos_gate import get_kronos_gate, kronos_infer_lock
 from data.ohlcv_store import OHLCVStore
 from patterns.base_pattern import TradeSignal
@@ -43,6 +43,15 @@ def _min_move() -> float:
     if v is None:
         return settings.kronos_min_move_pct
     return float(v)
+
+
+def _sleeve_daily_df(store: OHLCVStore, symbol: str, lookback: int):
+    from data.history import load_daily_ohlcv_df
+
+    df = load_daily_ohlcv_df(symbol, tv_fallback=False, limit=MAX_CONTEXT)
+    if df is not None and len(df) >= min(lookback, 60):
+        return df
+    return store.get_df(symbol, "1d", min_bars=min(lookback, 60))
 
 
 def _confidence_from_pred(pred_1w: float) -> float:
@@ -99,7 +108,7 @@ def forecast_universe(
             log.warning("KronosRank | predictor unavailable — sleeve emits nothing")
             return []
         for symbol in symbols:
-            df = store.get_df(symbol, "1d", min_bars=min(lb, 60))
+            df = _sleeve_daily_df(store, symbol, lb)
             if df is None or len(df) < 60:
                 continue
             out = predict_1w_return(gate._predictor, df, sample_count=sc, lookback=lb)

@@ -71,6 +71,8 @@ class PaperBook:
         self._stream_proc: Optional[subprocess.Popen] = None
         self.error: Optional[str] = None
         self._thread: Optional[threading.Thread] = None
+        self._chart_key: tuple[int, float] | None = None
+        self._chart_b64: Optional[str] = None
 
     def snapshot(self, *, stream_blocked_by: Optional[str] = None) -> dict[str, Any]:
         with self.lock:
@@ -216,10 +218,11 @@ class PaperBook:
             },
         }
 
-    @staticmethod
-    def _equity_chart_b64(account: PaperAccount) -> Optional[str]:
+    def _equity_chart_b64(self, account: PaperAccount) -> Optional[str]:
         curve = account.equity_curve_snapshot()
         if not curve or len(curve) < 2:
+            self._chart_key = None
+            self._chart_b64 = None
             return None
         try:
             ys: list[float] = []
@@ -230,6 +233,9 @@ class PaperBook:
                     ys.append(float(point))
             if len(ys) < 2:
                 return None
+            key = (len(ys), round(ys[-1], 6))
+            if key == self._chart_key:
+                return self._chart_b64
             fig, ax = plt.subplots(figsize=(6, 2.8), dpi=100)
             xs = list(range(len(ys)))
             ax.plot(xs, ys, color="#1b6fc0", linewidth=1.5)
@@ -240,7 +246,10 @@ class PaperBook:
             buf = io.BytesIO()
             fig.savefig(buf, format="png")
             plt.close(fig)
-            return base64.b64encode(buf.getvalue()).decode("ascii")
+            encoded = base64.b64encode(buf.getvalue()).decode("ascii")
+            self._chart_key = key
+            self._chart_b64 = encoded
+            return encoded
         except Exception:
             log.exception("PaperBook | equity chart failed")
             return None
@@ -281,8 +290,8 @@ class PaperBook:
         if scanner is not None:
             df = scanner.ohlcv_frame(trade.symbol, timeframe, min_bars=2)
         if df is None or len(df) < 2:
-            from data.db import load_daily_ohlcv_df
-            df = load_daily_ohlcv_df(trade.symbol)
+            from data.history import load_daily_ohlcv_df
+            df = load_daily_ohlcv_df(trade.symbol, tv_fallback=True)
         if df is None or len(df) < 2:
             return {"error": f"no OHLCV for {trade.symbol} {timeframe}"}
 
@@ -576,6 +585,16 @@ class PaperBookManager:
                 "running": snap["running"],
             }
         return {"clocks": clocks, "books": books}
+
+    def lamps(self) -> dict[str, Any]:
+        """Nav-lamp payload: running flags only — no matplotlib or blotter."""
+        books = {}
+        for mid in BOOK_IDS:
+            book = self.books[mid]
+            with book.lock:
+                running = book.running
+            books[mid] = {"running": running}
+        return {"books": books}
 
     def start(
         self,

@@ -27,6 +27,7 @@ from utils.logger import log
 from web.auth import (
     clear_session_cookie,
     current_username,
+    require_history,
     require_login,
     require_password_configured,
     set_session_cookie,
@@ -212,6 +213,58 @@ def create_app() -> FastAPI:
         symbols = get_explorer().fetch_symbols(n, market=market or None)
         return {"symbols": symbols}
 
+    @app.get("/api/history/symbols")
+    async def api_history_symbols(_user: str = Depends(require_history)):
+        from data import db
+
+        try:
+            conn = db.get_conn()
+        except Exception:
+            log.exception("History API | cannot open Postgres")
+            return JSONResponse({"detail": "History database unavailable."}, status_code=503)
+        try:
+            rows = db.all_symbols(conn)
+        except Exception:
+            log.exception("History API | all_symbols failed")
+            return JSONResponse({"detail": "History database unavailable."}, status_code=503)
+        finally:
+            conn.close()
+        return {
+            "symbols": [
+                {
+                    "symbol": r["symbol"],
+                    "market": r.get("market") or "us",
+                    "last_bar_ts": r.get("last_bar_ts"),
+                    "row_count": int(r.get("row_count") or 0),
+                }
+                for r in rows
+            ]
+        }
+
+    @app.get("/api/history/{symbol}/meta")
+    async def api_history_meta(symbol: str, _user: str = Depends(require_history)):
+        from data.db import load_symbol_meta
+
+        meta = load_symbol_meta(symbol)
+        if not meta:
+            return JSONResponse({"detail": "Unknown symbol."}, status_code=404)
+        return meta
+
+    @app.get("/api/history/{symbol}")
+    async def api_history_bars(
+        symbol: str,
+        after_ts: int | None = None,
+        limit: int | None = None,
+        _user: str = Depends(require_history),
+    ):
+        from data.db import load_daily_ohlcv_rows
+
+        ticker = symbol.upper().strip()
+        bars = load_daily_ohlcv_rows(ticker, after_ts=after_ts, limit=limit)
+        if not bars:
+            return JSONResponse({"detail": f"No daily bars for {ticker}."}, status_code=404)
+        return {"symbol": ticker, "bars": bars}
+
     @app.post("/api/symbol")
     async def api_symbol(request: Request, _user: str = Depends(require_login)):
         try:
@@ -282,10 +335,15 @@ def create_app() -> FastAPI:
     async def api_paper_status(
         request: Request, _user: str = Depends(require_login),
     ):
+        lamps = (request.query_params.get("lamps") or "").lower() in (
+            "1", "true", "yes",
+        )
         market = request.query_params.get("market") or None
+        if lamps:
+            return await asyncio.to_thread(paper_books.lamps)
         if market:
-            return paper_books.snapshot(market)
-        return paper_books.snapshot_all()
+            return await asyncio.to_thread(paper_books.snapshot, market)
+        return await asyncio.to_thread(paper_books.snapshot_all)
 
     def _start_book(payload: PaperStartRequest, market: str) -> str | None:
         return paper_books.start(
@@ -485,8 +543,15 @@ def run() -> None:
     require_password_configured()
     import uvicorn
     from data.ensure_history import start_web_history_backfill
+    from data.history import enable_ui_web_history, local_history_backfill_enabled
 
-    start_web_history_backfill()
+    enable_ui_web_history()
+    if local_history_backfill_enabled():
+        start_web_history_backfill()
+    else:
+        log.info(
+            "Web UI | STOCKS_HISTORY_URL set — remote history, skip local DB backfill"
+        )
 
     host = settings.web_ui_host
     port = int(settings.web_ui_port)

@@ -446,9 +446,20 @@ python main.py --web
 ```
 
 Auth: form login → signed HttpOnly session cookie (`tb_session`). All pages and
-`/api/*` routes require a valid session. `/login`, `/logout`, `/health`, and
+`/api/*` routes require a valid session **or HTTP Basic** (same
+`WEB_UI_USERNAME` / `WEB_UI_PASSWORD`). `/login`, `/logout`, `/health`, and
 `/static/*` are public. Put nginx/Caddy TLS in front for VPS deploys and set
 `WEB_UI_HTTPS=true`.
+
+**One history database (VPS).** Contabo runs Postgres `stocks_history` and
+serves `GET /api/history/symbols`, `GET /api/history/{symbol}`, and
+`GET /api/history/{symbol}/meta`. Local `--ui` / `--web` / Kronos set
+`STOCKS_HISTORY_URL=https://33ai.edos.uk` in `.env`. History API Basic auth is
+`WEB_UI_USERNAME` / `WEB_UI_USERNAME` (default `admin`:`admin`), not the
+dashboard password. They do **not** need `DATABASE_URL` or `/home/r00t/stocks_data`.
+Leave `STOCKS_HISTORY_URL` empty on the VPS so it keeps using local Postgres
+and `--update-db`. TV/Yahoo is only used when the API has no bars for a
+symbol. CLI `--backtest` / `--paper` / `--learn` still use TV/CSV.
 
 What both UIs support:
 

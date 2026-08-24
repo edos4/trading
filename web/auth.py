@@ -6,6 +6,7 @@ Session cookie is HttpOnly + SameSite=Lax (+ Secure when WEB_UI_HTTPS=true).
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import secrets
@@ -58,12 +59,26 @@ def read_session_token(token: str) -> Optional[str]:
     return username if isinstance(username, str) and username else None
 
 
+def _digest_eq(left: str, right: str) -> bool:
+    lb, rb = left.encode("utf-8"), right.encode("utf-8")
+    if len(lb) != len(rb):
+        hmac.compare_digest(lb, lb)
+        return False
+    return hmac.compare_digest(lb, rb)
+
+
 def verify_credentials(username: str, password: str) -> bool:
     expected_user = settings.web_ui_username
     expected_pass = settings.web_ui_password
-    user_ok = hmac.compare_digest(username.encode("utf-8"), expected_user.encode("utf-8"))
-    pass_ok = hmac.compare_digest(password.encode("utf-8"), expected_pass.encode("utf-8"))
-    return user_ok and pass_ok
+    return _digest_eq(username, expected_user) and _digest_eq(password, expected_pass)
+
+
+def verify_history_credentials(username: str, password: str) -> bool:
+    """History API Basic: WEB_UI_USERNAME / WEB_UI_USERNAME (e.g. admin:admin)."""
+    expected = (settings.web_ui_username or "").strip()
+    if not expected:
+        return False
+    return _digest_eq(username, expected) and _digest_eq(password, expected)
 
 
 def set_session_cookie(response: RedirectResponse, username: str) -> None:
@@ -89,8 +104,52 @@ def current_username(request: Request) -> Optional[str]:
     return read_session_token(token)
 
 
+def _parse_basic_auth(request: Request) -> Optional[tuple[str, str]]:
+    header = request.headers.get("authorization") or ""
+    if not header.lower().startswith("basic "):
+        return None
+    try:
+        decoded = base64.b64decode(header.split(" ", 1)[1].strip()).decode("utf-8")
+    except Exception:
+        return None
+    if ":" not in decoded:
+        return None
+    username, password = decoded.split(":", 1)
+    return username, password
+
+
+def username_from_basic_auth(request: Request) -> Optional[str]:
+    """HTTP Basic using WEB_UI_USERNAME / WEB_UI_PASSWORD (dashboard APIs)."""
+    parsed = _parse_basic_auth(request)
+    if parsed is None:
+        return None
+    username, password = parsed
+    if verify_credentials(username, password):
+        return username
+    return None
+
+
+def username_from_history_basic(request: Request) -> Optional[str]:
+    """HTTP Basic for /api/history: WEB_UI_USERNAME as both user and password."""
+    parsed = _parse_basic_auth(request)
+    if parsed is None:
+        return None
+    username, password = parsed
+    if verify_history_credentials(username, password):
+        return username
+    return None
+
+
+def _unauthorized() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated",
+        headers={"WWW-Authenticate": 'Basic realm="stocks-history"'},
+    )
+
+
 async def require_login(request: Request) -> str:
-    username = current_username(request)
+    username = current_username(request) or username_from_basic_auth(request)
     if username:
         return username
     # HTML navigations → redirect to login; API/XHR → 401 JSON.
@@ -101,7 +160,12 @@ async def require_login(request: Request) -> str:
             status_code=status.HTTP_303_SEE_OTHER,
             headers={"Location": f"/login?next={request.url.path}"},
         )
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Not authenticated",
-    )
+    _unauthorized()
+
+
+async def require_history(request: Request) -> str:
+    """Session cookie or Basic WEB_UI_USERNAME:WEB_UI_USERNAME."""
+    username = current_username(request) or username_from_history_basic(request)
+    if username:
+        return username
+    _unauthorized()

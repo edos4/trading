@@ -1643,8 +1643,13 @@ def _worker_symbol_backtest(
     candles: list[OHLCVCandle] | None = None,
 ) -> tuple[list[BacktestTrade], int]:
     if candles is None:
-        tv = TVClient(screener, exchange)
-        candles = tv._fetch_history_chart(symbol, timeframe)
+        from data.history import fetch_ohlcv_candles, ui_web_history_enabled
+
+        if ui_web_history_enabled():
+            candles = fetch_ohlcv_candles(symbol, timeframe)
+        if not candles:
+            tv = TVClient(screener, exchange)
+            candles = tv._fetch_history_chart(symbol, timeframe)
     patterns = _load_patterns(pattern_specs)
     return _core_backtest_symbol(symbol, timeframe, candles, patterns, config)
 
@@ -1792,9 +1797,16 @@ class Backtester:
         async def _fetch_one(symbol: str):
             candles = _load_cached_ohlcv(symbol, "1d", self._market)
             if candles is None:
-                candles = await asyncio.to_thread(
-                    self._tv._fetch_history_chart, symbol, "1d"
-                )
+                from data.history import fetch_ohlcv_candles, ui_web_history_enabled
+
+                if ui_web_history_enabled():
+                    candles = fetch_ohlcv_candles(
+                        symbol, "1d", tv_client=self._tv,
+                    )
+                if not candles:
+                    candles = await asyncio.to_thread(
+                        self._tv._fetch_history_chart, symbol, "1d"
+                    )
                 if candles:
                     _save_cached_ohlcv(symbol, "1d", candles, self._market)
             if candles:
@@ -2321,6 +2333,14 @@ class Backtester:
         return _min_required_bars(timeframe)
 
     def _fetch_history(self, symbol: str, timeframe: str) -> list[OHLCVCandle]:
+        from data.history import fetch_ohlcv_candles, ui_web_history_enabled
+
+        if ui_web_history_enabled():
+            candles = fetch_ohlcv_candles(
+                symbol, timeframe, tv_client=self._tv,
+            )
+            if candles:
+                return candles
         return self._tv._fetch_history_chart(symbol, timeframe)
 
     @staticmethod

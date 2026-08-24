@@ -24,7 +24,8 @@ Cron example (16:30 ET ≈ after US close):
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -35,13 +36,28 @@ from data.ingest import parse_csv_rows
 from utils.logger import log
 
 _NY_TZ = ZoneInfo("America/New_York")
+# Yahoo chart fetches; 8 keeps the 17k-symbol pass under ~1h without hammering.
+_FETCH_WORKERS = 3
 
 
-def _last_trading_date() -> "datetime.date":
-    today = datetime.now(tz=_NY_TZ).date()
-    while today.weekday() >= 5:  # Sat=5, Sun=6
-        today -= timedelta(days=1)
-    return today
+def _last_trading_date(now: datetime | None = None) -> date:
+    """Most recent *closed* US cash session (16:00 ET).
+
+    Before the close — and all weekend — yesterday's session is the last
+    complete daily bar. Treating "today" as the target on Monday morning
+    would mark every Friday-current symbol stale forever until 16:00.
+    """
+    now = now or datetime.now(tz=_NY_TZ)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=_NY_TZ)
+    else:
+        now = now.astimezone(_NY_TZ)
+    target = now.date()
+    if now.weekday() >= 5 or now.hour < 16:
+        target -= timedelta(days=1)
+    while target.weekday() >= 5:
+        target -= timedelta(days=1)
+    return target
 
 
 def _candles_to_rows(candles) -> list[tuple]:
@@ -137,18 +153,34 @@ def _fetch_fallback(conn, symbols, *, fetch_limit: int | None) -> tuple[int, int
 
     cap_note = f" (capped to {len(to_fetch)})" if fetch_limit else ""
     log.info(f"update | fetch fallback: {len(to_fetch)} stale symbol(s){cap_note} "
-             f"(older than {last_trading})")
+             f"(older than {last_trading}, workers={_FETCH_WORKERS})")
     fetched, new_bars = 0, 0
-    for i, sym in enumerate(tqdm(to_fetch, desc="Fetch fallback", unit="symbol")):
+
+    def _one(sym: dict) -> int:
+        own = db.get_conn()
         try:
-            n = _fetch_symbol(conn, sym["symbol"], sym["market"])
+            n = _fetch_symbol(own, sym["symbol"], sym["market"] or "us")
+            own.commit()
+            return n
+        except Exception as exc:
+            own.rollback()
+            log.warning(f"update | fetch failed for {sym['symbol']}: {exc}")
+            return 0
+        finally:
+            own.close()
+
+    workers = max(1, min(_FETCH_WORKERS, len(to_fetch)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = {pool.submit(_one, sym): sym["symbol"] for sym in to_fetch}
+        for fut in tqdm(as_completed(futs), total=len(futs), desc="Fetch fallback", unit="symbol"):
+            try:
+                n = fut.result()
+            except Exception as exc:
+                log.warning(f"update | fetch failed for {futs[fut]}: {exc}")
+                n = 0
             if n:
                 fetched += 1
                 new_bars += n
-        except Exception as exc:
-            log.warning(f"update | fetch failed for {sym['symbol']}: {exc}")
-        if (i + 1) % 250 == 0:
-            conn.commit()
     conn.commit()
     return fetched, new_bars
 

@@ -14,6 +14,7 @@ import shutil
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -165,6 +166,42 @@ SCREENER_FIELDS: dict[str, tuple[str, str, str, str, str]] = {
 _CHART_API = "https://query1.finance.yahoo.com/v8/finance/chart"
 _CHART_UA = "trading-bot/2.0 chart-history"
 
+
+def _yahoo_chart_payload(
+    chart_symbol: str, interval: str, range_: str, *, timeout: int = 20
+) -> dict | None:
+    """GET Yahoo v8 chart JSON. Retry on HTTP 429 with exponential backoff."""
+    url = f"{_CHART_API}/{chart_symbol}?interval={interval}&range={range_}"
+    delay = 2.0
+    last_exc: Exception | None = None
+    for attempt in range(7):
+        req = urllib.request.Request(url, headers={"User-Agent": _CHART_UA})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            last_exc = exc
+            if exc.code == 429 and attempt < 6:
+                time.sleep(delay)
+                delay = min(delay * 2, 60)
+                continue
+            log.warning(
+                f"TVClient | Chart history failed for {chart_symbol} "
+                f"{interval}/{range_}: {exc}"
+            )
+            return None
+        except Exception as exc:
+            last_exc = exc
+            log.warning(
+                f"TVClient | Chart history failed for {chart_symbol} "
+                f"{interval}/{range_}: {exc}"
+            )
+            return None
+    log.warning(
+        f"TVClient | Chart history failed for {chart_symbol} after retries: {last_exc}"
+    )
+    return None
+
 # interval, range, max bars to keep
 # Daily uses 2y so Kronos gate can take LOOKBACK=400 (1y ≈ 252 bars is too short).
 _CHART_SPECS: dict[str, tuple[str, str, int]] = {
@@ -236,14 +273,7 @@ def fetch_yahoo_daily_max(symbol: str) -> list[OHLCVCandle]:
     from core.market import yahoo_chart_symbol
 
     chart_symbol = yahoo_chart_symbol(symbol, screener="america")
-    url = f"{_CHART_API}/{chart_symbol}?interval=1d&range=max"
-    req = urllib.request.Request(url, headers={"User-Agent": _CHART_UA})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-    except Exception as exc:
-        log.warning(f"TVClient | max-history failed for {chart_symbol}: {exc}")
-        return []
+    payload = _yahoo_chart_payload(chart_symbol, "1d", "max", timeout=30)
     candles = _candles_from_yahoo_payload(payload, chart_symbol, "1d")
     if candles:
         log.debug(f"TVClient | max-history {symbol} → {len(candles)} bars")
@@ -747,17 +777,7 @@ class TVClient:
         from core.market import yahoo_chart_symbol
 
         chart_symbol = yahoo_chart_symbol(symbol, screener=self._screener)
-        url = f"{_CHART_API}/{chart_symbol}?interval={interval}&range={range_}"
-        req = urllib.request.Request(url, headers={"User-Agent": _CHART_UA})
-
-        try:
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
-        except Exception as exc:
-            log.warning(
-                f"TVClient | Chart history failed for {chart_symbol} {timeframe}: {exc}"
-            )
-            payload = None
+        payload = _yahoo_chart_payload(chart_symbol, interval, range_, timeout=20)
 
         candles = _candles_from_yahoo_payload(payload, chart_symbol, timeframe)
         if candles and len(candles) > max_bars:

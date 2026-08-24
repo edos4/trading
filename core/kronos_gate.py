@@ -35,6 +35,8 @@ from config import settings
 from utils.logger import log
 
 _INFER_LOCK = threading.Lock()
+_facade_df_cache: dict[str, object] = {}
+_facade_cache_lock = threading.Lock()
 
 
 def kronos_infer_lock() -> threading.Lock:
@@ -49,6 +51,25 @@ def _context_lookback() -> int:
     """
     available = min(DEFAULT_WINDOW, settings.tv_history_days)
     return max(60, min(LOOKBACK, available, MAX_CONTEXT))
+
+
+def _facade_daily_df(symbol: str):
+    """Cached API/Postgres daily frame (no TV). None if short or unavailable."""
+    key = (symbol or "").upper()
+    with _facade_cache_lock:
+        if key in _facade_df_cache:
+            return _facade_df_cache[key]
+    try:
+        from data.history import load_daily_ohlcv_df
+
+        df = load_daily_ohlcv_df(key, tv_fallback=False, limit=MAX_CONTEXT)
+    except Exception:
+        df = None
+    if df is not None and len(df) < 60:
+        df = None
+    with _facade_cache_lock:
+        _facade_df_cache[key] = df
+    return df
 
 
 @dataclass(frozen=True)
@@ -123,8 +144,12 @@ class KronosGate:
             return KronosGateResult(passed=True, reason="non-daily skip")
 
         lookback = _context_lookback()
-        df = store.get_df(signal.symbol, signal.timeframe, min_bars=lookback)
-        if df is None:
+        df = _facade_daily_df(signal.symbol)
+        if df is None or len(df) < lookback:
+            stored = store.get_df(signal.symbol, signal.timeframe, min_bars=lookback)
+            if stored is not None:
+                df = stored
+        if df is None or len(df) < min(60, lookback):
             if settings.kronos_gate_fail_open:
                 return KronosGateResult(
                     passed=True, reason="insufficient bars (fail-open)"

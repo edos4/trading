@@ -17,6 +17,7 @@ from core.kronos_gate import kronos_gate_check
 from core.market import get_market
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
 from data.tv_client import TVClient
+from data.history import fetch_ohlcv_candles
 from patterns.base_pattern import BasePattern, TradeSignal, skip_pattern_module
 from patterns.chart_scan import latest_signals_over_lookback
 from utils.logger import log
@@ -108,7 +109,9 @@ class ExplorerService:
         if profile.id != getattr(self, "_market", None):
             self._bind_market(profile)
 
-        candles = self._tv._fetch_history_screener(symbol, exchange, timeframe)
+        candles = fetch_ohlcv_candles(
+            symbol, timeframe, exchange=exchange, tv_client=self._tv,
+        )
         if not candles:
             raise ValueError(f"No history available for {symbol} {timeframe}.")
 
