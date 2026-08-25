@@ -5,7 +5,7 @@ Does NOT generate entries. After a real pattern emits BUY/SELL, this gate
 asks Kronos-base for a +3 trading day close forecast and only lets the signal
 through when:
   - predicted move aligns with the signal action, AND
-  - |pred_1w| >= settings.kronos_min_move_pct
+  - |pred_3d| >= 3% in those 3 days (settings.kronos_min_move_pct, default 0.03)
 
 Used as a veto/confirm layer on top of Toby patterns, not as a standalone
 entry (unlike the Kronos repo's finetune top-K demo).
@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from patterns.base_pattern import TradeSignal
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
 from core.kronos_eval import (
+    GATE_HORIZON_BARS,
     LOOKBACK,
     MAX_CONTEXT,
     MODEL_PATH,
@@ -75,6 +76,7 @@ def _facade_daily_df(symbol: str):
 @dataclass(frozen=True)
 class KronosGateResult:
     passed: bool
+    # Close-to-close % over GATE_HORIZON_BARS (3 trading days). Name is historical.
     pred_1w: float | None = None
     reason: str = ""
 
@@ -129,7 +131,7 @@ class KronosGate:
         *,
         adjust_exits: bool | None = None,
     ) -> KronosGateResult:
-        """Return whether `signal` clears the 3-trading-day Kronos filter.
+        """Return whether `signal` clears the 3% in 3 trading days Kronos filter.
 
         When passed and adjust_exits is True, mutates signal.take_profit /
         stop_loss from the forecast path (in place).
@@ -184,12 +186,16 @@ class KronosGate:
 
         pred_1w, last_close = out
         min_move = settings.kronos_min_move_pct
+        horizon = GATE_HORIZON_BARS  # 3 trading days; |pred| floor is 3%
 
         if abs(pred_1w) < min_move:
             return KronosGateResult(
                 passed=False,
                 pred_1w=pred_1w,
-                reason=f"|pred_1w|={abs(pred_1w):.2%} < min {min_move:.2%}",
+                reason=(
+                    f"|pred_3d|={abs(pred_1w):.2%} < min {min_move:.2%} "
+                    f"in {horizon}d"
+                ),
             )
 
         aligned = (signal.action == "BUY" and pred_1w > 0) or (
@@ -199,10 +205,10 @@ class KronosGate:
             return KronosGateResult(
                 passed=False,
                 pred_1w=pred_1w,
-                reason=f"pred_1w={pred_1w:+.2%} conflicts with {signal.action}",
+                reason=f"pred_3d={pred_1w:+.2%} conflicts with {signal.action}",
             )
 
-        note = f"KronosGate 3d {pred_1w:+.2%}"
+        note = f"KronosGate 3d {pred_1w:+.2%} in {horizon}d"
         signal.notes = f"{signal.notes} | {note}".strip(" |") if signal.notes else note
 
         if adjust_exits:

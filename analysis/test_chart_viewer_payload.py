@@ -38,6 +38,9 @@ def test_viewer_payload_has_candles_and_levels() -> None:
     assert len(payload["volume"]) == 40
     assert "ema20" not in payload
     assert "ema50" not in payload
+    assert payload["rsi14"]
+    assert payload["rsi14"][-1]["time"] == payload["candles"][-1]["time"]
+    assert all(0.0 <= row["value"] <= 100.0 for row in payload["rsi14"])
     titles = {level["title"] for level in payload["levels"]}
     assert titles == {"entry", "stop", "target", "last"}
     assert payload["markers"]

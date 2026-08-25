@@ -35,6 +35,10 @@ TV_TEXT = "#d1d4dc"
 TV_TEXT_DIM = "#787b86"
 TV_UP = "#26a69a"
 TV_DOWN = "#ef5350"
+TV_RSI = "#7e57c2"
+RSI_PERIOD = 14
+RSI_OVERBOUGHT = 70.0
+RSI_OVERSOLD = 30.0
 
 
 class ChartRenderer:
@@ -83,8 +87,8 @@ class ChartRenderer:
             type="candle",
             style=style,
             volume=True,
-            figsize=(14, 8),
-            panel_ratios=(4, 1),
+            figsize=(14, 9.2),
+            panel_ratios=(4, 1, 1.35),
             tight_layout=True,
             returnfig=True,
             warn_too_much_data=2500,
@@ -98,8 +102,22 @@ class ChartRenderer:
             volume_alpha=0.55,
             ylabel="",
         )
-        if add_plots:
-            plot_kwargs["addplot"] = add_plots
+        rsi = _rsi_sma(df["Close"], RSI_PERIOD)
+        plots = list(add_plots or [])
+        self._append_series_plot(
+            plots, rsi, panel=2, color=TV_RSI, width=1.0, ylabel="RSI",
+        )
+        self._append_series_plot(
+            plots, pd.Series(RSI_OVERBOUGHT, index=df.index),
+            panel=2, color=TV_TEXT_DIM, width=0.7, linestyle="dashed",
+        )
+        self._append_series_plot(
+            plots, pd.Series(RSI_OVERSOLD, index=df.index),
+            panel=2, color=TV_TEXT_DIM, width=0.7, linestyle="dashed",
+        )
+        plot_kwargs["addplot"] = plots
+        indicators = dict(indicators or {})
+        indicators["rsi_14"] = rsi
         fig, axes = mpf.plot(df, **plot_kwargs)
         self._polish_axes(axes, timeframe)
         self._format_xaxis_months(axes, df, timeframe)
@@ -284,8 +302,8 @@ class ChartRenderer:
                 )
                 axis.yaxis.get_offset_text().set_visible(False)
 
-        if len(axes) > 1:
-            plt.setp(axes[0].get_xticklabels(), visible=False)
+        for axis in axes[:-1]:
+            plt.setp(axis.get_xticklabels(), visible=False)
 
     def _normalize_session_index(self, df: pd.DataFrame) -> pd.DataFrame:
         """Session dates in this market's timezone (NY or Manila)."""
@@ -308,7 +326,7 @@ class ChartRenderer:
             return
 
         dates = self._normalize_session_index(df).index
-        date_axis = axes[2] if len(axes) > 2 else axes[-1]
+        date_axis = axes[-1]
 
         tick_positions: list[int] = []
         tick_labels: list[str] = []
@@ -523,6 +541,15 @@ def _viewer_bar_time(idx) -> str:
     return ts.strftime("%Y-%m-%d")
 
 
+def _rsi_sma(close: pd.Series, period: int = RSI_PERIOD) -> pd.Series:
+    """SMA-smoothed RSI — same formula as IndicatorEngine.rsi()."""
+    delta = close.diff()
+    gain = delta.clip(lower=0).rolling(period).mean()
+    loss = (-delta.clip(upper=0)).rolling(period).mean()
+    rs = gain / loss.replace(0, np.nan)
+    return 100 - (100 / (1 + rs))
+
+
 def _viewer_finite(value) -> float | None:
     try:
         number = float(value)
@@ -575,6 +602,8 @@ def build_trade_viewer_payload(
 
     candles = []
     volume = []
+    rsi14 = []
+    rsi = _rsi_sma(df["Close"], RSI_PERIOD)
     for idx, row in df.iterrows():
         t = _viewer_bar_time(idx)
         o = _viewer_finite(row["Open"])
@@ -591,6 +620,9 @@ def build_trade_viewer_payload(
             "value": v,
             "color": "rgba(38,166,154,0.55)" if up else "rgba(239,83,80,0.55)",
         })
+        rsi_val = _viewer_finite(rsi.loc[idx])
+        if rsi_val is not None:
+            rsi14.append({"time": t, "value": rsi_val})
 
     if len(candles) < 2:
         raise ValueError(f"not enough valid bars for {symbol} {timeframe}")
@@ -660,6 +692,7 @@ def build_trade_viewer_payload(
         },
         "candles": candles,
         "volume": volume,
+        "rsi14": rsi14,
         "levels": levels,
         "markers": markers,
     }

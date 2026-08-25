@@ -6,7 +6,8 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
-from core.kronos_eval import LOOKBACK
+from config import Settings
+from core.kronos_eval import GATE_HORIZON_BARS, LOOKBACK, WEEK_AHEAD
 from core.kronos_gate import KronosGate, _context_lookback
 from data.ohlcv_store import DEFAULT_WINDOW, OHLCVStore
 from data.tv_client import OHLCVCandle
@@ -75,6 +76,7 @@ def test_gate_pass_aligned_buy():
     assert "KronosGate" in sig.notes
     # Official-shaped inputs: lookback rows + amount column.
     assert fake.last_kwargs is not None
+    assert fake.last_kwargs["pred_len"] == GATE_HORIZON_BARS == 3
     assert len(fake.last_kwargs["df"]) == _context_lookback()
     assert "amount" in fake.last_kwargs["df"].columns
     assert _context_lookback() == LOOKBACK
@@ -96,6 +98,8 @@ def test_gate_reject_small_move():
     result = gate.check(_signal(action="BUY"), store, adjust_exits=False)
     assert not result.passed
     assert "min" in result.reason
+    assert "pred_3d" in result.reason
+    assert "in 3d" in result.reason
 
 
 def test_gate_pass_three_pct():
@@ -104,6 +108,13 @@ def test_gate_pass_three_pct():
     store = _fill_store()
     result = gate.check(_signal(action="BUY"), store, adjust_exits=False)
     assert result.passed, result
+    assert result.pred_1w is not None
+    assert abs(result.pred_1w - 0.03) < 1e-9
+
+
+def test_gate_contract_is_three_pct_in_three_days():
+    assert GATE_HORIZON_BARS == WEEK_AHEAD == 3
+    assert Settings.model_fields["kronos_min_move_pct"].default == 0.03
 
 
 def test_gate_skips_close():
@@ -151,6 +162,7 @@ if __name__ == "__main__":
     test_gate_reject_wrong_direction()
     test_gate_reject_small_move()
     test_gate_pass_three_pct()
+    test_gate_contract_is_three_pct_in_three_days()
     test_gate_skips_close()
     test_gate_fail_closed_no_weights()
     print("kronos_gate tests OK")

@@ -11,6 +11,7 @@ TV_TEXT = "#d1d4dc"
 TV_DIM = "#787b86"
 TV_UP = "#26a69a"
 TV_DOWN = "#ef5350"
+TV_RSI = "#7e57c2"
 TV_KRONOS = "#e040fb"
 TV_KRONOS_UP = "#ce93d8"
 TV_KRONOS_DOWN = "#7b1fa2"
@@ -36,6 +37,7 @@ class TradingViewChart(tk.Frame):
         self._payload: dict[str, Any] = {}
         self._candles: list[dict] = []
         self._volume: dict[str, dict] = {}
+        self._rsi: dict[str, float] = {}
         self._levels: list[dict] = []
         self._markers: dict[str, dict] = {}
         self._forecast: dict[str, float] = {}
@@ -50,12 +52,13 @@ class TradingViewChart(tk.Frame):
         self._vol_hi = 1.0
         self._plot = (0, 0, 1, 1)
         self._vol_plot = (0, 0, 1, 1)
+        self._rsi_plot = (0, 0, 1, 1)
 
         self._header = tk.Frame(self, bg=TV_BG)
         self._header.pack(fill=tk.X, padx=10, pady=(8, 0))
         self._title_var = tk.StringVar()
         self._ohlc_var = tk.StringVar()
-        self._legend_var = tk.StringVar(value="scroll to zoom · drag to pan")
+        self._legend_var = tk.StringVar(value="RSI 14    scroll to zoom · drag to pan")
         self._default_legend = self._legend_var.get()
         tk.Label(
             self._header, textvariable=self._title_var, fg=TV_TEXT, bg=TV_BG,
@@ -97,6 +100,7 @@ class TradingViewChart(tk.Frame):
             self._candles.append({**row, "predicted": True})
             seen.add(row["time"])
         self._volume = {row["time"]: row for row in payload.get("volume") or []}
+        self._rsi = {row["time"]: row["value"] for row in payload.get("rsi14") or []}
         self._levels = list(payload.get("levels") or [])
         self._markers = {row["time"]: row for row in payload.get("markers") or []}
         self._forecast = {
@@ -112,7 +116,7 @@ class TradingViewChart(tk.Frame):
         self._title_var.set(title)
         if self._forecast:
             self._legend_var.set(
-                "Kronos forecast    scroll to zoom · drag to pan"
+                "RSI 14    Kronos forecast    scroll to zoom · drag to pan"
             )
         else:
             self._legend_var.set(self._default_legend)
@@ -137,11 +141,13 @@ class TradingViewChart(tk.Frame):
         sign = "+" if change >= 0 else ""
         vol = (self._volume.get(candle["time"]) or {}).get("value")
         vol_s = _fmt_volume(vol) if vol is not None else "—"
+        rsi = self._rsi.get(candle["time"])
+        rsi_s = f"    RSI {rsi:.1f}" if rsi is not None else ""
         prefix = "Kronos  " if candle.get("predicted") else ""
         self._ohlc_var.set(
             f"{prefix}{candle['time']}    O {_fmt_price(o)}  H {_fmt_price(h)}  "
             f"L {_fmt_price(low)}  C {_fmt_price(c)}    "
-            f"{sign}{_fmt_price(change)} ({sign}{pct:.2f}%)    Vol {vol_s}"
+            f"{sign}{_fmt_price(change)} ({sign}{pct:.2f}%)    Vol {vol_s}{rsi_s}"
         )
         self._ohlc_label.configure(fg=TV_UP if change >= 0 else TV_DOWN)
 
@@ -155,10 +161,15 @@ class TradingViewChart(tk.Frame):
         axis_w = 72
         time_h = 28
         pad_l, pad_t = 8, 8
-        vol_h = max(52, int(h * 0.18))
-        price_bottom = h - time_h - vol_h
+        gap = 6
+        vol_h = max(44, int(h * 0.13))
+        rsi_h = max(56, int(h * 0.16))
+        price_bottom = h - time_h - vol_h - rsi_h - gap * 2
         self._plot = (pad_l, pad_t, w - axis_w, price_bottom)
-        self._vol_plot = (pad_l, price_bottom + 6, w - axis_w, h - time_h)
+        vol_top = price_bottom + gap
+        self._vol_plot = (pad_l, vol_top, w - axis_w, vol_top + vol_h)
+        rsi_top = vol_top + vol_h + gap
+        self._rsi_plot = (pad_l, rsi_top, w - axis_w, h - time_h)
         self._clamp_window()
         visible = self._candles[self._start:self._start + self._visible]
         if not visible:
@@ -187,6 +198,7 @@ class TradingViewChart(tk.Frame):
         self._draw_candles(visible)
         self._draw_forecast(visible)
         self._draw_volume(visible)
+        self._draw_rsi(visible)
         self._draw_levels()
         self._draw_axis(visible)
         self._draw_markers(visible)
@@ -218,10 +230,16 @@ class TradingViewChart(tk.Frame):
         _, y0, _, y1 = self._vol_plot
         return y1 - (value / (self._vol_hi or 1.0)) * (y1 - y0)
 
+    def _y_rsi(self, value: float) -> float:
+        _, y0, _, y1 = self._rsi_plot
+        span = 100.0
+        return y1 - (value / span) * (y1 - y0)
+
     def _draw_grid(self, visible: list[dict]) -> None:
         c = self._canvas
         x0, y0, x1, y1 = self._plot
         vx0, vy0, vx1, vy1 = self._vol_plot
+        rx0, ry0, rx1, ry1 = self._rsi_plot
         steps = 6
         for i in range(steps + 1):
             frac = i / steps
@@ -232,16 +250,17 @@ class TradingViewChart(tk.Frame):
                 x1 + 8, y, text=_fmt_price(price), fill=TV_DIM,
                 anchor="w", font=("Trebuchet MS", 9),
             )
-        c.create_line(x1, y0, x1, vy1, fill=TV_GRID, width=1)
+        c.create_line(x1, y0, x1, ry1, fill=TV_GRID, width=1)
         c.create_line(x0, vy1, vx1, vy1, fill=TV_GRID, width=1)
+        c.create_line(x0, ry1, rx1, ry1, fill=TV_GRID, width=1)
         stride = max(1, len(visible) // 6)
         for i, row in enumerate(visible):
             if i % stride != 0 and i != len(visible) - 1:
                 continue
             x = self._x_for(i)
-            c.create_line(x, y0, x, vy1, fill=TV_GRID, width=1)
+            c.create_line(x, y0, x, ry1, fill=TV_GRID, width=1)
             c.create_text(
-                x, vy1 + 10, text=row["time"][5:] if len(row["time"]) >= 10 else row["time"],
+                x, ry1 + 10, text=row["time"][5:] if len(row["time"]) >= 10 else row["time"],
                 fill=TV_DIM, anchor="n", font=("Trebuchet MS", 8),
             )
 
@@ -277,7 +296,36 @@ class TradingViewChart(tk.Frame):
             color = "#1f5c56" if row["close"] >= row["open"] else "#6e3331"
             c.create_rectangle(x - half, y, x + half, y1, outline="", fill=color)
 
-    def _draw_forecast(self, visible: list[dict]) -> None:
+    def _draw_rsi(self, visible: list[dict]) -> None:
+        c = self._canvas
+        x0, y0, x1, y1 = self._rsi_plot
+        for level in (30.0, 70.0):
+            y = self._y_rsi(level)
+            c.create_line(x0, y, x1, y, fill=TV_DIM, width=1, dash=(4, 4))
+        pts = []
+        last = None
+        for i, row in enumerate(visible):
+            val = self._rsi.get(row["time"])
+            if val is None:
+                continue
+            last = val
+            pts.extend([self._x_for(i), self._y_rsi(val)])
+        if len(pts) >= 4:
+            c.create_line(*pts, fill=TV_RSI, width=1, smooth=False)
+        for label, value in (("100", 100.0), ("70", 70.0), ("30", 30.0), ("0", 0.0)):
+            c.create_text(
+                x1 + 8, self._y_rsi(value), text=label, fill=TV_DIM,
+                anchor="w", font=("Trebuchet MS", 8),
+            )
+        if last is not None:
+            y = self._y_rsi(last)
+            c.create_rectangle(
+                x1 + 2, y - 8, x1 + 70, y + 8, fill=TV_RSI, outline=TV_RSI,
+            )
+            c.create_text(
+                x1 + 36, y, text=f"{last:.1f}",
+                fill="#ffffff", font=("Trebuchet MS", 8, "bold"),
+            )
         if not self._forecast:
             return
         self._polyline(visible, self._forecast, self._forecast_color, width=2)
@@ -351,10 +399,17 @@ class TradingViewChart(tk.Frame):
         row = self._candles[idx]
         x = self._x_for(i)
         _, y0, _, y1 = self._plot
-        _, vy0, _, vy1 = self._vol_plot
+        _, _, _, ry1 = self._rsi_plot
         y = self._y_price(row["close"])
-        self._canvas.create_line(x, y0, x, vy1, fill=TV_CROSS, dash=(3, 3), tags="xh")
+        self._canvas.create_line(x, y0, x, ry1, fill=TV_CROSS, dash=(3, 3), tags="xh")
         self._canvas.create_line(self._plot[0], y, self._plot[2], y, fill=TV_CROSS, dash=(3, 3), tags="xh")
+        rsi = self._rsi.get(row["time"])
+        if rsi is not None:
+            ry = self._y_rsi(rsi)
+            self._canvas.create_line(
+                self._rsi_plot[0], ry, self._rsi_plot[2], ry,
+                fill=TV_CROSS, dash=(3, 3), tags="xh",
+            )
 
     def _index_at(self, x: int) -> Optional[int]:
         x0, _, x1, _ = self._plot
