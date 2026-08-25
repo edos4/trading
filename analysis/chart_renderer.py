@@ -35,7 +35,6 @@ TV_TEXT = "#d1d4dc"
 TV_TEXT_DIM = "#787b86"
 TV_UP = "#26a69a"
 TV_DOWN = "#ef5350"
-TV_EMA_COLORS = ["#2962ff", "#ff9800"]
 
 
 class ChartRenderer:
@@ -58,32 +57,6 @@ class ChartRenderer:
         return self._render_chart(
             symbol, timeframe, ohlcv_df,
             add_plots=extra_plots, title=title, annotations=annotations,
-        )
-
-    def render_with_ema(
-        self,
-        symbol: str,
-        timeframe: str,
-        ohlcv_df: pd.DataFrame,
-        ema_periods: list[int] | None = None,
-        annotations: list[dict] | None = None,
-    ) -> bytes:
-        """Render TradingView-style chart with EMA overlays for scan / vision review."""
-        ema_periods = ema_periods or [20, 50]
-        df = self._prepare_df(ohlcv_df, timeframe)
-        df = self._trim_to_visible(df, timeframe)
-
-        add_plots = []
-        indicators: dict[str, pd.Series] = {}
-        for i, period in enumerate(ema_periods):
-            ema = df["Close"].ewm(span=period, adjust=False).mean()
-            indicators[f"ema_{period}"] = ema
-            color = TV_EMA_COLORS[i % len(TV_EMA_COLORS)]
-            self._append_series_plot(add_plots, ema, color=color, width=1.0)
-
-        return self._render_chart(
-            symbol, timeframe, df, add_plots=add_plots,
-            indicators=indicators, annotations=annotations,
         )
 
     # ── Internal ───────────────────────────────────────────────────────────────
@@ -594,20 +567,14 @@ def build_trade_viewer_payload(
     current: float | None = None,
     entry_time=None,
     exit_time=None,
-    ema_periods: tuple[int, ...] = (20, 50),
 ) -> dict:
     """OHLCV + levels for an interactive TradingView-style viewer (no PNG)."""
     renderer = ChartRenderer(save_to_disk=False, session_tz=session_tz)
     df = renderer._prepare_df(ohlcv_df, timeframe)
     df = renderer._trim_to_visible(df, timeframe)
-    close = df["Close"]
-    emas: dict[str, pd.Series] = {}
-    for period in ema_periods:
-        emas[f"ema_{period}"] = close.ewm(span=period, adjust=False).mean()
 
     candles = []
     volume = []
-    ema_series: dict[str, list] = {name: [] for name in emas}
     for idx, row in df.iterrows():
         t = _viewer_bar_time(idx)
         o = _viewer_finite(row["Open"])
@@ -624,10 +591,6 @@ def build_trade_viewer_payload(
             "value": v,
             "color": "rgba(38,166,154,0.55)" if up else "rgba(239,83,80,0.55)",
         })
-        for name, series in emas.items():
-            val = _viewer_finite(series.loc[idx])
-            if val is not None:
-                ema_series[name].append({"time": t, "value": val})
 
     if len(candles) < 2:
         raise ValueError(f"not enough valid bars for {symbol} {timeframe}")
@@ -697,8 +660,6 @@ def build_trade_viewer_payload(
         },
         "candles": candles,
         "volume": volume,
-        "ema20": ema_series.get("ema_20", []),
-        "ema50": ema_series.get("ema_50", []),
         "levels": levels,
         "markers": markers,
     }

@@ -2,7 +2,7 @@
 data/ohlcv_store.py — Rolling in-memory candle store.
 
 Each scan appends the latest candle. Patterns that need N bars of history
-(e.g. to compute a 20-period EMA themselves, or to detect multi-bar patterns)
+(e.g. to compute a 20-period SMA themselves, or to detect multi-bar patterns)
 pull a DataFrame from here instead of re-fetching from TradingView.
 
 Key: (symbol, timeframe) → deque of OHLCVCandle, max length = WINDOW

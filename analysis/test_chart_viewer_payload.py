@@ -7,7 +7,7 @@ import pandas as pd
 from analysis.chart_renderer import build_trade_viewer_payload
 
 
-def test_viewer_payload_has_candles_emas_and_levels() -> None:
+def test_viewer_payload_has_candles_and_levels() -> None:
     idx = pd.bdate_range("2024-01-02", periods=40)
     close = pd.Series(range(100, 140), index=idx, dtype=float)
     df = pd.DataFrame({
@@ -36,7 +36,8 @@ def test_viewer_payload_has_candles_emas_and_levels() -> None:
     assert payload["candles"][0]["time"] == "2024-01-02"
     assert payload["candles"][-1]["close"] == 139.0
     assert len(payload["volume"]) == 40
-    assert len(payload["ema20"]) == 40
+    assert "ema20" not in payload
+    assert "ema50" not in payload
     titles = {level["title"] for level in payload["levels"]}
     assert titles == {"entry", "stop", "target", "last"}
     assert payload["markers"]

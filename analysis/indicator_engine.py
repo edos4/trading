@@ -8,7 +8,6 @@ historical candles, or derive custom signals that TV doesn't expose.
 Usage:
     from analysis.indicator_engine import IndicatorEngine
     ind = IndicatorEngine(ohlcv_df)
-    ema_9  = ind.ema(9)
     rsi_14 = ind.rsi(14)
     macd   = ind.macd()
 """
@@ -32,9 +31,6 @@ class IndicatorEngine:
         self.volume = self._df["volume"]
 
     # ── Moving averages ────────────────────────────────────────────────────────
-    def ema(self, period: int) -> pd.Series:
-        return self.close.ewm(span=period, adjust=False).mean()
-
     def sma(self, period: int) -> pd.Series:
         return self.close.rolling(window=period).mean()
 

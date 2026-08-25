@@ -6,7 +6,7 @@ Built with tkinter (stdlib) so it runs unchanged on Windows, macOS, and Linux.
 Data reuse:
   - TVClient.fetch_top_symbols_with_exchanges  -> symbol list
   - TVClient._fetch_history_screener           -> OHLCV history (no MCP needed)
-  - ChartRenderer.render_with_ema              -> TradingView-style PNG
+  - ChartRenderer.render                       -> TradingView-style PNG
   - scanner pattern discovery                  -> runs every pattern's analyze()
 
 Run:
@@ -359,7 +359,7 @@ class TradingBotUI:
             annotations.extend(s.chart_annotations)
 
         try:
-            png = self._renderer.render_with_ema(
+            png = self._renderer.render(
                 symbol, timeframe, df, annotations=annotations or None,
             )
         except Exception as exc:
@@ -468,7 +468,7 @@ class TradingBotUI:
         for s in self._current_signals:
             annotations.extend(s.chart_annotations)
         try:
-            png = self._renderer.render_with_ema(
+            png = self._renderer.render(
                 self._current_symbol, self.tf_var.get(), df,
                 annotations=annotations or None,
             )
