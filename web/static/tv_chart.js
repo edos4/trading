@@ -83,27 +83,6 @@ window.TVChart = (function () {
     });
     volumeSeries.setData(data.volume || []);
 
-    if ((data.ema20 || []).length) {
-      const ema20 = chart.addLineSeries({
-        color: "#2962ff",
-        lineWidth: 1,
-        priceLineVisible: false,
-        lastValueVisible: true,
-        title: "EMA 20",
-      });
-      ema20.setData(data.ema20);
-    }
-    if ((data.ema50 || []).length) {
-      const ema50 = chart.addLineSeries({
-        color: "#ff9800",
-        lineWidth: 1,
-        priceLineVisible: false,
-        lastValueVisible: true,
-        title: "EMA 50",
-      });
-      ema50.setData(data.ema50);
-    }
-
     for (const level of data.levels || []) {
       candleSeries.createPriceLine({
         price: level.price,

@@ -148,7 +148,7 @@ class ExplorerService:
         for s in signals:
             annotations.extend(s.chart_annotations)
 
-        png = self._renderer.render_with_ema(
+        png = self._renderer.render(
             symbol, timeframe, df, annotations=annotations or None,
         )
         last = df.iloc[-1]

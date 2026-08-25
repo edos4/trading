@@ -11,8 +11,6 @@ TV_TEXT = "#d1d4dc"
 TV_DIM = "#787b86"
 TV_UP = "#26a69a"
 TV_DOWN = "#ef5350"
-TV_EMA20 = "#2962ff"
-TV_EMA50 = "#ff9800"
 TV_KRONOS = "#e040fb"
 TV_KRONOS_UP = "#ce93d8"
 TV_KRONOS_DOWN = "#7b1fa2"
@@ -38,8 +36,6 @@ class TradingViewChart(tk.Frame):
         self._payload: dict[str, Any] = {}
         self._candles: list[dict] = []
         self._volume: dict[str, dict] = {}
-        self._ema20: dict[str, float] = {}
-        self._ema50: dict[str, float] = {}
         self._levels: list[dict] = []
         self._markers: dict[str, dict] = {}
         self._forecast: dict[str, float] = {}
@@ -59,7 +55,7 @@ class TradingViewChart(tk.Frame):
         self._header.pack(fill=tk.X, padx=10, pady=(8, 0))
         self._title_var = tk.StringVar()
         self._ohlc_var = tk.StringVar()
-        self._legend_var = tk.StringVar(value="EMA 20    EMA 50    scroll to zoom · drag to pan")
+        self._legend_var = tk.StringVar(value="scroll to zoom · drag to pan")
         self._default_legend = self._legend_var.get()
         tk.Label(
             self._header, textvariable=self._title_var, fg=TV_TEXT, bg=TV_BG,
@@ -101,8 +97,6 @@ class TradingViewChart(tk.Frame):
             self._candles.append({**row, "predicted": True})
             seen.add(row["time"])
         self._volume = {row["time"]: row for row in payload.get("volume") or []}
-        self._ema20 = {row["time"]: row["value"] for row in payload.get("ema20") or []}
-        self._ema50 = {row["time"]: row["value"] for row in payload.get("ema50") or []}
         self._levels = list(payload.get("levels") or [])
         self._markers = {row["time"]: row for row in payload.get("markers") or []}
         self._forecast = {
@@ -118,7 +112,7 @@ class TradingViewChart(tk.Frame):
         self._title_var.set(title)
         if self._forecast:
             self._legend_var.set(
-                "EMA 20    EMA 50    Kronos forecast    scroll to zoom · drag to pan"
+                "Kronos forecast    scroll to zoom · drag to pan"
             )
         else:
             self._legend_var.set(self._default_legend)
@@ -190,7 +184,6 @@ class TradingViewChart(tk.Frame):
         ]
         self._vol_hi = max(vols) * 1.15 if vols else 1.0
         self._draw_grid(visible)
-        self._draw_emas(visible)
         self._draw_candles(visible)
         self._draw_forecast(visible)
         self._draw_volume(visible)
@@ -288,10 +281,6 @@ class TradingViewChart(tk.Frame):
         if not self._forecast:
             return
         self._polyline(visible, self._forecast, self._forecast_color, width=2)
-
-    def _draw_emas(self, visible: list[dict]) -> None:
-        self._polyline(visible, self._ema20, TV_EMA20)
-        self._polyline(visible, self._ema50, TV_EMA50)
 
     def _polyline(
         self, visible: list[dict], series: dict[str, float], color: str, width: int = 1,

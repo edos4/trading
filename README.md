@@ -509,14 +509,14 @@ trading_bot_v2/
 │   └── ohlcv_store.py                   # Rolling candle history per symbol/timeframe
 │
 ├── analysis/
-│   ├── indicator_engine.py              # EMA, RSI, MACD, BB, ATR, OBV, VWAP...
+│   ├── indicator_engine.py              # SMA, RSI, MACD, BB, ATR, OBV, VWAP...
 │   ├── price_volume.py                  # RVOL + OBV volume confirm gate
 │   ├── chart_renderer.py                # mplfinance candlestick chart → PNG
 │   └── vision_checker.py               # Claude vision API confirmation
 │
 ├── patterns/
 │   ├── base_pattern.py                  # Abstract base — analyze() interface
-│   └── pattern_001_ema_crossover.py     # Template / first pattern
+│   └── 003_double_bottom.py             # Example chart pattern
 │
 ├── broker/
 │   ├── ibkr_client.py                   # IBKR connection + market data

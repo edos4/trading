@@ -112,7 +112,7 @@ class BasePattern(ABC):
     @property
     @abstractmethod
     def name(self) -> str:
-        """Unique pattern ID, e.g. 'pattern_001_ema_crossover'."""
+        """Unique pattern ID, e.g. 'pattern_003_double_bottom'."""
 
     @property
     def skipped(self) -> bool:
@@ -159,7 +159,7 @@ class BasePattern(ABC):
 
         Guidelines:
           - Keep logic focused on ONE pattern per class.
-          - Use snapshot.indicator("EMA20") for TV-computed values.
+          - Use snapshot.indicator("RSI") for TV-computed values.
           - Use store.get_df() + IndicatorEngine for custom indicator computation.
           - Set confidence honestly — it gates the expensive vision check.
           - Log key decision points with log.debug() for Toby's review.

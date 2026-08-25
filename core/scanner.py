@@ -896,7 +896,7 @@ class MarketScanner:
             log.warning("Vision | No OHLCV data in store — skipping visual check")
             return VisionVerdict.UNCERTAIN
 
-        chart_png = self._renderer.render_with_ema(
+        chart_png = self._renderer.render(
             signal.symbol, signal.timeframe, df,
             annotations=signal.chart_annotations or None,
         )

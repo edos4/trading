@@ -46,9 +46,6 @@ def _load_pattern_class(module_filename: str, class_name: str):
     return getattr(module, class_name, None)
 
 
-EMACrossoverPattern = _load_pattern_class(
-    "pattern_001_ema_crossover", "EMACrossoverPattern"
-)
 DoubleTopPattern = _load_pattern_class("002_double_top", "DoubleTopPattern")
 DoubleBottomPattern = _load_pattern_class("003_double_bottom", "DoubleBottomPattern")
 RoundingBottomPattern = _load_pattern_class(
@@ -157,16 +154,9 @@ def run_pattern(pattern, symbol: str, candles: list[OHLCVCandle],
 
 
 def render_demo(symbol_label: str, df: pd.DataFrame, annotations: list[dict],
-                path: Path, with_ema: bool = False) -> None:
+                path: Path) -> None:
     renderer = ChartRenderer(save_to_disk=False)
-    if with_ema:
-        png = renderer.render_with_ema(symbol_label, TF, df,
-                                       ema_periods=[20, 50],
-                                       annotations=annotations)
-    else:
-        # ChartRenderer.render() has a kwarg bug; call _render_chart directly.
-        png = renderer._render_chart(symbol_label, TF, df,
-                                     annotations=annotations)
+    png = renderer.render(symbol_label, TF, df, annotations=annotations)
     path.write_bytes(png)
     print(f"  saved → {path}")
 
@@ -181,31 +171,6 @@ def save_csv(path: Path, df: pd.DataFrame, rsi: pd.Series | None = None) -> None
 
 
 # ── per-pattern data manufacturers ───────────────────────────────────────────
-def gen_ema_crossover() -> tuple[np.ndarray, np.ndarray, int]:
-    """Build a long decline + rally, find the first EMA20/EMA50 bullish cross,
-    then take the prefix ending at that cross bar. EMA(adjust=False) is
-    recursive, so ema[k] depends only on bars 0..k — the prefix's last-bar
-    EMAs equal the full series' EMAs at k, so the cross lands on the last bar.
-    """
-    decline_bars = 70
-    rally_bars = 90
-    n = decline_bars + rally_bars
-    c = np.empty(n)
-    c[:decline_bars] = np.linspace(100, 78, decline_bars)
-    c[decline_bars:] = np.linspace(78, 118, rally_bars)
-    df = pd.DataFrame({"close": c})
-    ind = IndicatorEngine(df.assign(open=c, high=c, low=c, volume=1e6))
-    ef = ind.ema(20)
-    es = ind.ema(50)
-    for k in range(decline_bars + 2, n):
-        if ef.iloc[k - 1] <= es.iloc[k - 1] and ef.iloc[k] > es.iloc[k]:
-            closes = c[:k + 1].copy()
-            vols = np.full(len(closes), 1_200_000, dtype=float)
-            vols[decline_bars:] = 1_800_000  # volume spike on the rally
-            return closes, vols, decline_bars
-    raise RuntimeError("EMA crossover cross-on-last-bar not found")
-
-
 def zigzag_leg(c, lo, hi, v0, v1, up_amp, dn_amp):
     """Fill c[lo:hi+1] with a choppy ramp from v0 to v1.
 
@@ -338,47 +303,41 @@ def gen_head_and_shoulders() -> tuple[np.ndarray, set, set]:
 def main() -> None:
     DEMO_DIR.mkdir(exist_ok=True)
 
-    def _demo_spec(name, cls, action, genfn, with_ema, extra):
+    def _demo_spec(name, cls, action, genfn, extra):
         if cls is None:
             print(f"\n=== {name} ===\n  skipping — patterns/{name}.py not found")
             return None
-        return (name, cls(), action, genfn, with_ema, extra)
+        return (name, cls(), action, genfn, extra)
 
     demos = [
         d
         for d in (
-            _demo_spec("pattern_001_ema_crossover", EMACrossoverPattern, "BUY",
-                       gen_ema_crossover, True, {}),
             _demo_spec("pattern_002_double_top", DoubleTopPattern, "SELL",
-                       gen_double_top, False, {"leg2": (89, 120, 400_000, 1_500_000)}),
+                       gen_double_top, {"leg2": (89, 120, 400_000, 1_500_000)}),
             _demo_spec("pattern_003_double_bottom", DoubleBottomPattern, "BUY",
-                       gen_double_bottom, False, {"leg2": (89, 120, 1_500_000, 400_000)}),
+                       gen_double_bottom, {"leg2": (89, 120, 1_500_000, 400_000)}),
             _demo_spec("pattern_004_rounding_bottom", RoundingBottomPattern, "BUY",
-                       gen_rounding_bottom, False, {}),
+                       gen_rounding_bottom, {}),
             _demo_spec("pattern_005_rounding_top", RoundingTopPattern, "SELL",
-                       gen_rounding_top, False, {}),
+                       gen_rounding_top, {}),
             _demo_spec("pattern_006_upward_channel", UpwardChannelPattern, "SELL",
-                       gen_upward_channel, False, {"disable_edgar": True}),
+                       gen_upward_channel, {"disable_edgar": True}),
             _demo_spec("pattern_007_descending_channel", DescendingChannelPattern, "BUY",
-                       gen_descending_channel, False, {"disable_edgar": True}),
+                       gen_descending_channel, {"disable_edgar": True}),
             _demo_spec("pattern_008_head_and_shoulders", HeadAndShouldersPattern, "SELL",
-                       gen_head_and_shoulders, False, {}),
+                       gen_head_and_shoulders, {}),
         )
         if d is not None
     ]
 
-    for name, pattern, action, genfn, with_ema, extra in demos:
+    for name, pattern, action, genfn, extra in demos:
         print(f"\n=== {name} ===")
         try:
-            if name == "pattern_001_ema_crossover":
-                closes, vols, _ = genfn()
-                peaks, troughs = set(), set()
-            else:
-                closes, peaks, troughs = genfn()
-                vols = np.full(len(closes), 1_000_000, dtype=float)
-                if "leg2" in extra:
-                    lo, hi, uv, dv = extra["leg2"]
-                    vols = up_down_vol(closes, lo, hi, uv, dv, 1_000_000)
+            closes, peaks, troughs = genfn()
+            vols = np.full(len(closes), 1_000_000, dtype=float)
+            if "leg2" in extra:
+                lo, hi, uv, dv = extra["leg2"]
+                vols = up_down_vol(closes, lo, hi, uv, dv, 1_000_000)
         except Exception as exc:
             print(f"  data generation failed: {exc!r}")
             continue
@@ -408,7 +367,7 @@ def main() -> None:
         label = f"{name} ({action})"
         png_path = DEMO_DIR / f"{name}_demo.png"
         csv_path = DEMO_DIR / f"{name}_demo.csv"
-        render_demo(label, df, annotations, png_path, with_ema=with_ema)
+        render_demo(label, df, annotations, png_path)
         save_csv(csv_path, df, rsi)
 
 

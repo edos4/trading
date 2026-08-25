@@ -961,13 +961,6 @@ def _from_mcp_payload(
     if isinstance(rsi, dict) and rsi.get("value") is not None:
         indicators["RSI"] = rsi["value"]
 
-    ema = mcp_data.get("ema") or {}
-    if isinstance(ema, dict):
-        for period in (5, 10, 20, 30, 50, 100, 200):
-            key = f"EMA{period}"
-            if ema.get(key) is not None:
-                indicators[key] = ema[key]
-
     sma = mcp_data.get("sma") or {}
     if isinstance(sma, dict):
         for period in (5, 10, 20, 30, 50, 100, 200):
@@ -996,7 +989,7 @@ def _from_mcp_payload(
 
     summary = {"RECOMMENDATION": rec}
     oscillators = mcp_data.get("stochastic") or {}
-    moving_avgs = ema if isinstance(ema, dict) else {}
+    moving_avgs = sma if isinstance(sma, dict) else {}
     return indicators, summary, oscillators, moving_avgs
 
 
