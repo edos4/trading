@@ -225,6 +225,26 @@ def all_symbols(conn) -> list[dict[str, Any]]:
         return [dict(zip(cols, row)) for row in cur.fetchall()]
 
 
+def median_last_bar_date(conn) -> date | None:
+    """Median `symbols.last_bar_ts` as an America/New_York session date.
+
+    Median (not max) so a couple of test/outlier tickers cannot hide a stale
+    universe, and a long tail of dead tickers cannot hide a current one.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT (to_timestamp("
+            "percentile_disc(0.5) WITHIN GROUP (ORDER BY last_bar_ts)"
+            ") AT TIME ZONE %s)::date "
+            "FROM symbols WHERE last_bar_ts IS NOT NULL",
+            (_NY_TZ,),
+        )
+        row = cur.fetchone()
+        if not row or row[0] is None:
+            return None
+        return row[0]
+
+
 def global_stats(conn) -> dict[str, Any]:
     with conn.cursor() as cur:
         cur.execute(

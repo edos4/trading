@@ -7,7 +7,7 @@ Every SCAN_INTERVAL_SECONDS it:
   2. Pushes the new candle into OHLCVStore
   3. Runs each registered pattern's analyze() method
   4. If a signal is returned:
-        a. Kronos 3d forecast gate (if enabled) — direction + min move
+        a. Kronos 3d forecast gate (if enabled) — direction + 3% in 3 days
         b. Renders a chart (if vision is enabled)
         c. Asks Claude vision to confirm the pattern
         d. Risk gates (ATR trail / R:R) then Kronos/vision; queue pending
@@ -760,7 +760,7 @@ class MarketScanner:
                 reason = (
                     f"Kronos 3d confirm gate vetoed this {signal.action}: {gate.reason}. "
                     f"Forecast must agree with the pattern direction and clear "
-                    f"KRONOS_MIN_MOVE_PCT."
+                    f"3% in 3 days (KRONOS_MIN_MOVE_PCT)."
                 )
                 log.info(
                     f"Signal REJECTED by Kronos gate — {signal.symbol} "
@@ -772,7 +772,7 @@ class MarketScanner:
             if gate.pred_1w is not None:
                 log.info(
                     f"Kronos gate PASS | {signal.symbol} {signal.pattern} | "
-                    f"pred_1w={gate.pred_1w:+.2%} | {gate.reason}"
+                    f"pred_3d={gate.pred_1w:+.2%} in 3d | {gate.reason}"
                 )
 
         # Step 0c — Volume confirm gate (RVOL + OBV direction).

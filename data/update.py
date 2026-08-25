@@ -17,9 +17,14 @@ in two stages:
 
 Both stages are idempotent: the primary key (symbol, ts) makes re-runs no-ops.
 
-Cron example (16:30 ET ≈ after US close):
+Cron (16:30 America/New_York, weekdays — after the 16:00 cash close):
+    CRON_TZ=America/New_York
+    TZ=America/New_York
     30 16 * * 1-5  cd <repo> && .venv/bin/python main.py --update-db \
         >> logs/db_update.log 2>&1
+
+Web start installs that crontab if missing and writes
+logs/stocks_history_updated.txt after a successful pass.
 """
 
 from __future__ import annotations
@@ -209,5 +214,14 @@ def run_update(
             f"update | CSV sync: {n_sync} file(s), {sync_bars} new bar(s); "
             f"fetch fallback: {n_fetch} symbol(s), {fetch_bars} new bar(s)"
         )
+        try:
+            from data.history_stamp import write_stamp
+
+            median = db.median_last_bar_date(conn)
+            if median is not None:
+                write_stamp(median)
+                log.info(f"update | wrote last-update stamp {median}")
+        except Exception:
+            log.exception("update | failed to write last-update stamp")
     finally:
         conn.close()

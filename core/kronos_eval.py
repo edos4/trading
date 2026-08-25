@@ -30,7 +30,9 @@ MAX_CONTEXT = 512
 LOOKBACK = 400
 
 DAY_AHEAD = 1
-WEEK_AHEAD = 3  # trading days — gate horizon (3d veto), not the demo pred_len=120
+# Confirm-gate contract: |predicted close-to-close| over this many trading days.
+GATE_HORIZON_BARS = 3
+WEEK_AHEAD = GATE_HORIZON_BARS  # historical name; horizon is 3d, not 5d/1w
 
 
 def with_amount(df: pd.DataFrame) -> pd.DataFrame:
@@ -52,9 +54,9 @@ def predict_1w_return(
     sample_count: int = 1,
     lookback: int = LOOKBACK,
 ) -> tuple[float, float] | None:
-    """Run Kronos on the last ``lookback`` bars; return (pred_1w, last_close).
+    """Run Kronos on the last ``lookback`` bars; return (pred_3d, last_close).
 
-    ``pred_1w`` is close-to-close % move over ``WEEK_AHEAD`` trading days.
+    ``pred_1w`` is close-to-close % move over ``GATE_HORIZON_BARS`` (3) trading days.
     Returns None if history is too short or predict fails.
     """
     if df is None or len(df) < max(60, min(lookback, len(df))):

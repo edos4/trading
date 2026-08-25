@@ -10,7 +10,7 @@ from core.market import MARKET_PH, MARKET_US
 BOOK_IDS = (MARKET_US, MARKET_PH)
 
 REVIEW_PROMPT = """You are reviewing paper-trading results for a swing-trading bot
-(chart patterns + optional Kronos 1w confirm gate + optional volume gate).
+(chart patterns + optional Kronos 3d confirm gate (3% in 3 days) + optional volume gate).
 
 Goal: recommend concrete rule changes that should improve expectancy and profit
 factor without collapsing trade count to zero.

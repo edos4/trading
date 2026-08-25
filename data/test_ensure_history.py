@@ -118,14 +118,81 @@ def test_run_ensure_complete_skip_fetch(monkeypatch):
     assert out["upserted_bars"] == 0
 
 
-def test_start_web_history_backfill_pings_only(monkeypatch):
+def test_start_web_history_backfill_ping_then_freshness(monkeypatch):
     import data.ensure_history as eh
 
     eh._started = False
     calls: list[str] = []
     monkeypatch.setattr(eh, "ping_db", lambda: calls.append("ping"))
     monkeypatch.setattr(
-        eh, "run_ensure_complete", lambda **_k: calls.append("ensure"),
+        eh, "ensure_freshness_and_cron", lambda: calls.append("fresh") or "noop",
     )
     eh.start_web_history_backfill()
-    assert calls == ["ping"]
+    assert calls == ["ping", "fresh"]
+
+
+def test_ensure_freshness_reads_current_stamp_no_update(monkeypatch, tmp_path):
+    import data.ensure_history as eh
+    from datetime import date
+
+    stamp = tmp_path / "stocks_history_updated.txt"
+    stamp.write_text("2026-08-25\n", encoding="utf-8")
+    spawned: list[str] = []
+    monkeypatch.setattr(eh, "ensure_weekday_update_cron", lambda: True)
+    monkeypatch.setattr(eh, "read_stamp", lambda: date(2026, 8, 25))
+    monkeypatch.setattr(eh, "_last_trading_date", lambda: date(2026, 8, 25))
+    monkeypatch.setattr(eh, "_spawn_update_db", lambda: spawned.append("update"))
+    monkeypatch.setattr(eh, "_db_median_last_bar", lambda: date(2026, 8, 21))
+    action = eh.ensure_freshness_and_cron()
+    assert action == "noop"
+    assert spawned == []
+
+
+def test_ensure_freshness_missing_file_db_current_writes(monkeypatch, tmp_path):
+    import data.ensure_history as eh
+    from datetime import date
+
+    written: list[date] = []
+    spawned: list[str] = []
+    monkeypatch.setattr(eh, "ensure_weekday_update_cron", lambda: False)
+    monkeypatch.setattr(eh, "read_stamp", lambda: None)
+    monkeypatch.setattr(eh, "_last_trading_date", lambda: date(2026, 8, 25))
+    monkeypatch.setattr(eh, "_db_median_last_bar", lambda: date(2026, 8, 25))
+    monkeypatch.setattr(eh, "write_stamp", lambda d: written.append(d))
+    monkeypatch.setattr(eh, "_spawn_update_db", lambda: spawned.append("update"))
+    action = eh.ensure_freshness_and_cron()
+    assert action == "write_stamp"
+    assert written == [date(2026, 8, 25)]
+    assert spawned == []
+
+
+def test_ensure_freshness_missing_file_db_stale_updates(monkeypatch):
+    import data.ensure_history as eh
+    from datetime import date
+
+    spawned: list[str] = []
+    monkeypatch.setattr(eh, "ensure_weekday_update_cron", lambda: True)
+    monkeypatch.setattr(eh, "read_stamp", lambda: None)
+    monkeypatch.setattr(eh, "_last_trading_date", lambda: date(2026, 8, 25))
+    monkeypatch.setattr(eh, "_db_median_last_bar", lambda: date(2026, 8, 21))
+    monkeypatch.setattr(eh, "_spawn_update_db", lambda: spawned.append("update"))
+    action = eh.ensure_freshness_and_cron()
+    assert action == "update"
+    assert spawned == ["update"]
+
+
+def test_ensure_freshness_stale_stamp_updates(monkeypatch):
+    import data.ensure_history as eh
+    from datetime import date
+
+    spawned: list[str] = []
+    monkeypatch.setattr(eh, "ensure_weekday_update_cron", lambda: False)
+    monkeypatch.setattr(eh, "read_stamp", lambda: date(2026, 8, 21))
+    monkeypatch.setattr(eh, "_last_trading_date", lambda: date(2026, 8, 25))
+    monkeypatch.setattr(
+        eh, "_db_median_last_bar", lambda: (_ for _ in ()).throw(AssertionError("db"))
+    )
+    monkeypatch.setattr(eh, "_spawn_update_db", lambda: spawned.append("update"))
+    action = eh.ensure_freshness_and_cron()
+    assert action == "update"
+    assert spawned == ["update"]

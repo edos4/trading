@@ -84,9 +84,10 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
     (
         "kronos_gate", "Kronos 3d gate",
         "Require Kronos-base +3 trading-day forecast to agree with the pattern's BUY/SELL "
-        "and clear KRONOS_MIN_MOVE_PCT before taking the trade. Fail-closed by "
-        "default if weights are missing (set KRONOS_GATE_FAIL_OPEN=true to pass "
-        "instead). Does not rewrite TP/SL unless KRONOS_GATE_ADJUST_EXITS=true.",
+        "and clear 3% in 3 days (KRONOS_MIN_MOVE_PCT, default 0.03) before taking the "
+        "trade. Fail-closed by default if weights are missing (set "
+        "KRONOS_GATE_FAIL_OPEN=true to pass instead). Does not rewrite TP/SL unless "
+        "KRONOS_GATE_ADJUST_EXITS=true.",
         "check", settings.kronos_gate_enabled, None,
     ),
     (

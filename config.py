@@ -85,8 +85,9 @@ class Settings(BaseSettings):
 
     # ── Kronos confirm gate (core/kronos_gate.py) ───────────────────────────
     # After a chart pattern fires, require Kronos 3-trading-day forecast to agree
-    # on direction and clear kronos_min_move_pct. Not a standalone entry pattern —
-    # veto/confirm layer only (not the Kronos finetune top-K strategy).
+    # on direction and clear 3% in those 3 days (kronos_min_move_pct). Not a
+    # standalone entry pattern — veto/confirm layer only (not the Kronos
+    # finetune top-K strategy).
     kronos_min_move_pct: float = 0.03
     kronos_sample_count: int = 3
     kronos_gate_enabled: bool = True

@@ -6,5 +6,7 @@ data/__pycache__
 .venv
 logs/bot.log
 logs/paper_signals_*.jsonl
+logs/stocks_history_updated.txt
+logs/stocks_history_updated.txt.tmp
 .env
 patterns_detected.md
