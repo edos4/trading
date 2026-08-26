@@ -167,18 +167,18 @@ BUY/SELL, and is the predicted move at least 3% in 3 days?"*
 
 Separately, the **Kronos ranked forecast sleeve** (`core/kronos_rank_sleeve.py`)
 can emit its own `pattern_kronos_rank` entries by cross-sectionally ranking
-predicted 1w returns — closer to the official finetune top-K demo. Gate and
-sleeve are independent; both call the same `KronosPredictor.predict()` API.
+predicted 3-trading-day returns — closer to the official finetune top-K demo. Gate and
+sleeve are independent; both call the same 3% / 3d forecast (`pred_len=3`).
 
 ### Kronos ranked forecast sleeve
 
 Opt-in entry source beside Toby patterns (off by default — GPU cost + needs BT):
 
-1. Forecast +1w close % for every symbol in the scan/backtest universe.
-2. Rank by `pred_1w`.
+1. Forecast +3 trading-day close % for every symbol in the scan/backtest universe.
+2. Rank by that 3d return.
 3. Emit top `KRONOS_RANK_TOP_K` BUYs (and bottom `KRONOS_RANK_BOTTOM_K` SELLs
    unless `KRONOS_RANK_LONG_ONLY=true`).
-4. Require `|pred_1w| ≥` floor (defaults to `KRONOS_MIN_MOVE_PCT`).
+4. Require `|pred| ≥` floor (defaults to `KRONOS_MIN_MOVE_PCT`, **3% in 3 days**).
 5. Skip Kronos gate / vision / volume on these signals (forecast *is* the thesis).
 6. Same deferred fill, regime, cooldown, and risk/sizing as other entries.
 
@@ -209,6 +209,12 @@ Implemented in `core/kronos_gate.py`. After a pattern emits BUY/SELL on the
 6. On **PASS**, optionally overwrite take-profit / stop-loss from the
    forecast (`KRONOS_GATE_ADJUST_EXITS=true`).
 
+**Batch Kronos** (opt-in checkbox, default off): collect pattern hits that
+already cleared cheap gates, then call `KronosPredictor.predict_batch` once
+per lookback group instead of `predict()` per signal. Same pass/fail math.
+The rank sleeve also batches its universe when this is on. Pattern-BT
+workers stay sequential. Unchecked = today's per-signal `predict()`.
+
 Fail-closed by default: if `~/Kronos` weights are missing, history is shorter
 than lookback, or `predict()` errors, the signal is rejected so a broken
 install cannot silently pass un-vetted trades. Set `KRONOS_GATE_FAIL_OPEN=true`
@@ -223,9 +229,9 @@ Skipped: `CLOSE` actions and non-daily timeframes.
 | `python main.py` (live/paper scan) | `KRONOS_GATE_ENABLED` in `.env` |
 | `python main.py --paper` | same |
 | `python main.py --backtest` | same |
-| `python main.py --ui` → symbol explorer | toolbar checkbox **Kronos 3d gate** |
-| `python main.py --ui` → **Backtest** | form checkbox **Kronos 3d gate** |
-| `python main.py --ui` → **Paper Trading** | per-book **Kronos 3d gate** (US default ON, PH default OFF) |
+| `python main.py --ui` → symbol explorer | toolbar **Kronos 3d gate**; **Batch Kronos** appears only when the gate is checked |
+| `python main.py --ui` → **Backtest** | form **Kronos 3d gate** / **Kronos rank**; **Batch Kronos** enabled when either is on (rank sleeve only — pattern workers stay sequential) |
+| `python main.py --ui` → **Paper Trading** | per-book **Kronos 3d gate** / **Kronos rank**; **Batch Kronos** appears when either is checked |
 
 UI checkboxes default to the `.env` value but can override for that session.
 Startup logs print `Kronos gate: ON/OFF`.
@@ -241,6 +247,11 @@ KRONOS_GATE_ADJUST_EXITS=false
 KRONOS_MIN_MOVE_PCT=0.03
 # Average N sampled forecast paths per prediction (reduces noise)
 KRONOS_SAMPLE_COUNT=3
+# Collect-then-batch GPU forecasts. Off unless the UI/web "Batch Kronos"
+# checkbox is on (only shown when Kronos gate or rank is enabled).
+KRONOS_BATCH_ENABLED=false
+# Series per predict_batch call (GPU batch = this × KRONOS_SAMPLE_COUNT).
+KRONOS_BATCH_SIZE=16
 # Prefer finetuned weights under ~/Kronos/finetuned (falls back to base)
 KRONOS_USE_FINETUNED=false
 # Pass signals through when the model/data is unavailable (research only).
@@ -275,13 +286,13 @@ Kronos.from_pretrained('NeoQuasar/Kronos-base', token=False) \
 
 ### Forecast accuracy test (`--kronos-test` / `scripts/kronos_1wk_test.py`)
 
-Walk-forward scores of Kronos +1 day / +1 week close forecasts on the
+Walk-forward scores of Kronos +1 day / +3 trading-day close forecasts on the
 historical daily CSVs in `/home/r00t/stocks_data`. Useful after fine-tuning
 or when comparing weight sets.
 
 Metrics now include flat-0 MAE, **prior-week persistence**, **majority-sign**
 bias check, **gate-filtered** dir/MAE/signed-return using the same
-`|pred_1w| ≥ KRONOS_MIN_MOVE_PCT` floor as `kronos_gate`, and soft bootstrap
+`|pred_3d| ≥ KRONOS_MIN_MOVE_PCT` floor as `kronos_gate`, and soft bootstrap
 CIs. This is still **unconditional** on chart patterns — for live-gate
 decision quality, run a formal backtest with `kronos_gate` on vs off.
 
@@ -454,9 +465,9 @@ Auth: form login → signed HttpOnly session cookie (`tb_session`). All pages an
 **One history database (VPS).** Contabo runs Postgres `stocks_history` and
 serves `GET /api/history/symbols`, `GET /api/history/{symbol}`, and
 `GET /api/history/{symbol}/meta`. Local `--ui` / `--web` **always** read
-daily OHLCV (explorer charts, paper charts, Kronos, backtest prefetch) from
-`https://33ai.edos.uk` — `STOCKS_HISTORY_URL` is applied automatically if
-empty. They do **not** use Yahoo/TV for history, and do **not** need
+daily OHLCV (explorer charts, paper charts, paper trade stream, Kronos,
+backtest prefetch) from `https://33ai.edos.uk` — `STOCKS_HISTORY_URL` is
+applied automatically if empty. They do **not** use Yahoo/TV for history, and do **not** need
 `DATABASE_URL` or `/home/r00t/stocks_data`. History API Basic auth is
 `WEB_UI_USERNAME` / `WEB_UI_USERNAME` (default `admin`:`admin`), not the
 dashboard password. On the VPS set `STOCKS_HISTORY_OWNER=true` and leave

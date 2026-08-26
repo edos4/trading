@@ -2,7 +2,7 @@
 core/kronos_eval.py — orchestrates `python main.py --kronos-test`: run
 Kronos-base (https://github.com/shiyu-coder/Kronos) walk-forward over the
 historical daily CSVs in /home/r00t/stocks_data and score its +1 day /
-+1 week close-price forecasts against what actually happened.
++3 trading-day close-price forecasts against what actually happened.
 """
 
 from __future__ import annotations
@@ -35,6 +35,10 @@ GATE_HORIZON_BARS = 3
 WEEK_AHEAD = GATE_HORIZON_BARS  # historical name; horizon is 3d, not 5d/1w
 
 
+_PRICE_COLS = ("open", "high", "low", "close")
+_OHLCV_COLS = ("open", "high", "low", "close", "volume")
+
+
 def with_amount(df: pd.DataFrame) -> pd.DataFrame:
     """OHLCV → OHLCV+amount using KronosPredictor's documented fallback.
 
@@ -47,6 +51,82 @@ def with_amount(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _naive_datetime_index(index) -> pd.DatetimeIndex | None:
+    """DatetimeIndex Kronos ``.dt`` stamps can read. None if unusable."""
+    try:
+        ts = pd.to_datetime(pd.Series(index), errors="coerce")
+    except Exception:
+        return None
+    if ts.isna().any() or len(ts) == 0:
+        return None
+    if getattr(ts.dt, "tz", None) is not None:
+        ts = ts.dt.tz_localize(None)
+    return pd.DatetimeIndex(ts)
+
+
+def _prep_3d_frame(df: pd.DataFrame, lookback: int):
+    """Slice + amount + timestamps for a 3-trading-day forecast, or None.
+
+    Output matches official ``predict`` / ``predict_batch``: OHLCV+amount, no
+    NaN/inf, naive datetime stamps, ``len(x_df) == len(x_timestamp)``,
+    ``len(y_timestamp) == GATE_HORIZON_BARS``.
+    """
+    if df is None or len(df) < 60:
+        return None
+    try:
+        work = df.copy()
+        idx = _naive_datetime_index(work.index)
+        if idx is None:
+            return None
+        work.index = idx
+        work = work.sort_index()
+        work = work[~work.index.duplicated(keep="last")]
+        for col in _OHLCV_COLS:
+            if col not in work.columns:
+                return None
+            work[col] = pd.to_numeric(work[col], errors="coerce")
+        if work[list(_PRICE_COLS)].isna().any().any():
+            return None
+        work["volume"] = work["volume"].fillna(0.0)
+        vals = work[list(_OHLCV_COLS)].to_numpy(dtype=float)
+        if not np.isfinite(vals).all():
+            return None
+        if (work[list(_PRICE_COLS)] <= 0).any().any():
+            return None
+        if len(work) < 60:
+            return None
+        use = min(lookback, len(work), MAX_CONTEXT)
+        if use < 60:
+            return None
+        x_df = with_amount(work.iloc[-use:])
+        last_close = float(x_df["close"].iloc[-1])
+        if last_close <= 0 or not np.isfinite(last_close):
+            return None
+        if x_df.isna().any().any() or not np.isfinite(x_df.to_numpy(dtype=float)).all():
+            return None
+        x_timestamp = pd.Series(pd.DatetimeIndex(x_df.index))
+        last = pd.Timestamp(x_df.index[-1])
+        y_timestamp = pd.Series(
+            pd.bdate_range(start=last + pd.Timedelta(days=1), periods=WEEK_AHEAD)
+        )
+        x_df = x_df.reset_index(drop=True)
+        if len(x_df) != len(x_timestamp) or len(y_timestamp) != WEEK_AHEAD:
+            return None
+        if not hasattr(x_timestamp, "dt") or not hasattr(y_timestamp, "dt"):
+            return None
+        return x_df, x_timestamp, y_timestamp, last_close, len(x_df)
+    except Exception:
+        log.debug("Kronos | _prep_3d_frame rejected a frame", exc_info=True)
+        return None
+
+
+def _return_from_pred(pred_df: pd.DataFrame | None, last_close: float):
+    if pred_df is None or len(pred_df) < WEEK_AHEAD or last_close <= 0:
+        return None
+    pred_1w = float(pred_df["close"].iloc[WEEK_AHEAD - 1]) / last_close - 1.0
+    return pred_1w, last_close
+
+
 def predict_1w_return(
     predictor,
     df: pd.DataFrame,
@@ -56,28 +136,16 @@ def predict_1w_return(
 ) -> tuple[float, float] | None:
     """Run Kronos on the last ``lookback`` bars; return (pred_3d, last_close).
 
-    ``pred_1w`` is close-to-close % move over ``GATE_HORIZON_BARS`` (3) trading days.
+    Return is close-to-close % over ``GATE_HORIZON_BARS`` (3 trading days, not 1w).
     Returns None if history is too short or predict fails.
     """
-    if df is None or len(df) < max(60, min(lookback, len(df))):
+    prepared = _prep_3d_frame(df, lookback)
+    if prepared is None:
         return None
-    use = min(lookback, len(df), MAX_CONTEXT)
-    if use < 60:
-        return None
+    x_df, x_timestamp, y_timestamp, last_close, _use = prepared
     try:
-        x_df = with_amount(df.iloc[-use:])
-        last_close = float(x_df["close"].iloc[-1])
-        if last_close <= 0:
-            return None
-        x_timestamp = pd.Series(x_df.index)
-        y_timestamp = pd.Series(
-            pd.bdate_range(
-                start=x_df.index[-1] + pd.Timedelta(days=1),
-                periods=WEEK_AHEAD,
-            )
-        )
         pred_df = predictor.predict(
-            df=x_df.reset_index(drop=True),
+            df=x_df,
             x_timestamp=x_timestamp,
             y_timestamp=y_timestamp,
             pred_len=WEEK_AHEAD,
@@ -86,11 +154,211 @@ def predict_1w_return(
             sample_count=sample_count,
             verbose=False,
         )
-        pred_1w = float(pred_df["close"].iloc[WEEK_AHEAD - 1]) / last_close - 1.0
-        return pred_1w, last_close
+        return _return_from_pred(pred_df, last_close)
     except Exception:
         log.exception("Kronos | predict_1w_return failed")
         return None
+
+
+_WARNED_NO_PREDICT_BATCH = False
+_CUDA_AVAILABLE: bool | None = None
+_LOGGED_CPU_BATCH_CAP = False
+# Attention is O(B * sample_count * heads * T^2). 16 is a CUDA default; CPU
+# hosts (e.g. 8 GB Contabo) swap-thrash above a handful of series.
+CPU_KRONOS_BATCH_CAP = 4
+
+
+def _cuda_available() -> bool:
+    global _CUDA_AVAILABLE
+    if _CUDA_AVAILABLE is not None:
+        return _CUDA_AVAILABLE
+    try:
+        import torch
+
+        _CUDA_AVAILABLE = bool(torch.cuda.is_available())
+    except Exception:
+        _CUDA_AVAILABLE = False
+    return _CUDA_AVAILABLE
+
+
+def effective_kronos_batch_size(requested: int | None = None) -> int:
+    """Chunk size for predict_batch. Caps on CPU when Batch Kronos is on."""
+    global _LOGGED_CPU_BATCH_CAP
+    want = requested
+    if want is None:
+        try:
+            from config import settings
+
+            want = settings.kronos_batch_size
+        except Exception:
+            want = 16
+    want = max(1, int(want))
+    if _cuda_available():
+        return want
+    got = min(want, CPU_KRONOS_BATCH_CAP)
+    if got < want and not _LOGGED_CPU_BATCH_CAP:
+        log.info(
+            f"Kronos | no CUDA — batch_size {want} → {got} "
+            f"(CPU cap {CPU_KRONOS_BATCH_CAP})"
+        )
+        _LOGGED_CPU_BATCH_CAP = True
+    return got
+
+
+def _is_cuda_oom(exc: BaseException) -> bool:
+    name = type(exc).__name__
+    if name in ("OutOfMemoryError", "CudaOutOfMemoryError"):
+        return True
+    msg = str(exc).lower()
+    return "out of memory" in msg or ("cuda" in msg and "memory" in msg)
+
+
+def _is_batch_contract_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return (
+        "consistent historical length" in msg
+        or "inconsistent lengths" in msg
+        or "nan values" in msg
+        or "missing price columns" in msg
+        or "y_timestamp length" in msg
+    )
+
+
+def _validate_batch_payload(df_list, x_ts_list, y_ts_list, pred_len: int) -> str | None:
+    """Return an error string if this chunk would trip official predict_batch."""
+    if not (len(df_list) == len(x_ts_list) == len(y_ts_list)):
+        return "list length mismatch"
+    seq_lens: list[int] = []
+    for i, (df, x_ts, y_ts) in enumerate(zip(df_list, x_ts_list, y_ts_list)):
+        if not isinstance(df, pd.DataFrame):
+            return f"index {i} is not a DataFrame"
+        missing = [c for c in (*_PRICE_COLS, "volume", "amount") if c not in df.columns]
+        if missing:
+            return f"index {i} missing columns {missing}"
+        cols = list((*_PRICE_COLS, "volume", "amount"))
+        if df[cols].isna().any().any() or not np.isfinite(df[cols].to_numpy(dtype=float)).all():
+            return f"index {i} has NaN/inf"
+        x_ts = pd.Series(x_ts)
+        y_ts = pd.Series(y_ts)
+        if not hasattr(x_ts, "dt") or not hasattr(y_ts, "dt"):
+            return f"index {i} timestamps are not datetime-like"
+        try:
+            pd.to_datetime(x_ts)
+            pd.to_datetime(y_ts)
+        except Exception:
+            return f"index {i} timestamps are not parseable"
+        if len(df) != len(x_ts):
+            return f"index {i} x rows {len(df)} != x_timestamp {len(x_ts)}"
+        if len(y_ts) != pred_len:
+            return f"index {i} y_timestamp {len(y_ts)} != pred_len {pred_len}"
+        seq_lens.append(len(df))
+    if len(set(seq_lens)) != 1:
+        return f"mixed historical lengths {seq_lens}"
+    return None
+
+
+def _predict_batch_chunk(predictor, items: list, sample_count: int) -> list:
+    """Run predict_batch on one same-length chunk; split on CUDA OOM / contract errors."""
+    if not items:
+        return []
+    df_list = [it[1] for it in items]
+    x_ts_list = [it[2] for it in items]
+    y_ts_list = [it[3] for it in items]
+    bad = _validate_batch_payload(df_list, x_ts_list, y_ts_list, WEEK_AHEAD)
+    if bad:
+        if len(items) == 1:
+            log.warning(f"Kronos | predict_batch skipped invalid series ({bad})")
+            return [None]
+        log.warning(f"Kronos | predict_batch payload invalid ({bad}) — splitting")
+        mid = len(items) // 2
+        return _predict_batch_chunk(
+            predictor, items[:mid], sample_count
+        ) + _predict_batch_chunk(predictor, items[mid:], sample_count)
+    try:
+        pred_dfs = predictor.predict_batch(
+            df_list=df_list,
+            x_timestamp_list=x_ts_list,
+            y_timestamp_list=y_ts_list,
+            pred_len=WEEK_AHEAD,
+            T=1.0,
+            top_p=0.9,
+            sample_count=sample_count,
+            verbose=False,
+        )
+    except Exception as exc:
+        if len(items) > 1 and (_is_cuda_oom(exc) or _is_batch_contract_error(exc)):
+            log.warning(
+                f"Kronos | predict_batch failed at chunk={len(items)} ({exc}) — splitting"
+            )
+            mid = len(items) // 2
+            return _predict_batch_chunk(
+                predictor, items[:mid], sample_count
+            ) + _predict_batch_chunk(predictor, items[mid:], sample_count)
+        log.exception("Kronos | predict_batch chunk failed")
+        return [None] * len(items)
+    if pred_dfs is None or len(pred_dfs) != len(items):
+        log.warning("Kronos | predict_batch returned mismatched length")
+        return [None] * len(items)
+    out = []
+    for it, pred_df in zip(items, pred_dfs):
+        out.append(_return_from_pred(pred_df, it[4]))
+    return out
+
+
+def predict_1w_return_batch(
+    predictor,
+    frames: list[pd.DataFrame],
+    *,
+    sample_count: int = 1,
+    lookback: int = LOOKBACK,
+    batch_size: int | None = None,
+) -> list[tuple[float, float] | None]:
+    """One ``(pred_3d, last_close)`` per frame, same 3% / 3d contract as sequential.
+
+    ``pred_len`` is always ``GATE_HORIZON_BARS`` (3 trading days), never a calendar
+    week. Groups by lookback length (official ``predict_batch`` requires identical
+    seq_len), then chunks by ``effective_kronos_batch_size`` (config size on
+    CUDA, capped on CPU). Falls back to sequential ``predict()`` if the
+    predictor has no ``predict_batch``.
+    """
+    n = len(frames)
+    results: list[tuple[float, float] | None] = [None] * n
+    if n == 0:
+        return results
+
+    global _WARNED_NO_PREDICT_BATCH
+    if not callable(getattr(predictor, "predict_batch", None)):
+        if not _WARNED_NO_PREDICT_BATCH:
+            log.warning(
+                "Kronos | predictor has no predict_batch — sequential fallback"
+            )
+            _WARNED_NO_PREDICT_BATCH = True
+        for i, df in enumerate(frames):
+            results[i] = predict_1w_return(
+                predictor, df, sample_count=sample_count, lookback=lookback,
+            )
+        return results
+
+    prepared: list[tuple[int, object, object, object, float, int]] = []
+    for i, df in enumerate(frames):
+        item = _prep_3d_frame(df, lookback)
+        if item is None:
+            continue
+        x_df, x_ts, y_ts, last_close, use = item
+        prepared.append((i, x_df, x_ts, y_ts, last_close, use))
+
+    chunk = effective_kronos_batch_size(batch_size)
+    groups: dict[int, list] = {}
+    for row in prepared:
+        groups.setdefault(row[5], []).append(row[:5])
+
+    for _use, group in groups.items():
+        for start in range(0, len(group), chunk):
+            part = group[start:start + chunk]
+            pred_part = _predict_batch_chunk(predictor, part, sample_count)
+            for (orig_i, *_rest), pred in zip(part, pred_part):
+                results[orig_i] = pred
+    return results
 
 
 @dataclass
@@ -101,7 +369,7 @@ class WindowResult:
     pred_1d: float
     actual_1w: float
     pred_1w: float
-    # Prior WEEK_AHEAD close-to-close return ending at asof (persistence baseline).
+    # Prior GATE_HORIZON_BARS (3d) close-to-close return ending at asof.
     persist_1w: float = float("nan")
 
 
@@ -212,7 +480,7 @@ def _score(results: list[WindowResult], actual_attr: str, pred_attr: str) -> dic
     mae = float(np.mean(np.abs(pred - actual)))
     naive_mae = float(np.mean(np.abs(actual)))  # baseline: predict no change
     direction_hits = np.sign(pred) == np.sign(actual)
-    # Mean 1w return if always trading the predicted sign (unit notional).
+    # Mean 3d return if always trading the predicted sign (unit notional).
     signed_ret = float(np.mean(np.sign(pred) * actual))
     return {
         "n": len(actual),
@@ -224,7 +492,7 @@ def _score(results: list[WindowResult], actual_attr: str, pred_attr: str) -> dic
 
 
 def _score_persistence(results: list[WindowResult]) -> dict:
-    """Same metrics as `_score`, but prediction = prior-week return (persist_1w)."""
+    """Same metrics as `_score`, but prediction = prior 3-trading-day return."""
     usable = [r for r in results if not math.isnan(r.persist_1w)]
     return _score(usable, "actual_1w", "persist_1w")
 
@@ -487,7 +755,7 @@ def run_kronos_test(
 
         min_move = settings.kronos_min_move_pct
     except Exception:
-        min_move = 0.06
+        min_move = 0.03
     gate = score_gate_rule(all_results, min_move)
     persist = _score_persistence(all_results)
 
@@ -495,7 +763,7 @@ def run_kronos_test(
     print("=" * 60)
     print(f"  Kronos-base accuracy — {len(candidates)} symbols, {len(all_results)} windows")
     print("=" * 60)
-    for label, s in (("+1 day", score_1d), ("+1 week", score_1w)):
+    for label, s in (("+1 day", score_1d), ("+3 days", score_1w)):
         print(f"  {label:8s}  n={s['n']:<5d} "
               f"MAE={s['mae_pct']:.2f}%  (naive MAE={s['naive_mae_pct']:.2f}%)  "
               f"direction hit={s['directional_accuracy_pct']:.1f}%")
@@ -504,7 +772,7 @@ def run_kronos_test(
             f"  persist  n={persist['n']:<5d} "
             f"MAE={persist['mae_pct']:.2f}%  "
             f"direction hit={persist['directional_accuracy_pct']:.1f}%  "
-            f"(prior-week return baseline)"
+            f"(prior 3d return baseline)"
         )
     if gate.get("n"):
         print(

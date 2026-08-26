@@ -1684,6 +1684,7 @@ class Backtester:
         kronos_gate: bool | None = None,
         volume_gate: bool | None = None,
         kronos_rank: bool | None = None,
+        kronos_batch: bool | None = None,
         market: str | None = None,
         long_only: bool | None = None,
     ):
@@ -1711,6 +1712,9 @@ class Backtester:
         )
         self._kronos_rank = (
             profile.kronos_rank_default if kronos_rank is None else kronos_rank
+        )
+        self._kronos_batch = (
+            settings.kronos_batch_enabled if kronos_batch is None else kronos_batch
         )
         self._cooldown_bars = cooldown_bars
         self._txn_cost_pct = txn_cost_pct
@@ -1858,6 +1862,7 @@ class Backtester:
             "volume_gate_rvol_min": settings.volume_gate_rvol_min,
             "volume_gate_obv_bars": settings.volume_gate_obv_bars,
             "kronos_rank": self._kronos_rank,
+            "kronos_batch": self._kronos_batch,
             "kronos_rank_top_k": settings.kronos_rank_top_k,
             "kronos_rank_bottom_k": settings.kronos_rank_bottom_k,
             "kronos_rank_long_only": (

@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
 """
-scripts/kronos_test.py — Plot AAPL Apr–Jun actual (blue) vs Kronos 5d preds (red).
+scripts/kronos_test.py — Plot AAPL Apr–Jun actual (blue) vs Kronos 3d preds (red).
 
-Walk-forward: every 5 trading days, feed lookback of true history, predict the
-next 5 closes, stitch into one red series. Same dates as actual for comparison.
-
-  First window: history through 2026-03-31 → predict Apr 1,2,6,7,8.
-
-Usage:
-    .venv/bin/python scripts/kronos_test.py
-    .venv/bin/python scripts/kronos_test.py --year 2025
+Walk-forward: every 3 trading days (live gate horizon), feed lookback of true
+history, predict the next 3 closes, stitch into one red series.
 """
 
 from __future__ import annotations
@@ -98,7 +92,7 @@ def walk_forward_5d(
     """Non-overlapping walk-forward: each window predicts ``horizon`` trading days.
 
     Window k uses true history ending the bar before that window's first forecast
-    day — e.g. first Apr window predicts from Mar 31 into Apr 1.. (5 trading days).
+    day — e.g. first Apr window predicts from Mar 31 into the next ``horizon`` days.
     """
     if forecast_start_i < lookback:
         raise SystemExit(
@@ -204,7 +198,7 @@ def run(
         f"({len(w0['pred'])} trading days)"
     )
 
-    # Simple overlay: blue = actual close, red = Kronos 5d walk-forward preds.
+    # Simple overlay: blue = actual close, red = Kronos 3d walk-forward preds.
     fig, ax = plt.subplots(figsize=(12, 5), dpi=120)
     ax.plot(
         act_all.index,
@@ -233,7 +227,7 @@ def run(
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Kronos AAPL Apr–Jun 5d walk-forward plot")
+    p = argparse.ArgumentParser(description="Kronos AAPL Apr–Jun 3d walk-forward plot")
     p.add_argument("--csv", type=Path, default=DEFAULT_CSV)
     p.add_argument("--out", type=Path, default=DEFAULT_OUT)
     p.add_argument("--year", type=int, default=DEFAULT_YEAR)

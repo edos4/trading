@@ -37,7 +37,7 @@ def owns_local_stocks_history() -> bool:
 
 
 def enable_ui_web_history() -> None:
-    """--ui / --web: facade history, no Yahoo. Local machines hit 33ai.edos.uk."""
+    """--ui / --web / paper stream: facade history, no Yahoo. Laptops hit 33ai.edos.uk."""
     global _ui_web_mode
     _ui_web_mode = True
     _apply_local_remote_history_url()
@@ -211,9 +211,11 @@ def load_daily_ohlcv_df(
     return candles_to_df(tv_candles) if tv_candles else None
 
 
-def load_daily_tape_rows(symbol: str) -> list[dict[str, Any]] | None:
+def load_daily_tape_rows(
+    symbol: str, *, after_ts: int | None = None, limit: int | None = None,
+) -> list[dict[str, Any]] | None:
     """Paper-stream tape rows: open/high/low/close/volume/timestamp (unix)."""
-    bars = load_daily_bars(symbol)
+    bars = load_daily_bars(symbol, after_ts=after_ts, limit=limit)
     if not bars:
         return None
     rows: list[dict[str, Any]] = []

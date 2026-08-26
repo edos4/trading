@@ -6,9 +6,8 @@ US markets are closed. Each symbol gets its own cursor into its data. The
 scanner advances the entire replay atomically once a complete scan cycle
 finishes, so all symbols in a cycle see the same simulated market bar.
 
-Bars come from the stocks_history database (data/db.py) — this is what the
-"Use paper trade stream" option serves. If a symbol isn't in the database
-(or the DB is unreachable) it falls back to the CSV layout
+Bars come from GET /api/history on STOCKS_HISTORY_URL (33ai.edos.uk on
+local --ui/--web), then local Postgres, then the CSV layout
 <papertrade_stream_dir>/<FIRST_LETTER>/<SYMBOL>.csv with columns
 low,open,volume,high,close,timestamp (unix seconds, one row per day).
 
@@ -151,29 +150,36 @@ def _load_symbol_csv(base_dir: Path, symbol: str) -> list[dict] | None:
     return rows or None
 
 
-def _load_symbol_db(symbol: str) -> list[dict] | None:
-    """Load a symbol's full daily history from the stocks_history store.
+_db_unavailable_logged = False
+
+
+def _load_symbol_db(symbol: str, start_ts: int | None = None) -> list[dict] | None:
+    """Load a symbol's daily history from the stocks_history store.
 
     Uses the remote API when STOCKS_HISTORY_URL is set, else local Postgres.
+    Near-end replay fetches only lookback bars; a start date uses after_ts.
     """
     from data.history_client import history_api_configured
 
-    if history_api_configured():
-        try:
-            from data.history import load_daily_tape_rows
-
-            return load_daily_tape_rows(symbol)
-        except Exception as exc:
-            log.warning(f"StreamServer | history API failed for {symbol}: {exc}")
-            return None
+    lookback = settings.papertrade_stream_lookback_bars
+    after_ts = None
+    limit = None
+    if start_ts is not None:
+        after_ts = int(start_ts) - lookback * 86400 * 2
+    else:
+        limit = lookback
     try:
         from data.history import load_daily_tape_rows
 
-        tape = load_daily_tape_rows(symbol)
+        tape = load_daily_tape_rows(symbol, after_ts=after_ts, limit=limit)
         if tape:
             return tape
+        if history_api_configured():
+            return None
     except Exception as exc:
         log.warning(f"StreamServer | history facade failed for {symbol}: {exc}")
+        if history_api_configured():
+            return None
     try:
         from data import db
     except ImportError:
@@ -181,7 +187,10 @@ def _load_symbol_db(symbol: str) -> list[dict] | None:
     try:
         conn = db.get_conn()
     except Exception:
-        log.warning("StreamServer | DB unavailable — falling back to CSVs")
+        global _db_unavailable_logged
+        if not _db_unavailable_logged:
+            log.warning("StreamServer | DB unavailable — falling back to CSVs")
+            _db_unavailable_logged = True
         return None
     try:
         with conn.cursor() as cur:
@@ -220,7 +229,9 @@ class StreamServer:
         tape = self._tapes.get(symbol)
         if tape is not None:
             return tape
-        rows = _load_symbol_db(symbol) or _load_symbol_csv(self._base_dir, symbol)
+        rows = _load_symbol_db(symbol, start_ts=self._start_ts) or _load_symbol_csv(
+            self._base_dir, symbol
+        )
         if rows is None:
             return None
         tape = _SymbolTape(rows, start_ts=self._start_ts)
@@ -354,14 +365,26 @@ class StreamServer:
             if self._start_ts is not None
             else "near-end lookback"
         )
+        from data.history_client import history_api_configured
+        from data.history import DEFAULT_STOCKS_HISTORY_URL
+
+        source = (
+            f"history API {(settings.stocks_history_url or DEFAULT_STOCKS_HISTORY_URL).rstrip('/')}"
+            if history_api_configured()
+            else f"database (CSV fallback: {self._base_dir})"
+        )
         async with websockets.serve(self._handle, host, port):
             log.info(
                 f"Paper trade stream server | {host}:{port} | "
-                f"source=database (CSV fallback: {self._base_dir}) | "
+                f"source={source} | "
                 f"start={start_note} | scanner-controlled atomic advancement"
             )
             await asyncio.Future()
 
 
 async def run_stream_server(start_date: str | None = None) -> None:
+    from data.history import enable_ui_web_history
+
+    # Child process of --web/--ui: inject https://33ai.edos.uk when URL is empty.
+    enable_ui_web_history()
     await StreamServer(start_date=start_date).run()

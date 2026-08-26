@@ -51,6 +51,7 @@ class SymbolRequest(BaseModel):
     timeframe: str = "1d"
     run_patterns: bool = True
     kronos_gate: Optional[bool] = None
+    kronos_batch: Optional[bool] = None
     volume_gate: Optional[bool] = None
     market: Optional[str] = None
 
@@ -61,6 +62,7 @@ class PaperStartRequest(BaseModel):
     use_stream: bool = False
     kronos_gate: bool = True
     kronos_rank: bool = False
+    kronos_batch: bool = False
     volume_gate: bool = True
     stream_start: Optional[str] = None
     market: Optional[Literal["us", "ph"]] = None
@@ -155,6 +157,7 @@ def create_app() -> FastAPI:
             "explorer.html",
             active="explorer",
             kronos_gate=default_market().kronos_gate_default,
+            kronos_batch=settings.kronos_batch_enabled,
             volume_gate=settings.volume_gate_enabled,
             default_market=default_market().id,
             markets=markets_payload(),
@@ -281,6 +284,7 @@ def create_app() -> FastAPI:
                 payload.timeframe,
                 run_patterns=payload.run_patterns,
                 kronos_gate=payload.kronos_gate,
+                kronos_batch=payload.kronos_batch,
                 volume_gate=payload.volume_gate,
                 market=payload.market,
             )
@@ -353,6 +357,7 @@ def create_app() -> FastAPI:
             use_stream=payload.use_stream,
             kronos_gate=payload.kronos_gate,
             kronos_rank=payload.kronos_rank,
+            kronos_batch=payload.kronos_batch,
             volume_gate=payload.volume_gate,
             stream_start=payload.stream_start,
         )

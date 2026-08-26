@@ -82,6 +82,11 @@ Shared helper today: `predict_1w_return()` in `core/kronos_eval.py` — always `
 
 ## Target flow
 
+Collect-then-batch **only if "Batch Kronos" is checked** (default off).
+Unchecked = today's per-signal `predict()` / `KronosGate.check()`.
+
+The checkbox is hidden unless Kronos 3d gate (explorer) or gate/rank (paper, backtest) is on.
+
 ### A. Scanner confirm gate (primary — the requested design)
 
 ```
@@ -165,27 +170,28 @@ def check_many(
 - Load frames via `_facade_daily_df` / store (same as `check`).
 - Dedupe GPU work by `symbol` (same asof in one scan).
 - Single `with _INFER_LOCK` around the batch, not per symbol.
-- `check()` can call `check_many([signal])[0]` so there is one decision path.
+- `check()` stays sequential (`predict_1w_return`). Collect-then-batch is `check_many` only.
 
 ### `config.py` / `.env.example`
 
 ```
+kronos_batch_enabled: bool = False   # UI/web "Batch Kronos" checkbox
 kronos_batch_size: int = 16
 ```
 
 GPU batch = `kronos_batch_size * kronos_sample_count` (default 48). 16 is conservative for Kronos-base @ context 400. Raise to 32/64 if VRAM allows.
 
-Env: `KRONOS_BATCH_SIZE`.
+Env: `KRONOS_BATCH_ENABLED`, `KRONOS_BATCH_SIZE`.
 
 ### Scanner
 
-Split `_process_signal`: cheap gates stay inline; Kronos+volume+vision+paper move to a `_finish_signal` used both for non-gated signals and for post-batch survivors.
+Split `_process_signal`: cheap gates stay inline. Sequential `kronos_gate_check` stays the default. Collect-then-batch + `_finish_signal` runs **only when Batch Kronos is on**.
 
 Do not hold the GPU lock during pattern eval.
 
 ### Rank sleeve
 
-Replace the `for symbol` / `for df` loops in `forecast_universe` and `forecast_from_frames` with one batch call. Preserve skip-on-short-history behavior.
+Replace the `for symbol` / `for df` loops in `forecast_universe` and `forecast_from_frames` with one batch call **when `use_batch` is True**. Preserve skip-on-short-history behavior. Unchecked = sequential `predict_1w_return`.
 
 ---
 

@@ -88,6 +88,7 @@ class MarketBookFrame(ttk.LabelFrame):
         self.stream_var = tk.BooleanVar(value=False)
         self.kronos_gate_var = tk.BooleanVar(value=profile.kronos_gate_default)
         self.kronos_rank_var = tk.BooleanVar(value=profile.kronos_rank_default)
+        self.kronos_batch_var = tk.BooleanVar(value=settings.kronos_batch_enabled)
         self.volume_gate_var = tk.BooleanVar(value=settings.volume_gate_enabled)
         self.equity_var = tk.StringVar()
         self.exposure_var = tk.StringVar()
@@ -127,9 +128,21 @@ class MarketBookFrame(ttk.LabelFrame):
 
         flags = ttk.Frame(self)
         flags.pack(fill=tk.X, padx=8, pady=(2, 8))
-        ttk.Checkbutton(flags, text="Kronos 3d gate", variable=self.kronos_gate_var).pack(side=tk.LEFT)
-        ttk.Checkbutton(flags, text="Kronos rank", variable=self.kronos_rank_var).pack(side=tk.LEFT, padx=(8, 0))
-        ttk.Checkbutton(flags, text="Volume gate", variable=self.volume_gate_var).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Checkbutton(
+            flags, text="Kronos 3d gate", variable=self.kronos_gate_var,
+            command=self._sync_batch_kronos,
+        ).pack(side=tk.LEFT)
+        ttk.Checkbutton(
+            flags, text="Kronos rank", variable=self.kronos_rank_var,
+            command=self._sync_batch_kronos,
+        ).pack(side=tk.LEFT, padx=(8, 0))
+        self._batch_kronos_cb = ttk.Checkbutton(
+            flags, text="Batch Kronos", variable=self.kronos_batch_var,
+        )
+        self._volume_gate_cb = ttk.Checkbutton(
+            flags, text="Volume gate", variable=self.volume_gate_var,
+        )
+        self._volume_gate_cb.pack(side=tk.LEFT, padx=(8, 0))
         self.stream_check = ttk.Checkbutton(
             flags, text="Stream", variable=self.stream_var, command=self._on_stream_toggle,
         )
@@ -141,6 +154,15 @@ class MarketBookFrame(ttk.LabelFrame):
             **self._stream_start_date_kwargs(),
         )
         self.stream_start_picker.pack(side=tk.LEFT)
+        self._sync_batch_kronos()
+
+    def _sync_batch_kronos(self) -> None:
+        if self.kronos_gate_var.get() or self.kronos_rank_var.get():
+            self._batch_kronos_cb.pack(
+                side=tk.LEFT, padx=(8, 0), before=self._volume_gate_cb,
+            )
+        else:
+            self._batch_kronos_cb.pack_forget()
 
     @staticmethod
     def _stream_start_date_kwargs() -> dict:
@@ -169,6 +191,10 @@ class MarketBookFrame(ttk.LabelFrame):
             "use_stream": bool(self.stream_var.get()),
             "kronos_gate": bool(self.kronos_gate_var.get()),
             "kronos_rank": bool(self.kronos_rank_var.get()),
+            "kronos_batch": bool(
+                (self.kronos_gate_var.get() or self.kronos_rank_var.get())
+                and self.kronos_batch_var.get()
+            ),
             "volume_gate": bool(self.volume_gate_var.get()),
             "stream_start": stream_start,
         }

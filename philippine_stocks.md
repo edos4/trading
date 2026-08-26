@@ -249,7 +249,7 @@ Do not enable 1m/5m pattern modules here.
 |---|---|---|---|
 | Patterns | enabled subset | same enabled subset, **longs only** | SELL=short is mostly unusable |
 | SMA200 regime | on | on | still valid as trend filter |
-| Kronos 1w | on | **off** until PH backtest | model + 6% min-move unproven on PSE; fail-open would silently skip the filter |
+| Kronos 3d | on | **off** until PH backtest | model + 3% min-move unproven on PSE; fail-open would silently skip the filter |
 | Volume RVOL+OBV | off | keep off until PH A/B | US A/B already killed trade count; PSE volume is lumpier |
 | Vision | off/optional | optional | same cost |
 | Cost / R:R | 0.10% / 1.5 R | bake **0.69% round trip** into R:R | otherwise winners are costs |

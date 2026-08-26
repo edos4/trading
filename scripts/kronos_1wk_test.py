@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-scripts/kronos_1wk_test.py — Walk-forward Kronos +1 week (5 trading days)
+scripts/kronos_1wk_test.py — Walk-forward Kronos +3 trading-day
 close-forecast test on /home/r00t/stocks_data, scored for this project's
-`kronos_gate` (direction + |pred| >= KRONOS_MIN_MOVE_PCT), not just raw MAE.
+`kronos_gate` (direction + |pred| >= 3% in 3 days), not just raw MAE.
 
 Writes raw per-window rows and summary findings as Markdown to
-kronos_1_wk.md (project root by default).
+kronos_1_wk.md (project root by default). Filename is historical.
 
 What this validates:
-  - Unconditional forecast skill vs flat / prior-week persistence / majority-sign
-  - Gate-filtered skill (same magnitude floor as live confirm/veto)
+  - Unconditional forecast skill vs flat / prior-3d persistence / majority-sign
+  - Gate-filtered skill (same 3% / 3d floor as live confirm/veto)
   - Bootstrap CIs (windows are correlated — treat intervals as soft)
 
 What this does NOT validate:
@@ -126,8 +126,8 @@ def _findings(
     lines.append("## Findings")
     lines.append("")
     lines.append(
-        "Primary question for this repo: does Kronos 1w forecast skill survive "
-        f"the live gate rule (`|pred_1w| ≥ {min_move:.0%}` + sign), vs weak "
+        "Primary question for this repo: does Kronos 3d forecast skill survive "
+        f"the live gate rule (`|pred_3d| ≥ {min_move:.0%}` + sign), vs weak "
         "baselines? Pattern-conditional A/B is out of scope here."
     )
     lines.append("")
@@ -183,7 +183,7 @@ def _findings(
         f"- **MAE bootstrap CI:** {_fmt_ci(ci_all['mae_pct_ci'], 3)}%"
     )
     lines.append(
-        f"- **Signed return** (always trade pred sign, 1w hold): "
+        f"- **Signed return** (always trade pred sign, 3d hold): "
         f"{score['signed_return_pct']:.3f}% mean per window."
     )
     lines.append(
@@ -192,9 +192,9 @@ def _findings(
         f"**corr(pred, actual):** {corr:.3f}"
     )
     lines.append(
-        f"- **Actual 1w move:** mean={float(np.mean(actual))*100:.3f}% "
+        f"- **Actual 3d move:** mean={float(np.mean(actual))*100:.3f}% "
         f"std={float(np.std(actual))*100:.3f}% · "
-        f"**Pred 1w move:** mean={float(np.mean(pred))*100:.3f}% "
+        f"**Pred 3d move:** mean={float(np.mean(pred))*100:.3f}% "
         f"std={float(np.std(pred))*100:.3f}%"
     )
 
@@ -234,7 +234,7 @@ def _findings(
         )
         lines.append(
             f"- **Signed return (gate slice):** {gate['signed_return_pct']:.3f}% "
-            f"mean per cleared window — proxy for confirm-and-hold-1w expectancy."
+            f"mean per cleared window — proxy for confirm-and-hold-3d expectancy."
         )
         buy_s = (
             f"{gate['buy_dir_hit_pct']:.1f}%"
@@ -351,7 +351,7 @@ def write_report(
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     lines: list[str] = []
-    lines.append("# Kronos +1 week ahead forecast test")
+    lines.append("# Kronos +3 trading-day ahead forecast test")
     lines.append("")
     lines.append(f"_Generated: {now}_")
     lines.append("")
@@ -366,7 +366,7 @@ def write_report(
     lines.append("## Summary")
     lines.append("")
     lines.append(
-        "+1 week primary (gate horizon). Gate row uses the same "
+        "+3 trading days primary (live gate horizon). Gate row uses the same "
         f"`|pred| ≥ {min_move:.0%}` floor as `core/kronos_gate.py`."
     )
     lines.append("")
@@ -376,7 +376,7 @@ def write_report(
         )
         lines.append("| --- | ---: | ---: | ---: | ---: | ---: |")
         lines.append(
-            f"| +1 week (all) | {score_1w['n']} | {score_1w['mae_pct']:.3f} | "
+            f"| +3 days (all) | {score_1w['n']} | {score_1w['mae_pct']:.3f} | "
             f"{score_1w['naive_mae_pct']:.3f} | {score_1w['directional_accuracy_pct']:.1f} | "
             f"{score_1w['signed_return_pct']:.3f} |"
         )
@@ -387,7 +387,7 @@ def write_report(
         )
         if persist.get("n"):
             lines.append(
-                f"| persistence 1w | {persist['n']} | {persist['mae_pct']:.3f} | "
+                f"| persistence 3d | {persist['n']} | {persist['mae_pct']:.3f} | "
                 f"{persist['naive_mae_pct']:.3f} | {persist['directional_accuracy_pct']:.1f} | "
                 f"{persist['signed_return_pct']:.3f} |"
             )
@@ -436,7 +436,7 @@ def write_report(
         )
     lines.append("")
     lines.append(
-        f"_Notes:_ `*_pct` = close-to-close % from asof. 1w = {WEEK_AHEAD} trading days. "
+        f"_Notes:_ `*_pct` = close-to-close % from asof. Horizon = {WEEK_AHEAD} trading days (not 1 calendar week). "
         f"`persist_1w` = prior {WEEK_AHEAD}d return ending at asof. "
         f"`gate_clear=1` if `|pred_1w| ≥ {min_move:.0%}` (live floor). "
         "MAE = mean |pred − actual|. Flat MAE = mean |actual|. "
@@ -525,7 +525,7 @@ def run(
     cfg = {
         "data_dir": str(data_dir),
         "start_date": start_date,
-        "horizon": f"{WEEK_AHEAD} trading days (+1 week)",
+        "horizon": f"{WEEK_AHEAD} trading days (3d gate, not 1 calendar week)",
         "n_symbols_requested": n_symbols,
         "n_symbols_evaluated": len(candidates),
         "symbols": ",".join(s for s, _ in candidates),
@@ -561,7 +561,7 @@ def run(
     gate = score_gate_rule(all_results, min_move)
     print()
     print("=" * 60)
-    print(f"  Kronos +1 week — {len(candidates)} symbols, {len(all_results)} windows")
+    print(f"  Kronos +3 trading days — {len(candidates)} symbols, {len(all_results)} windows")
     print(
         f"  all:  MAE={score['mae_pct']:.3f}%  flat={score['naive_mae_pct']:.3f}%  "
         f"dir={score['directional_accuracy_pct']:.1f}%  "
@@ -583,7 +583,7 @@ def run(
 def main() -> None:
     p = argparse.ArgumentParser(
         description=(
-            "Kronos +1 week forecast test with gate-filtered metrics → kronos_1_wk.md"
+            "Kronos +3 trading-day forecast test with gate-filtered metrics → kronos_1_wk.md"
         )
     )
     p.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)

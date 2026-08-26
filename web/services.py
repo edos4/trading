@@ -13,7 +13,7 @@ from analysis.chart_renderer import ChartRenderer
 from analysis.price_volume import volume_confirm_gate
 from config import settings, DISABLED_PATTERNS
 from core.engine_defaults import passes_min_confidence, passes_regime_filter
-from core.kronos_gate import kronos_gate_check
+from core.kronos_gate import kronos_gate_check, kronos_gate_check_many
 from core.market import get_market
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
 from data.tv_client import TVClient
@@ -94,6 +94,7 @@ class ExplorerService:
         *,
         run_patterns: bool = True,
         kronos_gate: bool | None = None,
+        kronos_batch: bool | None = None,
         volume_gate: bool | None = None,
         market: str | None = None,
     ) -> dict[str, Any]:
@@ -122,6 +123,9 @@ class ExplorerService:
             raise ValueError(f"Insufficient bars for {symbol} {timeframe}.")
 
         use_kronos = settings.kronos_gate_enabled if kronos_gate is None else kronos_gate
+        use_batch = bool(use_kronos) and (
+            settings.kronos_batch_enabled if kronos_batch is None else kronos_batch
+        )
         use_volume = settings.volume_gate_enabled if volume_gate is None else volume_gate
 
         signals: list[TradeSignal] = []
@@ -130,15 +134,22 @@ class ExplorerService:
                 self._patterns, symbol, timeframe, candles,
                 session_tz=profile.session_tz,
             )
+            cheap: list[TradeSignal] = []
             for sig in raw:
                 if not passes_min_confidence(sig):
                     continue
                 if not passes_regime_filter(sig, self._store):
                     continue
-                if use_kronos:
-                    gate = kronos_gate_check(sig, self._store)
-                    if not gate.passed:
-                        continue
+                cheap.append(sig)
+            if use_kronos and use_batch and cheap:
+                gates = kronos_gate_check_many(cheap, self._store)
+                cheap = [sig for sig, gate in zip(cheap, gates) if gate.passed]
+            elif use_kronos:
+                cheap = [
+                    sig for sig in cheap
+                    if kronos_gate_check(sig, self._store).passed
+                ]
+            for sig in cheap:
                 if use_volume:
                     vgate = volume_confirm_gate(sig, self._store)
                     if not vgate.passed:

@@ -1,14 +1,15 @@
 """
-core/kronos_rank_sleeve.py — Cross-sectional Kronos 1w ranked forecast sleeve.
+core/kronos_rank_sleeve.py — Cross-sectional Kronos 3d ranked forecast sleeve.
 
 Sits *beside* Toby chart patterns as an independent entry source (closer to
 the official Kronos finetune top-K demo than `kronos_gate`'s hard veto).
 
 Flow:
-  1. Forecast +1w close % move for every eligible daily symbol.
-  2. Rank by pred_1w.
+  1. Forecast +3 trading-day close % move for every eligible daily symbol.
+  2. Rank by that 3d return (field still named pred_1w historically).
   3. Emit top_k BUY and (unless long_only) bottom_k SELL as TradeSignals
      with pattern=`pattern_kronos_rank`.
+  4. Floor is KRONOS_MIN_MOVE_PCT (3% in 3 days) unless overridden.
 
 Does NOT replace `kronos_gate` — that still filters Toby patterns. Sleeve
 signals skip the gate (the forecast *is* the signal).
@@ -21,7 +22,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from config import settings
-from core.kronos_eval import LOOKBACK, MAX_CONTEXT, predict_1w_return
+from core.kronos_eval import LOOKBACK, MAX_CONTEXT, predict_1w_return, predict_1w_return_batch
 from core.kronos_gate import get_kronos_gate, kronos_infer_lock
 from data.ohlcv_store import OHLCVStore
 from patterns.base_pattern import TradeSignal
@@ -33,6 +34,7 @@ PATTERN_NAME = "pattern_kronos_rank"
 @dataclass(frozen=True)
 class ForecastRow:
     symbol: str
+    # Close-to-close % over GATE_HORIZON_BARS (3 trading days). Name is historical.
     pred_1w: float
     last_close: float
     asof: pd.Timestamp
@@ -71,7 +73,7 @@ def _signal_from_row(row: ForecastRow, action: str, rank: int, n_pool: int) -> T
         stop_loss = close * (1 + stop_pct)
         take_profit = close * (1 + pred)  # pred negative → TP below
     note = (
-        f"KronosRank 1w {pred:+.2%} rank={rank}/{n_pool} "
+        f"KronosRank 3d {pred:+.2%} rank={rank}/{n_pool} "
         f"asof={pd.Timestamp(row.asof).date()}"
     )
     return TradeSignal(
@@ -97,16 +99,44 @@ def forecast_universe(
     *,
     sample_count: int | None = None,
     lookback: int | None = None,
+    use_batch: bool | None = None,
 ) -> list[ForecastRow]:
-    """Forecast pred_1w for each symbol that has enough daily history in store."""
+    """Forecast 3-trading-day return for each symbol with enough daily history."""
     gate = get_kronos_gate()
     sc = settings.kronos_sample_count if sample_count is None else sample_count
     lb = LOOKBACK if lookback is None else lookback
+    batch = settings.kronos_batch_enabled if use_batch is None else use_batch
     rows: list[ForecastRow] = []
     with kronos_infer_lock():
         if not gate._ensure_loaded():
             log.warning("KronosRank | predictor unavailable — sleeve emits nothing")
             return []
+        if batch:
+            frames: list[pd.DataFrame] = []
+            kept: list[str] = []
+            for symbol in symbols:
+                df = _sleeve_daily_df(store, symbol, lb)
+                if df is None or len(df) < 60:
+                    continue
+                frames.append(df)
+                kept.append(symbol)
+            outs = predict_1w_return_batch(
+                gate._predictor, frames, sample_count=sc, lookback=lb,
+                batch_size=settings.kronos_batch_size,
+            )
+            for symbol, df, out in zip(kept, frames, outs):
+                if out is None:
+                    continue
+                pred_1w, last_close = out
+                rows.append(
+                    ForecastRow(
+                        symbol=symbol,
+                        pred_1w=pred_1w,
+                        last_close=last_close,
+                        asof=pd.Timestamp(df.index[-1]),
+                    )
+                )
+            return rows
         for symbol in symbols:
             df = _sleeve_daily_df(store, symbol, lb)
             if df is None or len(df) < 60:
@@ -131,19 +161,44 @@ def forecast_from_frames(
     *,
     sample_count: int | None = None,
     lookback: int | None = None,
+    use_batch: bool | None = None,
 ) -> list[ForecastRow]:
     """Same as forecast_universe but from pre-sliced DataFrames (backtest)."""
     gate = get_kronos_gate()
     sc = settings.kronos_sample_count if sample_count is None else sample_count
     lb = LOOKBACK if lookback is None else lookback
+    batch = settings.kronos_batch_enabled if use_batch is None else use_batch
     rows: list[ForecastRow] = []
     with kronos_infer_lock():
         if not gate._ensure_loaded():
             log.warning("KronosRank | predictor unavailable — sleeve emits nothing")
             return []
-        for symbol, df in frames.items():
-            if df is None or len(df) < 60:
-                continue
+        items = [
+            (symbol, df) for symbol, df in frames.items()
+            if df is not None and len(df) >= 60
+        ]
+        if batch:
+            outs = predict_1w_return_batch(
+                gate._predictor,
+                [df for _s, df in items],
+                sample_count=sc,
+                lookback=lb,
+                batch_size=settings.kronos_batch_size,
+            )
+            for (symbol, df), out in zip(items, outs):
+                if out is None:
+                    continue
+                pred_1w, last_close = out
+                rows.append(
+                    ForecastRow(
+                        symbol=symbol,
+                        pred_1w=pred_1w,
+                        last_close=last_close,
+                        asof=pd.Timestamp(df.index[-1]),
+                    )
+                )
+            return rows
+        for symbol, df in items:
             out = predict_1w_return(gate._predictor, df, sample_count=sc, lookback=lb)
             if out is None:
                 continue
@@ -167,7 +222,7 @@ def rank_and_emit(
     long_only: bool | None = None,
     min_move: float | None = None,
 ) -> list[TradeSignal]:
-    """Select top_k longs / bottom_k shorts by pred_1w and build TradeSignals."""
+    """Select top_k longs / bottom_k shorts by 3d forecast and build TradeSignals."""
     if not rows:
         return []
 
@@ -180,7 +235,7 @@ def rank_and_emit(
     n = len(ranked)
     signals: list[TradeSignal] = []
 
-    # Longs: highest pred_1w, must clear +min_move
+    # Longs: highest 3d pred, must clear +min_move (default 3%)
     long_candidates = [r for r in ranked if r.pred_1w >= min_move]
     for i, row in enumerate(long_candidates[: max(0, top_k)]):
         signals.append(_signal_from_row(row, "BUY", rank=i + 1, n_pool=n))
@@ -201,9 +256,10 @@ def run_sleeve(
     bottom_k: int | None = None,
     long_only: bool | None = None,
     min_move: float | None = None,
+    use_batch: bool | None = None,
 ) -> list[TradeSignal]:
     """Forecast → rank → emit. Entry point for the scanner."""
-    rows = forecast_universe(store, symbols)
+    rows = forecast_universe(store, symbols, use_batch=use_batch)
     if not rows:
         return []
     signals = rank_and_emit(
@@ -370,7 +426,9 @@ def backtest_rank_sleeve(
             if len(sub) >= 60:
                 sliced[sym] = sub
 
-        rows = forecast_from_frames(sliced)
+        rows = forecast_from_frames(
+            sliced, use_batch=bool(config.get("kronos_batch")),
+        )
         if not rows:
             continue
         for sym, sub in sliced.items():

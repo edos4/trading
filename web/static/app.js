@@ -49,6 +49,32 @@ function downloadB64(filename, b64, mime) {
   URL.revokeObjectURL(a.href);
 }
 
+function syncExplorerBatchKronos() {
+  const gate = document.getElementById("kronos-gate");
+  const wrap = document.getElementById("kronos-batch-wrap");
+  if (!wrap || !gate) return;
+  wrap.hidden = !gate.checked;
+}
+
+function syncBookBatchKronos(id) {
+  const gate = document.getElementById(`${id}-kronos`);
+  const rank = document.getElementById(`${id}-kronos-rank`);
+  const wrap = document.getElementById(`${id}-kronos-batch-wrap`);
+  if (!wrap) return;
+  wrap.hidden = !((gate && gate.checked) || (rank && rank.checked));
+}
+
+function syncBacktestBatchKronos() {
+  const gate = document.getElementById("p-kronos_gate");
+  const rank = document.getElementById("p-kronos_rank");
+  const wrap = document.querySelector('[data-key="kronos_batch"]');
+  if (!wrap) return;
+  const on = !!(gate && gate.checked) || !!(rank && rank.checked);
+  wrap.hidden = !on;
+  const box = document.getElementById("p-kronos_batch");
+  if (!on && box) box.checked = false;
+}
+
 /* ── Explorer ─────────────────────────────────────────────────────────── */
 function initExplorer() {
   const listEl = document.getElementById("symbol-list");
@@ -97,6 +123,8 @@ function initExplorer() {
       timeframe: document.getElementById("timeframe").value,
       run_patterns: document.getElementById("run-patterns").checked,
       kronos_gate: document.getElementById("kronos-gate").checked,
+      kronos_batch: document.getElementById("kronos-gate").checked
+        && !!(document.getElementById("kronos-batch") || {}).checked,
       volume_gate: document.getElementById("volume-gate").checked,
       market: (document.getElementById("market") || {}).value || "",
     };
@@ -147,6 +175,7 @@ function initExplorer() {
       if (spec) {
         document.getElementById("count").value = spec.default_n_symbols;
         document.getElementById("kronos-gate").checked = !!spec.kronos_gate;
+        syncExplorerBatchKronos();
       }
       refreshSymbols().catch((e) => {
         status.textContent = String(e.message || e);
@@ -169,6 +198,9 @@ function initExplorer() {
       "text/csv",
     );
   };
+  const kronosGate = document.getElementById("kronos-gate");
+  if (kronosGate) kronosGate.onchange = syncExplorerBatchKronos;
+  syncExplorerBatchKronos();
   refreshSymbols().catch((e) => {
     status.textContent = String(e.message || e);
   });
@@ -278,8 +310,14 @@ function initBacktest() {
       setVal("p-account_value", spec.account_value);
       setVal("p-kronos_gate", spec.kronos_gate);
       setVal("p-kronos_rank", spec.kronos_rank);
+      syncBacktestBatchKronos();
     });
   }
+  const gateEl = document.getElementById("p-kronos_gate");
+  const rankEl = document.getElementById("p-kronos_rank");
+  if (gateEl) gateEl.addEventListener("change", syncBacktestBatchKronos);
+  if (rankEl) rankEl.addEventListener("change", syncBacktestBatchKronos);
+  syncBacktestBatchKronos();
   poll().catch(console.error);
 }
 
@@ -345,6 +383,11 @@ function initPaper() {
     if (stream && wrap) {
       stream.onchange = () => { wrap.hidden = !stream.checked; };
     }
+    const gate = document.getElementById(`${id}-kronos`);
+    const rank = document.getElementById(`${id}-kronos-rank`);
+    if (gate) gate.addEventListener("change", () => syncBookBatchKronos(id));
+    if (rank) rank.addEventListener("change", () => syncBookBatchKronos(id));
+    syncBookBatchKronos(id);
   });
 
   document.querySelectorAll(".tabs .tab").forEach((btn) => {
@@ -466,6 +509,10 @@ function initPaper() {
       use_stream: !!(document.getElementById(`${id}-stream`) || {}).checked,
       kronos_gate: !!(document.getElementById(`${id}-kronos`) || {}).checked,
       kronos_rank: !!(document.getElementById(`${id}-kronos-rank`) || {}).checked,
+      kronos_batch: (
+        !!(document.getElementById(`${id}-kronos`) || {}).checked
+        || !!(document.getElementById(`${id}-kronos-rank`) || {}).checked
+      ) && !!(document.getElementById(`${id}-kronos-batch`) || {}).checked,
       volume_gate: !!(document.getElementById(`${id}-volume`) || {}).checked,
       stream_start: (document.getElementById(`${id}-stream-start`) || {}).value || null,
     };

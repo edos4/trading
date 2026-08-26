@@ -16,9 +16,9 @@ Usage:
     python main.py --web                            # Launch the authenticated web UI (VPS)
                                                     # On start: connect to stocks_history and
                                                     # backfill missing/stale daily bars per symbol.
-    python main.py --papertrade-stream              # Serve historical CSV bars for paper trading when markets are closed
+    python main.py --papertrade-stream              # Serve historical bars (33ai /api/history, then DB/CSV) for paper trading when markets are closed
     python main.py --papertrade-stream --papertrade-stream-start 2025-01-02  # Replay from a specific date
-    python main.py --kronos-test                    # Score Kronos-base +1d/+1w forecast accuracy (20 random symbols)
+    python main.py --kronos-test                    # Score Kronos-base +1d/+3d forecast accuracy (20 random symbols)
     python main.py --kronos-test 50                  # ...on 50 randomly sampled symbols
     python main.py --kronos-test 50 --kronos-liquid-only  # ...top 50 by $ volume instead of random
     python main.py --ingest-db                       # Ingest /home/r00t/stocks_data CSVs into Postgres
@@ -442,7 +442,7 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         metavar="N",
-        help="Evaluate Kronos-base's +1 day / +1 week close-price forecast accuracy "
+        help="Evaluate Kronos-base's +1 day / +3 trading-day close-price forecast accuracy "
         "on N randomly sampled symbols (default: 20) from /home/r00t/stocks_data.",
     )
     parser.add_argument(
@@ -511,8 +511,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--papertrade-stream",
         action="store_true",
-        help="Run the paper trade stream server: replays historical daily CSVs "
-        "from settings.papertrade_stream_dir (default /home/r00t/stocks_data) over "
+        help="Run the paper trade stream server: replays daily bars from "
+        "GET /api/history (https://33ai.edos.uk on local --ui/--web), then "
+        "local Postgres, then CSVs under settings.papertrade_stream_dir, over "
         "a local WebSocket so paper trading (--paper / --ui) can run with the "
         "'Use paper trade stream' option even when US markets are closed.",
     )
