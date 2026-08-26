@@ -183,7 +183,7 @@ def test_ticker_collision_chart_uses_market():
         def _payload(_df, **kw):
             return {"symbol": kw["symbol"], "entry": kw["entry"]}
 
-        with patch("data.db.load_daily_ohlcv_df", return_value=df):
+        with patch("data.history.load_daily_ohlcv_df", return_value=df):
             with patch(
                 "analysis.chart_renderer.build_trade_viewer_payload",
                 side_effect=_payload,

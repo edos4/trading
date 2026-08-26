@@ -453,13 +453,15 @@ Auth: form login → signed HttpOnly session cookie (`tb_session`). All pages an
 
 **One history database (VPS).** Contabo runs Postgres `stocks_history` and
 serves `GET /api/history/symbols`, `GET /api/history/{symbol}`, and
-`GET /api/history/{symbol}/meta`. Local `--ui` / `--web` / Kronos set
-`STOCKS_HISTORY_URL=https://33ai.edos.uk` in `.env`. History API Basic auth is
+`GET /api/history/{symbol}/meta`. Local `--ui` / `--web` **always** read
+daily OHLCV (explorer charts, paper charts, Kronos, backtest prefetch) from
+`https://33ai.edos.uk` — `STOCKS_HISTORY_URL` is applied automatically if
+empty. They do **not** use Yahoo/TV for history, and do **not** need
+`DATABASE_URL` or `/home/r00t/stocks_data`. History API Basic auth is
 `WEB_UI_USERNAME` / `WEB_UI_USERNAME` (default `admin`:`admin`), not the
-dashboard password. They do **not** need `DATABASE_URL` or `/home/r00t/stocks_data`.
-Leave `STOCKS_HISTORY_URL` empty on the VPS so it keeps using local Postgres
-and `--update-db`. TV/Yahoo is only used when the API has no bars for a
-symbol. CLI `--backtest` / `--paper` / `--learn` still use TV/CSV.
+dashboard password. On the VPS set `STOCKS_HISTORY_OWNER=true` and leave
+`STOCKS_HISTORY_URL` empty so `--web` keeps using local Postgres and
+`--update-db`. CLI `--backtest` / `--paper` / `--learn` still use TV/CSV.
 
 What both UIs support:
 

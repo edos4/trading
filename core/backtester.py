@@ -1646,8 +1646,8 @@ def _worker_symbol_backtest(
         from data.history import fetch_ohlcv_candles, ui_web_history_enabled
 
         if ui_web_history_enabled():
-            candles = fetch_ohlcv_candles(symbol, timeframe)
-        if not candles:
+            candles = fetch_ohlcv_candles(symbol, timeframe, tv_fallback=False)
+        else:
             tv = TVClient(screener, exchange)
             candles = tv._fetch_history_chart(symbol, timeframe)
     patterns = _load_patterns(pattern_specs)
@@ -1801,9 +1801,9 @@ class Backtester:
 
                 if ui_web_history_enabled():
                     candles = fetch_ohlcv_candles(
-                        symbol, "1d", tv_client=self._tv,
+                        symbol, "1d", tv_client=self._tv, tv_fallback=False,
                     )
-                if not candles:
+                else:
                     candles = await asyncio.to_thread(
                         self._tv._fetch_history_chart, symbol, "1d"
                     )
@@ -2336,11 +2336,9 @@ class Backtester:
         from data.history import fetch_ohlcv_candles, ui_web_history_enabled
 
         if ui_web_history_enabled():
-            candles = fetch_ohlcv_candles(
-                symbol, timeframe, tv_client=self._tv,
+            return fetch_ohlcv_candles(
+                symbol, timeframe, tv_client=self._tv, tv_fallback=False,
             )
-            if candles:
-                return candles
         return self._tv._fetch_history_chart(symbol, timeframe)
 
     @staticmethod

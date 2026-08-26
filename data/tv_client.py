@@ -756,13 +756,31 @@ class TVClient:
         )
 
     def _fetch_history_chart(self, symbol: str, timeframe: str) -> list[OHLCVCandle]:
-        """Fetch OHLCV history. PH uses PSE Edge (Yahoo *.PS is a YHD stub)."""
+        """Fetch OHLCV history. PH uses PSE Edge (Yahoo *.PS is a YHD stub).
+
+        Local --ui/--web read 33ai.edos.uk (or VPS Postgres) and never Yahoo.
+        """
         spec = _CHART_SPECS.get(timeframe)
         if spec is None:
             return []
 
         interval, range_, default_max = spec
         max_bars = settings.tv_history_days if timeframe == "1d" else default_max
+
+        from data.history import load_daily_candles, resample_weekly, ui_web_history_enabled
+
+        if ui_web_history_enabled():
+            daily = load_daily_candles(symbol)
+            if not daily:
+                return []
+            if timeframe.upper() in ("1W", "W", "1WK", "WEEKLY"):
+                weekly = resample_weekly(daily)
+                if weekly and len(weekly) > default_max:
+                    return weekly[-default_max:]
+                return weekly
+            if len(daily) > max_bars:
+                return daily[-max_bars:]
+            return daily
 
         if self._screener == "philippines":
             from data.pse_edge import fetch_history

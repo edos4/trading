@@ -146,11 +146,13 @@ class Settings(BaseSettings):
     db_password: str = ""
 
     # ── Remote stocks_history API (local --ui / --web / Kronos) ─────────────
-    # Empty = read/write local Postgres (VPS). Set to https://33ai.edos.uk on
-    # laptops so they never need DATABASE_URL or a local stocks_history DB.
+    # Local --ui/--web auto-use https://33ai.edos.uk when this is empty (charts
+    # included; no Yahoo). VPS --web must leave this empty and set owner so it
+    # keeps reading/writing local Postgres and serving GET /api/history.
     stocks_history_url: str = ""
     stocks_history_username: str = ""
     stocks_history_password: str = ""
+    stocks_history_owner: bool = False
 
     # ── Web UI (python main.py --web) ───────────────────────────────────────
     # Session login. WEB_UI_PASSWORD is required — the server refuses to bind

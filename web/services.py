@@ -111,6 +111,7 @@ class ExplorerService:
 
         candles = fetch_ohlcv_candles(
             symbol, timeframe, exchange=exchange, tv_client=self._tv,
+            tv_fallback=False,
         )
         if not candles:
             raise ValueError(f"No history available for {symbol} {timeframe}.")
