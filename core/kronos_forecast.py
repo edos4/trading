@@ -154,7 +154,7 @@ def forecast_symbol(
     profile = get_market(market)
     from data.history import load_daily_ohlcv_df
 
-    df = load_daily_ohlcv_df(symbol, tv_fallback=True, limit=MAX_CONTEXT)
+    df = load_daily_ohlcv_df(symbol, tv_fallback=False, limit=MAX_CONTEXT)
     if df is None or len(df) < MIN_BARS:
         raise ValueError(
             f"Not enough daily history for {symbol} (need ≥{MIN_BARS} bars)."

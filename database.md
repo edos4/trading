@@ -265,8 +265,11 @@ Auth: session cookie or HTTP Basic with `WEB_UI_USERNAME` as both user and
 password (default `admin` / `admin`). Dashboard login still uses
 `WEB_UI_PASSWORD`.
 
-Laptops set `STOCKS_HISTORY_URL=https://33ai.edos.uk`. History client Basic
-auth defaults to `WEB_UI_USERNAME`:`WEB_UI_USERNAME` unless
-`STOCKS_HISTORY_USERNAME` / `STOCKS_HISTORY_PASSWORD` are set. They must
-not set `STOCKS_HISTORY_URL` on the VPS itself (self-HTTP loop). Do not dump
+Laptops running `--ui` / `--web` always use `https://33ai.edos.uk` (auto-set
+if `STOCKS_HISTORY_URL` is empty). Charts and daily OHLCV do not fall back
+to Yahoo/TV. History client Basic auth defaults to
+`WEB_UI_USERNAME`:`WEB_UI_USERNAME` unless
+`STOCKS_HISTORY_USERNAME` / `STOCKS_HISTORY_PASSWORD` are set. On the VPS
+set `STOCKS_HISTORY_OWNER=true` and leave `STOCKS_HISTORY_URL` empty so
+`--web` does not HTTP-loop to itself. Do not dump
 the whole universe in one response — clients fetch per symbol.

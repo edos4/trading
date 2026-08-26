@@ -543,14 +543,19 @@ def run() -> None:
     require_password_configured()
     import uvicorn
     from data.ensure_history import start_web_history_backfill
-    from data.history import enable_ui_web_history, local_history_backfill_enabled
+    from data.history import (
+        DEFAULT_STOCKS_HISTORY_URL,
+        enable_ui_web_history,
+        local_history_backfill_enabled,
+    )
 
     enable_ui_web_history()
     if local_history_backfill_enabled():
         start_web_history_backfill()
     else:
+        remote = (settings.stocks_history_url or DEFAULT_STOCKS_HISTORY_URL).rstrip("/")
         log.info(
-            "Web UI | STOCKS_HISTORY_URL set — remote history, skip local DB backfill"
+            f"Web UI | remote history {remote} — skip local Postgres ping/--update-db"
         )
 
     host = settings.web_ui_host

@@ -156,6 +156,16 @@ def _load_symbol_db(symbol: str) -> list[dict] | None:
 
     Uses the remote API when STOCKS_HISTORY_URL is set, else local Postgres.
     """
+    from data.history_client import history_api_configured
+
+    if history_api_configured():
+        try:
+            from data.history import load_daily_tape_rows
+
+            return load_daily_tape_rows(symbol)
+        except Exception as exc:
+            log.warning(f"StreamServer | history API failed for {symbol}: {exc}")
+            return None
     try:
         from data.history import load_daily_tape_rows
 

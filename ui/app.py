@@ -310,6 +310,7 @@ class TradingBotUI:
         try:
             candles = fetch_ohlcv_candles(
                 symbol, timeframe, exchange=exchange, tv_client=self._tv,
+                tv_fallback=False,
             )
         except Exception as exc:
             msg = f"History fetch failed for {symbol}: {exc}"
