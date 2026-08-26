@@ -98,6 +98,13 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
         "check", settings.kronos_rank_enabled, None,
     ),
     (
+        "kronos_batch", "Batch Kronos",
+        "Collect pattern hits (and the rank sleeve universe) then call "
+        "KronosPredictor.predict_batch. Only used when Kronos 3d gate or rank "
+        "sleeve is on. Pattern-BT workers still gate sequentially.",
+        "check", settings.kronos_batch_enabled, None,
+    ),
+    (
         "volume_gate", "Volume gate (RVOL+OBV)",
         "Require relative volume ≥ VOLUME_GATE_RVOL_MIN and OBV slope agreeing with "
         "BUY/SELL. Off by default — 2026-07-26 A/B showed no expectancy edge "
@@ -273,6 +280,23 @@ class BacktestDialog:
             row += 2
         if "market" in self._vars:
             self._vars["market"].trace_add("write", lambda *_: self._apply_market_defaults())
+        for key in ("kronos_gate", "kronos_rank"):
+            if key in self._vars:
+                self._vars[key].trace_add("write", lambda *_: self._sync_batch_kronos())
+        self._sync_batch_kronos()
+
+    def _sync_batch_kronos(self) -> None:
+        gate = bool(self._vars.get("kronos_gate") and self._vars["kronos_gate"].get())
+        rank = bool(self._vars.get("kronos_rank") and self._vars["kronos_rank"].get())
+        widget = getattr(self, "_batch_kronos_widget", None)
+        var = self._vars.get("kronos_batch")
+        if widget is None or var is None:
+            return
+        if gate or rank:
+            widget.configure(state=tk.NORMAL)
+        else:
+            var.set(False)
+            widget.configure(state=tk.DISABLED)
 
     def _apply_market_defaults(self) -> None:
         profile = get_market(self._vars["market"].get())
@@ -307,9 +331,10 @@ class BacktestDialog:
             ).grid(row=grid_row, column=col + 1, sticky=tk.W, padx=(0, 8))
         elif ptype == "check":
             var = tk.BooleanVar(value=default)
-            ttk.Checkbutton(parent, variable=var).grid(
-                row=grid_row, column=col + 1, sticky=tk.W, padx=(0, 8),
-            )
+            cb = ttk.Checkbutton(parent, variable=var)
+            cb.grid(row=grid_row, column=col + 1, sticky=tk.W, padx=(0, 8))
+            if key == "kronos_batch":
+                self._batch_kronos_widget = cb
         else:
             var = tk.StringVar(value=str(default))
             width = 28 if key == "extra_symbols" else 18
@@ -418,6 +443,8 @@ class BacktestDialog:
             p["synthetic_stop_multiple"] = 0
         p["market"] = market
         p["long_only"] = get_market(market).long_only
+        if not p.get("kronos_gate") and not p.get("kronos_rank"):
+            p["kronos_batch"] = False
         return {
             "n_symbols": n_symbols,
             "extra_symbols": extra_symbols,

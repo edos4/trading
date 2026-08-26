@@ -5,7 +5,7 @@
   <h1>Backtest</h1>
   <form id="bt-form" class="param-grid">
     {% for p in params %}
-    <div class="param">
+    <div class="param" data-key="{{ p.key }}">
       <label for="p-{{ p.key }}"><strong>{{ p.label }}</strong></label>
       <p class="muted small">{{ p.description }}</p>
       {% if p.type == "spin" %}

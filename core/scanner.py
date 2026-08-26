@@ -41,7 +41,7 @@ from data.stream_client import FetchSkip
 from analysis.chart_renderer import ChartRenderer
 from analysis.vision_checker import VisionChecker, VisionVerdict
 from core.paper_trader import PaperAccount
-from core.kronos_gate import kronos_gate_check
+from core.kronos_gate import kronos_gate_check, kronos_gate_check_many
 from core.kronos_rank_sleeve import is_kronos_rank_signal, run_sleeve
 from core.backtester import describe_risk_gate_rejection
 from core.engine_defaults import (
@@ -89,6 +89,7 @@ class MarketScanner:
         kronos_gate: bool | None = None,
         volume_gate: bool | None = None,
         kronos_rank: bool | None = None,
+        kronos_batch: bool | None = None,
         market: str | None = None,
     ):
         self._symbols = symbols or settings.symbols
@@ -109,6 +110,11 @@ class MarketScanner:
         )
         self._kronos_rank = (
             profile.kronos_rank_default if kronos_rank is None else kronos_rank
+        )
+        # Collect-then-batch Kronos only when this is on. Sequential check()
+        # remains the default.
+        self._kronos_batch = (
+            settings.kronos_batch_enabled if kronos_batch is None else kronos_batch
         )
         self._tv = data_feed or TVClient(
             profile.tv_screener,
@@ -161,6 +167,8 @@ class MarketScanner:
         # Kronos rank sleeve: only re-forecast when the daily asof advances
         # (hourly scans otherwise waste GPU on the same bar).
         self._kronos_rank_last_asof: object | None = None
+        self._pending_kronos: list[tuple[TradeSignal, BasePattern | None, object]] = []
+        self._pending_kronos_lock = asyncio.Lock()
         # Scan-cycle health counters — surfaced by the paper trading UI/CLI
         # so a stalled or misbehaving scan is visible without reading logs.
         self.stats: dict = {
@@ -291,6 +299,7 @@ class MarketScanner:
             f"patterns={[p.name for p in self._patterns]} | "
             f"kronos_gate={'ON' if self._kronos_gate else 'OFF'} | "
             f"kronos_rank={'ON' if self._kronos_rank else 'OFF'} | "
+            f"kronos_batch={'ON' if self._kronos_batch else 'OFF'} | "
             f"volume_gate={'ON' if self._volume_gate else 'OFF'} | "
             f"interval={self._scan_interval}s"
         )
@@ -397,6 +406,7 @@ class MarketScanner:
         uses its own MCP session so there is no contention on the stdio pipe.
         """
         scan_start = time.monotonic()
+        self._pending_kronos = []
         self.stats["patterns_found"] = 0
         self.stats["signals_rejected"] = 0
         self.stats["trades_opened"] = 0
@@ -578,6 +588,9 @@ class MarketScanner:
         finally:
             pbar.close()
 
+        if self._kronos_batch and self._pending_kronos:
+            await self._flush_kronos_batch()
+
         # Mark equity against the completed simulated bar BEFORE advancing the
         # replay. PaperAccount deduplicates marks to one point per market
         # session, so Sharpe is a daily/session statistic rather than a
@@ -641,6 +654,7 @@ class MarketScanner:
             self._store,
             list(self._symbols),
             long_only=True if get_market(self._market).long_only else None,
+            use_batch=self._kronos_batch,
         )
         self._kronos_rank_last_asof = asof
         self.stats["kronos_rank_emitted"] = self.stats.get("kronos_rank_emitted", 0) + len(
@@ -749,33 +763,58 @@ class MarketScanner:
             self._append_signal_log(signal, status="rejected", reason=risk_reason)
             return
 
-        # Step 0b — Kronos 3d confirm gate (direction + min move). Runs before
-        # vision so we don't burn Claude tokens on forecasts that disagree.
-        # Fail-closed by default when weights are missing — see
-        # core/kronos_gate.py (KRONOS_GATE_FAIL_OPEN opts into fail-open).
+        # Step 0b — Kronos 3d confirm gate. Sequential unless Batch Kronos.
         # Skip for pattern_kronos_rank — the forecast *is* the entry signal.
         if self._kronos_gate and not is_kronos_rank_signal(signal):
-            gate = kronos_gate_check(signal, self._store)
-            if not gate.passed:
-                reason = (
-                    f"Kronos 3d confirm gate vetoed this {signal.action}: {gate.reason}. "
-                    f"Forecast must agree with the pattern direction and clear "
-                    f"3% in 3 days (KRONOS_MIN_MOVE_PCT)."
-                )
-                log.info(
-                    f"Signal REJECTED by Kronos gate — {signal.symbol} "
-                    f"{signal.pattern} | {gate.reason}"
-                )
-                self.stats["signals_rejected"] += 1
-                self._append_signal_log(signal, status="rejected", reason=reason)
+            if self._kronos_batch:
+                async with self._pending_kronos_lock:
+                    self._pending_kronos.append((signal, pattern, candle))
                 return
-            if gate.pred_1w is not None:
-                log.info(
-                    f"Kronos gate PASS | {signal.symbol} {signal.pattern} | "
-                    f"pred_3d={gate.pred_1w:+.2%} in 3d | {gate.reason}"
-                )
+            gate = kronos_gate_check(signal, self._store)
+            if not self._kronos_gate_ok(signal, gate):
+                return
 
-        # Step 0c — Volume confirm gate (RVOL + OBV direction).
+        await self._finish_signal(signal, pattern, candle)
+
+    def _kronos_gate_ok(self, signal: TradeSignal, gate) -> bool:
+        if not gate.passed:
+            reason = (
+                f"Kronos 3d confirm gate vetoed this {signal.action}: {gate.reason}. "
+                f"Forecast must agree with the pattern direction and clear "
+                f"3% in 3 days (KRONOS_MIN_MOVE_PCT)."
+            )
+            log.info(
+                f"Signal REJECTED by Kronos gate — {signal.symbol} "
+                f"{signal.pattern} | {gate.reason}"
+            )
+            self.stats["signals_rejected"] += 1
+            self._append_signal_log(signal, status="rejected", reason=reason)
+            return False
+        if gate.pred_1w is not None:
+            log.info(
+                f"Kronos gate PASS | {signal.symbol} {signal.pattern} | "
+                f"pred_3d={gate.pred_1w:+.2%} in 3d | {gate.reason}"
+            )
+        return True
+
+    async def _flush_kronos_batch(self) -> None:
+        pending = self._pending_kronos
+        self._pending_kronos = []
+        if not pending:
+            return
+        signals = [item[0] for item in pending]
+        log.info(f"Kronos batch | gating {len(signals)} pattern hits")
+        results = await asyncio.to_thread(
+            kronos_gate_check_many, signals, self._store,
+        )
+        for (signal, pattern, candle), gate in zip(pending, results):
+            if not self._kronos_gate_ok(signal, gate):
+                continue
+            await self._finish_signal(signal, pattern, candle)
+
+    async def _finish_signal(
+        self, signal: TradeSignal, pattern: BasePattern | None = None, candle=None,
+    ) -> None:
         # Sleeve skips volume by default — ranking is price-path based.
         if self._volume_gate and not is_kronos_rank_signal(signal):
             vgate = volume_confirm_gate(signal, self._store)

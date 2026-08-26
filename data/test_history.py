@@ -90,6 +90,14 @@ def test_stocks_history_auth_defaults_to_username() -> None:
     assert s.stocks_history_auth == ("admin", "admin")
 
 
+def test_history_path_encodes_slash_tickers() -> None:
+    from data.history_client import _history_path
+
+    assert _history_path("AAPL") == "/api/history/AAPL"
+    assert _history_path("FLG/PU") == "/api/history/FLG%2FPU"
+    assert _history_path("AAPL", "/meta") == "/api/history/AAPL/meta"
+
+
 def test_load_daily_bars_forwards_limit() -> None:
     from data.history import load_daily_bars
 

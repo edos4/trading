@@ -559,6 +559,7 @@ def markets_payload() -> list[dict]:
             "account_value": p.paper_initial_capital,
             "kronos_gate": p.kronos_gate_default,
             "kronos_rank": p.kronos_rank_default,
+            "kronos_batch": False,
             "long_only": p.long_only,
             "scan_interval_seconds": p.scan_interval_seconds,
         })

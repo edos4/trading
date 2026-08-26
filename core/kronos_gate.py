@@ -31,6 +31,7 @@ from core.kronos_eval import (
     MODEL_PATH,
     _load_predictor,
     predict_1w_return,
+    predict_1w_return_batch,
 )
 from config import settings
 from utils.logger import log
@@ -71,6 +72,81 @@ def _facade_daily_df(symbol: str):
     with _facade_cache_lock:
         _facade_df_cache[key] = df
     return df
+
+
+def _load_gate_df(symbol: str, timeframe: str, store: OHLCVStore, lookback: int):
+    df = _facade_daily_df(symbol)
+    if df is None or len(df) < lookback:
+        stored = store.get_df(symbol, timeframe, min_bars=lookback)
+        if stored is not None:
+            df = stored
+    return df
+
+
+def _insufficient_bars(df, lookback: int) -> bool:
+    return df is None or len(df) < min(60, lookback)
+
+
+def _bars_fail_result() -> KronosGateResult:
+    if settings.kronos_gate_fail_open:
+        return KronosGateResult(passed=True, reason="insufficient bars (fail-open)")
+    return KronosGateResult(passed=False, reason="insufficient bars (fail-closed)")
+
+
+def _model_fail_result() -> KronosGateResult:
+    if settings.kronos_gate_fail_open:
+        return KronosGateResult(passed=True, reason="model unavailable (fail-open)")
+    return KronosGateResult(passed=False, reason="model unavailable (fail-closed)")
+
+
+def _predict_fail_result() -> KronosGateResult:
+    if settings.kronos_gate_fail_open:
+        return KronosGateResult(passed=True, reason="predict error (fail-open)")
+    return KronosGateResult(passed=False, reason="predict error (fail-closed)")
+
+
+def _apply_pred(
+    signal: TradeSignal,
+    pred_1w: float,
+    last_close: float,
+    *,
+    adjust_exits: bool,
+) -> KronosGateResult:
+    min_move = settings.kronos_min_move_pct
+    horizon = GATE_HORIZON_BARS
+
+    if abs(pred_1w) < min_move:
+        return KronosGateResult(
+            passed=False,
+            pred_1w=pred_1w,
+            reason=(
+                f"|pred_3d|={abs(pred_1w):.2%} < min {min_move:.2%} "
+                f"in {horizon}d"
+            ),
+        )
+
+    aligned = (signal.action == "BUY" and pred_1w > 0) or (
+        signal.action == "SELL" and pred_1w < 0
+    )
+    if not aligned:
+        return KronosGateResult(
+            passed=False,
+            pred_1w=pred_1w,
+            reason=f"pred_3d={pred_1w:+.2%} conflicts with {signal.action}",
+        )
+
+    note = f"KronosGate 3d {pred_1w:+.2%} in {horizon}d"
+    signal.notes = f"{signal.notes} | {note}".strip(" |") if signal.notes else note
+
+    if adjust_exits:
+        signal.take_profit = last_close * (1 + pred_1w)
+        stop_pct = abs(pred_1w) * 0.5
+        if signal.action == "BUY":
+            signal.stop_loss = last_close * (1 - stop_pct)
+        else:
+            signal.stop_loss = last_close * (1 + stop_pct)
+
+    return KronosGateResult(passed=True, pred_1w=pred_1w, reason="aligned")
 
 
 @dataclass(frozen=True)
@@ -146,29 +222,13 @@ class KronosGate:
             return KronosGateResult(passed=True, reason="non-daily skip")
 
         lookback = _context_lookback()
-        df = _facade_daily_df(signal.symbol)
-        if df is None or len(df) < lookback:
-            stored = store.get_df(signal.symbol, signal.timeframe, min_bars=lookback)
-            if stored is not None:
-                df = stored
-        if df is None or len(df) < min(60, lookback):
-            if settings.kronos_gate_fail_open:
-                return KronosGateResult(
-                    passed=True, reason="insufficient bars (fail-open)"
-                )
-            return KronosGateResult(
-                passed=False, reason="insufficient bars (fail-closed)"
-            )
+        df = _load_gate_df(signal.symbol, signal.timeframe, store, lookback)
+        if _insufficient_bars(df, lookback):
+            return _bars_fail_result()
 
         with _INFER_LOCK:
             if not self._ensure_loaded():
-                if settings.kronos_gate_fail_open:
-                    return KronosGateResult(
-                        passed=True, reason="model unavailable (fail-open)"
-                    )
-                return KronosGateResult(
-                    passed=False, reason="model unavailable (fail-closed)"
-                )
+                return _model_fail_result()
             out = predict_1w_return(
                 self._predictor,
                 df,
@@ -176,50 +236,87 @@ class KronosGate:
                 lookback=lookback,
             )
         if out is None:
-            if settings.kronos_gate_fail_open:
-                return KronosGateResult(
-                    passed=True, reason="predict error (fail-open)"
-                )
-            return KronosGateResult(
-                passed=False, reason="predict error (fail-closed)"
-            )
-
+            return _predict_fail_result()
         pred_1w, last_close = out
-        min_move = settings.kronos_min_move_pct
-        horizon = GATE_HORIZON_BARS  # 3 trading days; |pred| floor is 3%
-
-        if abs(pred_1w) < min_move:
-            return KronosGateResult(
-                passed=False,
-                pred_1w=pred_1w,
-                reason=(
-                    f"|pred_3d|={abs(pred_1w):.2%} < min {min_move:.2%} "
-                    f"in {horizon}d"
-                ),
-            )
-
-        aligned = (signal.action == "BUY" and pred_1w > 0) or (
-            signal.action == "SELL" and pred_1w < 0
+        return _apply_pred(
+            signal, pred_1w, last_close, adjust_exits=adjust_exits,
         )
-        if not aligned:
-            return KronosGateResult(
-                passed=False,
-                pred_1w=pred_1w,
-                reason=f"pred_3d={pred_1w:+.2%} conflicts with {signal.action}",
+
+    def check_many(
+        self,
+        signals: list[TradeSignal],
+        store: OHLCVStore,
+        *,
+        adjust_exits: bool | None = None,
+    ) -> list[KronosGateResult]:
+        """Batch Kronos gate. One result per signal, same 3% / 3d rule as ``check``.
+
+        Dedupes GPU work by symbol. Only used when the caller opted into
+        collect-then-batch (scanner/UI "Batch Kronos"). ``check()`` stays
+        sequential. Horizon is ``GATE_HORIZON_BARS`` (3 trading days), not 1w.
+        """
+        if adjust_exits is None:
+            adjust_exits = settings.kronos_gate_adjust_exits
+        if not signals:
+            return []
+
+        lookback = _context_lookback()
+        results: list[KronosGateResult | None] = [None] * len(signals)
+        need: list[int] = []
+        frames_by_symbol: dict[str, object] = {}
+
+        for i, signal in enumerate(signals):
+            if signal.action == "CLOSE":
+                results[i] = KronosGateResult(passed=True, reason="skipped")
+                continue
+            if signal.timeframe != "1d":
+                results[i] = KronosGateResult(passed=True, reason="non-daily skip")
+                continue
+            df = _load_gate_df(signal.symbol, signal.timeframe, store, lookback)
+            if _insufficient_bars(df, lookback):
+                results[i] = _bars_fail_result()
+                continue
+            need.append(i)
+            key = (signal.symbol or "").upper()
+            if key not in frames_by_symbol:
+                frames_by_symbol[key] = df
+
+        if not need:
+            return [r if r is not None else _predict_fail_result() for r in results]
+
+        unique_symbols = list(dict.fromkeys(
+            (signals[i].symbol or "").upper() for i in need
+        ))
+        unique_frames = [frames_by_symbol[s] for s in unique_symbols]
+
+        with _INFER_LOCK:
+            if not self._ensure_loaded():
+                fail = _model_fail_result()
+                for i in need:
+                    results[i] = fail
+                return [r if r is not None else fail for r in results]
+            outs = predict_1w_return_batch(
+                self._predictor,
+                unique_frames,
+                sample_count=settings.kronos_sample_count,
+                lookback=lookback,
+                batch_size=settings.kronos_batch_size,
             )
 
-        note = f"KronosGate 3d {pred_1w:+.2%} in {horizon}d"
-        signal.notes = f"{signal.notes} | {note}".strip(" |") if signal.notes else note
-
-        if adjust_exits:
-            signal.take_profit = last_close * (1 + pred_1w)
-            stop_pct = abs(pred_1w) * 0.5
-            if signal.action == "BUY":
-                signal.stop_loss = last_close * (1 - stop_pct)
-            else:
-                signal.stop_loss = last_close * (1 + stop_pct)
-
-        return KronosGateResult(passed=True, pred_1w=pred_1w, reason="aligned")
+        by_sym = dict(zip(unique_symbols, outs))
+        for i in need:
+            key = (signals[i].symbol or "").upper()
+            out = by_sym.get(key)
+            if out is None:
+                results[i] = _predict_fail_result()
+                continue
+            pred_1w, last_close = out
+            results[i] = _apply_pred(
+                signals[i], pred_1w, last_close, adjust_exits=adjust_exits,
+            )
+        return [
+            r if r is not None else _predict_fail_result() for r in results
+        ]
 
 
 # Process-local shared instance (scanner + each backtest worker).
@@ -241,3 +338,15 @@ def kronos_gate_check(
 ) -> KronosGateResult:
     """Convenience wrapper around the process-local KronosGate."""
     return get_kronos_gate().check(signal, store, adjust_exits=adjust_exits)
+
+
+def kronos_gate_check_many(
+    signals: list[TradeSignal],
+    store: OHLCVStore,
+    *,
+    adjust_exits: bool | None = None,
+) -> list[KronosGateResult]:
+    """Batch convenience wrapper. Sequential ``check()`` is unchanged."""
+    return get_kronos_gate().check_many(
+        signals, store, adjust_exits=adjust_exits,
+    )

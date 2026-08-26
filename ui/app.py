@@ -32,7 +32,7 @@ matplotlib.use("Agg", force=True)
 
 from analysis.chart_renderer import ChartRenderer
 from config import settings
-from core.kronos_gate import kronos_gate_check
+from core.kronos_gate import kronos_gate_check, kronos_gate_check_many
 from core.engine_defaults import passes_min_confidence, passes_regime_filter
 from core.market import default_market, get_market
 from analysis.price_volume import volume_confirm_gate
@@ -161,9 +161,20 @@ class TradingBotUI:
         self.run_patterns_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(toolbar, text="Run patterns", variable=self.run_patterns_var).pack(side=tk.LEFT, padx=(12, 0))
         self.kronos_gate_var = tk.BooleanVar(value=default_market().kronos_gate_default)
-        ttk.Checkbutton(toolbar, text="Kronos 3d gate", variable=self.kronos_gate_var).pack(side=tk.LEFT, padx=(12, 0))
+        ttk.Checkbutton(
+            toolbar, text="Kronos 3d gate", variable=self.kronos_gate_var,
+            command=self._sync_batch_kronos,
+        ).pack(side=tk.LEFT, padx=(12, 0))
+        self.kronos_batch_var = tk.BooleanVar(value=settings.kronos_batch_enabled)
+        self._batch_kronos_cb = ttk.Checkbutton(
+            toolbar, text="Batch Kronos", variable=self.kronos_batch_var,
+        )
         self.volume_gate_var = tk.BooleanVar(value=settings.volume_gate_enabled)
-        ttk.Checkbutton(toolbar, text="Volume gate", variable=self.volume_gate_var).pack(side=tk.LEFT, padx=(12, 0))
+        self._volume_gate_cb = ttk.Checkbutton(
+            toolbar, text="Volume gate", variable=self.volume_gate_var,
+        )
+        self._volume_gate_cb.pack(side=tk.LEFT, padx=(12, 0))
+        self._sync_batch_kronos()
         ttk.Button(toolbar, text="Download CSV", command=self._download_csv).pack(side=tk.RIGHT)
         ttk.Button(toolbar, text="Save chart PNG", command=self._save_chart_png).pack(side=tk.RIGHT, padx=(0, 6))
 
@@ -273,6 +284,14 @@ class TradingBotUI:
             self._filtered_rows.append((sym, exch))
 
     # Symbol selection -> load chart + patterns
+    def _sync_batch_kronos(self) -> None:
+        if self.kronos_gate_var.get():
+            self._batch_kronos_cb.pack(
+                side=tk.LEFT, padx=(12, 0), before=self._volume_gate_cb,
+            )
+        else:
+            self._batch_kronos_cb.pack_forget()
+
     def _on_market_change(self) -> None:
         profile = get_market(self.market_var.get())
         self._market = profile.id
@@ -283,6 +302,7 @@ class TradingBotUI:
         )
         self._renderer = ChartRenderer(save_to_disk=False, session_tz=profile.session_tz)
         self.kronos_gate_var.set(profile.kronos_gate_default)
+        self._sync_batch_kronos()
         self.count_var.set(profile.default_n_symbols)
         self._load_symbols_threaded()
 
@@ -329,23 +349,42 @@ class TradingBotUI:
         signals: list[TradeSignal] = []
         if self.run_patterns_var.get():
             use_kronos = self.kronos_gate_var.get()
+            use_batch = use_kronos and self.kronos_batch_var.get()
             use_volume = self.volume_gate_var.get()
             raw = latest_signals_over_lookback(
                 self._patterns, symbol, timeframe, candles,
                 session_tz=self._store._session_tz,
             )
+            cheap: list[TradeSignal] = []
             for sig in raw:
                 if not passes_min_confidence(sig):
                     continue
                 if not passes_regime_filter(sig, self._store):
                     continue
-                if use_kronos:
+                cheap.append(sig)
+            if use_kronos and use_batch and cheap:
+                gates = kronos_gate_check_many(cheap, self._store)
+                gated: list[TradeSignal] = []
+                for sig, gate in zip(cheap, gates):
+                    if not gate.passed:
+                        log.info(
+                            f"UI | Kronos gate rejected {symbol} {sig.pattern}: {gate.reason}"
+                        )
+                        continue
+                    gated.append(sig)
+                cheap = gated
+            elif use_kronos:
+                gated = []
+                for sig in cheap:
                     gate = kronos_gate_check(sig, self._store)
                     if not gate.passed:
                         log.info(
                             f"UI | Kronos gate rejected {symbol} {sig.pattern}: {gate.reason}"
                         )
                         continue
+                    gated.append(sig)
+                cheap = gated
+            for sig in cheap:
                 if use_volume:
                     vgate = volume_confirm_gate(sig, self._store)
                     if not vgate.passed:

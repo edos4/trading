@@ -102,6 +102,8 @@ def normalize_backtest_form(raw: dict[str, Any]) -> dict[str, Any]:
         p["synthetic_stop_multiple"] = 0
     p["market"] = market
     p["long_only"] = get_market(market).long_only
+    if not p.get("kronos_gate") and not p.get("kronos_rank"):
+        p["kronos_batch"] = False
     return {
         "n_symbols": n_symbols,
         "extra_symbols": extra_symbols,

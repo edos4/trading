@@ -14,7 +14,7 @@ from data.tv_client import OHLCVCandle
 from patterns.base_pattern import TradeSignal
 
 
-def _fill_store(n: int | None = None, last_close: float = 100.0) -> OHLCVStore:
+def _fill_store(n: int | None = None, last_close: float = 100.0, symbol: str = "TEST") -> OHLCVStore:
     n = max(LOOKBACK, _context_lookback()) if n is None else n
     store = OHLCVStore(window=DEFAULT_WINDOW)
     start = datetime(2024, 1, 2, tzinfo=timezone.utc)
@@ -22,7 +22,7 @@ def _fill_store(n: int | None = None, last_close: float = 100.0) -> OHLCVStore:
         # Flat path ending at last_close — gate only cares about forecast vs close.
         c = last_close
         store.append_candle(
-            "TEST",
+            symbol,
             "1d",
             OHLCVCandle(
                 open=c,
@@ -54,6 +54,7 @@ class _FakePredictor:
     def __init__(self, pred_close: float):
         self.pred_close = pred_close
         self.last_kwargs: dict | None = None
+        self.batch_calls: list[int] = []
 
     def predict(self, **kwargs):
         self.last_kwargs = kwargs
@@ -61,6 +62,20 @@ class _FakePredictor:
         pred_len = kwargs.get("pred_len", 3)
         closes = [self.pred_close] * pred_len
         return pd.DataFrame({"close": closes})
+
+    def predict_batch(self, df_list, x_timestamp_list, y_timestamp_list, pred_len, **kwargs):
+        self.batch_calls.append(len(df_list))
+        self.last_kwargs = {
+            "df_list": df_list,
+            "x_timestamp_list": x_timestamp_list,
+            "y_timestamp_list": y_timestamp_list,
+            "pred_len": pred_len,
+            **kwargs,
+        }
+        return [
+            pd.DataFrame({"close": [self.pred_close] * pred_len})
+            for _ in df_list
+        ]
 
 
 def test_gate_pass_aligned_buy():
@@ -115,6 +130,7 @@ def test_gate_pass_three_pct():
 def test_gate_contract_is_three_pct_in_three_days():
     assert GATE_HORIZON_BARS == WEEK_AHEAD == 3
     assert Settings.model_fields["kronos_min_move_pct"].default == 0.03
+    assert Settings.model_fields["kronos_batch_enabled"].default is False
 
 
 def test_gate_skips_close():
@@ -155,6 +171,202 @@ def test_gate_prefers_history_facade(monkeypatch):
     result = gate.check(_signal(action="BUY"), empty, adjust_exits=False)
     assert result.passed, result
     kg._facade_df_cache.clear()
+
+
+def _store_with(*symbols: str) -> OHLCVStore:
+    store = OHLCVStore(window=DEFAULT_WINDOW)
+    start = datetime(2024, 1, 2, tzinfo=timezone.utc)
+    n = max(LOOKBACK, _context_lookback())
+    for symbol in symbols:
+        for i in range(n):
+            store.append_candle(
+                symbol, "1d",
+                OHLCVCandle(
+                    open=100.0, high=101.0, low=99.0, close=100.0,
+                    volume=1_000_000.0, timestamp=start + timedelta(days=i),
+                ),
+            )
+    return store
+
+
+def test_check_many_batches_unique_symbols(monkeypatch):
+    from core import kronos_gate as kg
+
+    kg._facade_df_cache.clear()
+    monkeypatch.setattr(kg, "_facade_daily_df", lambda _s: None)
+    gate = KronosGate()
+    fake = _FakePredictor(110.0)
+    gate._predictor = fake
+    store = _store_with("AAA", "BBB", "CCC")
+    sigs = [
+        _signal(symbol="AAA", action="BUY"),
+        _signal(symbol="BBB", action="BUY"),
+        _signal(symbol="CCC", action="BUY"),
+    ]
+    results = gate.check_many(sigs, store, adjust_exits=False)
+    assert len(results) == 3
+    assert all(r.passed for r in results)
+    assert fake.batch_calls == [3]
+    assert fake.last_kwargs is not None
+    assert fake.last_kwargs["pred_len"] == GATE_HORIZON_BARS == 3
+    df_list = fake.last_kwargs["df_list"]
+    x_ts_list = fake.last_kwargs["x_timestamp_list"]
+    y_ts_list = fake.last_kwargs["y_timestamp_list"]
+    seq = len(df_list[0])
+    assert seq >= 60
+    for df, x_ts, y_ts in zip(df_list, x_ts_list, y_ts_list):
+        assert list(df.columns) == ["open", "high", "low", "close", "volume", "amount"]
+        assert not df.isna().any().any()
+        assert len(df) == seq == len(pd.Series(x_ts))
+        assert len(pd.Series(y_ts)) == GATE_HORIZON_BARS
+
+
+def test_check_many_dedupes_same_symbol(monkeypatch):
+    from core import kronos_gate as kg
+
+    kg._facade_df_cache.clear()
+    monkeypatch.setattr(kg, "_facade_daily_df", lambda _s: None)
+    gate = KronosGate()
+    fake = _FakePredictor(110.0)
+    gate._predictor = fake
+    store = _store_with("AAA")
+    sigs = [
+        _signal(symbol="AAA", pattern="pattern_003_double_bottom"),
+        _signal(symbol="AAA", pattern="pattern_004_rounding_bottom"),
+    ]
+    results = gate.check_many(sigs, store, adjust_exits=False)
+    assert len(results) == 2
+    assert all(r.passed for r in results)
+    assert fake.batch_calls == [1]
+
+
+def test_check_many_groups_mixed_lookbacks(monkeypatch):
+    from core import kronos_gate as kg
+
+    kg._facade_df_cache.clear()
+    idx400 = pd.bdate_range("2024-01-02", periods=400)
+    idx80 = pd.bdate_range("2024-01-02", periods=80)
+    long_df = pd.DataFrame(
+        {"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 1e6},
+        index=idx400,
+    )
+    short_df = pd.DataFrame(
+        {"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 1e6},
+        index=idx80,
+    )
+
+    def _facade(symbol: str):
+        return long_df if symbol == "LONG" else short_df
+
+    monkeypatch.setattr(kg, "_facade_daily_df", _facade)
+    gate = KronosGate()
+    fake = _FakePredictor(110.0)
+    gate._predictor = fake
+    empty = OHLCVStore(window=DEFAULT_WINDOW)
+    results = gate.check_many(
+        [_signal(symbol="LONG"), _signal(symbol="SHORT")],
+        empty, adjust_exits=False,
+    )
+    assert len(results) == 2
+    assert all(r.passed for r in results)
+    assert sorted(fake.batch_calls) == [1, 1]
+
+
+def test_check_many_short_frame_fail_closed(monkeypatch):
+    from core import kronos_gate as kg
+
+    kg._facade_df_cache.clear()
+    idx = pd.bdate_range("2024-01-02", periods=20)
+    short = pd.DataFrame(
+        {"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 1e6},
+        index=idx,
+    )
+    long = pd.DataFrame(
+        {"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 1e6},
+        index=pd.bdate_range("2024-01-02", periods=400),
+    )
+
+    def _facade(symbol: str):
+        return long if symbol == "OK" else short
+
+    monkeypatch.setattr(kg, "_facade_daily_df", _facade)
+    gate = KronosGate()
+    fake = _FakePredictor(110.0)
+    gate._predictor = fake
+    empty = OHLCVStore(window=DEFAULT_WINDOW)
+    results = gate.check_many(
+        [_signal(symbol="OK"), _signal(symbol="THIN")],
+        empty, adjust_exits=False,
+    )
+    assert results[0].passed
+    assert not results[1].passed
+    assert "fail-closed" in results[1].reason
+    assert fake.batch_calls == [1]
+
+
+def _ohlcv_df(n: int, close: float = 100.0, *, tz: str | None = None) -> pd.DataFrame:
+    idx = pd.bdate_range("2024-01-02", periods=n, tz=tz)
+    return pd.DataFrame(
+        {"open": close, "high": close + 1, "low": close - 1, "close": close, "volume": 1e6},
+        index=idx,
+    )
+
+
+def test_batch_payload_rejects_nan_without_poisoning_neighbors():
+    from core.kronos_eval import predict_1w_return_batch
+
+    fake = _FakePredictor(110.0)
+    good = _ohlcv_df(LOOKBACK)
+    bad = good.copy()
+    bad.iloc[-1, bad.columns.get_loc("close")] = float("nan")
+    outs = predict_1w_return_batch(
+        fake, [good, bad, good.copy()], sample_count=1, lookback=LOOKBACK,
+    )
+    assert outs[0] is not None and outs[2] is not None
+    assert outs[1] is None
+    assert fake.batch_calls == [2]
+    for df in fake.last_kwargs["df_list"]:
+        assert not df.isna().any().any()
+        assert len(df) == len(fake.last_kwargs["x_timestamp_list"][0])
+
+
+def test_batch_payload_tz_aware_index_is_naive_datetime():
+    from core.kronos_eval import predict_1w_return_batch
+
+    fake = _FakePredictor(110.0)
+    df = _ohlcv_df(LOOKBACK, tz="America/New_York")
+    outs = predict_1w_return_batch(fake, [df], sample_count=1, lookback=LOOKBACK)
+    assert outs[0] is not None
+    x_ts = pd.Series(fake.last_kwargs["x_timestamp_list"][0])
+    assert getattr(x_ts.dt, "tz", None) is None
+    y_ts = pd.Series(fake.last_kwargs["y_timestamp_list"][0])
+    assert len(y_ts) == GATE_HORIZON_BARS
+
+
+def test_cpu_caps_kronos_batch_size(monkeypatch):
+    from core import kronos_eval as ke
+
+    monkeypatch.setattr(ke, "_cuda_available", lambda: False)
+    ke._LOGGED_CPU_BATCH_CAP = False
+    assert ke.effective_kronos_batch_size(16) == ke.CPU_KRONOS_BATCH_CAP
+    assert ke.effective_kronos_batch_size(2) == 2
+    monkeypatch.setattr(ke, "_cuda_available", lambda: True)
+    assert ke.effective_kronos_batch_size(16) == 16
+
+
+def test_cpu_batch_chunks_at_cap(monkeypatch):
+    from core import kronos_eval as ke
+    from core.kronos_eval import predict_1w_return_batch
+
+    monkeypatch.setattr(ke, "_cuda_available", lambda: False)
+    ke._LOGGED_CPU_BATCH_CAP = False
+    fake = _FakePredictor(110.0)
+    frames = [_ohlcv_df(LOOKBACK) for _ in range(9)]
+    outs = predict_1w_return_batch(
+        fake, frames, sample_count=1, lookback=LOOKBACK, batch_size=16,
+    )
+    assert all(o is not None for o in outs)
+    assert fake.batch_calls == [4, 4, 1]
 
 
 if __name__ == "__main__":

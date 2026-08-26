@@ -97,15 +97,21 @@ class Settings(BaseSettings):
     kronos_gate_fail_open: bool = False
     # Load finetuned weights from ~/Kronos/finetuned when present; else base.
     kronos_use_finetuned: bool = False
-    # Off by default: rewriting pattern TP/SL from the 1w forecast made paper
+    # Off by default: rewriting pattern TP/SL from the 3d forecast made paper
     # and "pattern" backtests describe different strategies (paper +81% while
     # Kronos-on formal BT printed PF 0.046). Gate still vetoes on direction;
     # exits stay the pattern's until adjust_exits is proven to lift expectancy.
     kronos_gate_adjust_exits: bool = False
+    # Collect pattern hits, then one KronosPredictor.predict_batch. Off by
+    # default — UI/web "Batch Kronos" checkbox opts in when Kronos is on.
+    kronos_batch_enabled: bool = False
+    # Series per predict_batch call on CUDA. GPU batch = this × sample_count.
+    # No CUDA: runtime caps at 4 (see effective_kronos_batch_size).
+    kronos_batch_size: int = 16
 
     # ── Kronos ranked forecast sleeve (core/kronos_rank_sleeve.py) ──────────
     # Independent entry source beside Toby patterns: cross-sectionally rank
-    # predicted 1w returns and take top_k longs / bottom_k shorts. Off by
+    # predicted 3-trading-day returns and take top_k longs / bottom_k shorts. Off by
     # default (GPU cost per scan + needs BT validation). Does not replace
     # kronos_gate — gate still filters chart-pattern signals only.
     kronos_rank_enabled: bool = False
@@ -199,6 +205,11 @@ class Settings(BaseSettings):
     @classmethod
     def _clamp_screener_backoff(cls, value: float) -> float:
         return max(0.1, value)
+
+    @field_validator("kronos_batch_size")
+    @classmethod
+    def _clamp_kronos_batch_size(cls, value: int) -> int:
+        return max(1, min(int(value), 256))
 
     @property
     def stocks_history_auth(self) -> tuple[str, str]:

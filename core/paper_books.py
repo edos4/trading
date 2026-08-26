@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import os
 import subprocess
 import sys
 import threading
@@ -213,6 +214,7 @@ class PaperBook:
             "defaults": {
                 "kronos_gate": profile.kronos_gate_default,
                 "kronos_rank": profile.kronos_rank_default,
+                "kronos_batch": settings.kronos_batch_enabled,
                 "volume_gate": settings.volume_gate_enabled,
                 "n_symbols": profile.default_n_symbols,
             },
@@ -327,6 +329,7 @@ class PaperBook:
         use_stream: bool,
         kronos_gate: bool,
         kronos_rank: bool,
+        kronos_batch: bool = False,
         volume_gate: bool,
         stream_start: Optional[str] = None,
     ) -> str | None:
@@ -341,7 +344,7 @@ class PaperBook:
             target=self._run_thread,
             args=(
                 n_symbols, extra_symbols, use_stream, kronos_gate, kronos_rank,
-                volume_gate, stream_start,
+                kronos_batch, volume_gate, stream_start,
             ),
             name=f"paper-{self.market}",
             daemon=True,
@@ -416,7 +419,11 @@ class PaperBook:
         cmd = [sys.executable, "main.py", "--papertrade-stream"]
         if start_date:
             cmd.extend(["--papertrade-stream-start", start_date])
-        self._stream_proc = subprocess.Popen(cmd, cwd=str(REPO_ROOT))
+        env = os.environ.copy()
+        url = (settings.stocks_history_url or "").strip()
+        if url:
+            env["STOCKS_HISTORY_URL"] = url
+        self._stream_proc = subprocess.Popen(cmd, cwd=str(REPO_ROOT), env=env)
         for _ in range(20):
             if self._port_open(host, port):
                 return None
@@ -432,6 +439,7 @@ class PaperBook:
         use_stream: bool,
         kronos_gate: bool,
         kronos_rank: bool,
+        kronos_batch: bool,
         volume_gate: bool,
         stream_start: Optional[str],
     ) -> None:
@@ -496,6 +504,7 @@ class PaperBook:
                 ),
                 kronos_gate=kronos_gate,
                 kronos_rank=kronos_rank,
+                kronos_batch=kronos_batch,
                 volume_gate=volume_gate,
                 market=profile.id,
             )
@@ -515,6 +524,7 @@ class PaperBook:
                 f"{stream_note}"
                 f", Kronos gate={'ON' if kronos_gate else 'OFF'}"
                 f", Kronos rank={'ON' if kronos_rank else 'OFF'}"
+                f", Kronos batch={'ON' if kronos_batch else 'OFF'}"
                 f", Volume gate={'ON' if volume_gate else 'OFF'}"
                 f", session={session_label(profile.id)}"
             )
@@ -605,6 +615,7 @@ class PaperBookManager:
         use_stream: bool,
         kronos_gate: bool,
         kronos_rank: bool,
+        kronos_batch: bool = False,
         volume_gate: bool,
         stream_start: Optional[str] = None,
     ) -> str | None:
@@ -622,6 +633,7 @@ class PaperBookManager:
             use_stream=use_stream,
             kronos_gate=kronos_gate,
             kronos_rank=kronos_rank,
+            kronos_batch=kronos_batch,
             volume_gate=volume_gate,
             stream_start=stream_start,
         )
@@ -640,6 +652,7 @@ class PaperBookManager:
                 use_stream=bool(payload.get("use_stream")),
                 kronos_gate=bool(payload.get("kronos_gate")),
                 kronos_rank=bool(payload.get("kronos_rank")),
+                kronos_batch=bool(payload.get("kronos_batch")),
                 volume_gate=bool(payload.get("volume_gate")),
                 stream_start=payload.get("stream_start"),
             )

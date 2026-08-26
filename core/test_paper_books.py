@@ -24,6 +24,7 @@ START_KW = dict(
     use_stream=False,
     kronos_gate=False,
     kronos_rank=False,
+    kronos_batch=False,
     volume_gate=False,
     stream_start=None,
 )
@@ -251,6 +252,31 @@ def test_kronos_infer_lock_does_not_overlap():
     t1.join()
     t2.join()
     assert overlap == []
+
+
+def test_ensure_stream_server_passes_history_url() -> None:
+    from config import settings
+    from core.paper_books import PaperBook
+
+    prev = settings.stocks_history_url
+    book = PaperBook("us")
+    try:
+        settings.stocks_history_url = "https://33ai.edos.uk"
+        with patch("core.paper_books.subprocess.Popen") as popen, \
+             patch("core.paper_books.time.sleep"), \
+             patch.object(book, "_kill_whatever_is_on"), \
+             patch.object(book, "_port_open", return_value=True):
+            err = book._ensure_stream_server("2025-01-02")
+        assert err is None
+        env = popen.call_args.kwargs["env"]
+        assert env["STOCKS_HISTORY_URL"] == "https://33ai.edos.uk"
+        cmd = popen.call_args.args[0]
+        assert "--papertrade-stream" in cmd
+        assert "2025-01-02" in cmd
+    finally:
+        settings.stocks_history_url = prev
+        if book._stream_proc is not None:
+            book._stream_proc = None
 
 
 def test_lamps_payload_is_running_flags_only() -> None:
