@@ -268,6 +268,7 @@ class PaperDashboard:
         self._book_filter = tk.StringVar(value="All")
         self._pos_rows: dict[str, tuple[str, str]] = {}
         self._closed_rows: dict[str, tuple[str, int]] = {}
+        self._log_rows: dict[str, tuple[str, str]] = {}
         self._envelope: dict = {"clocks": {}, "books": {}}
 
         strip = ttk.Frame(self._top, padding=(8, 6))
@@ -385,7 +386,7 @@ class PaperDashboard:
         self._configure_color_tags(self._closed_tree)
 
     def _build_logs_tab(self, parent: ttk.Frame) -> None:
-        frame = ttk.LabelFrame(parent, text="Signal log")
+        frame = ttk.LabelFrame(parent, text="Signal log (double-click a row for chart)")
         frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
         log_cols = [
             ("market", 40, "Mkt"), ("time", 145, "Time"), ("sim_bar", 105, "Sim Bar"),
@@ -401,6 +402,7 @@ class PaperDashboard:
         self._log_tree.tag_configure("accepted", foreground=COLOR_GAIN)
         self._log_tree.tag_configure("filled", foreground=COLOR_BUY)
         self._log_tree.tag_configure("rejected", foreground=COLOR_LOSS)
+        self._log_tree.bind("<Double-1>", self._on_log_double_click)
 
     def _build_performance_tab(self, parent: ttk.Frame) -> None:
         body = ttk.PanedWindow(parent, orient=tk.HORIZONTAL)
@@ -516,6 +518,20 @@ class PaperDashboard:
             return
         market, index = entry
         self._open_chart(market, "closed", None, index)
+
+    def _on_log_double_click(self, event) -> None:
+        if self._log_tree.identify_region(event.x, event.y) != "cell":
+            return
+        sel = self._log_tree.selection()
+        if not sel:
+            return
+        entry = self._log_rows.get(sel[0])
+        if entry is None:
+            return
+        market, symbol = entry
+        if not symbol:
+            return
+        self._open_chart(market, "log", symbol, None)
 
     def _poll(self) -> None:
         if self._closed:
@@ -661,6 +677,7 @@ class PaperDashboard:
 
     def _refresh_logs(self) -> None:
         self._log_tree.delete(*self._log_tree.get_children())
+        self._log_rows = {}
         rows = []
         for book in self._visible_books():
             mkt = book.get("market")
@@ -686,7 +703,7 @@ class PaperDashboard:
             status = str(row.get("status") or "")
             conf = row.get("confidence")
             price = row.get("price")
-            self._log_tree.insert(
+            item_id = self._log_tree.insert(
                 "", tk.END, iid=f"log-{idx}",
                 values=(
                     mkt.upper(),
@@ -703,6 +720,7 @@ class PaperDashboard:
                 ),
                 tags=(status, f"book-{mkt}"),
             )
+            self._log_rows[item_id] = (mkt, row.get("symbol") or "")
         self._log_tree.set_sort(*self._log_sort)
 
     def _refresh_performance(self) -> None:

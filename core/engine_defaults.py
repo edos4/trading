@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from core.market import format_money
 from data.ohlcv_store import OHLCVStore
 from patterns.base_pattern import TradeSignal
 from utils.logger import log
@@ -39,6 +40,8 @@ class EngineDefaults:
     # Long+short notional / equity. 0 = unlimited.
     max_gross_exposure_pct: float = 1.0
     trailing_activation_default: float = 0.02
+    # US book defaults. PH overlays 5% / 0.80% via MarketProfile in
+    # backtest_kwargs (PSE round-trip ~0.70% made a 0.15% floor a −0.6% tax).
     # Arm entry floor once +3%. 1.5% armed too early — 2026-08-18 paper had
     # five breakeven_stop exits at ~−0.1% after a brief +1.5% flicker.
     breakeven_trigger_pct: float | None = 0.03
@@ -78,6 +81,8 @@ def backtest_kwargs(**overrides: Any) -> dict[str, Any]:
     profile = get_market(market)
     d["market"] = profile.id
     d["txn_cost_pct"] = profile.txn_cost_pct
+    d["breakeven_trigger_pct"] = profile.breakeven_trigger_pct
+    d["breakeven_buffer_pct"] = profile.breakeven_buffer_pct
     d["account_value"] = profile.paper_initial_capital
     d["long_only"] = profile.long_only
     d["min_share_price"] = profile.min_share_price
@@ -147,6 +152,8 @@ def passes_min_share_price(
 def describe_min_share_price_rejection(
     signal: TradeSignal,
     min_share_price: float | None = None,
+    *,
+    market: str | None = None,
 ) -> str | None:
     """Block entries on sub-floor share prices (gap/wick risk on OTC-style names)."""
     if min_share_price is None or min_share_price <= 0:
@@ -154,14 +161,16 @@ def describe_min_share_price_rejection(
     if signal.action == "CLOSE" or signal.price is None or signal.price <= 0:
         return None
     if signal.price < min_share_price:
+        px = format_money(signal.price, market)
+        floor = format_money(min_share_price, market)
         log.debug(
             f"EntryGate | {signal.symbol} {signal.pattern} price "
-            f"${signal.price:.4f} < min ${min_share_price:.2f} — skip"
+            f"{px} < min {floor} — skip"
         )
         return (
-            f"Min share-price gate: {signal.symbol} entry ${signal.price:.2f} is "
-            f"below the ${min_share_price:.2f} floor — sub-dollar/penny names "
-            f"are excluded after gap-risk losses on the US paper book."
+            f"Min share-price gate: {signal.symbol} entry {px} is "
+            f"below the {floor} floor — names under that price are excluded "
+            f"after gap-risk losses on the US paper book."
         )
     return None
 
@@ -181,6 +190,7 @@ def describe_regime_rejection(
     store: OHLCVStore,
     *,
     enabled: bool | None = None,
+    market: str | None = None,
 ) -> str | None:
     """Human-readable regime reject, or None if the signal clears the filter."""
     use = ENGINE.regime_filter if enabled is None else enabled
@@ -199,6 +209,8 @@ def describe_regime_rejection(
         return None
     pct_vs = (current_close - current_sma200) / current_sma200 * 100.0
     band = ENGINE.regime_hysteresis_pct * 100.0
+    close_txt = format_money(current_close, market)
+    sma_txt = format_money(current_sma200, market)
 
     if signal.action == "BUY" and pct_vs < -band:
         log.debug(
@@ -207,8 +219,8 @@ def describe_regime_rejection(
         return (
             f"SMA200 regime filter: longs only when price is above the 200-bar SMA "
             f"(treat as uptrend). {signal.symbol} {signal.timeframe} close "
-            f"${current_close:.2f} is {abs(pct_vs):.2f}% below SMA200 "
-            f"${current_sma200:.2f} — counter-trend BUY blocked."
+            f"{close_txt} is {abs(pct_vs):.2f}% below SMA200 "
+            f"{sma_txt} — counter-trend BUY blocked."
         )
     if signal.action == "SELL" and pct_vs > band:
         log.debug(
@@ -217,8 +229,8 @@ def describe_regime_rejection(
         return (
             f"SMA200 regime filter: shorts only when price is below the 200-bar SMA "
             f"(treat as downtrend). {signal.symbol} {signal.timeframe} close "
-            f"${current_close:.2f} is {pct_vs:.2f}% above SMA200 "
-            f"${current_sma200:.2f} — counter-trend SELL blocked."
+            f"{close_txt} is {pct_vs:.2f}% above SMA200 "
+            f"{sma_txt} — counter-trend SELL blocked."
         )
     return None
 

@@ -627,7 +627,9 @@ async def main(args: argparse.Namespace | None = None) -> None:
     if args.papertrade_stream:
         from data.stream_server import run_stream_server
 
-        await run_stream_server(start_date=args.papertrade_stream_start)
+        await run_stream_server(
+            start_date=args.papertrade_stream_start, market=args.market,
+        )
         return
 
     if args.check_db:

@@ -330,7 +330,12 @@ class MarketScanner:
         if not self._symbols:
             return None
         wanted = {s.upper() for s in self._symbols}
-        for symbol in ("SPY", "AAPL", "MSFT", "QQQ"):
+        refs = (
+            ("BDO", "SM", "ICT", "ALI", "BPI")
+            if self._market == "ph"
+            else ("SPY", "AAPL", "MSFT", "QQQ")
+        )
+        for symbol in refs:
             if symbol in wanted:
                 return next(s for s in self._symbols if s.upper() == symbol)
         return self._symbols[0]
@@ -342,16 +347,33 @@ class MarketScanner:
         self.stats["dead_symbols"] = len(self._dead_symbols)
         log.warning(f"Scan | drop {symbol} for this run — {reason}")
 
+    def _pin_candidates(self) -> list[str]:
+        """Liquid names first; skip symbols already dropped as dead."""
+        ordered: list[str] = []
+        seen: set[str] = set()
+        primary = self._reference_symbol()
+        if primary:
+            ordered.append(primary)
+            seen.add(primary.upper())
+        for symbol in self._symbols:
+            key = symbol.upper()
+            if key in seen or symbol in self._dead_symbols:
+                continue
+            ordered.append(symbol)
+            seen.add(key)
+            if len(ordered) >= 12:
+                break
+        return ordered
+
     async def _pin_replay_asof(self, feed_sessions: list | None) -> None:
         pin = getattr(self._tv, "pin_replay_asof", None)
         if pin is None or not feed_sessions:
             return
-        ref = self._reference_symbol()
-        if ref is None:
-            return
-        asof_day = await pin(ref, feed_sessions[0])
-        if asof_day:
-            log.info(f"Scan | replay asof pinned to {asof_day} via {ref}")
+        for ref in self._pin_candidates():
+            asof_day = await pin(ref, feed_sessions[0])
+            if asof_day:
+                log.info(f"Scan | replay asof pinned to {asof_day} via {ref}")
+                return
 
     # ── Main async loop ────────────────────────────────────────────────────────
     async def run(self) -> None:
@@ -546,6 +568,11 @@ class MarketScanner:
                             self._append_signal_log(
                                 pending, status="filled", reason=fill_reason,
                             )
+                        elif fill_reason.startswith("Session "):
+                            # Live PH after hours: keep the deferred fill for
+                            # the next AM/PM session. Stream replay sets
+                            # assume_session_open so this branch is unused.
+                            self._pending_entries[(symbol, timeframe)] = pending
                         else:
                             self.stats["signals_rejected"] += 1
                             self._append_signal_log(
@@ -702,7 +729,7 @@ class MarketScanner:
             return
 
         price_reason = describe_min_share_price_rejection(
-            signal, self._min_share_price,
+            signal, self._min_share_price, market=self._market,
         )
         if price_reason is not None:
             log.info(
@@ -713,7 +740,9 @@ class MarketScanner:
             self._append_signal_log(signal, status="rejected", reason=price_reason)
             return
 
-        regime_reason = describe_regime_rejection(signal, self._store)
+        regime_reason = describe_regime_rejection(
+            signal, self._store, market=self._market,
+        )
         if regime_reason is not None:
             log.info(
                 f"Signal REJECTED by regime filter — {signal.symbol} "

@@ -45,6 +45,10 @@ class MarketProfile:
     paper_initial_capital: float
     max_daily_loss: float
     txn_cost_pct: float
+    # Engine breakeven is per book: a “scratch” must clear round-trip costs.
+    # US 0.10% RT → 3% trigger / 0.15% buffer. PH ~0.70% RT → 5% / 0.80%.
+    breakeven_trigger_pct: float | None
+    breakeven_buffer_pct: float
     long_only: bool
     kronos_gate_default: bool
     kronos_rank_default: bool
@@ -70,6 +74,8 @@ US = MarketProfile(
     paper_initial_capital=100_000.0,
     max_daily_loss=1_500.0,
     txn_cost_pct=0.001,
+    breakeven_trigger_pct=0.03,
+    breakeven_buffer_pct=0.0015,
     long_only=False,
     kronos_gate_default=True,
     kronos_rank_default=False,
@@ -95,6 +101,8 @@ PH = MarketProfile(
     paper_initial_capital=1_000_000.0,
     max_daily_loss=15_000.0,
     txn_cost_pct=0.0035,  # ~0.70% round trip (buy~0.295% + sell~0.395%)
+    breakeven_trigger_pct=0.05,  # skip +3% flicker (PH paper: PNB 003 in 3 bars)
+    breakeven_buffer_pct=0.008,  # ≥ RT cost so BE is a ₱ scratch, not −0.6%
     long_only=True,
     kronos_gate_default=False,
     kronos_rank_default=False,
@@ -570,6 +578,8 @@ def markets_payload() -> list[dict]:
             "tv_exchange": p.tv_exchange,
             "default_n_symbols": p.default_n_symbols,
             "txn_cost_pct": p.txn_cost_pct,
+            "breakeven_trigger_pct": p.breakeven_trigger_pct,
+            "breakeven_buffer_pct": p.breakeven_buffer_pct,
             "account_value": p.paper_initial_capital,
             "kronos_gate": p.kronos_gate_default,
             "kronos_rank": p.kronos_rank_default,

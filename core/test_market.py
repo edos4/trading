@@ -47,12 +47,16 @@ def test_resolve_and_profiles():
     assert PH.long_only and PH.currency == "PHP"
     assert PH.tv_screener == "philippines" and PH.tv_exchange == "PSE"
     assert US.txn_cost_pct == 0.001
+    assert US.breakeven_trigger_pct == 0.03
+    assert US.breakeven_buffer_pct == 0.0015
+    assert abs(PH.txn_cost_pct - 0.0035) < 1e-9
+    assert PH.breakeven_trigger_pct == 0.05
+    assert PH.breakeven_buffer_pct == 0.008
     assert US.default_n_symbols == 50
     assert US.min_adv == 20_000_000.0
     assert US.min_share_price == 5.0
     assert PH.min_share_price is None
     assert US.universe_order == "value"
-    assert abs(PH.txn_cost_pct - 0.0035) < 1e-9
     assert PH.paper_account_path != US.paper_account_path
 
 
@@ -158,11 +162,15 @@ def test_engine_kwargs_ph_overlay():
 
     us = backtest_kwargs(market="us")
     assert us["txn_cost_pct"] == ENGINE.txn_cost_pct
+    assert us["breakeven_trigger_pct"] == ENGINE.breakeven_trigger_pct
+    assert us["breakeven_buffer_pct"] == ENGINE.breakeven_buffer_pct
     assert us["long_only"] is False
     ph = backtest_kwargs(market="ph")
     assert ph["market"] == "ph"
     assert ph["long_only"] is True
     assert ph["txn_cost_pct"] == PH.txn_cost_pct
+    assert ph["breakeven_trigger_pct"] == PH.breakeven_trigger_pct
+    assert ph["breakeven_buffer_pct"] == PH.breakeven_buffer_pct
     assert ph["account_value"] == PH.paper_initial_capital
 
 

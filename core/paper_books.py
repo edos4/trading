@@ -178,7 +178,10 @@ class PaperBook:
         }
         window = session_window(profile.id)
         session_idle = (
-            profile.id == MARKET_PH and running and window == "closed"
+            profile.id == MARKET_PH
+            and running
+            and window == "closed"
+            and not use_stream
         )
         display_status = status
         if session_idle and not error:
@@ -271,6 +274,7 @@ class PaperBook:
 
         trade = None
         current = None
+        view_side = side
         if side == "open":
             if not symbol:
                 return {"error": "symbol is required for open charts"}
@@ -283,8 +287,24 @@ class PaperBook:
             if index is None or index < 0 or index >= len(closed):
                 return {"error": "closed chart needs a valid row index"}
             trade = closed[index]
+        elif side == "log":
+            if not symbol:
+                return {"error": "symbol is required for log charts"}
+            trade = account.positions.get(symbol.upper()) or account.positions.get(symbol)
+            if trade is not None:
+                current = account.last_price(trade.symbol, trade.entry_price)
+                view_side = "open"
+            else:
+                needle = symbol.upper()
+                for closed_trade in reversed(account.closed):
+                    if str(closed_trade.symbol).upper() == needle:
+                        trade = closed_trade
+                        view_side = "closed"
+                        break
+                if trade is None:
+                    return self._chart_from_log_symbol(account, scanner, symbol)
         else:
-            return {"error": "side must be open or closed"}
+            return {"error": "side must be open, closed, or log"}
 
         timeframe = trade.timeframe or "1d"
         df = None
@@ -310,14 +330,61 @@ class PaperBook:
                 entry=trade.entry_price,
                 stop=trade.stop_loss,
                 target=trade.take_profit,
-                exit_price=trade.exit_price if side == "closed" else None,
-                exit_reason=trade.exit_reason if side == "closed" else None,
+                exit_price=trade.exit_price if view_side == "closed" else None,
+                exit_reason=trade.exit_reason if view_side == "closed" else None,
                 current=current,
                 entry_time=trade.sim_entry_date or trade.entry_date,
                 exit_time=(
-                    None if side == "open"
+                    None if view_side == "open"
                     else (trade.sim_exit_date or trade.exit_date)
                 ),
+            )
+        except Exception as exc:
+            log.exception("PaperBook | trade chart payload failed")
+            return {"error": f"chart data failed: {exc}"}
+
+    def _chart_from_log_symbol(
+        self,
+        account: PaperAccount,
+        scanner: Optional[MarketScanner],
+        symbol: str,
+    ) -> dict[str, Any]:
+        from analysis.chart_renderer import build_trade_viewer_payload
+
+        needle = symbol.upper()
+        log_row: dict[str, Any] = {}
+        for row in reversed(load_signal_log(account.market)):
+            if str(row.get("symbol") or "").upper() == needle:
+                log_row = row
+                break
+        ticker = str(log_row.get("symbol") or symbol)
+        timeframe = str(log_row.get("timeframe") or "1d")
+        df = None
+        session_tz = get_market(account.market).session_tz
+        if scanner is not None:
+            df = scanner.ohlcv_frame(ticker, timeframe, min_bars=2)
+        if df is None or len(df) < 2:
+            from data.history import load_daily_ohlcv_df
+            df = load_daily_ohlcv_df(
+                ticker, tv_fallback=False, market=account.market,
+            )
+        if df is None or len(df) < 2:
+            return {"error": f"no OHLCV for {ticker} {timeframe}"}
+        price = log_row.get("price")
+        try:
+            entry = float(price) if price is not None else None
+        except (TypeError, ValueError):
+            entry = None
+        try:
+            return build_trade_viewer_payload(
+                df,
+                symbol=ticker,
+                timeframe=timeframe,
+                pattern=log_row.get("pattern"),
+                action=log_row.get("action"),
+                session_tz=session_tz,
+                entry=entry,
+                entry_time=log_row.get("sim_bar") or log_row.get("ts"),
             )
         except Exception as exc:
             log.exception("PaperBook | trade chart payload failed")
@@ -418,10 +485,14 @@ class PaperBook:
                 if start_date
                 else "Starting paper trade stream server..."
             )
-        cmd = [sys.executable, "main.py", "--papertrade-stream"]
+        cmd = [
+            sys.executable, "main.py", "--papertrade-stream",
+            "--market", self.market,
+        ]
         if start_date:
             cmd.extend(["--papertrade-stream-start", start_date])
         env = os.environ.copy()
+        env["MARKET"] = self.market
         url = (settings.stocks_history_url or "").strip()
         if url:
             env["STOCKS_HISTORY_URL"] = url
@@ -495,6 +566,7 @@ class PaperBook:
         with self.lock:
             self.loop = loop
             self.account = PaperAccount.load(market=profile.id)
+            self.account.assume_session_open = bool(use_stream)
             scanner = MarketScanner(
                 symbols=symbols,
                 exchange_overrides=exchange_overrides,

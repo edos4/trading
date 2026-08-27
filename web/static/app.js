@@ -310,8 +310,15 @@ function initBacktest() {
       setVal("p-account_value", spec.account_value);
       setVal("p-kronos_gate", spec.kronos_gate);
       setVal("p-kronos_rank", spec.kronos_rank);
+      if (spec.breakeven_trigger_pct != null) {
+        setVal("p-breakeven_trigger_pct", spec.breakeven_trigger_pct);
+      }
+      if (spec.breakeven_buffer_pct != null) {
+        setVal("p-breakeven_buffer_pct", spec.breakeven_buffer_pct);
+      }
       syncBacktestBatchKronos();
     });
+    marketSel.dispatchEvent(new Event("change"));
   }
   const gateEl = document.getElementById("p-kronos_gate");
   const rankEl = document.getElementById("p-kronos_rank");
@@ -765,6 +772,7 @@ function initPaper() {
     for (const row of logRows) {
       const tr = document.createElement("tr");
       tr.classList.add(`book-${row.market || "us"}`);
+      tr.title = "Double-click to open chart";
       const stCls = `status-${row.status || ""}`;
       tr.innerHTML =
         `<td><span class="pill mkt-${esc(row.market)}">${esc((row.market || "").toUpperCase())}</span></td>` +
@@ -778,6 +786,9 @@ function initPaper() {
         `<td>${row.price == null ? "—" : Number(row.price).toFixed(2)}</td>` +
         `<td class="${stCls}">${esc(row.status)}</td>` +
         `<td title="${esc(row.reason)}">${esc(row.reason)}</td>`;
+      if (row.symbol) {
+        tr.addEventListener("dblclick", () => openTradeChart("log", row.market, row.symbol));
+      }
       logsBody.appendChild(tr);
     }
   }

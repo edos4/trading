@@ -52,8 +52,11 @@ def demo():
 
     assert passes_min_share_price(_sig(price=5.0), min_share_price=5.0)
     assert not passes_min_share_price(_sig(price=4.99), min_share_price=5.0)
-    price_reason = describe_min_share_price_rejection(_sig(price=2.0), 5.0)
+    price_reason = describe_min_share_price_rejection(_sig(price=2.0), 5.0, market="us")
     assert price_reason is not None and "Min share-price gate" in price_reason
+    assert "$2.00" in price_reason
+    ph_price = describe_min_share_price_rejection(_sig(price=2.0), 5.0, market="ph")
+    assert "₱2.00" in ph_price
     assert passes_min_share_price(_sig(price=2.0), min_share_price=None)
 
     # Short history → regime no-op (same as backtester).
@@ -62,10 +65,18 @@ def demo():
     # 200+ bars: BUY well below SMA200 rejected.
     below = [100.0] * 200 + [50.0]
     assert not passes_regime_filter(_sig(action="BUY"), _Store(below))
-    buy_reason = describe_regime_rejection(_sig(action="BUY"), _Store(below))
+    buy_reason = describe_regime_rejection(
+        _sig(action="BUY"), _Store(below), market="us",
+    )
     assert buy_reason is not None
     assert "SMA200 regime filter" in buy_reason
     assert "counter-trend BUY blocked" in buy_reason
+    assert "$50.00" in buy_reason
+    ph_reason = describe_regime_rejection(
+        _sig(action="BUY"), _Store(below), market="ph",
+    )
+    assert "₱50.00" in ph_reason
+    assert "$" not in ph_reason
     # SELL below SMA200 allowed.
     assert passes_regime_filter(_sig(action="SELL"), _Store(below))
     assert describe_regime_rejection(_sig(action="SELL"), _Store(below)) is None
@@ -115,6 +126,7 @@ def demo():
     assert bt["max_position_pct"] == 0.10
     assert bt["max_gross_exposure_pct"] == 1.0
     assert bt["breakeven_trigger_pct"] == 0.03
+    assert bt["breakeven_buffer_pct"] == 0.0015
     assert bt["min_share_price"] == 5.0
     assert "regime_hysteresis_pct" not in bt
     assert "regime_exempt_patterns" not in bt
