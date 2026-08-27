@@ -63,6 +63,7 @@ def test_load_symbol_db_uses_history_api_not_local_postgres():
     assert out == rows
     load.assert_called_once_with(
         "AAPL", after_ts=None, limit=settings.papertrade_stream_lookback_bars,
+        market=None,
     )
     get_conn.assert_not_called()
 
@@ -87,5 +88,38 @@ def test_load_symbol_db_uses_after_ts_when_start_set():
     lookback = settings.papertrade_stream_lookback_bars
     load.assert_called_once_with(
         "AAPL", after_ts=start_ts - lookback * 86400 * 2, limit=None,
+        market=None,
     )
     get_conn.assert_not_called()
+
+
+def test_load_symbol_db_passes_ph_market():
+    from config import settings
+
+    rows = [{"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "timestamp": 1}]
+    with patch("data.history.load_daily_tape_rows", return_value=rows) as load:
+        out = _load_symbol_db("BDO", market="ph")
+    assert out == rows
+    load.assert_called_once_with(
+        "BDO", after_ts=None, limit=settings.papertrade_stream_lookback_bars,
+        market="ph",
+    )
+
+
+def test_stream_server_tape_load_uses_market():
+    rows = [{"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "timestamp": 1}]
+    server = StreamServer(market="ph")
+    with patch("data.stream_server._load_symbol_db", return_value=rows) as load:
+        tape = server._tape_for("BDO")
+    assert tape is not None
+    load.assert_called_once_with("BDO", start_ts=server._start_ts, market="ph")
+
+
+def test_pin_asof_keeps_existing_control_date_when_symbol_missing():
+    server = StreamServer()
+    liquid = [
+        {"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "timestamp": 1},
+    ]
+    server._tapes = {"BDO": _SymbolTape(liquid)}
+    assert server.pin_asof("BDO") == 1
+    assert server.pin_asof("ICT") == 1

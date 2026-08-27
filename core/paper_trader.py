@@ -191,6 +191,9 @@ class PaperAccount:
         # clock could age a daily position using a different timeframe's
         # latest candle, producing nonsensical open-position ages.
         self._sim_now_by_timeframe: dict[str, datetime] = {}
+        # Historical paper stream replays closed daily bars after hours.
+        # Wall-clock PSE AM/PM must not block those assumed fills.
+        self.assume_session_open = False
         # The scanner runs in a background thread with its own asyncio loop
         # (see ui/paper_dashboard.py) while the UI polls this same account
         # from the Tk main thread every second. Without a lock, the UI's
@@ -356,7 +359,10 @@ class PaperAccount:
                 f"Long-only {profile.label}: SELL/short signals are disabled "
                 f"(PSE retail shorts need SBL)."
             )
-        if not may_assume_fill(self.market):
+        if (
+            not self.assume_session_open
+            and not may_assume_fill(self.market)
+        ):
             window = session_label(self.market)
             return False, (
                 f"Session {window}: paper will not assume a fill outside continuous "
@@ -479,8 +485,8 @@ class PaperAccount:
         position.sim_entry_date = position.entry_date
         position.entry_date = datetime.now(timezone.utc)
         position.exit_date = position.entry_date
-        position.breakeven_trigger_pct = ENGINE.breakeven_trigger_pct
-        position.breakeven_buffer_pct = ENGINE.breakeven_buffer_pct
+        position.breakeven_trigger_pct = profile.breakeven_trigger_pct
+        position.breakeven_buffer_pct = profile.breakeven_buffer_pct
         notional = position.entry_price * position.qty
         if signal.action == "BUY":
             self.cash -= notional

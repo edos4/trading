@@ -233,12 +233,14 @@ progress { width: 180px; height: 0.7rem; }
 .loss { color: var(--danger); }
 
 #paper-pos tbody tr,
-#paper-closed tbody tr {
+#paper-closed tbody tr,
+#paper-logs tbody tr {
   cursor: pointer;
   user-select: none;
 }
 #paper-pos tbody tr:hover,
-#paper-closed tbody tr:hover {
+#paper-closed tbody tr:hover,
+#paper-logs tbody tr:hover {
   background: #243041;
 }
 

@@ -121,5 +121,16 @@ def _demo_body():
     print("deferred entry fill: all checks passed")
 
 
+def test_ph_reference_symbol_prefers_bdo():
+    scanner = MarketScanner(symbols=["ICT", "BDO", "ALI"], market="ph")
+    assert scanner._reference_symbol() == "BDO"
+    assert scanner._pin_candidates()[0] == "BDO"
+
+
+def test_us_reference_symbol_prefers_spy():
+    scanner = MarketScanner(symbols=["NVDA", "AAPL", "SPY"], market="us")
+    assert scanner._reference_symbol() == "SPY"
+
+
 if __name__ == "__main__":
     demo()

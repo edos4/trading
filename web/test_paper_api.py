@@ -145,6 +145,13 @@ class WebPaperApiTests(unittest.TestCase):
         r = self.client.get("/api/paper/export?market=eu")
         self.assertEqual(r.status_code, 400)
 
+    def test_chart_accepts_log_side(self) -> None:
+        self._login()
+        with patch("web.app.paper_books.chart", return_value={"title": "TSLA"}) as chart:
+            r = self.client.get("/api/paper/chart?side=log&market=us&symbol=TSLA")
+            self.assertEqual(r.status_code, 200)
+            chart.assert_called_once_with("us", side="log", symbol="TSLA", index=None)
+
     def test_reset_logs_validates_market(self) -> None:
         self._login()
         with patch("web.app.paper_books.reset_logs") as reset_logs:

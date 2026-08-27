@@ -228,3 +228,69 @@ def test_pattern_cap_and_min_notional_skip_fill():
     finally:
         settings.max_open_per_pattern = old_cap
         settings.min_position_notional = old_min
+
+
+def test_ph_stream_ignores_wall_clock_session():
+    from unittest.mock import patch
+
+    from config import settings
+    from data.tv_client import OHLCVCandle
+    from patterns.base_pattern import TradeSignal
+
+    candle = OHLCVCandle(
+        open=57.6, high=57.7, low=57.5, close=57.65, volume=1_000,
+        timestamp=datetime(2026, 1, 6, tzinfo=timezone.utc),
+    )
+    signal = TradeSignal(
+        symbol="PNB", timeframe="1d", pattern="test",
+        action="BUY", price=57.65, confidence=0.9, qty=10,
+        stop_loss=54.0, take_profit=70.0,
+    )
+    old_min = settings.min_position_notional
+    try:
+        settings.min_position_notional = 0
+        live = PaperAccount(initial_capital=1_000_000.0, market="ph", slippage_pct=0.0)
+        live.assume_session_open = False
+        with patch("core.paper_trader.may_assume_fill", return_value=False):
+            ok, reason = live.open_position(signal, candle, _EmptyStore())
+        assert not ok
+        assert "Session closed" in reason
+
+        replay = PaperAccount(initial_capital=1_000_000.0, market="ph", slippage_pct=0.0)
+        replay.assume_session_open = True
+        with patch("core.paper_trader.may_assume_fill", return_value=False):
+            ok, reason = replay.open_position(signal, candle, _EmptyStore())
+        assert ok, reason
+        assert "PNB" in replay.positions
+        pos = replay.positions["PNB"]
+        assert pos.breakeven_trigger_pct == 0.05
+        assert pos.breakeven_buffer_pct == 0.008
+    finally:
+        settings.min_position_notional = old_min
+
+
+def test_us_paper_keeps_engine_breakeven():
+    from config import settings
+    from data.tv_client import OHLCVCandle
+    from patterns.base_pattern import TradeSignal
+
+    candle = OHLCVCandle(
+        open=100, high=100, low=100, close=100, volume=1,
+        timestamp=datetime(2026, 1, 2, tzinfo=timezone.utc),
+    )
+    signal = TradeSignal(
+        symbol="AAPL", timeframe="1d", pattern="test",
+        action="BUY", price=100.0, confidence=0.9, qty=10,
+        stop_loss=94.0, take_profit=120.0,
+    )
+    old_min = settings.min_position_notional
+    try:
+        settings.min_position_notional = 0
+        acct = PaperAccount(initial_capital=100_000.0, market="us", slippage_pct=0.0)
+        ok, reason = acct.open_position(signal, candle, _EmptyStore())
+        assert ok, reason
+        pos = acct.positions["AAPL"]
+        assert pos.breakeven_trigger_pct == 0.03
+        assert pos.breakeven_buffer_pct == 0.0015
+    finally:
+        settings.min_position_notional = old_min

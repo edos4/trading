@@ -129,10 +129,15 @@ class _SymbolTape:
         return None
 
 
-def _load_symbol_db(symbol: str, start_ts: int | None = None) -> list[dict] | None:
+def _load_symbol_db(
+    symbol: str,
+    start_ts: int | None = None,
+    market: str | None = None,
+) -> list[dict] | None:
     """Load a symbol's daily history from GET /api/history.
 
     Near-end replay fetches only lookback bars; a start date uses after_ts.
+    `market=ph` maps BDO → BDO.PS so the stream does not 404 / hit US SM.
     """
     lookback = _stream_history_bars()
     after_ts = None
@@ -144,17 +149,22 @@ def _load_symbol_db(symbol: str, start_ts: int | None = None) -> list[dict] | No
     try:
         from data.history import load_daily_tape_rows
 
-        return load_daily_tape_rows(symbol, after_ts=after_ts, limit=limit)
+        return load_daily_tape_rows(
+            symbol, after_ts=after_ts, limit=limit, market=market,
+        )
     except Exception as exc:
         log.warning(f"StreamServer | history facade failed for {symbol}: {exc}")
         return None
 
 
 class StreamServer:
-    def __init__(self, start_date: str | None = None):
+    def __init__(self, start_date: str | None = None, market: str | None = None):
+        from core.market import resolve_market_id
+
         self._start_ts = _parse_start_ts(
             start_date if start_date is not None else settings.papertrade_stream_start_date
         )
+        self._market = resolve_market_id(market)
         self._tapes: dict[str, _SymbolTape] = {}
         self._asof_ts: int | None = None
         self._tape_lock = threading.Lock()
@@ -168,7 +178,9 @@ class StreamServer:
             tape = self._tapes.get(symbol)
             if tape is not None:
                 return tape
-        rows = _load_symbol_db(symbol, start_ts=self._start_ts)
+        rows = _load_symbol_db(
+            symbol, start_ts=self._start_ts, market=self._market,
+        )
         with self._tape_lock:
             existing = self._tapes.get(symbol)
             if existing is not None:
@@ -185,15 +197,16 @@ class StreamServer:
 
     def pin_asof(self, symbol: str) -> int | None:
         """Pin the replay control date to `symbol`'s current cursor bar."""
+        if self._asof_ts is not None:
+            return self._asof_ts
         tape = self._tape_for(symbol)
         if tape is None or not tape.rows:
             return None
-        if self._asof_ts is None:
-            self._asof_ts = int(tape.rows[tape.cursor]["timestamp"])
-            log.info(
-                f"StreamServer | pinned asof={asof_key(self._asof_ts)} "
-                f"from {symbol.upper()}"
-            )
+        self._asof_ts = int(tape.rows[tape.cursor]["timestamp"])
+        log.info(
+            f"StreamServer | pinned asof={asof_key(self._asof_ts)} "
+            f"from {symbol.upper()}"
+        )
         return self._asof_ts
 
     def advance(self) -> int:
@@ -323,15 +336,17 @@ class StreamServer:
         async with websockets.serve(self._handle, host, port, **LOCAL_STREAM_WS):
             log.info(
                 f"Paper trade stream server | {host}:{port} | "
-                f"source={source} | "
+                f"market={self._market} | source={source} | "
                 f"start={start_note} | scanner-controlled atomic advancement"
             )
             await asyncio.Future()
 
 
-async def run_stream_server(start_date: str | None = None) -> None:
+async def run_stream_server(
+    start_date: str | None = None, market: str | None = None,
+) -> None:
     from data.history import enable_ui_web_history
 
     # Child process of --web/--ui: inject https://33ai.edos.uk when URL is empty.
     enable_ui_web_history()
-    await StreamServer(start_date=start_date).run()
+    await StreamServer(start_date=start_date, market=market).run()

@@ -195,6 +195,65 @@ def test_ticker_collision_chart_uses_market():
         assert ph_chart["entry"] == 100.0
 
 
+def test_log_chart_uses_open_then_closed_then_symbol():
+    df = pd.DataFrame(
+        {
+            "open": [1.0, 2.0],
+            "high": [1.0, 2.0],
+            "low": [1.0, 2.0],
+            "close": [1.0, 2.0],
+            "volume": [1.0, 1.0],
+        },
+        index=pd.date_range("2026-01-01", periods=2, tz="UTC"),
+    )
+
+    def _payload(_df, **kw):
+        return {
+            "symbol": kw["symbol"],
+            "entry": kw["entry"],
+            "exit_price": kw.get("exit_price"),
+            "pattern": kw.get("pattern"),
+        }
+
+    with patch("core.paper_books.PaperAccount.save"):
+        mgr = PaperBookManager()
+        with patch("data.history.load_daily_ohlcv_df", return_value=df):
+            with patch(
+                "analysis.chart_renderer.build_trade_viewer_payload",
+                side_effect=_payload,
+            ):
+                mgr.books["us"].account.positions["AAPL"] = _open_trade("AAPL", 10.0)
+                open_chart = mgr.chart("us", side="log", symbol="AAPL")
+                assert open_chart["entry"] == 10.0
+                assert open_chart["exit_price"] is None
+
+                del mgr.books["us"].account.positions["AAPL"]
+                closed = _open_trade("AAPL", 12.0)
+                closed.exit_price = 13.0
+                mgr.books["us"].account.closed.append(closed)
+                closed_chart = mgr.chart("us", side="log", symbol="AAPL")
+                assert closed_chart["entry"] == 12.0
+                assert closed_chart["exit_price"] == 13.0
+
+                mgr.books["us"].account.closed.clear()
+                prev = sls._log_dir
+                sls._log_dir = Path(tempfile.mkdtemp())
+                try:
+                    sls.append_signal_log("us", {
+                        "symbol": "TSLA",
+                        "status": "rejected",
+                        "pattern": "pattern_003_double_bottom",
+                        "action": "BUY",
+                        "price": 250.0,
+                        "timeframe": "1d",
+                    })
+                    log_chart = mgr.chart("us", side="log", symbol="TSLA")
+                    assert log_chart["entry"] == 250.0
+                    assert log_chart["pattern"] == "pattern_003_double_bottom"
+                finally:
+                    sls._log_dir = prev
+
+
 def test_stream_exclusive():
     with _manager() as mgr:
         mgr.books["us"].running = True
@@ -272,14 +331,51 @@ def test_ensure_stream_server_passes_history_url() -> None:
         assert env["STOCKS_HISTORY_URL"] == "https://33ai.edos.uk"
         cmd = popen.call_args.args[0]
         assert "--papertrade-stream" in cmd
+        assert "--market" in cmd
+        assert cmd[cmd.index("--market") + 1] == "us"
         assert "2025-01-02" in cmd
+        assert env["MARKET"] == "us"
     finally:
         settings.stocks_history_url = prev
         if book._stream_proc is not None:
             book._stream_proc = None
 
 
-def test_lamps_payload_is_running_flags_only() -> None:
+def test_ensure_stream_server_passes_ph_market() -> None:
+    book = PaperBook("ph")
+    with patch("core.paper_books.subprocess.Popen") as popen, \
+         patch("core.paper_books.time.sleep"), \
+         patch.object(book, "_kill_whatever_is_on"), \
+         patch.object(book, "_port_open", return_value=True):
+        err = book._ensure_stream_server("2026-01-01")
+    assert err is None
+    cmd = popen.call_args.args[0]
+    env = popen.call_args.kwargs["env"]
+    assert cmd[cmd.index("--market") + 1] == "ph"
+    assert env["MARKET"] == "ph"
+    if book._stream_proc is not None:
+        book._stream_proc = None
+
+
+def test_ph_stream_snapshot_not_session_idle() -> None:
+    book = PaperBook("ph")
+    book.running = True
+    book.use_stream = True
+    with patch("core.paper_books.session_window", return_value="closed"):
+        snap = book.snapshot()
+    assert snap["session_idle"] is False
+    assert "idle until AM/PM" not in snap["status"]
+
+
+def test_ph_live_snapshot_session_idle_when_closed() -> None:
+    book = PaperBook("ph")
+    book.running = True
+    book.use_stream = False
+    with patch("core.paper_books.session_window", return_value="closed"):
+        snap = book.snapshot()
+    assert snap["session_idle"] is True
+    assert "idle until AM/PM" in snap["status"]
+
     with patch("core.paper_books.PaperAccount.save"):
         mgr = PaperBookManager()
         payload = mgr.lamps()

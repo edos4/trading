@@ -174,7 +174,7 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
     (
         "breakeven_buffer_pct", "Breakeven buffer (%)",
         "How far above entry (longs) / below entry (shorts) the breakeven floor sits. "
-        "Ensures round-trip exits clear txn costs and land as small wins. (0.003 = 0.3%)",
+        "Must cover round-trip costs (US ~0.15%; PH ~0.80%) so a scratch is not a fee-taxed loss.",
         "spin", (ENGINE.breakeven_buffer_pct, 0.0, 0.05, 0.0005), None,
     ),
     (
@@ -306,6 +306,8 @@ class BacktestDialog:
             "account_value": profile.paper_initial_capital,
             "kronos_gate": profile.kronos_gate_default,
             "kronos_rank": profile.kronos_rank_default,
+            "breakeven_trigger_pct": profile.breakeven_trigger_pct or 0.0,
+            "breakeven_buffer_pct": profile.breakeven_buffer_pct,
         }
         for key, value in mapping.items():
             if key in self._vars:
