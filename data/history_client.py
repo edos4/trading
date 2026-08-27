@@ -10,6 +10,7 @@ from urllib.parse import quote
 from config import settings
 from utils.logger import log
 
+DEFAULT_STOCKS_HISTORY_URL = "https://33ai.edos.uk"
 _CONNECT_TIMEOUT = 10.0
 _READ_TIMEOUT = 30.0
 _MAX_INFLIGHT = 4
@@ -21,11 +22,12 @@ _request_sema = threading.BoundedSemaphore(_MAX_INFLIGHT)
 
 
 def _base_url() -> str:
-    return (settings.stocks_history_url or "").strip().rstrip("/")
+    return (settings.stocks_history_url or "").strip().rstrip("/") or DEFAULT_STOCKS_HISTORY_URL
 
 
 def history_api_configured() -> bool:
-    return bool(_base_url())
+    """Readers always have a URL (explicit or 33ai default). Never local Postgres."""
+    return True
 
 
 def _history_path(symbol: str, suffix: str = "") -> str:
@@ -119,8 +121,6 @@ def _log_fail(op: str, exc: BaseException) -> None:
 
 
 def fetch_history_symbols() -> list[dict[str, Any]] | None:
-    if not history_api_configured():
-        return None
     try:
         resp = _get("/api/history/symbols")
         resp.raise_for_status()
@@ -137,8 +137,6 @@ def fetch_history_symbols() -> list[dict[str, Any]] | None:
 def fetch_history_bars(
     symbol: str, after_ts: int | None = None, limit: int | None = None,
 ) -> list[dict[str, Any]] | None:
-    if not history_api_configured():
-        return None
     symbol = (symbol or "").upper().strip()
     if not symbol:
         return None
@@ -163,8 +161,6 @@ def fetch_history_bars(
 
 
 def fetch_history_meta(symbol: str) -> dict[str, Any] | None:
-    if not history_api_configured():
-        return None
     symbol = (symbol or "").upper().strip()
     if not symbol:
         return None

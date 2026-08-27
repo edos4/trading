@@ -467,7 +467,7 @@ def is_closed_session_bar(
     """Whether this snapshot is a completed swing bar (not a forming RTH print).
 
     Historical bars (session date before today) are always closed — paper
-    stream replay uses wall-clock 'now' years after the CSV row.
+    stream replay uses wall-clock 'now' years after the history bar.
     """
     if not is_swing_timeframe(timeframe):
         return True

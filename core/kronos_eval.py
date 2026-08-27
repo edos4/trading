@@ -1,7 +1,7 @@
 """
 core/kronos_eval.py — orchestrates `python main.py --kronos-test`: run
 Kronos-base (https://github.com/shiyu-coder/Kronos) walk-forward over the
-historical daily CSVs in /home/r00t/stocks_data and score its +1 day /
+historical daily bars in stocks_history and score its +1 day /
 +3 trading-day close-price forecasts against what actually happened.
 """
 
@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from learn.dataset import DEFAULT_DATA_DIR, iter_ticker_frames
+from learn.dataset import iter_ticker_frames
 from utils.logger import log
 
 KRONOS_REPO_DIR = Path.home() / "Kronos"
@@ -625,32 +625,7 @@ def majority_sign_baseline(results: list[WindowResult]) -> dict:
     }
 
 
-def _candidates_from_history_api(min_bars: int) -> list[tuple[str, pd.DataFrame]]:
-    """Load eval frames from GET /api/history when STOCKS_HISTORY_URL is set."""
-    from data.history import bars_to_df
-    from data.history_client import fetch_history_bars, fetch_history_symbols
-
-    metas = fetch_history_symbols() or []
-    eligible = [
-        m for m in metas
-        if (m.get("row_count") or 0) >= min_bars and m.get("symbol")
-    ]
-    # Cap fetches: full-universe HTTP would be huge. Rank by row_count then load.
-    eligible.sort(key=lambda m: int(m.get("row_count") or 0), reverse=True)
-    out: list[tuple[str, pd.DataFrame]] = []
-    for meta in eligible[:400]:
-        symbol = str(meta["symbol"]).upper()
-        bars = fetch_history_bars(symbol)
-        df = bars_to_df(bars)
-        if df is None or len(df) < min_bars:
-            continue
-        out.append((symbol, df))
-    log.info(f"Kronos-test | history API loaded {len(out)} tickers with >= {min_bars} bars")
-    return out
-
-
 def run_kronos_test(
-    data_dir: Path = DEFAULT_DATA_DIR,
     n_symbols: int = 20,
     windows_per_symbol: int = 3,
     lookback: int = LOOKBACK,
@@ -669,26 +644,18 @@ def run_kronos_test(
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
     log.info(
-        f"Kronos-test | data_dir={data_dir} symbols={n_symbols} device={device} "
+        f"Kronos-test | stocks_history symbols={n_symbols} device={device} "
         f"windows/symbol={windows_per_symbol} lookback={lookback} liquid_only={liquid_only} "
         f"sample_count={sample_count} start_date={start_date} use_finetuned={use_finetuned}"
     )
     start_ts = pd.Timestamp(start_date) if start_date else None
 
-    from data.history_client import history_api_configured
-
-    if history_api_configured():
-        candidates = _candidates_from_history_api(min_bars)
-        if not candidates:
-            log.error("Kronos-test | history API returned no tickers with enough bars")
-            return
-    else:
-        candidates = [
-            (symbol, df) for symbol, df in iter_ticker_frames(data_dir) if len(df) >= min_bars
-        ]
-        if not candidates:
-            log.error("Kronos-test | no tickers with enough history found — check data_dir")
-            return
+    candidates = [
+        (symbol, df) for symbol, df in iter_ticker_frames(min_bars=min_bars)
+    ]
+    if not candidates:
+        log.error("Kronos-test | no tickers with enough history found — check stocks_history")
+        return
 
     if start_ts is not None:
         # Tickers whose data ends before start_date are stale/delisted — their
@@ -701,14 +668,14 @@ def run_kronos_test(
                 f"Kronos-test | dropped {n_before - len(candidates)} tickers with no data on/after {start_date}"
             )
         if not candidates:
-            log.error(f"Kronos-test | no tickers have data on/after {start_date} — check data_dir")
+            log.error(f"Kronos-test | no tickers have data on/after {start_date} — check stocks_history")
             return
     pool_size = len(candidates)
 
     if liquid_only:
         # Rank by recent avg dollar volume (close * volume) — picks liquid
         # large/mid-caps instead of the random-sample junk that dominates
-        # this CSV set by ticker count (penny/OTC names).
+        # this universe by ticker count (penny/OTC names).
         def dollar_volume(df: pd.DataFrame) -> float:
             tail = df.tail(liquidity_window)
             return float((tail["close"] * tail["volume"]).mean())

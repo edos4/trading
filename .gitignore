@@ -5,6 +5,7 @@ __pycache__
 data/__pycache__
 .venv
 logs/bot.log
+logs/db_update.log
 logs/paper_signals_*.jsonl
 logs/stocks_history_updated.txt
 logs/stocks_history_updated.txt.tmp

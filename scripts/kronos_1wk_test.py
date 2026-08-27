@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 scripts/kronos_1wk_test.py — Walk-forward Kronos +3 trading-day
-close-forecast test on /home/r00t/stocks_data, scored for this project's
+close-forecast test on stocks_history, scored for this project's
 `kronos_gate` (direction + |pred| >= 3% in 3 days), not just raw MAE.
 
 Writes raw per-window rows and summary findings as Markdown to
@@ -51,7 +51,7 @@ from core.kronos_eval import (  # noqa: E402
     majority_sign_baseline,
     score_gate_rule,
 )
-from learn.dataset import DEFAULT_DATA_DIR, iter_ticker_frames  # noqa: E402
+from learn.dataset import iter_ticker_frames  # noqa: E402
 from utils.logger import log  # noqa: E402
 
 DEFAULT_OUT = ROOT / "kronos_1_wk.md"
@@ -59,7 +59,6 @@ DEFAULT_START = "2026-06-01"
 
 
 def _select_candidates(
-    data_dir: Path,
     n_symbols: int,
     min_bars: int,
     start_ts: pd.Timestamp | None,
@@ -68,7 +67,7 @@ def _select_candidates(
     seed: int,
 ) -> list[tuple[str, pd.DataFrame]]:
     candidates = [
-        (symbol, df) for symbol, df in iter_ticker_frames(data_dir) if len(df) >= min_bars
+        (symbol, df) for symbol, df in iter_ticker_frames(min_bars=min_bars)
     ]
     if start_ts is not None:
         n_before = len(candidates)
@@ -449,7 +448,6 @@ def write_report(
 
 
 def run(
-    data_dir: Path = DEFAULT_DATA_DIR,
     n_symbols: int = 30,
     windows_per_symbol: int = 8,
     lookback: int = LOOKBACK,
@@ -484,7 +482,7 @@ def run(
 
     start_ts = pd.Timestamp(start_date) if start_date else None
     log.info(
-        f"kronos-1wk | data_dir={data_dir} symbols={n_symbols} device={device} "
+        f"kronos-1wk | stocks_history symbols={n_symbols} device={device} "
         f"windows/symbol={windows_per_symbol} lookback={lookback} stride={stride} "
         f"liquid_only={liquid_only} sample_count={sample_count} "
         f"start_date={start_date} use_finetuned={use_finetuned} "
@@ -492,10 +490,10 @@ def run(
     )
 
     candidates = _select_candidates(
-        data_dir, n_symbols, min_bars, start_ts, liquid_only, liquidity_window, seed
+        n_symbols, min_bars, start_ts, liquid_only, liquidity_window, seed
     )
     if not candidates:
-        raise SystemExit("kronos-1wk | no eligible tickers — check data_dir / start_date")
+        raise SystemExit("kronos-1wk | no eligible tickers — check stocks_history / start_date")
 
     log.info(f"kronos-1wk | evaluating {len(candidates)} symbols")
     predictor = _load_predictor(device=device, use_finetuned=use_finetuned)
@@ -523,7 +521,7 @@ def run(
         raise SystemExit("kronos-1wk | no windows evaluated")
 
     cfg = {
-        "data_dir": str(data_dir),
+        "source": "stocks_history",
         "start_date": start_date,
         "horizon": f"{WEEK_AHEAD} trading days (3d gate, not 1 calendar week)",
         "n_symbols_requested": n_symbols,
@@ -586,7 +584,6 @@ def main() -> None:
             "Kronos +3 trading-day forecast test with gate-filtered metrics → kronos_1_wk.md"
         )
     )
-    p.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     p.add_argument("--symbols", type=int, default=30, help="Number of tickers to evaluate")
     p.add_argument("--windows", type=int, default=8, help="Max walk-forward windows per symbol")
     p.add_argument("--lookback", type=int, default=LOOKBACK)
@@ -619,7 +616,6 @@ def main() -> None:
     # Keep cwd-relative --out paths under project root when launched from elsewhere.
     out = args.out if args.out.is_absolute() else ROOT / args.out
     run(
-        data_dir=args.data_dir,
         n_symbols=args.symbols,
         windows_per_symbol=args.windows,
         lookback=args.lookback,

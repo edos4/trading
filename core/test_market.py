@@ -137,7 +137,7 @@ def test_us_daily_bar_identity_ignores_intraday_prints():
     assert cash_session_closed("us", after)
     assert is_closed_session_bar("1d", t1, market="us", now=after)
     assert bar_identity("1d", t1, market="us", now=after) == date(2026, 8, 14)
-    # Historical CSV row vs wall-clock now is always a closed bar.
+    # Historical bar vs wall-clock now is always a closed bar.
     old = datetime(2024, 1, 2, 15, 0, tzinfo=tz)
     assert is_closed_session_bar("1d", old, market="us", now=after)
     assert bar_identity("1d", old, market="us", now=after) == date(2024, 1, 2)

@@ -131,10 +131,37 @@ def test_history_path_encodes_slash_tickers() -> None:
 def test_load_daily_bars_forwards_limit() -> None:
     from data.history import load_daily_bars
 
-    with patch("data.history_client.history_api_configured", return_value=False), \
-         patch("data.db.load_daily_ohlcv_rows", return_value=[]) as load:
+    with patch("data.history_client.fetch_history_bars", return_value=[]) as load, \
+         patch("data.db.get_conn") as get_conn:
         load_daily_bars("AAPL", limit=512)
     load.assert_called_once_with("AAPL", after_ts=None, limit=512)
+    get_conn.assert_not_called()
+
+
+def test_load_daily_bars_never_uses_postgres() -> None:
+    from data.history import load_daily_bars
+
+    with patch("data.history_client.fetch_history_bars", return_value=None) as load, \
+         patch("data.db.load_daily_ohlcv_rows") as db_load, \
+         patch("data.db.get_conn") as get_conn:
+        assert load_daily_bars("AAPL") is None
+    load.assert_called_once()
+    db_load.assert_not_called()
+    get_conn.assert_not_called()
+
+
+def test_history_client_defaults_to_33ai() -> None:
+    from config import settings
+    from data.history_client import DEFAULT_STOCKS_HISTORY_URL, _base_url
+
+    prev = settings.stocks_history_url
+    try:
+        settings.stocks_history_url = ""
+        assert _base_url() == DEFAULT_STOCKS_HISTORY_URL
+        settings.stocks_history_url = "https://other.example/"
+        assert _base_url() == "https://other.example"
+    finally:
+        settings.stocks_history_url = prev
 
 
 def test_enable_ui_web_sets_33ai_on_laptop() -> None:
@@ -232,3 +259,45 @@ def test_tv_client_chart_uses_facade_in_ui_web() -> None:
         assert out[0].close == 10.0
     finally:
         disable_ui_web_history()
+
+
+def test_list_history_symbols_uses_api_when_configured() -> None:
+    from data.history import list_history_symbols
+
+    rows = [{"symbol": "AAPL", "row_count": 10}]
+    with patch("data.history_client.fetch_history_symbols", return_value=rows) as fetch, \
+         patch("data.db.get_conn") as get_conn, \
+         patch("data.db.all_symbols") as all_sym:
+        assert list_history_symbols() == rows
+    fetch.assert_called_once()
+    get_conn.assert_not_called()
+    all_sym.assert_not_called()
+
+
+def test_iter_ticker_frames_skips_thin_and_empty(monkeypatch) -> None:
+    import pandas as pd
+    from learn.dataset import iter_ticker_frames
+
+    fat = pd.DataFrame(
+        {"open": [1, 2], "high": [1, 2], "low": [1, 2], "close": [1, 2], "volume": [1, 1]},
+        index=pd.to_datetime(["2024-01-02", "2024-01-03"]),
+    )
+
+    def fake_list():
+        return [
+            {"symbol": "THIN", "row_count": 1},
+            {"symbol": "FAT", "row_count": 400},
+            {"symbol": "EMPTY", "row_count": 400},
+        ]
+
+    def fake_df(symbol, **_k):
+        if symbol == "FAT":
+            return fat
+        if symbol == "EMPTY":
+            return None
+        raise AssertionError(f"should not load {symbol}")
+
+    monkeypatch.setattr("data.history.list_history_symbols", fake_list)
+    monkeypatch.setattr("data.history.load_daily_ohlcv_df", fake_df)
+    out = list(iter_ticker_frames(min_bars=2))
+    assert [(s, len(df)) for s, df in out] == [("FAT", 2)]

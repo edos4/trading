@@ -1,16 +1,23 @@
 # Plan: PostgreSQL stock-history database
 
-## Objective
+## Current
 
-Move the raw historical daily OHLCV data under `/home/r00t/stocks_data` into a
-PostgreSQL database and keep it current, so the bot can query history without
-re-parsing ~3.7 GB of CSVs every run.
+History lives in Postgres `stocks_history` and is served as `GET /api/history`.
+`--update-db` refreshes stale symbols from Yahoo/PSE. CSV files are not a
+history source (ingest from `/home/r00t/stocks_data` was removed).
 
-1. **Ingest** all historical CSVs into PostgreSQL.
-2. **Verify** the database is current (freshness / gap check against the files
-   and today's date).
-3. **Update** every trading day: new closing bars are saved in the same
-   format the CSVs already use.
+The notes below are the original design of the schema and daily update.
+
+---
+
+## Objective (original)
+
+Move historical daily OHLCV into PostgreSQL and keep it current from Yahoo/PSE
+so the bot can query history without files on disk.
+
+1. **Store** daily bars in PostgreSQL.
+2. **Verify** the database is current (`--check-db` freshness).
+3. **Update** every trading day via `--update-db` (Yahoo v8 / PSE Edge).
 
 ---
 
@@ -188,8 +195,8 @@ timestamp` shape:
 4. Log a summary (symbols updated, new bars, errors).
 
 Scheduling options (choose one; both are documented):
-- **cron** (simplest): `30 16 * * 1-5  cd <repo> && .venv/bin/python main.py
-  --update-db >> logs/db_update.log 2>&1` (16:30 ET ≈ after US close).
+- **cron**: weekday `*/15` + `python -m data.update_cron` (runs after 16:30 ET;
+  do not use `CRON_TZ` — Ubuntu vixie cron ignores it).
 - **in-process**: a `--db-daemon` mode using the already-present `schedule`
   lib, if the bot already runs long-lived.
 
