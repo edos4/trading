@@ -100,10 +100,10 @@ window.TVChart = (function () {
     let predSeries = null;
     if ((data.pred_candles || []).length) {
       predSeries = chart.addCandlestickSeries({
-        upColor: "#ce93d8",
-        downColor: "#7b1fa2",
-        wickUpColor: "#ce93d8",
-        wickDownColor: "#7b1fa2",
+        upColor: "#ffeb3b",
+        downColor: "#f9a825",
+        wickUpColor: "#ffeb3b",
+        wickDownColor: "#f9a825",
         borderVisible: false,
         title: "Kronos",
       });
@@ -119,7 +119,7 @@ window.TVChart = (function () {
     }
     if ((data.forecast || []).length) {
       const forecast = chart.addLineSeries({
-        color: data.forecast_color || "#e040fb",
+        color: data.forecast_color || "#ffeb3b",
         lineWidth: 2,
         priceLineVisible: false,
         lastValueVisible: true,

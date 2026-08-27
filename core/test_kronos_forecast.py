@@ -78,3 +78,4 @@ def test_viewer_payload_shows_kronos_path() -> None:
     assert payload["pred"]["days"] == 3
     assert any(m.get("text") == "Kronos" for m in payload["markers"])
     assert "Kronos" in payload["title"]
+    assert payload["forecast_color"] == "#ffeb3b"

@@ -19,7 +19,7 @@ MAX_PRED_DAYS = 120
 DEFAULT_PRED_DAYS = 3
 MIN_BARS = 60
 _SYMBOL_RE = re.compile(r"^[A-Za-z][A-Za-z0-9.\-]{0,15}$")
-KRONOS_LINE = "#e040fb"
+KRONOS_LINE = "#ffeb3b"
 
 
 def normalize_symbol(raw: str) -> str:
