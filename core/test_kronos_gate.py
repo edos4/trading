@@ -173,6 +173,22 @@ def test_gate_prefers_history_facade(monkeypatch):
     kg._facade_df_cache.clear()
 
 
+def test_gate_uses_store_without_hitting_api(monkeypatch):
+    from core import kronos_gate as kg
+
+    kg._facade_df_cache.clear()
+
+    def _boom(_symbol: str):
+        raise AssertionError("Kronos gate must use scan/replay store, not re-fetch 33ai")
+
+    monkeypatch.setattr(kg, "_facade_daily_df", _boom)
+    gate = KronosGate()
+    gate._predictor = _FakePredictor(110.0)
+    result = gate.check(_signal(action="BUY"), _fill_store(), adjust_exits=False)
+    assert result.passed, result
+    kg._facade_df_cache.clear()
+
+
 def _store_with(*symbols: str) -> OHLCVStore:
     store = OHLCVStore(window=DEFAULT_WINDOW)
     start = datetime(2024, 1, 2, tzinfo=timezone.utc)

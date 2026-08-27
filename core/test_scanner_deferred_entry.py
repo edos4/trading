@@ -5,10 +5,11 @@ instead of the same candle whose close produced the signal."""
 import asyncio
 import tempfile
 from contextlib import asynccontextmanager
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from config import PATTERN_SCAN_HISTORY_BARS
 from core import signal_log_store as sls
 from core.paper_trader import PaperAccount
 from core.scanner import MarketScanner
@@ -66,7 +67,18 @@ class _FakeFeed:
             candle=candle, indicators={}, summary={}, oscillators={}, moving_avgs={},
         )
         if store is not None:
-            store.push(snapshot)
+            if self.bar == 0:
+                tz = candle.timestamp.tzinfo
+                warmup = [
+                    _candle(
+                        90.0,
+                        datetime(2023, 11, 20, 16, 5, tzinfo=tz) + timedelta(days=i),
+                    )
+                    for i in range(PATTERN_SCAN_HISTORY_BARS)
+                ]
+                store.replace_all(symbol, timeframe, warmup + [candle])
+            else:
+                store.push(snapshot)
         return snapshot
 
 

@@ -32,12 +32,15 @@ from __future__ import annotations
 import asyncio
 import csv
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
 import websockets
 
-from config import settings
+from config import PATTERN_SCAN_HISTORY_BARS, settings
+from data.stream_client import LOCAL_STREAM_WS
 from utils.logger import log
 
 
@@ -63,6 +66,11 @@ def asof_key(ts: int) -> int | str:
     return int(ts)
 
 
+def _stream_history_bars() -> int:
+    """Bars sent with each snapshot — at least 30 days for pattern scans."""
+    return max(int(settings.papertrade_stream_lookback_bars), PATTERN_SCAN_HISTORY_BARS)
+
+
 class _SymbolTape:
     def __init__(self, rows: list[dict], start_ts: int | None = None):
         self.rows = rows  # sorted by timestamp ascending
@@ -73,10 +81,10 @@ class _SymbolTape:
             )
             if idx is None:
                 # All bars are before start_ts — fall back to near-end window.
-                idx = max(0, len(rows) - settings.papertrade_stream_lookback_bars)
+                idx = max(0, len(rows) - _stream_history_bars())
             self.start = idx
         else:
-            self.start = max(0, len(rows) - settings.papertrade_stream_lookback_bars)
+            self.start = max(0, len(rows) - _stream_history_bars())
         self.cursor = self.start
 
     def advance(self) -> None:
@@ -90,7 +98,7 @@ class _SymbolTape:
             self.cursor = self.start
 
     def snapshot(self, asof_ts: int | None = None) -> dict | None:
-        lookback = settings.papertrade_stream_lookback_bars
+        lookback = _stream_history_bars()
         if asof_ts is not None:
             idx = self.index_for_asof(asof_ts)
             if idx is None:
@@ -161,7 +169,7 @@ def _load_symbol_db(symbol: str, start_ts: int | None = None) -> list[dict] | No
     """
     from data.history_client import history_api_configured
 
-    lookback = settings.papertrade_stream_lookback_bars
+    lookback = _stream_history_bars()
     after_ts = None
     limit = None
     if start_ts is not None:
@@ -223,20 +231,33 @@ class StreamServer:
         )
         self._tapes: dict[str, _SymbolTape] = {}
         self._asof_ts: int | None = None
+        self._tape_lock = threading.Lock()
+        self._load_pool = ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix="stream-hist",
+        )
 
     def _tape_for(self, symbol: str) -> _SymbolTape | None:
         symbol = symbol.upper()
-        tape = self._tapes.get(symbol)
-        if tape is not None:
-            return tape
+        with self._tape_lock:
+            tape = self._tapes.get(symbol)
+            if tape is not None:
+                return tape
         rows = _load_symbol_db(symbol, start_ts=self._start_ts) or _load_symbol_csv(
             self._base_dir, symbol
         )
-        if rows is None:
-            return None
-        tape = _SymbolTape(rows, start_ts=self._start_ts)
-        self._tapes[symbol] = tape
-        return tape
+        with self._tape_lock:
+            existing = self._tapes.get(symbol)
+            if existing is not None:
+                return existing
+            if rows is None:
+                return None
+            tape = _SymbolTape(rows, start_ts=self._start_ts)
+            self._tapes[symbol] = tape
+            return tape
+
+    async def _tape_for_async(self, symbol: str) -> _SymbolTape | None:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._load_pool, self._tape_for, symbol)
 
     def pin_asof(self, symbol: str) -> int | None:
         """Pin the replay control date to `symbol`'s current cursor bar."""
@@ -318,7 +339,12 @@ class StreamServer:
 
                 if req.get("action") == "pin_asof":
                     symbol = str(req.get("symbol") or "")
-                    ts = self.pin_asof(symbol) if symbol else None
+                    ts = (
+                        await asyncio.get_running_loop().run_in_executor(
+                            self._load_pool, self.pin_asof, symbol,
+                        )
+                        if symbol else None
+                    )
                     if ts is None:
                         await ws.send(json.dumps({
                             "error": f"no data for {symbol}",
@@ -336,7 +362,7 @@ class StreamServer:
                 except (KeyError, TypeError):
                     await ws.send(json.dumps({"error": "bad request"}))
                     continue
-                tape = self._tape_for(symbol)
+                tape = await self._tape_for_async(symbol)
                 if tape is None:
                     await ws.send(json.dumps({
                         "error": f"no data for {symbol}",
@@ -373,7 +399,7 @@ class StreamServer:
             if history_api_configured()
             else f"database (CSV fallback: {self._base_dir})"
         )
-        async with websockets.serve(self._handle, host, port):
+        async with websockets.serve(self._handle, host, port, **LOCAL_STREAM_WS):
             log.info(
                 f"Paper trade stream server | {host}:{port} | "
                 f"source={source} | "

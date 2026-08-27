@@ -90,6 +90,36 @@ def test_stocks_history_auth_defaults_to_username() -> None:
     assert s.stocks_history_auth == ("admin", "admin")
 
 
+def test_fetch_history_bars_retries_connect_timeout() -> None:
+    import httpx
+    from data.history_client import fetch_history_bars
+
+    class _Resp:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"bars": [_bar(1, 1.0)]}
+
+    calls = {"n": 0}
+
+    class _Client:
+        def get(self, *_a, **_k):
+            calls["n"] += 1
+            if calls["n"] < 2:
+                raise httpx.ConnectTimeout("timed out")
+            return _Resp()
+
+    with patch("data.history_client.history_api_configured", return_value=True), \
+         patch("data.history_client._client", return_value=_Client()), \
+         patch("data.history_client.time.sleep"):
+        bars = fetch_history_bars("FEDU", limit=10)
+    assert bars is not None and len(bars) == 1
+    assert calls["n"] == 2
+
+
 def test_history_path_encodes_slash_tickers() -> None:
     from data.history_client import _history_path
 
