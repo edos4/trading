@@ -249,6 +249,20 @@ def default_market() -> MarketProfile:
     return get_market(None)
 
 
+def ph_history_symbol(symbol: str) -> str:
+    """Bot ticker BDO → stocks_history key BDO.PS. Idempotent on .PS."""
+    s = (symbol or "").strip().upper()
+    if ":" in s:
+        s = s.split(":")[-1]
+    if s.endswith(".PS"):
+        return s
+    return f"{s}.PS" if s else s
+
+
+def is_ph_history_symbol(symbol: str) -> bool:
+    return (symbol or "").upper().strip().endswith(".PS")
+
+
 def yahoo_chart_symbol(symbol: str, market: str | None = None, *, screener: str | None = None) -> str:
     """Bot ticker → Yahoo chart ticker. Never send PSE:BDO to Yahoo."""
     s = (symbol or "").strip().upper()

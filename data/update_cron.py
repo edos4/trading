@@ -33,24 +33,38 @@ def _app_root() -> Path:
 def is_due(
     now: datetime | None = None,
     stamp: date | None | object = _UNSET,
+    *,
+    market: str = "us",
 ) -> bool:
-    """True after 16:30 ET on a weekday when the stamp is behind last close."""
+    """True after that market's close on a weekday when the stamp is behind."""
     from data.update import _last_trading_date
 
-    now = now or datetime.now(tz=_NY_TZ)
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=_NY_TZ)
+    if market == "ph":
+        tz = ZoneInfo("Asia/Manila")
+        now = now or datetime.now(tz=tz)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=tz)
+        else:
+            now = now.astimezone(tz)
+        if now.weekday() >= 5:
+            return False
+        if now.hour < 15 or (now.hour == 15 and now.minute < 30):
+            return False
     else:
-        now = now.astimezone(_NY_TZ)
-    if now.weekday() >= 5:
-        return False
-    if now.hour < 16 or (now.hour == 16 and now.minute < 30):
-        return False
+        now = now or datetime.now(tz=_NY_TZ)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=_NY_TZ)
+        else:
+            now = now.astimezone(_NY_TZ)
+        if now.weekday() >= 5:
+            return False
+        if now.hour < 16 or (now.hour == 16 and now.minute < 30):
+            return False
     if stamp is _UNSET:
         from data.history_stamp import read_stamp
 
-        stamp = read_stamp()
-    last = _last_trading_date(now)
+        stamp = read_stamp(market=market)
+    last = _last_trading_date(now, market)
     if stamp is not None and stamp >= last:
         return False
     return True
@@ -140,11 +154,11 @@ def ensure_weekday_update_cron(
 
 
 def main() -> int:
-    if not is_due():
+    if not is_due() and not is_due(market="ph"):
         return 0
     from data.update import run_update
 
-    log.info("stocks_history | --update-db due after US cash close")
+    log.info("stocks_history | --update-db due after US and/or PSE cash close")
     run_update()
     return 0
 

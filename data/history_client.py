@@ -120,9 +120,12 @@ def _log_fail(op: str, exc: BaseException) -> None:
         log.exception(f"History API | {op} failed")
 
 
-def fetch_history_symbols() -> list[dict[str, Any]] | None:
+def fetch_history_symbols(market: str | None = None) -> list[dict[str, Any]] | None:
+    params = {}
+    if market:
+        params["market"] = market
     try:
-        resp = _get("/api/history/symbols")
+        resp = _get("/api/history/symbols", params=params or None)
         resp.raise_for_status()
         data = resp.json()
     except Exception as exc:
@@ -135,16 +138,26 @@ def fetch_history_symbols() -> list[dict[str, Any]] | None:
 
 
 def fetch_history_bars(
-    symbol: str, after_ts: int | None = None, limit: int | None = None,
+    symbol: str,
+    after_ts: int | None = None,
+    limit: int | None = None,
+    *,
+    market: str | None = None,
 ) -> list[dict[str, Any]] | None:
     symbol = (symbol or "").upper().strip()
     if not symbol:
         return None
+    if (market or "").lower() == "ph":
+        from core.market import ph_history_symbol
+
+        symbol = ph_history_symbol(symbol)
     params = {}
     if after_ts is not None:
         params["after_ts"] = int(after_ts)
     if limit is not None:
         params["limit"] = max(1, int(limit))
+    if market:
+        params["market"] = market
     try:
         resp = _get(_history_path(symbol), params=params)
         if resp.status_code == 404:
@@ -160,12 +173,17 @@ def fetch_history_bars(
     return bars
 
 
-def fetch_history_meta(symbol: str) -> dict[str, Any] | None:
+def fetch_history_meta(symbol: str, *, market: str | None = None) -> dict[str, Any] | None:
     symbol = (symbol or "").upper().strip()
     if not symbol:
         return None
+    if (market or "").lower() == "ph":
+        from core.market import ph_history_symbol
+
+        symbol = ph_history_symbol(symbol)
+    params = {"market": market} if market else None
     try:
-        resp = _get(_history_path(symbol, "/meta"))
+        resp = _get(_history_path(symbol, "/meta"), params=params)
         if resp.status_code == 404:
             return None
         resp.raise_for_status()

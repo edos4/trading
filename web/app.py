@@ -217,16 +217,22 @@ def create_app() -> FastAPI:
         return {"symbols": symbols}
 
     @app.get("/api/history/symbols")
-    async def api_history_symbols(_user: str = Depends(require_history)):
+    async def api_history_symbols(
+        market: str = "",
+        _user: str = Depends(require_history),
+    ):
         from data import db
 
+        mid = (market or "").strip().lower() or None
+        if mid not in (None, "us", "ph"):
+            return JSONResponse({"detail": "market must be us or ph."}, status_code=400)
         try:
             conn = db.get_conn()
         except Exception:
             log.exception("History API | cannot open Postgres")
             return JSONResponse({"detail": "History database unavailable."}, status_code=503)
         try:
-            rows = db.all_symbols(conn)
+            rows = db.all_symbols(conn, market=mid)
         except Exception:
             log.exception("History API | all_symbols failed")
             return JSONResponse({"detail": "History database unavailable."}, status_code=503)
@@ -245,10 +251,15 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/api/history/{symbol}/meta")
-    async def api_history_meta(symbol: str, _user: str = Depends(require_history)):
+    async def api_history_meta(
+        symbol: str,
+        market: str = "",
+        _user: str = Depends(require_history),
+    ):
         from data.db import load_symbol_meta
 
-        meta = load_symbol_meta(symbol)
+        mid = (market or "").strip().lower() or None
+        meta = load_symbol_meta(symbol, market=mid)
         if not meta:
             return JSONResponse({"detail": "Unknown symbol."}, status_code=404)
         return meta
@@ -258,15 +269,22 @@ def create_app() -> FastAPI:
         symbol: str,
         after_ts: int | None = None,
         limit: int | None = None,
+        market: str = "",
         _user: str = Depends(require_history),
     ):
         from data.db import load_daily_ohlcv_rows
 
         ticker = symbol.upper().strip()
-        bars = load_daily_ohlcv_rows(ticker, after_ts=after_ts, limit=limit)
+        mid = (market or "").strip().lower() or None
+        bars = load_daily_ohlcv_rows(
+            ticker, after_ts=after_ts, limit=limit, market=mid,
+        )
         if not bars:
             return JSONResponse({"detail": f"No daily bars for {ticker}."}, status_code=404)
-        return {"symbol": ticker, "bars": bars}
+        from core.market import ph_history_symbol, resolve_market_id
+
+        out_sym = ph_history_symbol(ticker) if mid and resolve_market_id(mid) == "ph" else ticker
+        return {"symbol": out_sym, "bars": bars}
 
     @app.post("/api/symbol")
     async def api_symbol(request: Request, _user: str = Depends(require_login)):

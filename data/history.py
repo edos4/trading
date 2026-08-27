@@ -174,15 +174,19 @@ def _is_weekly(timeframe: str) -> bool:
     return timeframe.upper() in ("1W", "W", "1WK", "WEEKLY")
 
 
-def list_history_symbols() -> list[dict[str, Any]]:
+def list_history_symbols(market: str | None = None) -> list[dict[str, Any]]:
     """Symbol metas from GET /api/history/symbols."""
     from data.history_client import fetch_history_symbols
 
-    return fetch_history_symbols() or []
+    return fetch_history_symbols(market=market) or []
 
 
 def load_daily_bars(
-    symbol: str, *, after_ts: int | None = None, limit: int | None = None,
+    symbol: str,
+    *,
+    after_ts: int | None = None,
+    limit: int | None = None,
+    market: str | None = None,
 ) -> list[dict[str, Any]] | None:
     """GET /api/history/{symbol}. None on hard failure; [] if empty."""
     from data.history_client import fetch_history_bars
@@ -190,13 +194,15 @@ def load_daily_bars(
     symbol = (symbol or "").upper().strip()
     if not symbol:
         return None
-    return fetch_history_bars(symbol, after_ts=after_ts, limit=limit)
+    return fetch_history_bars(
+        symbol, after_ts=after_ts, limit=limit, market=market,
+    )
 
 
 def load_daily_candles(
-    symbol: str, *, limit: int | None = None,
+    symbol: str, *, limit: int | None = None, market: str | None = None,
 ) -> list[OHLCVCandle] | None:
-    bars = load_daily_bars(symbol, limit=limit)
+    bars = load_daily_bars(symbol, limit=limit, market=market)
     if bars is None:
         return None
     candles = bars_to_candles(bars)
@@ -204,22 +210,32 @@ def load_daily_candles(
 
 
 def load_daily_ohlcv_df(
-    symbol: str, *, tv_fallback: bool = False, limit: int | None = None,
+    symbol: str,
+    *,
+    tv_fallback: bool = False,
+    limit: int | None = None,
+    market: str | None = None,
 ) -> pd.DataFrame | None:
-    candles = load_daily_candles(symbol, limit=limit)
+    candles = load_daily_candles(symbol, limit=limit, market=market)
     if candles:
         return candles_to_df(candles)
     if not tv_fallback or ui_web_history_enabled():
         return None
-    tv_candles = fetch_ohlcv_candles(symbol, "1d", tv_fallback=True)
+    tv_candles = fetch_ohlcv_candles(
+        symbol, "1d", tv_fallback=True, market=market,
+    )
     return candles_to_df(tv_candles) if tv_candles else None
 
 
 def load_daily_tape_rows(
-    symbol: str, *, after_ts: int | None = None, limit: int | None = None,
+    symbol: str,
+    *,
+    after_ts: int | None = None,
+    limit: int | None = None,
+    market: str | None = None,
 ) -> list[dict[str, Any]] | None:
     """Paper-stream tape rows: open/high/low/close/volume/timestamp (unix)."""
-    bars = load_daily_bars(symbol, after_ts=after_ts, limit=limit)
+    bars = load_daily_bars(symbol, after_ts=after_ts, limit=limit, market=market)
     if not bars:
         return None
     rows: list[dict[str, Any]] = []
@@ -245,13 +261,14 @@ def fetch_ohlcv_candles(
     exchange: str | None = None,
     tv_client: TVClient | None = None,
     tv_fallback: bool = True,
+    market: str | None = None,
 ) -> list[OHLCVCandle]:
     """Daily (or weekly resampled from daily) from GET /api/history, then optional TV.
 
     --ui/--web never fall back to Yahoo/TV: charts and OHLCV come from
     33ai.edos.uk.
     """
-    daily = load_daily_candles(symbol)
+    daily = load_daily_candles(symbol, market=market)
     if daily:
         if _is_weekly(timeframe):
             weekly = resample_weekly(daily)

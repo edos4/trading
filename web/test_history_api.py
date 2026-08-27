@@ -87,6 +87,41 @@ class HistoryApiTests(unittest.TestCase):
             r = self.client.get("/api/history/NOPE", auth=("admin", "admin"))
         self.assertEqual(r.status_code, 404)
 
+    def test_history_ph_market_query(self) -> None:
+        bars = [
+            {
+                "ts": 1704456000,
+                "date": "2024-01-05",
+                "open": 1.0,
+                "high": 2.0,
+                "low": 0.5,
+                "close": 126.0,
+                "volume": 100,
+            }
+        ]
+        with patch("data.db.load_daily_ohlcv_rows", return_value=bars) as load:
+            r = self.client.get(
+                "/api/history/BDO?market=ph", auth=("admin", "admin"),
+            )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["symbol"], "BDO.PS")
+        load.assert_called_once()
+        self.assertEqual(load.call_args.kwargs.get("market"), "ph")
+
+    def test_history_symbols_market_filter(self) -> None:
+        rows = [
+            {"symbol": "BDO.PS", "market": "ph", "last_bar_ts": 1, "row_count": 9},
+        ]
+        with patch("data.db.get_conn", return_value=_Conn()), \
+             patch("data.db.all_symbols", return_value=rows) as all_sym:
+            r = self.client.get(
+                "/api/history/symbols?market=ph", auth=("admin", "admin"),
+            )
+        self.assertEqual(r.status_code, 200)
+        all_sym.assert_called_once()
+        self.assertEqual(all_sym.call_args.kwargs.get("market"), "ph")
+        self.assertEqual(r.json()["symbols"][0]["symbol"], "BDO.PS")
+
     def test_history_rejects_dashboard_password(self) -> None:
         r = self.client.get("/api/history/AAPL", auth=("admin", "correct-horse"))
         self.assertEqual(r.status_code, 401)

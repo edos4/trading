@@ -92,3 +92,12 @@ def test_is_due_skips_when_stamp_current_or_weekend():
     assert is_due(now=_et(2026, 8, 26, 16, 30), stamp=date(2026, 8, 26)) is False
     assert is_due(now=_et(2026, 8, 29, 17, 0), stamp=date(2026, 8, 25)) is False
     assert is_due(now=_et(2026, 8, 26, 16, 30), stamp=None) is True
+
+
+def test_is_due_ph_after_manila_close():
+    manila = ZoneInfo("Asia/Manila")
+    now = datetime(2026, 8, 26, 15, 30, tzinfo=manila)
+    assert is_due(now=now, stamp=date(2026, 8, 25), market="ph") is True
+    assert is_due(now=now, stamp=date(2026, 8, 26), market="ph") is False
+    before = datetime(2026, 8, 26, 15, 29, tzinfo=manila)
+    assert is_due(now=before, stamp=date(2026, 8, 25), market="ph") is False

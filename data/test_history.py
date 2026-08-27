@@ -134,7 +134,7 @@ def test_load_daily_bars_forwards_limit() -> None:
     with patch("data.history_client.fetch_history_bars", return_value=[]) as load, \
          patch("data.db.get_conn") as get_conn:
         load_daily_bars("AAPL", limit=512)
-    load.assert_called_once_with("AAPL", after_ts=None, limit=512)
+    load.assert_called_once_with("AAPL", after_ts=None, limit=512, market=None)
     get_conn.assert_not_called()
 
 
@@ -269,7 +269,7 @@ def test_list_history_symbols_uses_api_when_configured() -> None:
          patch("data.db.get_conn") as get_conn, \
          patch("data.db.all_symbols") as all_sym:
         assert list_history_symbols() == rows
-    fetch.assert_called_once()
+    fetch.assert_called_once_with(market=None)
     get_conn.assert_not_called()
     all_sym.assert_not_called()
 

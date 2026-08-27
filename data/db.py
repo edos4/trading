@@ -28,6 +28,11 @@ from config import settings
 from utils.logger import log
 
 _NY_TZ = "America/New_York"
+_MANILA_TZ = "Asia/Manila"
+
+
+def bar_date_tz(market: str | None) -> str:
+    return _MANILA_TZ if (market or "us").lower() == "ph" else _NY_TZ
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS daily_bars (
@@ -75,7 +80,7 @@ CREATE TEMP TABLE IF NOT EXISTS _stage (
 # (symbol, ts, open, high, low, close, volume).
 _UPSERT_SQL = """
 INSERT INTO daily_bars (symbol, ts, bar_date, open, high, low, close, volume)
-VALUES (%s, %s, (to_timestamp(%s) AT TIME ZONE 'America/New_York')::date,
+VALUES (%s, %s, (to_timestamp(%s) AT TIME ZONE %s)::date,
         %s, %s, %s, %s, %s)
 ON CONFLICT (symbol, ts) DO UPDATE SET
     bar_date = EXCLUDED.bar_date,
@@ -90,7 +95,7 @@ _STAGE_COPY_SQL = "COPY _stage (symbol, ts, open, high, low, close, volume) FROM
 
 _STAGE_FLUSH_SQL = """
 INSERT INTO daily_bars (symbol, ts, bar_date, open, high, low, close, volume)
-SELECT symbol, ts, (to_timestamp(ts) AT TIME ZONE 'America/New_York')::date,
+SELECT symbol, ts, (to_timestamp(ts) AT TIME ZONE %s)::date,
        open, high, low, close, volume
 FROM _stage
 ON CONFLICT (symbol, ts) DO UPDATE SET
@@ -158,11 +163,12 @@ def create_staging(conn) -> None:
         cur.execute(_STAGE_SQL)
 
 
-def upsert_bars(conn, symbol: str, rows: Sequence[tuple]) -> None:
+def upsert_bars(conn, symbol: str, rows: Sequence[tuple], *, market: str = "us") -> None:
     """Upsert (ts, open, high, low, close, volume) tuples for `symbol`."""
     if not rows:
         return
-    params = [(symbol, ts, ts, o, h, l, c, v) for ts, o, h, l, c, v in rows]
+    tz = bar_date_tz(market)
+    params = [(symbol, ts, ts, tz, o, h, l, c, v) for ts, o, h, l, c, v in rows]
     with conn.cursor() as cur:
         cur.executemany(_UPSERT_SQL, params)
 
@@ -179,9 +185,9 @@ def copy_bars(conn, symbol: str, rows: Iterable[tuple]) -> None:
                 copy.write_row((symbol, ts, o, h, l, c, v))
 
 
-def flush_stage(conn) -> None:
+def flush_stage(conn, *, market: str = "us") -> None:
     with conn.cursor() as cur:
-        cur.execute(_STAGE_FLUSH_SQL)
+        cur.execute(_STAGE_FLUSH_SQL, (bar_date_tz(market),))
         cur.execute("TRUNCATE _stage")
 
 
@@ -215,75 +221,113 @@ def refresh_symbol_meta(conn, symbol: str) -> None:
         )
 
 
-def all_symbols(conn) -> list[dict[str, Any]]:
+def all_symbols(conn, market: str | None = None) -> list[dict[str, Any]]:
+    sql = (
+        "SELECT symbol, letter, market, source_path, last_bar_ts, row_count, "
+        "file_mtime, file_size, updated_at FROM symbols"
+    )
+    params: list[Any] = []
+    if market:
+        sql += " WHERE market = %s"
+        params.append(market)
+    sql += " ORDER BY symbol"
     with conn.cursor() as cur:
-        cur.execute(
-            "SELECT symbol, letter, market, source_path, last_bar_ts, row_count, "
-            "file_mtime, file_size, updated_at FROM symbols ORDER BY symbol"
-        )
+        cur.execute(sql, params)
         cols = [d.name for d in cur.description]
         return [dict(zip(cols, row)) for row in cur.fetchall()]
 
 
-def median_last_bar_date(conn) -> date | None:
-    """Median `symbols.last_bar_ts` as an America/New_York session date.
-
-    Median (not max) so a couple of test/outlier tickers cannot hide a stale
-    universe, and a long tail of dead tickers cannot hide a current one.
-    """
+def median_last_bar_date(conn, market: str | None = None) -> date | None:
+    """Median `symbols.last_bar_ts` as a session date in that market's TZ."""
+    tz = bar_date_tz(market) if market else _NY_TZ
+    sql = (
+        "SELECT (to_timestamp("
+        "percentile_disc(0.5) WITHIN GROUP (ORDER BY last_bar_ts)"
+        ") AT TIME ZONE %s)::date "
+        "FROM symbols WHERE last_bar_ts IS NOT NULL"
+    )
+    params: list[Any] = [tz]
+    if market:
+        sql += " AND market = %s"
+        params.append(market)
     with conn.cursor() as cur:
-        cur.execute(
-            "SELECT (to_timestamp("
-            "percentile_disc(0.5) WITHIN GROUP (ORDER BY last_bar_ts)"
-            ") AT TIME ZONE %s)::date "
-            "FROM symbols WHERE last_bar_ts IS NOT NULL",
-            (_NY_TZ,),
-        )
+        cur.execute(sql, params)
         row = cur.fetchone()
         if not row or row[0] is None:
             return None
         return row[0]
 
 
-def global_stats(conn) -> dict[str, Any]:
+def global_stats(conn, market: str | None = None) -> dict[str, Any]:
+    join = ""
+    where = ""
+    params: list[Any] = []
+    if market:
+        join = " JOIN symbols s ON s.symbol = daily_bars.symbol"
+        where = " WHERE s.market = %s"
+        params.append(market)
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT count(DISTINCT symbol) AS n_symbols, "
+            "SELECT count(DISTINCT daily_bars.symbol) AS n_symbols, "
             "count(*) AS n_bars, min(bar_date) AS min_date, max(bar_date) AS max_date, "
             "current_database() AS db_name "
-            "FROM daily_bars"
+            f"FROM daily_bars{join}{where}",
+            params,
         )
         cols = [d.name for d in cur.description]
         out = dict(zip(cols, cur.fetchone()))
         cur.execute("SELECT pg_database_size(current_database())")
         out["db_size_bytes"] = cur.fetchone()[0]
+        out["market"] = market or "all"
     return out
 
 
-def per_symbol_range(conn) -> dict[str, tuple[date, date, int]]:
-    """symbol -> (min bar_date, max bar_date, row_count)."""
+def per_symbol_range(
+    conn, market: str | None = None,
+) -> dict[str, tuple[date, date, int, str]]:
+    """symbol -> (min bar_date, max bar_date, row_count, market)."""
+    sql = (
+        "SELECT d.symbol, min(d.bar_date), max(d.bar_date), count(*), "
+        "COALESCE(s.market, 'us') "
+        "FROM daily_bars d LEFT JOIN symbols s ON s.symbol = d.symbol"
+    )
+    params: list[Any] = []
+    if market:
+        sql += " WHERE s.market = %s"
+        params.append(market)
+    sql += " GROUP BY d.symbol, s.market"
     with conn.cursor() as cur:
-        cur.execute(
-            "SELECT symbol, min(bar_date), max(bar_date), count(*) "
-            "FROM daily_bars GROUP BY symbol"
-        )
+        cur.execute(sql, params)
         return {
-            symbol: (min_d, max_d, n)
-            for symbol, min_d, max_d, n in cur.fetchall()
+            symbol: (min_d, max_d, n, mkt)
+            for symbol, min_d, max_d, n, mkt in cur.fetchall()
         }
 
 
-def today_date() -> date:
+def today_date(market: str | None = None) -> date:
     from zoneinfo import ZoneInfo
 
-    return datetime.now(tz=ZoneInfo(_NY_TZ)).date()
+    return datetime.now(tz=ZoneInfo(bar_date_tz(market))).date()
+
+
+def _history_symbol(symbol: str, market: str | None) -> str:
+    from core.market import ph_history_symbol, resolve_market_id
+
+    symbol = (symbol or "").upper().strip()
+    if market and resolve_market_id(market) == "ph":
+        return ph_history_symbol(symbol)
+    return symbol
 
 
 def load_daily_ohlcv_rows(
-    symbol: str, after_ts: int | None = None, limit: int | None = None,
+    symbol: str,
+    after_ts: int | None = None,
+    limit: int | None = None,
+    *,
+    market: str | None = None,
 ) -> list[dict[str, Any]]:
     """Raw daily bars for the history API. Empty list if DB/symbol missing."""
-    symbol = (symbol or "").upper().strip()
+    symbol = _history_symbol(symbol, market)
     if not symbol:
         return []
     try:
@@ -328,8 +372,8 @@ def load_daily_ohlcv_rows(
         conn.close()
 
 
-def load_symbol_meta(symbol: str) -> dict[str, Any] | None:
-    symbol = (symbol or "").upper().strip()
+def load_symbol_meta(symbol: str, *, market: str | None = None) -> dict[str, Any] | None:
+    symbol = _history_symbol(symbol, market)
     if not symbol:
         return None
     try:
@@ -391,10 +435,10 @@ def load_daily_ohlcv_df(symbol: str):
         conn.close()
 
 
-def bar_date_from_ts(ts: int) -> date:
+def bar_date_from_ts(ts: int, market: str | None = None) -> date:
     from zoneinfo import ZoneInfo
 
-    return datetime.fromtimestamp(ts, tz=ZoneInfo(_NY_TZ)).date()
+    return datetime.fromtimestamp(ts, tz=ZoneInfo(bar_date_tz(market))).date()
 
 
 log.debug("data.db | database_url=%s", "set" if settings.database_url else "unset")

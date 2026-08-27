@@ -148,6 +148,53 @@ def _parse_directory_html(html: str) -> dict[str, tuple[str, str]]:
     return out
 
 
+def fetch_directory(*, force: bool = False) -> dict[str, tuple[str, str]]:
+    """Paginate Edge company directory into the on-disk ticker map."""
+    if not force:
+        cached = _load_dir_cache()
+        if len(cached) >= 50:
+            return cached
+    mapping: dict[str, tuple[str, str]] = {}
+    for page in range(1, 80):
+        form = urllib.parse.urlencode(
+            {
+                "pageNo": str(page),
+                "companyId": "",
+                "keyword": "",
+                "sortType": "",
+                "dateSortType": "DESC",
+                "cmpySortType": "ASC",
+                "symbolSortType": "ASC",
+                "sector": "ALL",
+                "subsector": "ALL",
+            }
+        ).encode()
+        try:
+            html = _request(
+                _DIR_URL,
+                data=form,
+                content_type="application/x-www-form-urlencoded",
+                referer=_DIR_REFERER,
+            ).decode("utf-8", errors="replace")
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            log.warning(f"PSE Edge | directory page {page} failed: {exc}")
+            break
+        found = _parse_directory_html(html)
+        if not found:
+            break
+        before = len(mapping)
+        mapping.update(found)
+        if len(mapping) == before:
+            break
+    if mapping:
+        try:
+            _save_dir_cache(mapping)
+        except OSError as exc:
+            log.debug(f"PSE Edge | directory cache write skipped: {exc}")
+        log.info(f"PSE Edge | directory {len(mapping)} ticker(s)")
+    return mapping
+
+
 def resolve_ids(symbol: str) -> tuple[str, str] | None:
     """Map bot ticker BDO → Edge (company_id, security_id). Cached to disk."""
     sym = _norm_symbol(symbol)
@@ -319,6 +366,26 @@ def fetch_daily(symbol: str, *, start: date | None = None, end: date | None = No
     if candles and not custom_range:
         _save_daily_cache(symbol, candles)
     return candles
+
+
+def fetch_daily_chunked(
+    symbol: str,
+    *,
+    start_year: int = 2010,
+    end: date | None = None,
+):
+    """Year-chunked Edge history (full backfill). Dedupes on timestamp."""
+    end = end or date.today()
+    start_year = min(start_year, end.year)
+    by_ts: dict[int, object] = {}
+    for year in range(start_year, end.year + 1):
+        chunk_start = date(year, 1, 1)
+        chunk_end = min(date(year, 12, 31), end)
+        for c in fetch_daily(symbol, start=chunk_start, end=chunk_end):
+            if c.timestamp is None:
+                continue
+            by_ts[int(c.timestamp.timestamp())] = c
+    return [by_ts[ts] for ts in sorted(by_ts)]
 
 
 def _to_weekly(daily):

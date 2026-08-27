@@ -43,7 +43,7 @@ def test_fetch_symbol_fill_all_upserts_entire_series(monkeypatch):
         lambda symbol: candles,
     )
 
-    def upsert(conn_, symbol, rows):
+    def upsert(conn_, symbol, rows, **_k):
         conn_.upserts.append((symbol, list(rows)))
 
     def refresh(conn_, symbol):

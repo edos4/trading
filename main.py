@@ -21,8 +21,11 @@ Usage:
     python main.py --kronos-test                    # Score Kronos-base +1d/+3d forecast accuracy (20 random symbols)
     python main.py --kronos-test 50                  # ...on 50 randomly sampled symbols
     python main.py --kronos-test 50 --kronos-liquid-only  # ...top 50 by $ volume instead of random
-    python main.py --check-db                        # Verify DB is current (freshness)
+    python main.py --check-db                        # Verify US + PH freshness
     python main.py --update-db                       # Daily incremental update: Yahoo/PSE fetch for stale symbols
+    python main.py --ingest-pse                      # Seed local stocks_history from PSE Edge (TICKER.PS)
+    python main.py --export-pse /tmp/pse_dump        # COPY PH rows for 33ai import
+    python main.py --import-pse /tmp/pse_dump        # Load PH dump (refuses non-.PS / non-ph)
     python scripts/compare_patterns.py              # Cross-pattern comparison (parallel)
     python scripts/compare_patterns.py -p 4         # Limit to 4 concurrent backtests
 
@@ -528,8 +531,14 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=7,
         metavar="N",
-        help="With --check-db, flag the dataset as stale when the global last bar "
-        "is older than N days (default: 7).",
+        help="With --check-db, flag a market as stale when its last bar is "
+        "older than N days vs that market's last closed session (default: 7).",
+    )
+    parser.add_argument(
+        "--check-db-market",
+        choices=["us", "ph"],
+        default=None,
+        help="With --check-db, only report this market (default: both).",
     )
     parser.add_argument(
         "--update-db",
@@ -550,6 +559,39 @@ def _parse_args() -> argparse.Namespace:
         metavar="N",
         help="With --update-db, cap the fetch to the top N stale symbols "
         "(by recency). Default: all stale symbols (no cap).",
+    )
+    parser.add_argument(
+        "--ingest-pse",
+        action="store_true",
+        help="Create local stocks_history if needed and load PSE Edge daily "
+        "bars as TICKER.PS (market=ph).",
+    )
+    parser.add_argument(
+        "--ingest-pse-symbols",
+        type=str,
+        default="",
+        help="With --ingest-pse, comma-separated tickers (default: full Edge directory).",
+    )
+    parser.add_argument(
+        "--ingest-pse-limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="With --ingest-pse, only the first N directory tickers (spike).",
+    )
+    parser.add_argument(
+        "--export-pse",
+        type=str,
+        default=None,
+        metavar="DIR",
+        help="Write PH-only symbols.csv + daily_bars.csv to DIR.",
+    )
+    parser.add_argument(
+        "--import-pse",
+        type=str,
+        default=None,
+        metavar="DIR",
+        help="Load PH CSV dump into stocks_history (refuses US / bare tickers).",
     )
     return parser.parse_args()
 
@@ -591,7 +633,10 @@ async def main(args: argparse.Namespace | None = None) -> None:
     if args.check_db:
         from data.check import run_check
 
-        rc = run_check(stale_days=args.check_db_stale_days)
+        rc = run_check(
+            stale_days=args.check_db_stale_days,
+            market=args.check_db_market,
+        )
         raise SystemExit(rc)
 
     if args.update_db:
@@ -601,6 +646,30 @@ async def main(args: argparse.Namespace | None = None) -> None:
             fetch=not args.update_db_no_fetch,
             fetch_limit=args.update_db_fetch_limit,
         )
+        return
+
+    if args.ingest_pse:
+        from data.pse_ingest import run_ingest
+
+        extra = [s.strip() for s in (args.ingest_pse_symbols or "").split(",") if s.strip()]
+        run_ingest(
+            symbols=extra or None,
+            limit=args.ingest_pse_limit,
+        )
+        return
+
+    if args.export_pse:
+        from pathlib import Path
+        from data.pse_ingest import export_ph
+
+        export_ph(Path(args.export_pse))
+        return
+
+    if args.import_pse:
+        from pathlib import Path
+        from data.pse_ingest import import_ph
+
+        import_ph(Path(args.import_pse))
         return
 
     if args.learn:
