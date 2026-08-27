@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import patch
 
 from data.stream_server import StreamServer, _SymbolTape, _load_symbol_db
@@ -12,8 +11,8 @@ def test_local_stream_ws_disables_protocol_pings():
     assert LOCAL_STREAM_WS["ping_timeout"] is None
 
 
-def test_stream_advance_moves_all_loaded_tapes_atomically(tmp_path: Path):
-    server = StreamServer(base_dir=str(tmp_path))
+def test_stream_advance_moves_all_loaded_tapes_atomically():
+    server = StreamServer()
     rows_a = [
         {"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "timestamp": 1},
         {"open": 2, "high": 2, "low": 2, "close": 2, "volume": 1, "timestamp": 2},
@@ -33,7 +32,7 @@ def test_stream_advance_moves_all_loaded_tapes_atomically(tmp_path: Path):
 def test_pinned_asof_skips_future_ipo_tape():
     """An IPO whose first bar is later than the control asof must not leak
     a future price into the current scan."""
-    server = StreamServer(base_dir=".")
+    server = StreamServer()
     liquid = [
         {"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "timestamp": 1},
         {"open": 2, "high": 2, "low": 2, "close": 2, "volume": 1, "timestamp": 2},
@@ -58,8 +57,7 @@ def test_load_symbol_db_uses_history_api_not_local_postgres():
     from config import settings
 
     rows = [{"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "timestamp": 1}]
-    with patch("data.history_client.history_api_configured", return_value=True), \
-         patch("data.history.load_daily_tape_rows", return_value=rows) as load, \
+    with patch("data.history.load_daily_tape_rows", return_value=rows) as load, \
          patch("data.db.get_conn") as get_conn:
         out = _load_symbol_db("AAPL")
     assert out == rows
@@ -70,8 +68,7 @@ def test_load_symbol_db_uses_history_api_not_local_postgres():
 
 
 def test_load_symbol_db_skips_postgres_when_api_empty():
-    with patch("data.history_client.history_api_configured", return_value=True), \
-         patch("data.history.load_daily_tape_rows", return_value=None), \
+    with patch("data.history.load_daily_tape_rows", return_value=None), \
          patch("data.db.get_conn") as get_conn:
         out = _load_symbol_db("ZZZZ")
     assert out is None
@@ -83,8 +80,7 @@ def test_load_symbol_db_uses_after_ts_when_start_set():
 
     start_ts = 1_700_000_000
     rows = [{"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "timestamp": start_ts}]
-    with patch("data.history_client.history_api_configured", return_value=True), \
-         patch("data.history.load_daily_tape_rows", return_value=rows) as load, \
+    with patch("data.history.load_daily_tape_rows", return_value=rows) as load, \
          patch("data.db.get_conn") as get_conn:
         out = _load_symbol_db("AAPL", start_ts=start_ts)
     assert out == rows

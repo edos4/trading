@@ -28,10 +28,10 @@ sys.path.insert(0, str(ROOT))
 
 from config import settings  # noqa: E402
 from core.kronos_eval import LOOKBACK, MAX_CONTEXT, _load_predictor, with_amount  # noqa: E402
+from data.history import load_daily_ohlcv_df  # noqa: E402
 from data.tv_client import TVClient  # noqa: E402
 from utils.logger import log  # noqa: E402
 
-CSV = Path("/home/r00t/stocks_data/A/AAPL.csv")
 OUT = ROOT / "kronos_aapl_aug10_11.png"
 CUTOFF = pd.Timestamp("2026-08-10")
 TARGET_DATES = [
@@ -43,50 +43,32 @@ PLOT_ACTUAL_BARS = 40
 
 
 def refresh_aapl() -> pd.DataFrame:
+    df = load_daily_ohlcv_df("AAPL")
+    if df is not None and not df.empty:
+        log.info(f"kronos-aug | AAPL stocks_history {len(df)} bars, last={df.index.max()}")
+        return df
+
     tv = TVClient(settings.tv_screener, "NASDAQ")
     candles = tv._fetch_history_chart("AAPL", "1d")
     if not candles:
-        raise SystemExit("Failed to fetch AAPL 1d history from chart API")
+        raise SystemExit("Failed to fetch AAPL 1d history")
 
-    fresh_rows = []
+    rows = []
     for c in candles:
         ts = c.timestamp
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
-        fresh_rows.append(
-            {
-                "volume": float(c.volume),
-                "low": float(c.low),
-                "close": float(c.close),
-                "open": float(c.open),
-                "high": float(c.high),
-                "timestamp": int(ts.timestamp()),
-            }
-        )
-    fresh = pd.DataFrame(fresh_rows)
-    if CSV.exists():
-        old = pd.read_csv(CSV)
-        merged = (
-            pd.concat([old, fresh], ignore_index=True)
-            .drop_duplicates("timestamp", keep="last")
-            .sort_values("timestamp")
-        )
-    else:
-        merged = fresh.sort_values("timestamp")
-    CSV.parent.mkdir(parents=True, exist_ok=True)
-    merged.to_csv(CSV, index=False)
-    log.info(
-        f"kronos-aug | updated {CSV} → {len(merged)} bars, "
-        f"last={pd.to_datetime(merged['timestamp'].max(), unit='s')}"
-    )
-
-    df = merged.copy()
-    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
-    return (
-        df.sort_values("timestamp")
-        .drop_duplicates("timestamp")
-        .set_index("timestamp")[["open", "high", "low", "close", "volume"]]
-    )
+        rows.append({
+            "open": float(c.open),
+            "high": float(c.high),
+            "low": float(c.low),
+            "close": float(c.close),
+            "volume": float(c.volume),
+            "timestamp": ts,
+        })
+    out = pd.DataFrame(rows).set_index("timestamp")[["open", "high", "low", "close", "volume"]]
+    log.info(f"kronos-aug | AAPL chart API {len(out)} bars, last={out.index.max()}")
+    return out
 
 
 def main() -> None:

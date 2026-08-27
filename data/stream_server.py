@@ -6,10 +6,8 @@ US markets are closed. Each symbol gets its own cursor into its data. The
 scanner advances the entire replay atomically once a complete scan cycle
 finishes, so all symbols in a cycle see the same simulated market bar.
 
-Bars come from GET /api/history on STOCKS_HISTORY_URL (33ai.edos.uk on
-local --ui/--web), then local Postgres, then the CSV layout
-<papertrade_stream_dir>/<FIRST_LETTER>/<SYMBOL>.csv with columns
-low,open,volume,high,close,timestamp (unix seconds, one row per day).
+Bars come from GET /api/history (STOCKS_HISTORY_URL, default 33ai.edos.uk).
+No CSV files and no local Postgres.
 
 Optional start_date (YYYY-MM-DD) sets the initial cursor to the first bar
 on/after that date. Without it, each tape starts near the end of its data
@@ -30,12 +28,10 @@ Replay control:
 from __future__ import annotations
 
 import asyncio
-import csv
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from pathlib import Path
 
 import websockets
 
@@ -89,7 +85,7 @@ class _SymbolTape:
 
     def advance(self) -> None:
         # Wrap back to this tape's own recent window, not row 0 of the whole
-        # CSV — modulo-ing by len(rows) would snap the price back to the
+        # series — modulo-ing by len(rows) would snap the price back to the
         # earliest bar on file (a different era, often a different
         # split-adjustment level), producing a fake multi-year price cliff
         # mid-session instead of a smooth loop.
@@ -133,42 +129,11 @@ class _SymbolTape:
         return None
 
 
-def _load_symbol_csv(base_dir: Path, symbol: str) -> list[dict] | None:
-    path = base_dir / symbol[0].upper() / f"{symbol.upper()}.csv"
-    if not path.exists():
-        return None
-    rows = []
-    with path.open(newline="") as f:
-        for row in csv.DictReader(f):
-            # Some tickers have gap rows with only a timestamp and blank
-            # OHLCV fields (e.g. a halted/delisted day) — skip rather than
-            # fail the whole symbol.
-            try:
-                rows.append({
-                    "open": float(row["open"]),
-                    "high": float(row["high"]),
-                    "low": float(row["low"]),
-                    "close": float(row["close"]),
-                    "volume": float(row["volume"]),
-                    "timestamp": int(float(row["timestamp"])),
-                })
-            except (ValueError, KeyError):
-                continue
-    rows.sort(key=lambda r: r["timestamp"])
-    return rows or None
-
-
-_db_unavailable_logged = False
-
-
 def _load_symbol_db(symbol: str, start_ts: int | None = None) -> list[dict] | None:
-    """Load a symbol's daily history from the stocks_history store.
+    """Load a symbol's daily history from GET /api/history.
 
-    Uses the remote API when STOCKS_HISTORY_URL is set, else local Postgres.
     Near-end replay fetches only lookback bars; a start date uses after_ts.
     """
-    from data.history_client import history_api_configured
-
     lookback = _stream_history_bars()
     after_ts = None
     limit = None
@@ -179,53 +144,14 @@ def _load_symbol_db(symbol: str, start_ts: int | None = None) -> list[dict] | No
     try:
         from data.history import load_daily_tape_rows
 
-        tape = load_daily_tape_rows(symbol, after_ts=after_ts, limit=limit)
-        if tape:
-            return tape
-        if history_api_configured():
-            return None
+        return load_daily_tape_rows(symbol, after_ts=after_ts, limit=limit)
     except Exception as exc:
         log.warning(f"StreamServer | history facade failed for {symbol}: {exc}")
-        if history_api_configured():
-            return None
-    try:
-        from data import db
-    except ImportError:
         return None
-    try:
-        conn = db.get_conn()
-    except Exception:
-        global _db_unavailable_logged
-        if not _db_unavailable_logged:
-            log.warning("StreamServer | DB unavailable — falling back to CSVs")
-            _db_unavailable_logged = True
-        return None
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT ts, open, high, low, close, volume "
-                "FROM daily_bars WHERE symbol = %s ORDER BY ts",
-                (symbol,),
-            )
-            rows = [{
-                "open": float(o),
-                "high": float(h),
-                "low": float(l),
-                "close": float(c),
-                "volume": float(v),
-                "timestamp": int(ts),
-            } for ts, o, h, l, c, v in cur.fetchall()]
-        return rows or None
-    except Exception as exc:
-        log.warning(f"StreamServer | DB read failed for {symbol}: {exc}")
-        return None
-    finally:
-        conn.close()
 
 
 class StreamServer:
-    def __init__(self, base_dir: str | None = None, start_date: str | None = None):
-        self._base_dir = Path(base_dir or settings.papertrade_stream_dir)
+    def __init__(self, start_date: str | None = None):
         self._start_ts = _parse_start_ts(
             start_date if start_date is not None else settings.papertrade_stream_start_date
         )
@@ -242,9 +168,7 @@ class StreamServer:
             tape = self._tapes.get(symbol)
             if tape is not None:
                 return tape
-        rows = _load_symbol_db(symbol, start_ts=self._start_ts) or _load_symbol_csv(
-            self._base_dir, symbol
-        )
+        rows = _load_symbol_db(symbol, start_ts=self._start_ts)
         with self._tape_lock:
             existing = self._tapes.get(symbol)
             if existing is not None:
@@ -314,7 +238,7 @@ class StreamServer:
     async def _handle(self, ws) -> None:
         # A single bad request/symbol must never take the whole connection
         # down — every concurrent scanner worker shares this one server
-        # process, so an unhandled exception here (previously: any CSV or
+        # process, so an unhandled exception here (previously: any history or
         # lookup error) closed that worker's socket with code 1011 and
         # surfaced as a scary-looking error for an otherwise fine symbol.
         async for raw in ws:
@@ -391,13 +315,10 @@ class StreamServer:
             if self._start_ts is not None
             else "near-end lookback"
         )
-        from data.history_client import history_api_configured
         from data.history import DEFAULT_STOCKS_HISTORY_URL
 
         source = (
             f"history API {(settings.stocks_history_url or DEFAULT_STOCKS_HISTORY_URL).rstrip('/')}"
-            if history_api_configured()
-            else f"database (CSV fallback: {self._base_dir})"
         )
         async with websockets.serve(self._handle, host, port, **LOCAL_STREAM_WS):
             log.info(

@@ -1,9 +1,9 @@
 """
 data/db.py — PostgreSQL access for the stock-history database.
 
-One shared code path for `--ingest-db`, `--check-db`, and `--update-db` so
-the scanner (and any future reader) never has to re-parse the ~3.7 GB of
-CSVs under /home/r00t/stocks_data.
+`--check-db` and `--update-db` keep daily_bars current from Yahoo/PSE.
+The scanner and UIs read via the history facade (API or this Postgres).
+CSV files are not a history source.
 
 Connection is a local unix socket with peer auth (OS user r00t → role r00t),
 so no password is involved. `settings.database_url` is the DSN; when it is
@@ -15,13 +15,13 @@ Schema:
   symbols(symbol, letter, market, source_path, last_bar_ts, row_count,
       file_mtime, file_size, updated_at)
 
-`ts` (Unix seconds) is the file's identity; `bar_date` is reporting-only.
+`ts` (Unix seconds) is the bar identity; `bar_date` is reporting-only.
+source_path / file_mtime / file_size are leftover columns (unused).
 """
 
 from __future__ import annotations
 
 from datetime import date, datetime
-from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 from config import settings
@@ -395,10 +395,6 @@ def bar_date_from_ts(ts: int) -> date:
     from zoneinfo import ZoneInfo
 
     return datetime.fromtimestamp(ts, tz=ZoneInfo(_NY_TZ)).date()
-
-
-def symbol_path_for(data_dir: Path, symbol: str) -> Path:
-    return data_dir / symbol[0].upper() / f"{symbol.upper()}.csv"
 
 
 log.debug("data.db | database_url=%s", "set" if settings.database_url else "unset")

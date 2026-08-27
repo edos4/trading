@@ -1,7 +1,7 @@
 """
 core/kronos_finetune.py — orchestrates `python main.py --kronos-finetune`:
 fine-tune Kronos-base's tokenizer and predictor on liquid tickers from
-/home/r00t/stocks_data.
+stocks_history.
 
 Ports the training loops from ~/Kronos/finetune/{train_tokenizer,train_predictor}.py:
 same loss functions, same window normalization. Deliberately drops two
@@ -28,7 +28,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
 from core.kronos_eval import KRONOS_REPO_DIR, MODEL_PATH, TOKENIZER_PATH, with_amount
-from learn.dataset import DEFAULT_DATA_DIR, iter_ticker_frames
+from learn.dataset import iter_ticker_frames
 from utils.logger import log
 
 FEATURE_LIST = ["open", "high", "low", "close", "volume", "amount"]
@@ -42,9 +42,9 @@ PREDICTOR_OUT = FINETUNE_DIR / "predictor" / "best_model"
 
 # ── Dataset prep ───────────────────────────────────────────────────────────
 
-def _rank_liquid_symbols(data_dir: Path, n_symbols: int, min_bars: int, liquidity_window: int = 60):
+def _rank_liquid_symbols(n_symbols: int, min_bars: int, liquidity_window: int = 60):
     """Same dollar-volume ranking as `--kronos-test --kronos-liquid-only`."""
-    candidates = [(s, df) for s, df in iter_ticker_frames(data_dir) if len(df) >= min_bars]
+    candidates = [(s, df) for s, df in iter_ticker_frames(min_bars=min_bars)]
 
     def dollar_volume(df: pd.DataFrame) -> float:
         tail = df.tail(liquidity_window)
@@ -57,7 +57,6 @@ def _rank_liquid_symbols(data_dir: Path, n_symbols: int, min_bars: int, liquidit
 
 
 def prepare_dataset(
-    data_dir: Path = DEFAULT_DATA_DIR,
     n_symbols: int = 1500,
     min_bars: int = 500,
     val_frac: float = 0.1,
@@ -65,15 +64,15 @@ def prepare_dataset(
     """Build train_data.pkl / val_data.pkl — dict[symbol] -> DataFrame,
     split chronologically per-symbol so validation never leaks earlier
     prices into a later training window. Caches to disk; delete DATASET_DIR
-    to force a rebuild after changing n_symbols/data_dir."""
+    to force a rebuild after changing n_symbols."""
     train_path = DATASET_DIR / "train_data.pkl"
     val_path = DATASET_DIR / "val_data.pkl"
     if train_path.exists() and val_path.exists():
         log.info(f"Kronos-finetune | reusing cached dataset at {DATASET_DIR}")
         return train_path, val_path
 
-    log.info(f"Kronos-finetune | ranking top {n_symbols} liquid tickers from {data_dir} ...")
-    ranked = _rank_liquid_symbols(data_dir, n_symbols, min_bars)
+    log.info(f"Kronos-finetune | ranking top {n_symbols} liquid tickers from stocks_history ...")
+    ranked = _rank_liquid_symbols(n_symbols, min_bars)
     log.info(f"Kronos-finetune | building dataset from {len(ranked)} symbols")
 
     train_data: dict[str, pd.DataFrame] = {}
@@ -282,7 +281,6 @@ def _train_predictor(
 
 
 def run_kronos_finetune(
-    data_dir: Path = DEFAULT_DATA_DIR,
     n_symbols: int = 1500,
     min_bars: int = 500,
     lookback: int = 256,
@@ -305,7 +303,7 @@ def run_kronos_finetune(
     if device.type == "cpu":
         log.warning("Kronos-finetune | running on CPU — this will be extremely slow, install CUDA torch first")
 
-    train_pkl, val_pkl = prepare_dataset(data_dir, n_symbols, min_bars)
+    train_pkl, val_pkl = prepare_dataset(n_symbols, min_bars)
 
     tokenizer_path = Path(TOKENIZER_PATH)
     if not skip_tokenizer:

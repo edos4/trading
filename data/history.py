@@ -1,4 +1,8 @@
-"""Unified daily OHLCV source: remote API, then local Postgres, then TV/Yahoo."""
+"""Unified daily OHLCV source: GET /api/history (33ai by default), then TV/Yahoo.
+
+Readers never use CSV files or local Postgres. Postgres is only for
+`--update-db` / `--check-db` and for serving `/api/history` on the VPS owner.
+"""
 
 from __future__ import annotations
 
@@ -8,10 +12,10 @@ from typing import Any
 
 import pandas as pd
 
+from data.history_client import DEFAULT_STOCKS_HISTORY_URL
 from data.tv_client import OHLCVCandle, TVClient
 from utils.logger import log
 
-DEFAULT_STOCKS_HISTORY_URL = "https://33ai.edos.uk"
 _VPS_APP_ROOT = "/home/deploy/apps/trading"
 
 _ui_web_mode = False
@@ -170,23 +174,23 @@ def _is_weekly(timeframe: str) -> bool:
     return timeframe.upper() in ("1W", "W", "1WK", "WEEKLY")
 
 
+def list_history_symbols() -> list[dict[str, Any]]:
+    """Symbol metas from GET /api/history/symbols."""
+    from data.history_client import fetch_history_symbols
+
+    return fetch_history_symbols() or []
+
+
 def load_daily_bars(
     symbol: str, *, after_ts: int | None = None, limit: int | None = None,
 ) -> list[dict[str, Any]] | None:
-    """API (if URL set) or local Postgres. None on hard failure; [] if empty."""
-    from data.history_client import fetch_history_bars, history_api_configured
+    """GET /api/history/{symbol}. None on hard failure; [] if empty."""
+    from data.history_client import fetch_history_bars
 
     symbol = (symbol or "").upper().strip()
     if not symbol:
         return None
-    if history_api_configured():
-        bars = fetch_history_bars(symbol, after_ts=after_ts, limit=limit)
-        if bars is None:
-            return None
-        return bars
-    from data.db import load_daily_ohlcv_rows
-
-    return load_daily_ohlcv_rows(symbol, after_ts=after_ts, limit=limit)
+    return fetch_history_bars(symbol, after_ts=after_ts, limit=limit)
 
 
 def load_daily_candles(
@@ -242,10 +246,10 @@ def fetch_ohlcv_candles(
     tv_client: TVClient | None = None,
     tv_fallback: bool = True,
 ) -> list[OHLCVCandle]:
-    """Daily (or weekly resampled from daily) from API/DB, then optional TV.
+    """Daily (or weekly resampled from daily) from GET /api/history, then optional TV.
 
     --ui/--web never fall back to Yahoo/TV: charts and OHLCV come from
-    33ai.edos.uk (or local Postgres on the VPS owner).
+    33ai.edos.uk.
     """
     daily = load_daily_candles(symbol)
     if daily:

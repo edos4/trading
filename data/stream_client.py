@@ -2,7 +2,7 @@
 data/stream_client.py — Client for the paper trade stream server
 (main.py --papertrade-stream). Drop-in replacement for TVClient inside
 MarketScanner: same mcp_session()/fetch_snapshot() shape, backed by the
-CSV replay server instead of TradingView.
+history replay server instead of TradingView.
 """
 
 from __future__ import annotations

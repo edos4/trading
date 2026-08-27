@@ -286,9 +286,8 @@ Kronos.from_pretrained('NeoQuasar/Kronos-base', token=False) \
 
 ### Forecast accuracy test (`--kronos-test` / `scripts/kronos_1wk_test.py`)
 
-Walk-forward scores of Kronos +1 day / +3 trading-day close forecasts on the
-historical daily CSVs in `/home/r00t/stocks_data`. Useful after fine-tuning
-or when comparing weight sets.
+Walk-forward scores of Kronos +1 day / +3 trading-day close forecasts on
+stocks_history. Useful after fine-tuning or when comparing weight sets.
 
 Metrics now include flat-0 MAE, **prior-week persistence**, **majority-sign**
 bias check, **gate-filtered** dir/MAE/signed-return using the same
@@ -322,7 +321,7 @@ plus persistence and `gate@min_move` rows when available.
 ### Fine-tuning (`--kronos-finetune`)
 
 Adapts Kronos-base's tokenizer + predictor on liquid tickers from
-`/home/r00t/stocks_data`. Saves checkpoints under `~/Kronos/finetuned/`.
+stocks_history. Saves checkpoints under `~/Kronos/finetuned/`.
 Needs a CUDA GPU to be practical. Re-score with
 `--kronos-test ... --kronos-use-finetuned` before switching the live gate
 onto fine-tuned weights (the live gate currently loads **base** weights
@@ -468,11 +467,13 @@ serves `GET /api/history/symbols`, `GET /api/history/{symbol}`, and
 daily OHLCV (explorer charts, paper charts, paper trade stream, Kronos,
 backtest prefetch) from `https://33ai.edos.uk` — `STOCKS_HISTORY_URL` is
 applied automatically if empty. They do **not** use Yahoo/TV for history, and do **not** need
-`DATABASE_URL` or `/home/r00t/stocks_data`. History API Basic auth is
+`DATABASE_URL`. History API Basic auth is
 `WEB_UI_USERNAME` / `WEB_UI_USERNAME` (default `admin`:`admin`), not the
 dashboard password. On the VPS set `STOCKS_HISTORY_OWNER=true` and leave
-`STOCKS_HISTORY_URL` empty so `--web` keeps using local Postgres and
-`--update-db`. CLI `--backtest` / `--paper` / `--learn` still use TV/CSV.
+`STOCKS_HISTORY_URL` empty so `--web` still **writes** local Postgres via
+`--update-db` and **serves** `GET /api/history`. All OHLCV **reads**
+(scanner, explorer, paper stream, Kronos, `--learn`) go through that API
+(default `https://33ai.edos.uk`), never local Postgres or CSV.
 
 What both UIs support:
 

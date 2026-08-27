@@ -29,9 +29,9 @@ from core.kronos_eval import (  # noqa: E402
     _load_predictor,
     with_amount,
 )
+from data.history import load_daily_ohlcv_df  # noqa: E402
 from utils.logger import log  # noqa: E402
 
-DEFAULT_CSV = Path("/home/r00t/stocks_data/A/AAPL.csv")
 DEFAULT_OUT = ROOT / "kronos_test.png"
 DEFAULT_YEAR = 2026
 DEFAULT_LOOKBACK = LOOKBACK
@@ -39,14 +39,11 @@ DEFAULT_HORIZON = WEEK_AHEAD
 MIN_LOOKBACK = 60
 
 
-def load_aapl(csv_path: Path) -> pd.DataFrame:
-    raw = pd.read_csv(csv_path)
-    raw["timestamp"] = pd.to_datetime(raw["timestamp"], unit="s")
-    return (
-        raw.sort_values("timestamp")
-        .drop_duplicates("timestamp")
-        .set_index("timestamp")[["open", "high", "low", "close", "volume"]]
-    )
+def load_aapl() -> pd.DataFrame:
+    df = load_daily_ohlcv_df("AAPL")
+    if df is None or df.empty:
+        raise SystemExit("No AAPL bars in stocks_history")
+    return df
 
 
 def april_june_slice(df: pd.DataFrame, year: int) -> tuple[pd.DataFrame, int, int]:
@@ -56,7 +53,7 @@ def april_june_slice(df: pd.DataFrame, year: int) -> tuple[pd.DataFrame, int, in
     pred_mask = (df.index.normalize() >= start) & (df.index.normalize() < end)
     pred_idx = df.index[pred_mask]
     if len(pred_idx) == 0:
-        raise SystemExit(f"No AAPL bars for {year}-04-01 .. {year}-06-30 in {DEFAULT_CSV}")
+        raise SystemExit(f"No AAPL bars for {year}-04-01 .. {year}-06-30 in stocks_history")
 
     forecast_start_i = int(df.index.get_indexer([pred_idx[0]])[0])
     forecast_end_i = int(df.index.get_indexer([pred_idx[-1]])[0]) + 1
@@ -145,7 +142,6 @@ def walk_forward_5d(
 
 
 def run(
-    csv_path: Path,
     out_path: Path,
     year: int,
     device: str,
@@ -153,7 +149,7 @@ def run(
     lookback: int | None = None,
     horizon: int = DEFAULT_HORIZON,
 ) -> Path:
-    df, forecast_start_i, forecast_end_i = april_june_slice(load_aapl(csv_path), year)
+    df, forecast_start_i, forecast_end_i = april_june_slice(load_aapl(), year)
     use_lookback = resolve_lookback(forecast_start_i, lookback)
     y_actual = df.iloc[forecast_start_i:forecast_end_i]
 
@@ -228,7 +224,6 @@ def run(
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Kronos AAPL Apr–Jun 3d walk-forward plot")
-    p.add_argument("--csv", type=Path, default=DEFAULT_CSV)
     p.add_argument("--out", type=Path, default=DEFAULT_OUT)
     p.add_argument("--year", type=int, default=DEFAULT_YEAR)
     p.add_argument("--device", default="cuda")
@@ -247,7 +242,6 @@ def main() -> None:
     )
     args = p.parse_args()
     run(
-        args.csv,
         args.out,
         args.year,
         args.device,

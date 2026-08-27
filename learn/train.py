@@ -1,17 +1,16 @@
 """
-learn/train.py — orchestrates `python main.py --learn`: ingest CSVs, train
-the swing-win LightGBM classifier, save it under models/.
+learn/train.py — orchestrates `python main.py --learn`: load stocks_history,
+train the swing-win LightGBM classifier, save it under models/.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from pathlib import Path
 
 import lightgbm as lgb
 import numpy as np
 
-from learn.dataset import DEFAULT_DATA_DIR, build_dataset
+from learn.dataset import build_dataset
 from learn.features import FEATURE_NAMES
 from learn.model import save_model
 from utils.logger import log
@@ -52,33 +51,30 @@ def _train_lgb(X: np.ndarray, y: np.ndarray, seed: int = 42, val_frac: float = 0
 
 
 def run_learn(
-    data_dir: Path = DEFAULT_DATA_DIR,
     horizon_days: int = DEFAULT_HORIZON_DAYS,
     target_pct: float = DEFAULT_TARGET_PCT,
     stop_pct: float = DEFAULT_STOP_PCT,
     max_tickers: int | None = None,
 ) -> None:
     log.info(
-        f"Learn | ingesting {data_dir} | horizon={horizon_days}d "
+        f"Learn | stocks_history | horizon={horizon_days}d "
         f"target={target_pct:.1%} stop={stop_pct:.1%}"
         + (f" | max_tickers={max_tickers}" if max_tickers else "")
     )
     X, y, n_tickers = build_dataset(
-        data_dir=data_dir,
         horizon_days=horizon_days,
         target_pct=target_pct,
         stop_pct=stop_pct,
         max_tickers=max_tickers,
     )
     if len(y) == 0:
-        log.error("Learn | no usable examples found — check data_dir / CSV format")
+        log.error("Learn | no usable examples found — check stocks_history")
         return
     win_rate = float(y.mean())
     log.info(
         f"Learn | dataset built: {len(y):,} examples from {n_tickers:,} tickers, "
         f"win_rate={win_rate:.3f}"
     )
-
     booster, auc = _train_lgb(X, y)
     log.info(f"Learn | trained | val AUC={auc:.4f}")
 

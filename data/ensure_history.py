@@ -19,7 +19,6 @@ from data.update import _fetch_symbol, _last_trading_date
 from data.update_cron import ensure_weekday_update_cron
 from utils.logger import log
 
-_CSV_DIR = "/home/r00t/stocks_data"
 _started = False
 _lock = threading.Lock()
 
@@ -124,7 +123,7 @@ def _run_update_db() -> None:
     from data.update import run_update
 
     try:
-        run_update(_CSV_DIR)
+        run_update()
     except Exception:
         log.exception("Web UI | background --update-db failed")
 

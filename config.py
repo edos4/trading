@@ -43,17 +43,16 @@ class Settings(BaseSettings):
     paper_initial_capital: float = 100_000.0
     paper_slippage_pct: float = 0.0005
 
-    # ── Paper trade stream (replays historical CSVs when markets are closed) ──
-    papertrade_stream_dir: str = "/home/r00t/stocks_data"
+    # ── Paper trade stream (replays stocks_history when markets are closed) ──
     papertrade_stream_host: str = "127.0.0.1"
     papertrade_stream_port: int = 8765
-    # Warm enough for Kronos gate LOOKBACK=400 when replaying near CSV end.
+    # Warm enough for Kronos gate LOOKBACK=400 when replaying near tape end.
     papertrade_stream_lookback_bars: int = 420
     # Legacy pacing knob retained for .env compatibility. Replay advancement
     # is now scanner-controlled and happens once per completed universe scan,
     # so scan duration can never desynchronize symbols.
     papertrade_stream_interval_seconds: int = 60
-    # YYYY-MM-DD cursor start for CSV replay. None = near end of each CSV
+    # YYYY-MM-DD cursor start for stream replay. None = near end of each tape
     # (last papertrade_stream_lookback_bars). UI datepicker overrides this
     # when launching via "Use paper trade stream".
     papertrade_stream_start_date: str | None = None
@@ -147,7 +146,7 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
-    # ── PostgreSQL (stock history DB, python main.py --ingest-db/--check-db) ─
+    # ── PostgreSQL (stock history DB, python main.py --check-db/--update-db) ─
     # Local socket + peer auth (OS user r00t → role r00t), no password.
     # Discrete fallbacks below are used only when DATABASE_URL is empty.
     database_url: str = "postgresql://r00t@/stocks_history?host=/var/run/postgresql"
@@ -159,8 +158,9 @@ class Settings(BaseSettings):
 
     # ── Remote stocks_history API (local --ui / --web / Kronos) ─────────────
     # Local --ui/--web auto-use https://33ai.edos.uk when this is empty (charts
-    # included; no Yahoo). VPS --web must leave this empty and set owner so it
-    # keeps reading/writing local Postgres and serving GET /api/history.
+    # included; no Yahoo). All OHLCV reads use this API, never local Postgres.
+    # VPS --web must leave this empty and set owner so it still writes Postgres
+    # via --update-db and serves GET /api/history.
     stocks_history_url: str = ""
     stocks_history_username: str = ""
     stocks_history_password: str = ""
@@ -181,7 +181,11 @@ class Settings(BaseSettings):
     # Idle session lifetime (hours).
     web_ui_session_hours: int = 12
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+    }
 
     @field_validator("market")
     @classmethod

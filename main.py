@@ -16,14 +16,13 @@ Usage:
     python main.py --web                            # Launch the authenticated web UI (VPS)
                                                     # On start: connect to stocks_history and
                                                     # backfill missing/stale daily bars per symbol.
-    python main.py --papertrade-stream              # Serve historical bars (33ai /api/history, then DB/CSV) for paper trading when markets are closed
+    python main.py --papertrade-stream              # Serve historical bars (33ai /api/history) for paper trading when markets are closed
     python main.py --papertrade-stream --papertrade-stream-start 2025-01-02  # Replay from a specific date
     python main.py --kronos-test                    # Score Kronos-base +1d/+3d forecast accuracy (20 random symbols)
     python main.py --kronos-test 50                  # ...on 50 randomly sampled symbols
     python main.py --kronos-test 50 --kronos-liquid-only  # ...top 50 by $ volume instead of random
-    python main.py --ingest-db                       # Ingest /home/r00t/stocks_data CSVs into Postgres
-    python main.py --check-db                        # Verify DB is current (freshness / gap check)
-    python main.py --update-db                       # Daily incremental update: CSV sync + fetch all stale symbols
+    python main.py --check-db                        # Verify DB is current (freshness)
+    python main.py --update-db                       # Daily incremental update: Yahoo/PSE fetch for stale symbols
     python scripts/compare_patterns.py              # Cross-pattern comparison (parallel)
     python scripts/compare_patterns.py -p 4         # Limit to 4 concurrent backtests
 
@@ -418,22 +417,15 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--learn",
         action="store_true",
-        help="Ingest historical daily OHLCV CSVs (default /home/r00t/stocks_data) and "
-        "train the pattern_012_ml_signal model used by paper/live trading.",
-    )
-    parser.add_argument(
-        "--learn-data-dir",
-        type=str,
-        default=None,
-        metavar="DIR",
-        help="Override the CSV directory for --learn (default: /home/r00t/stocks_data).",
+        help="Train the pattern_012_ml_signal model from GET /api/history "
+        "for paper/live trading.",
     )
     parser.add_argument(
         "--learn-max-tickers",
         type=int,
         default=None,
         metavar="N",
-        help="Limit --learn to the first N ticker CSVs (smoke test before a full run).",
+        help="Limit --learn to the first N tickers (smoke test before a full run).",
     )
     parser.add_argument(
         "--kronos-test",
@@ -443,7 +435,7 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         metavar="N",
         help="Evaluate Kronos-base's +1 day / +3 trading-day close-price forecast accuracy "
-        "on N randomly sampled symbols (default: 20) from /home/r00t/stocks_data.",
+        "on N randomly sampled symbols (default: 20) from stocks_history.",
     )
     parser.add_argument(
         "--kronos-liquid-only",
@@ -478,7 +470,7 @@ def _parse_args() -> argparse.Namespace:
         "--kronos-finetune",
         action="store_true",
         help="Fine-tune Kronos-base's tokenizer + predictor on liquid tickers from "
-        "/home/r00t/stocks_data. Saves to ~/Kronos/finetuned/. Needs a CUDA GPU to "
+        "stocks_history. Saves to ~/Kronos/finetuned/. Needs a CUDA GPU to "
         "finish in a reasonable time.",
     )
     parser.add_argument(
@@ -512,9 +504,8 @@ def _parse_args() -> argparse.Namespace:
         "--papertrade-stream",
         action="store_true",
         help="Run the paper trade stream server: replays daily bars from "
-        "GET /api/history (https://33ai.edos.uk on local --ui/--web), then "
-        "local Postgres, then CSVs under settings.papertrade_stream_dir, over "
-        "a local WebSocket so paper trading (--paper / --ui) can run with the "
+        "GET /api/history (https://33ai.edos.uk by default) over a local "
+        "WebSocket so paper trading (--paper / --ui) can run with the "
         "'Use paper trade stream' option even when US markets are closed.",
     )
     parser.add_argument(
@@ -522,35 +513,15 @@ def _parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         metavar="YYYY-MM-DD",
-        help="With --papertrade-stream, start replaying each CSV from this date "
+        help="With --papertrade-stream, start replaying each tape from this date "
         "(first bar on/after). Default: PAPERTRADE_STREAM_START_DATE, or near "
-        "the end of each CSV.",
-    )
-    parser.add_argument(
-        "--ingest-db",
-        action="store_true",
-        help="Bulk-ingest the historical daily OHLCV CSVs into PostgreSQL "
-        "(stocks_history). Idempotent — safe to re-run.",
-    )
-    parser.add_argument(
-        "--ingest-db-dir",
-        type=str,
-        default=None,
-        metavar="DIR",
-        help="Override the CSV directory for --ingest-db (default: /home/r00t/stocks_data).",
+        "the end of each tape.",
     )
     parser.add_argument(
         "--check-db",
         action="store_true",
-        help="Check the stock-history DB is current: global + per-symbol stats, "
-        "CSV vs DB gap check, freshness. Non-zero exit if stale/missing.",
-    )
-    parser.add_argument(
-        "--check-db-dir",
-        type=str,
-        default=None,
-        metavar="DIR",
-        help="Override the CSV directory for --check-db (default: /home/r00t/stocks_data).",
+        help="Check the stock-history DB is current: global + per-symbol stats "
+        "and freshness. Non-zero exit if stale.",
     )
     parser.add_argument(
         "--check-db-stale-days",
@@ -561,35 +532,23 @@ def _parse_args() -> argparse.Namespace:
         "is older than N days (default: 7).",
     )
     parser.add_argument(
-        "--check-db-fast",
-        action="store_true",
-        help="With --check-db, skip the per-CSV comparison (DB-only freshness).",
-    )
-    parser.add_argument(
         "--update-db",
         action="store_true",
-        help="Incremental daily update: CSV sync (new rows ts > max(ts)) plus "
-        "fetch fallback for every symbol whose last bar is older than the last "
-        "trading day (Yahoo v8 / PSE Edge). Unbounded — updates all symbols.",
-    )
-    parser.add_argument(
-        "--update-db-dir",
-        type=str,
-        default=None,
-        metavar="DIR",
-        help="Override the CSV directory for --update-db (default: /home/r00t/stocks_data).",
+        help="Incremental daily update: Yahoo v8 / PSE Edge fetch for every symbol "
+        "whose last bar is older than the last trading day. Unbounded — updates "
+        "all symbols.",
     )
     parser.add_argument(
         "--update-db-no-fetch",
         action="store_true",
-        help="With --update-db, skip the network fetch fallback (CSV sync only).",
+        help="With --update-db, skip the Yahoo/PSE fetch.",
     )
     parser.add_argument(
         "--update-db-fetch-limit",
         type=int,
         default=None,
         metavar="N",
-        help="With --update-db, cap the fetch fallback to the top N stale symbols "
+        help="With --update-db, cap the fetch to the top N stale symbols "
         "(by recency). Default: all stale symbols (no cap).",
     )
     return parser.parse_args()
@@ -629,40 +588,25 @@ async def main(args: argparse.Namespace | None = None) -> None:
         await run_stream_server(start_date=args.papertrade_stream_start)
         return
 
-    if args.ingest_db:
-        from data.ingest import run_ingest
-
-        run_ingest(args.ingest_db_dir or "/home/r00t/stocks_data")
-        return
-
     if args.check_db:
         from data.check import run_check
 
-        rc = run_check(
-            args.check_db_dir or "/home/r00t/stocks_data",
-            stale_days=args.check_db_stale_days,
-            compare_csv=not args.check_db_fast,
-        )
+        rc = run_check(stale_days=args.check_db_stale_days)
         raise SystemExit(rc)
 
     if args.update_db:
         from data.update import run_update
 
         run_update(
-            args.update_db_dir or "/home/r00t/stocks_data",
             fetch=not args.update_db_no_fetch,
             fetch_limit=args.update_db_fetch_limit,
         )
         return
 
     if args.learn:
-        from pathlib import Path as _Path
         from learn.train import run_learn
 
-        kwargs = {"max_tickers": args.learn_max_tickers}
-        if args.learn_data_dir:
-            kwargs["data_dir"] = _Path(args.learn_data_dir)
-        run_learn(**kwargs)
+        run_learn(max_tickers=args.learn_max_tickers)
         return
 
     if args.paper is not None:

@@ -1,18 +1,12 @@
 """
-learn/dataset.py — ingest the historical daily OHLCV CSVs and build the
-feature/label matrix used to train the swing-win model.
+learn/dataset.py — build the feature/label matrix from stocks_history.
 
-Layout expected under `data_dir`: <FirstLetter>/<TICKER>.csv, columns
-volume,low,close,open,high,timestamp (unix seconds). ~17.7k tickers / 3.8GB.
-
-Processed per-ticker (float32, NaN rows dropped immediately) to keep peak
-memory well under the full 3.8GB raw size — the feature matrix is a few GB
-at most, not the whole CSV set held in memory at once.
+Ticker frames come from GET /api/history, never CSV or local Postgres.
+Processed per-ticker (float32, NaN rows dropped immediately).
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Iterator
 
 import numpy as np
@@ -21,38 +15,39 @@ from tqdm import tqdm
 
 from learn.features import FEATURE_NAMES, compute_features
 from learn.labels import triple_barrier_labels
-from utils.logger import log
-
-DEFAULT_DATA_DIR = Path("/home/r00t/stocks_data")
-REQUIRED_COLUMNS = {"open", "high", "low", "close", "volume", "timestamp"}
 
 
-def iter_ticker_frames(data_dir: Path) -> Iterator[tuple[str, pd.DataFrame]]:
-    """Yield (symbol, df) for every <letter>/<TICKER>.csv under data_dir.
+def iter_ticker_frames(
+    *,
+    min_bars: int = 0,
+    max_tickers: int | None = None,
+) -> Iterator[tuple[str, pd.DataFrame]]:
+    """Yield (symbol, df) for every stocks_history ticker with enough bars.
 
-    df has columns open, high, low, close, volume, indexed by timestamp,
-    oldest-first, deduplicated.
+    df has columns open, high, low, close, volume, datetime index, oldest-first.
     """
-    for csv_path in sorted(data_dir.glob("*/*.csv")):
-        symbol = csv_path.stem
-        try:
-            raw = pd.read_csv(csv_path)
-        except Exception as exc:
-            log.debug(f"learn | skipping {csv_path.name}: {exc}")
+    from data.history import list_history_symbols, load_daily_ohlcv_df
+
+    metas = list_history_symbols()
+    n = 0
+    for meta in metas:
+        symbol = str(meta.get("symbol") or "").upper()
+        if not symbol:
             continue
-        if not REQUIRED_COLUMNS.issubset(raw.columns) or raw.empty:
+        if min_bars and int(meta.get("row_count") or 0) < min_bars:
             continue
-        raw["timestamp"] = pd.to_datetime(raw["timestamp"], unit="s")
-        df = (
-            raw.sort_values("timestamp")
-            .drop_duplicates("timestamp")
-            .set_index("timestamp")[["open", "high", "low", "close", "volume"]]
-        )
+        df = load_daily_ohlcv_df(symbol)
+        if df is None or df.empty:
+            continue
+        if min_bars and len(df) < min_bars:
+            continue
         yield symbol, df
+        n += 1
+        if max_tickers is not None and n >= max_tickers:
+            return
 
 
 def build_dataset(
-    data_dir: Path = DEFAULT_DATA_DIR,
     horizon_days: int = 10,
     target_pct: float = 0.09,
     stop_pct: float = 0.06,
@@ -64,7 +59,7 @@ def build_dataset(
     y_parts: list[np.ndarray] = []
     n_tickers = 0
 
-    frames = iter_ticker_frames(data_dir)
+    frames = iter_ticker_frames(min_bars=min_bars, max_tickers=max_tickers)
     for symbol, df in tqdm(frames, desc="Ingesting tickers", unit="ticker"):
         if len(df) < min_bars:
             continue
