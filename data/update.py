@@ -21,7 +21,7 @@ logs/stocks_history_updated.txt after a successful pass.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from tqdm import tqdm
@@ -29,29 +29,21 @@ from tqdm import tqdm
 from data import db
 from utils.logger import log
 
-_NY_TZ = ZoneInfo("America/New_York")
 # Yahoo chart fetches; 8 keeps the 17k-symbol pass under ~1h without hammering.
 _FETCH_WORKERS = 3
 
 
-def _last_trading_date(now: datetime | None = None) -> date:
-    """Most recent *closed* US cash session (16:00 ET).
+def _last_trading_date(now: datetime | None = None, market: str = "us") -> date:
+    """Most recent *closed* cash session for `market` (US 16:00 ET, PSE 15:00 PHT)."""
+    from core.market import last_closed_session_date
 
-    Before the close — and all weekend — yesterday's session is the last
-    complete daily bar. Treating "today" as the target on Monday morning
-    would mark every Friday-current symbol stale forever until 16:00.
-    """
-    now = now or datetime.now(tz=_NY_TZ)
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=_NY_TZ)
-    else:
-        now = now.astimezone(_NY_TZ)
-    target = now.date()
-    if now.weekday() >= 5 or now.hour < 16:
-        target -= timedelta(days=1)
-    while target.weekday() >= 5:
-        target -= timedelta(days=1)
-    return target
+    return last_closed_session_date(market, now)
+
+
+def _target_ts(market: str, now: datetime | None = None) -> int:
+    last = _last_trading_date(now, market)
+    tz = ZoneInfo("Asia/Manila" if market == "ph" else "America/New_York")
+    return int(datetime(last.year, last.month, last.day, tzinfo=tz).timestamp())
 
 
 def _candles_to_rows(candles) -> list[tuple]:
@@ -67,10 +59,11 @@ def _candles_to_rows(candles) -> list[tuple]:
 
 def _fetch_symbol(conn, symbol: str, market: str, *, fill_all: bool = False) -> int:
     candles = []
+    market = (market or "us").lower()
     if market == "ph":
-        from data.pse_edge import fetch_daily
+        from data.pse_edge import fetch_daily, fetch_daily_chunked
 
-        candles = fetch_daily(symbol)
+        candles = fetch_daily_chunked(symbol) if fill_all else fetch_daily(symbol)
     elif fill_all:
         from data.tv_client import fetch_yahoo_daily_max
 
@@ -85,25 +78,24 @@ def _fetch_symbol(conn, symbol: str, market: str, *, fill_all: bool = False) -> 
     if not rows:
         return 0
     if fill_all:
-        db.upsert_bars(conn, symbol, rows)
+        db.upsert_bars(conn, symbol, rows, market=market)
         db.refresh_symbol_meta(conn, symbol)
         return len(rows)
     last_ts = db.max_ts(conn, symbol) or 0
     new = [r for r in rows if r[0] > last_ts]
     if new:
-        db.upsert_bars(conn, symbol, new)
+        db.upsert_bars(conn, symbol, new, market=market)
     db.refresh_symbol_meta(conn, symbol)
     return len(new)
 
 
 def _fetch_fallback(conn, symbols, *, fetch_limit: int | None) -> tuple[int, int]:
-    last_trading = _last_trading_date()
-    target_ts = int(
-        datetime(last_trading.year, last_trading.month, last_trading.day, tzinfo=_NY_TZ)
-        .timestamp()
-    )
-
-    stale = [s for s in symbols if (s["last_bar_ts"] or 0) < target_ts]
+    stale = []
+    for s in symbols:
+        market = (s.get("market") or "us").lower()
+        target_ts = _target_ts(market)
+        if (s["last_bar_ts"] or 0) < target_ts:
+            stale.append(s)
     stale.sort(key=lambda s: s["last_bar_ts"] or 0, reverse=True)
 
     to_fetch = stale if fetch_limit is None else stale[:fetch_limit]
@@ -113,7 +105,7 @@ def _fetch_fallback(conn, symbols, *, fetch_limit: int | None) -> tuple[int, int
 
     cap_note = f" (capped to {len(to_fetch)})" if fetch_limit else ""
     log.info(f"update | fetch fallback: {len(to_fetch)} stale symbol(s){cap_note} "
-             f"(older than {last_trading}, workers={_FETCH_WORKERS})")
+             f"(per-market last close, workers={_FETCH_WORKERS})")
     fetched, new_bars = 0, 0
 
     def _one(sym: dict) -> int:
@@ -168,10 +160,19 @@ def run_update(
         try:
             from data.history_stamp import write_stamp
 
-            median = db.median_last_bar_date(conn)
-            if median is not None:
-                write_stamp(median)
-                log.info(f"update | wrote last-update stamp {median}")
+            median_us = db.median_last_bar_date(conn, market="us")
+            median_ph = db.median_last_bar_date(conn, market="ph")
+            if median_us is not None:
+                write_stamp(median_us, market="us")
+                log.info(f"update | wrote US last-update stamp {median_us}")
+            if median_ph is not None:
+                write_stamp(median_ph, market="ph")
+                log.info(f"update | wrote PH last-update stamp {median_ph}")
+            if median_us is None and median_ph is None:
+                median = db.median_last_bar_date(conn)
+                if median is not None:
+                    write_stamp(median)
+                    log.info(f"update | wrote last-update stamp {median}")
         except Exception:
             log.exception("update | failed to write last-update stamp")
     finally:

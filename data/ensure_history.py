@@ -43,7 +43,6 @@ def run_ensure_complete(*, fetch: bool = True) -> dict[str, int]:
     from datetime import datetime
     from zoneinfo import ZoneInfo
 
-    ny = ZoneInfo("America/New_York")
     conn = db.get_conn()
     try:
         db.ensure_schema(conn)
@@ -52,20 +51,25 @@ def run_ensure_complete(*, fetch: bool = True) -> dict[str, int]:
             log.info("ensure-history | stocks_history has no symbols yet")
             return {"symbols": 0, "incomplete": 0, "fetched": 0, "upserted_bars": 0}
 
-        last_trading = _last_trading_date()
-        target_ts = int(
-            datetime(
-                last_trading.year, last_trading.month, last_trading.day, tzinfo=ny
-            ).timestamp()
+        last_us = _last_trading_date()
+        last_ph = _last_trading_date(market="ph")
+        ny = ZoneInfo("America/New_York")
+        manila = ZoneInfo("Asia/Manila")
+        target_us = int(
+            datetime(last_us.year, last_us.month, last_us.day, tzinfo=ny).timestamp()
         )
-        incomplete = [
-            s
-            for s in symbols
-            if (s["last_bar_ts"] or 0) < target_ts or (s["row_count"] or 0) == 0
-        ]
+        target_ph = int(
+            datetime(last_ph.year, last_ph.month, last_ph.day, tzinfo=manila).timestamp()
+        )
+        incomplete = []
+        for s in symbols:
+            market = (s.get("market") or "us").lower()
+            target = target_ph if market == "ph" else target_us
+            if (s["last_bar_ts"] or 0) < target or (s["row_count"] or 0) == 0:
+                incomplete.append(s)
         log.info(
             f"ensure-history | {len(incomplete)}/{len(symbols)} symbol(s) "
-            f"missing or stale vs last trading day {last_trading}"
+            f"missing or stale vs US {last_us} / PH {last_ph}"
         )
         fetched = upserted = 0
         if fetch:
@@ -102,12 +106,30 @@ def run_ensure_complete(*, fetch: bool = True) -> dict[str, int]:
         conn.close()
 
 
-def _db_median_last_bar() -> date | None:
+def _db_median_last_bar(market: str | None = None) -> date | None:
     conn = db.get_conn()
     try:
-        return db.median_last_bar_date(conn)
+        return db.median_last_bar_date(conn, market=market)
     finally:
         conn.close()
+
+
+def _ph_book_action() -> str:
+    """PH freshness vs Manila close. noop if no PH rows or DB unreachable."""
+    try:
+        from core.market import last_closed_session_date
+        from data.history_stamp import plan_web_freshness, read_stamp, stamp_path
+
+        median = _db_median_last_bar("ph")
+        if median is None:
+            return "noop"
+        stamp = read_stamp(stamp_path("ph"))
+        return plan_web_freshness(stamp, median, last_closed_session_date("ph"))
+    except TypeError:
+        return "noop"
+    except Exception:
+        log.exception("Web UI | PH stocks_history freshness check failed")
+        return "noop"
 
 
 def _spawn_update_db() -> None:
@@ -149,6 +171,7 @@ def ensure_freshness_and_cron() -> str:
             return "update"
 
     action = plan_web_freshness(stamp, db_median, last_trading)
+    ph_action = _ph_book_action()
     if stamp is not None:
         log.info(
             f"Web UI | stocks_history last-update file {stamp} "
@@ -159,6 +182,19 @@ def ensure_freshness_and_cron() -> str:
             f"Web UI | no last-update file; stocks_history median last bar "
             f"{db_median} (last US session {last_trading})"
         )
+
+    if ph_action == "update":
+        log.info("Web UI | PH stocks_history stale vs last PSE session")
+        action = "update"
+    elif ph_action == "write_stamp" and action != "update":
+        try:
+            from data.history_stamp import write_stamp as _write
+
+            median_ph = _db_median_last_bar("ph")
+            if median_ph is not None:
+                _write(median_ph, market="ph")
+        except Exception:
+            log.exception("Web UI | failed to write PH last-update stamp")
 
     if action == "noop":
         log.info("Web UI | stocks_history already has last US cash close")

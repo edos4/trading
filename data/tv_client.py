@@ -770,7 +770,8 @@ class TVClient:
         from data.history import load_daily_candles, resample_weekly, ui_web_history_enabled
 
         if ui_web_history_enabled():
-            daily = load_daily_candles(symbol)
+            mkt = "ph" if self._screener == "philippines" else None
+            daily = load_daily_candles(symbol, market=mkt)
             if not daily:
                 return []
             if timeframe.upper() in ("1W", "W", "1WK", "WEEKLY"):

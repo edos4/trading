@@ -13,13 +13,18 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _STAMP_NAME = "stocks_history_updated.txt"
 
 
-def stamp_path() -> Path:
-    return _REPO_ROOT / "logs" / _STAMP_NAME
+def stamp_path(market: str = "us") -> Path:
+    name = (
+        "stocks_history_updated_ph.txt"
+        if (market or "us").lower() == "ph"
+        else _STAMP_NAME
+    )
+    return _REPO_ROOT / "logs" / name
 
 
-def read_stamp(path: Path | None = None) -> date | None:
+def read_stamp(path: Path | None = None, *, market: str = "us") -> date | None:
     """Return the stamped session date, or None if the file is missing/invalid."""
-    path = path or stamp_path()
+    path = path or stamp_path(market)
     if not path.is_file():
         return None
     try:
@@ -37,9 +42,9 @@ def read_stamp(path: Path | None = None) -> date | None:
     return None
 
 
-def write_stamp(day: date, path: Path | None = None) -> Path:
-    """Atomically write `YYYY-MM-DD` as the last ingested US session."""
-    path = path or stamp_path()
+def write_stamp(day: date, path: Path | None = None, *, market: str = "us") -> Path:
+    """Atomically write `YYYY-MM-DD` as the last ingested session for `market`."""
+    path = path or stamp_path(market)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(f"{day.isoformat()}\n", encoding="utf-8")

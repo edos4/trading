@@ -293,7 +293,9 @@ class PaperBook:
             df = scanner.ohlcv_frame(trade.symbol, timeframe, min_bars=2)
         if df is None or len(df) < 2:
             from data.history import load_daily_ohlcv_df
-            df = load_daily_ohlcv_df(trade.symbol, tv_fallback=False)
+            df = load_daily_ohlcv_df(
+                trade.symbol, tv_fallback=False, market=account.market,
+            )
         if df is None or len(df) < 2:
             return {"error": f"no OHLCV for {trade.symbol} {timeframe}"}
 

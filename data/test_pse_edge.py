@@ -128,6 +128,66 @@ def test_fetch_daily_parses_chart_payload(tmp_path: Path, monkeypatch):
     assert tmp_path.joinpath("dir.json").exists()
 
 
+def test_fetch_directory_paginates(tmp_path: Path, monkeypatch):
+    pse_edge.reset_for_tests()
+    monkeypatch.setattr(pse_edge, "_DIR_CACHE", tmp_path / "dir.json")
+    monkeypatch.setattr(pse_edge, "_MIN_INTERVAL_SECONDS", 0.0)
+    pages = []
+
+    def fake_request(url, *, data, content_type, referer, timeout=30):
+        pages.append(data.decode())
+        if len(pages) == 1:
+            return BDO_DIR_HTML.encode()
+        return b"<table></table>"
+
+    monkeypatch.setattr(pse_edge, "_request", fake_request)
+    mapping = pse_edge.fetch_directory(force=True)
+    assert mapping["BDO"] == ("260", "468")
+    assert mapping["SMPH"] == ("111", "222")
+    assert len(pages) >= 2
+
+
+def test_fetch_daily_chunked_merges_years(tmp_path: Path, monkeypatch):
+    pse_edge.reset_for_tests()
+    monkeypatch.setattr(pse_edge, "_DIR_CACHE", tmp_path / "dir.json")
+    monkeypatch.setattr(pse_edge, "_HIST_CACHE_DIR", tmp_path / "ohlcv")
+    monkeypatch.setattr(pse_edge, "_MIN_INTERVAL_SECONDS", 0.0)
+
+    def fake_request(url, *, data, content_type, referer, timeout=30):
+        if "search.ax" in url:
+            return BDO_DIR_HTML.encode()
+        payload = data.decode()
+        year = "2024" if "01-01-2024" in payload or "2024" in payload else "2025"
+        # startDate is mm-dd-YYYY
+        if '"startDate": "01-01-2024"' in payload or "01-01-2024" in payload:
+            chart_date = "Jan 02, 2024 00:00:00"
+            close = 100.0
+        else:
+            chart_date = "Jan 02, 2025 00:00:00"
+            close = 110.0
+        return json.dumps(
+            {
+                "chartData": [
+                    {
+                        "OPEN": close,
+                        "HIGH": close,
+                        "LOW": close,
+                        "CLOSE": close,
+                        "VALUE": close * 1000,
+                        "CHART_DATE": chart_date,
+                    }
+                ]
+            }
+        ).encode()
+
+    monkeypatch.setattr(pse_edge, "_request", fake_request)
+    candles = pse_edge.fetch_daily_chunked(
+        "BDO", start_year=2024, end=datetime(2025, 1, 3).date(),
+    )
+    assert len(candles) == 2
+    assert [c.close for c in candles] == [100.0, 110.0]
+
+
 def test_ph_peso_adv_ranks_banks_over_pennies():
     df = pd.DataFrame(
         {

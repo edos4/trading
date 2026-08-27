@@ -66,6 +66,16 @@ def test_yahoo_suffix():
     assert ohlcv_cache_key("SM", "1d", "us") == "SM_1d"
 
 
+def test_ph_history_symbol():
+    from core.market import is_ph_history_symbol, ph_history_symbol
+
+    assert ph_history_symbol("BDO") == "BDO.PS"
+    assert ph_history_symbol("bdo.ps") == "BDO.PS"
+    assert ph_history_symbol("PSE:SM") == "SM.PS"
+    assert is_ph_history_symbol("SM.PS")
+    assert not is_ph_history_symbol("SM")
+
+
 def test_board_lots_and_ticks():
     assert pse_board_lot(7.50, as_of=date(2026, 8, 13)) == 100
     assert pse_tick_size(7.50) == 0.01
