@@ -31,7 +31,7 @@ from PIL import Image, ImageTk
 matplotlib.use("Agg", force=True)
 
 from analysis.chart_renderer import ChartRenderer
-from config import settings
+from config import PATTERN_SCAN_HISTORY_BARS, settings
 from core.kronos_gate import kronos_gate_check, kronos_gate_check_many
 from core.engine_defaults import passes_min_confidence, passes_regime_filter
 from core.market import default_market, get_market
@@ -338,6 +338,13 @@ class TradingBotUI:
             return
         if not candles:
             self._safe_after(lambda: self._fail(f"No history available for {symbol} {timeframe}."))
+            return
+        if self.run_patterns_var.get() and len(candles) < PATTERN_SCAN_HISTORY_BARS:
+            self._safe_after(lambda: self._fail(
+                f"{symbol} {timeframe} has {len(candles)} bars; "
+                f"need {PATTERN_SCAN_HISTORY_BARS} days of back history "
+                f"for pattern scan."
+            ))
             return
 
         self._store.replace_all(symbol, timeframe, candles)

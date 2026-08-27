@@ -5,9 +5,11 @@ the latest bar *is* the entry bar. That is required for bar-by-bar backtests
 and the live scanner (otherwise the same setup would re-fire every day).
 
 A human looking at a chart is asking a different question: is there a pattern
-that formed over ~FORMATION_BARS and is almost complete / recently triggered?
-This helper walks the last FORMATION_BARS closes so explorer/UI are not stuck
-looking at "day 1 of the signal" (today only) and coming back empty.
+that formed over the last month and is almost complete / recently triggered?
+This helper walks the last PATTERN_SCAN_HISTORY_BARS closes so explorer/UI
+are not stuck looking at "day 1 of the signal" (today only) and coming back
+empty. The candle list must include those 30 days plus whatever prefix
+`MIN_BARS` needs — analyze() sees the full prefix, not a 30-bar stub.
 """
 
 from __future__ import annotations
@@ -16,7 +18,8 @@ from datetime import datetime, timezone
 
 from data.ohlcv_store import OHLCVStore
 from data.tv_client import MarketSnapshot, OHLCVCandle
-from patterns.base_pattern import FORMATION_BARS, BasePattern, TradeSignal
+from config import PATTERN_SCAN_HISTORY_BARS
+from patterns.base_pattern import BasePattern, TradeSignal
 from utils.logger import log
 
 
@@ -40,14 +43,21 @@ def latest_signals_over_lookback(
     timeframe: str,
     candles: list[OHLCVCandle],
     *,
-    lookback: int = FORMATION_BARS,
+    lookback: int = PATTERN_SCAN_HISTORY_BARS,
     session_tz: str,
 ) -> list[TradeSignal]:
-    """Newest signal per pattern across the last `lookback` bars, if any."""
-    if not candles or lookback < 1:
+    """Newest signal per pattern across the last `lookback` bars, if any.
+
+    Refuses to run unless the series has at least PATTERN_SCAN_HISTORY_BARS
+    so forming setups have a month of prior closes.
+    """
+    if not candles:
         return []
+    lookback = max(int(lookback), PATTERN_SCAN_HISTORY_BARS)
 
     n = len(candles)
+    if n < PATTERN_SCAN_HISTORY_BARS:
+        return []
     start = max(0, n - lookback)
     out: list[TradeSignal] = []
 

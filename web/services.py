@@ -11,7 +11,7 @@ from typing import Any, Optional
 import patterns as patterns_pkg
 from analysis.chart_renderer import ChartRenderer
 from analysis.price_volume import volume_confirm_gate
-from config import settings, DISABLED_PATTERNS
+from config import PATTERN_SCAN_HISTORY_BARS, settings, DISABLED_PATTERNS
 from core.engine_defaults import passes_min_confidence, passes_regime_filter
 from core.kronos_gate import kronos_gate_check, kronos_gate_check_many
 from core.market import get_market
@@ -116,6 +116,12 @@ class ExplorerService:
         )
         if not candles:
             raise ValueError(f"No history available for {symbol} {timeframe}.")
+        if run_patterns and len(candles) < PATTERN_SCAN_HISTORY_BARS:
+            raise ValueError(
+                f"{symbol} {timeframe} has {len(candles)} bars; "
+                f"need {PATTERN_SCAN_HISTORY_BARS} days of back history "
+                f"for pattern scan."
+            )
 
         self._store.replace_all(symbol, timeframe, candles)
         df = self._store.get_df(symbol, timeframe, min_bars=2)

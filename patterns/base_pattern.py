@@ -27,10 +27,8 @@ from utils.logger import log
 
 
 # Swing setups typically take ~1 month of daily bars to develop (21
-# trading sessions). Chart explorer scans this many recent closes so a
-# pattern that is almost formed (or triggered a few days ago) still shows
-# — analyze() itself only fires on the exact trigger bar, which is
-# correct for the backtester/scanner.
+# trading sessions). Geometry (W/M gap, rounding wait) uses this.
+# Explorer/scanner history lookback is PATTERN_SCAN_HISTORY_BARS (30).
 FORMATION_BARS = 21
 
 

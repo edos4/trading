@@ -58,7 +58,7 @@ from analysis.price_volume import volume_confirm_gate
 # from broker.ibkr_client import IBKRClient
 # from broker.order_manager import OrderManager
 # from risk.risk_guard import RiskGuard, TradeIntent
-from config import settings
+from config import PATTERN_SCAN_HISTORY_BARS, settings
 from core.market import (
     bar_identity,
     get_market,
@@ -556,7 +556,10 @@ class MarketScanner:
                     for pattern in self._patterns:
                         if timeframe not in pattern.timeframes:
                             continue
-                        min_bars = int(getattr(pattern, "MIN_BARS", 2) or 2)
+                        min_bars = max(
+                            int(getattr(pattern, "MIN_BARS", 2) or 2),
+                            PATTERN_SCAN_HISTORY_BARS,
+                        )
                         if n_bars < min_bars:
                             if (symbol, timeframe) not in self._thin_logged:
                                 self._thin_logged.add((symbol, timeframe))

@@ -18,6 +18,15 @@ from data.ohlcv_store import OHLCVStore
 from data.tv_client import MarketSnapshot, OHLCVCandle
 from utils.logger import log
 
+# Localhost replay: protocol pings are harmful. Default ping_timeout=20s closes
+# every scanner worker while the server is still fetching 33ai history.
+LOCAL_STREAM_WS = {
+    "ping_interval": None,
+    "ping_timeout": None,
+    "close_timeout": 5,
+    "max_size": 8 * 1024 * 1024,
+}
+
 
 class FetchSkip(Exception):
     """Stream snapshot skipped — not a transport failure."""
@@ -45,7 +54,7 @@ class StreamClient:
     @asynccontextmanager
     async def mcp_session(self):
         uri = f"ws://{self._host}:{self._port}"
-        async with websockets.connect(uri) as ws:
+        async with websockets.connect(uri, **LOCAL_STREAM_WS) as ws:
             yield ws
 
     async def fetch_snapshot(
@@ -61,6 +70,9 @@ class StreamClient:
         try:
             await mcp_session.send(json.dumps({"symbol": symbol, "timeframe": timeframe}))
             reply = json.loads(await mcp_session.recv())
+        except websockets.exceptions.ConnectionClosed as exc:
+            log.warning(f"StreamClient | {symbol}: connection closed ({exc})")
+            return None
         except Exception as exc:
             log.error(f"StreamClient | {symbol} request failed: {exc}")
             return None

@@ -7,6 +7,10 @@ from pydantic_settings import BaseSettings
 from pydantic import field_validator
 from enum import Enum
 
+# Daily bars each symbol must carry into a pattern scan so forming setups
+# (not only today's exact trigger bar) can be recognized.
+PATTERN_SCAN_HISTORY_BARS = 30
+
 
 class TradingMode(str, Enum):
     PAPER = "paper"
@@ -62,6 +66,8 @@ class Settings(BaseSettings):
     tv_use_ta_fallback: bool = False  # unused; kept for .env compatibility
     # Daily bars to pull from Yahoo chart + screener overlay. Sized for Kronos
     # gate LOOKBACK=400 (official demo) plus a little headroom; clamp ≤512.
+    # Floor is PATTERN_SCAN_HISTORY_BARS so every pattern scan has a month of
+    # prior closes (forming setups), not just the latest bar.
     tv_history_days: int = 450
     # Swing setups form on daily/weekly bars, which only print one new candle
     # per day/week — no need to poll every minute. Once per hour is plenty
@@ -189,7 +195,12 @@ class Settings(BaseSettings):
     @classmethod
     def _clamp_history_days(cls, value: int) -> int:
         # Kronos-base max_context is 512; more bars than that are truncated.
-        return max(1, min(value, 512))
+        return max(PATTERN_SCAN_HISTORY_BARS, min(value, 512))
+
+    @field_validator("papertrade_stream_lookback_bars")
+    @classmethod
+    def _clamp_stream_lookback(cls, value: int) -> int:
+        return max(PATTERN_SCAN_HISTORY_BARS, int(value))
 
     @field_validator("tv_screener_min_interval_seconds")
     @classmethod

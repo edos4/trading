@@ -48,12 +48,15 @@ def _min_move() -> float:
 
 
 def _sleeve_daily_df(store: OHLCVStore, symbol: str, lookback: int):
+    stored = store.get_df(symbol, "1d", min_bars=min(lookback, 60))
+    if stored is not None and len(stored) >= lookback:
+        return stored
     from data.history import load_daily_ohlcv_df
 
     df = load_daily_ohlcv_df(symbol, tv_fallback=False, limit=MAX_CONTEXT)
     if df is not None and len(df) >= min(lookback, 60):
         return df
-    return store.get_df(symbol, "1d", min_bars=min(lookback, 60))
+    return stored
 
 
 def _confidence_from_pred(pred_1w: float) -> float:

@@ -75,12 +75,14 @@ def _facade_daily_df(symbol: str):
 
 
 def _load_gate_df(symbol: str, timeframe: str, store: OHLCVStore, lookback: int):
+    """Prefer in-memory scan/replay bars so paper stream does not re-hit 33ai."""
+    stored = store.get_df(symbol, timeframe, min_bars=min(60, lookback))
+    if stored is not None and len(stored) >= lookback:
+        return stored
     df = _facade_daily_df(symbol)
-    if df is None or len(df) < lookback:
-        stored = store.get_df(symbol, timeframe, min_bars=lookback)
-        if stored is not None:
-            df = stored
-    return df
+    if df is not None:
+        return df
+    return stored
 
 
 def _insufficient_bars(df, lookback: int) -> bool:

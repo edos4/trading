@@ -4,6 +4,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from data.stream_server import StreamServer, _SymbolTape, _load_symbol_db
+from data.stream_client import LOCAL_STREAM_WS
+
+
+def test_local_stream_ws_disables_protocol_pings():
+    assert LOCAL_STREAM_WS["ping_interval"] is None
+    assert LOCAL_STREAM_WS["ping_timeout"] is None
 
 
 def test_stream_advance_moves_all_loaded_tapes_atomically(tmp_path: Path):
