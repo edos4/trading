@@ -12,9 +12,9 @@ TV_DIM = "#787b86"
 TV_UP = "#26a69a"
 TV_DOWN = "#ef5350"
 TV_RSI = "#7e57c2"
-TV_KRONOS = "#e040fb"
-TV_KRONOS_UP = "#ce93d8"
-TV_KRONOS_DOWN = "#7b1fa2"
+TV_KRONOS = "#ffeb3b"
+TV_KRONOS_UP = "#ffeb3b"
+TV_KRONOS_DOWN = "#f9a825"
 TV_CROSS = "#9598a1"
 
 
