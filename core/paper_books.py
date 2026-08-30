@@ -87,19 +87,19 @@ class PaperBook:
         profile = get_market(account.market)
         clock = clock_payload(profile.id)
         now = datetime.now(timezone.utc)
-        equity = account.equity()
-        exp = account.exposure()
+        # Single atomic read: equity, exposure, per-position MTM, and the
+        # realized/unrealized totals below all derive from this one frozen
+        # snapshot so the header figures and the position-row figures can
+        # never disagree, even while a scan thread is actively repricing
+        # positions in the background (see snapshot_metrics docstring).
+        snap = account.snapshot_metrics()
+        equity = snap["equity"]
+        exp = snap["exposure"]
         positions = []
-        for sym, p in account.positions_snapshot():
-            current = account.last_price(sym, p.entry_price)
+        for sym, p, current, mtm in snap["positions"]:
             r = r_multiple(p, current)
             risk = risk_dollars(p)
             value = current * p.qty
-            mtm = (
-                (current - p.entry_price) * p.qty
-                if p.action == "BUY"
-                else (p.entry_price - current) * p.qty
-            )
             positions.append(
                 {
                     "market": profile.id,
@@ -126,7 +126,7 @@ class PaperBook:
             )
 
         closed = []
-        for t in account.closed:
+        for t in snap["closed"]:
             exit_px = t.exit_price if t.exit_price is not None else t.entry_price
             closed.append(
                 {
@@ -162,13 +162,13 @@ class PaperBook:
             signal_logs.append(entry)
         curve_b64 = self._equity_chart_b64(account)
 
-        total_pnl = equity - account.initial_capital
+        total_pnl = snap["total_pnl_dollars"]
         metrics = {
             "total_pnl_dollars": total_pnl,
-            "total_pnl_pct": (total_pnl / account.initial_capital * 100)
-            if account.initial_capital else 0.0,
-            "realized_pnl_dollars": account.realized_pnl_dollars(),
-            "unrealized_pnl_dollars": account.unrealized_pnl_dollars(),
+            "total_pnl_pct": (total_pnl / snap["initial_capital"] * 100)
+            if snap["initial_capital"] else 0.0,
+            "realized_pnl_dollars": snap["realized_pnl_dollars"],
+            "unrealized_pnl_dollars": snap["unrealized_pnl_dollars"],
             "avg_r": result.avg_r,
             "median_r": result.median_r,
             "avg_hold_bars": result.avg_hold_bars,
@@ -191,10 +191,10 @@ class PaperBook:
             "status": display_status,
             "error": error,
             "use_stream": use_stream,
-            "cash": account.cash,
+            "cash": snap["cash"],
             "equity": equity,
-            "open_count": len(account.positions),
-            "closed_count": len(account.closed),
+            "open_count": len(snap["positions"]),
+            "closed_count": len(snap["closed"]),
             "exposure": exp,
             "scan_stats": stats,
             "positions": positions,
