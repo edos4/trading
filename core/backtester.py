@@ -111,6 +111,13 @@ class BacktestTrade:
     # Engine-level take: close when unrl% from entry reaches this (0.04 = 4%).
     # Independent of the pattern's measured-move take_profit. None/0 = off.
     profit_take_pct: float | None = None
+    # Engine-level ratchet: protective floor at entry×(1±best×frac). Caps
+    # giveback of peak unrl without forcing an exit at a hard % target.
+    # None/0 frac = off. Never loosens because _best_pnl_pct only rises.
+    profit_lock_frac: float | None = None
+    # Peak unrl required before profit_lock_frac arms. None/0 = arm on any
+    # positive MFE (too tight in paper — 1% flicker locks).
+    profit_lock_trigger_pct: float | None = None
 
     _trailing_activated: bool = False
     _best_pnl_pct: float | None = None
@@ -488,6 +495,19 @@ def trade_risk_dollars(trade: BacktestTrade) -> float | None:
     return abs(trade.entry_price - trade.stop_loss) * trade.qty
 
 
+def initial_risk_pct(trade: BacktestTrade) -> float | None:
+    """The trade's own entry-to-stop distance, as a fraction of entry price.
+
+    This is "1R" in percent terms. Used to scale execution-layer knobs (like
+    profit_lock's arming trigger) to each trade's actual risk instead of a
+    flat percent that means something different for a 5%-stop name than a
+    12%-stop name."""
+    if trade.stop_loss is None or trade.entry_price <= 0:
+        return None
+    risk_pct = abs(trade.entry_price - trade.stop_loss) / trade.entry_price
+    return risk_pct if risk_pct > 0 else None
+
+
 def _realized_daily_returns(
     trades: list[BacktestTrade], initial_capital: float,
 ) -> np.ndarray:
@@ -805,6 +825,51 @@ def _profit_take_level(position: BacktestTrade) -> float | None:
     return position.entry_price * (1.0 + pct)
 
 
+def _resolve_profit_lock_trigger_pct(
+    position: BacktestTrade, trigger_r: float | None,
+) -> float | None:
+    """Convert the configured R-multiple into this trade's own absolute %.
+
+    2026-08-30 paper (24 closed US trades): profit_lock fired on 11/24
+    (46%) at avg +0.21R, while the 2 trades that reached take_profit
+    averaged +2.04R and stop_loss losers averaged -1.07R. Root cause: the
+    old knob (profit_lock_trigger_pct=0.03) armed the ratchet at a flat
+    +3% price move regardless of the trade's stop distance — for a
+    12%-stop swing trade that is only +0.25R, so the profit floor started
+    clamping upside before the trade had even proven itself relative to
+    its own risk, let alone approached its 1.5-3.6R structural target.
+    Scaling the trigger to a multiple of the trade's *own* initial risk
+    (see initial_risk_pct) fixes this for wide- and tight-stop names alike.
+    """
+    if trigger_r is None or trigger_r <= 0:
+        return None
+    risk_pct = initial_risk_pct(position)
+    if risk_pct is None:
+        return None
+    return trigger_r * risk_pct
+
+
+def _profit_lock_level(position: BacktestTrade) -> float | None:
+    """Protective floor locking `profit_lock_frac` of peak close-to-close unrl."""
+    frac = position.profit_lock_frac
+    best = position._best_pnl_pct
+    trigger = position.profit_lock_trigger_pct
+    if (
+        frac is None
+        or frac <= 0
+        or best is None
+        or best <= 0
+        or position.entry_price <= 0
+    ):
+        return None
+    if trigger is not None and trigger > 0 and best < trigger:
+        return None
+    locked = best * frac
+    if position.action == "SELL":
+        return position.entry_price * (1.0 - locked)
+    return position.entry_price * (1.0 + locked)
+
+
 def _first_favorable_fill(
     candle: OHLCVCandle, position: BacktestTrade, is_short: bool,
 ) -> tuple[float | None, str]:
@@ -863,6 +928,10 @@ def _check_exit(
                 else position.entry_price * (1 - buf)
             )
             candidates.append((breakeven_price, "breakeven_stop"))
+    if bars_held >= min_hold_bars:
+        lock = _profit_lock_level(position)
+        if lock is not None:
+            candidates.append((lock, "profit_lock"))
     if candidates:
         fills = []
         for level, reason in candidates:
@@ -873,10 +942,10 @@ def _check_exit(
                 fills.append((fill, reason))
         if fills:
             # A single daily bar can cross several protective levels (hard
-            # stop, trailing stop, breakeven floor). Without intrabar
-            # sequencing we cannot know which one actually filled first, so
-            # model the worst plausible protective fill for the trade
-            # direction instead of the most favourable one.
+            # stop, trailing stop, breakeven floor, profit lock). Without
+            # intrabar sequencing we cannot know which one actually filled
+            # first, so model the worst plausible protective fill for the
+            # trade direction instead of the most favourable one.
             if is_short:
                 fill, reason = max(fills, key=lambda f: f[0])
             else:
@@ -1478,6 +1547,13 @@ def _core_backtest_symbol(
             open_position.profit_take_pct = config.get(
                 "profit_take_pct", ENGINE.profit_take_pct,
             )
+            open_position.profit_lock_frac = config.get(
+                "profit_lock_frac", ENGINE.profit_lock_frac,
+            )
+            open_position.profit_lock_trigger_pct = _resolve_profit_lock_trigger_pct(
+                open_position,
+                config.get("profit_lock_trigger_r", ENGINE.profit_lock_trigger_r),
+            )
             i += 1
             continue
 
@@ -1721,6 +1797,8 @@ class Backtester:
         breakeven_trigger_pct: float | None = ENGINE.breakeven_trigger_pct,
         breakeven_buffer_pct: float = ENGINE.breakeven_buffer_pct,
         profit_take_pct: float | None = ENGINE.profit_take_pct,
+        profit_lock_frac: float | None = ENGINE.profit_lock_frac,
+        profit_lock_trigger_r: float | None = ENGINE.profit_lock_trigger_r,
         min_atr_stop_multiple: float | None = ENGINE.min_atr_stop_multiple,
         synthetic_stop_multiple: float = ENGINE.synthetic_stop_multiple,
         atr_stop_floor_multiple: float | None = ENGINE.atr_stop_floor_multiple,
@@ -1788,6 +1866,8 @@ class Backtester:
         self._breakeven_trigger_pct = breakeven_trigger_pct
         self._breakeven_buffer_pct = breakeven_buffer_pct
         self._profit_take_pct = profit_take_pct
+        self._profit_lock_frac = profit_lock_frac
+        self._profit_lock_trigger_r = profit_lock_trigger_r
         self._min_atr_stop_multiple = min_atr_stop_multiple
         self._synthetic_stop_multiple = synthetic_stop_multiple
         # Widens (never tightens) a pattern's own stop_loss up to
@@ -1905,6 +1985,8 @@ class Backtester:
             "breakeven_trigger_pct": self._breakeven_trigger_pct,
             "breakeven_buffer_pct": self._breakeven_buffer_pct,
             "profit_take_pct": self._profit_take_pct,
+            "profit_lock_frac": self._profit_lock_frac,
+            "profit_lock_trigger_r": self._profit_lock_trigger_r,
             "min_atr_stop_multiple": self._min_atr_stop_multiple,
             "synthetic_stop_multiple": self._synthetic_stop_multiple,
             "atr_stop_floor_multiple": self._atr_stop_floor_multiple,
@@ -2062,6 +2144,8 @@ class Backtester:
                 "breakeven_trigger_pct": self._breakeven_trigger_pct,
                 "breakeven_buffer_pct": self._breakeven_buffer_pct,
                 "profit_take_pct": self._profit_take_pct,
+                "profit_lock_frac": self._profit_lock_frac,
+                "profit_lock_trigger_r": self._profit_lock_trigger_r,
                 "min_atr_stop_multiple": self._min_atr_stop_multiple,
                 "synthetic_stop_multiple": self._synthetic_stop_multiple,
                 "atr_stop_floor_multiple": self._atr_stop_floor_multiple,
@@ -2233,6 +2317,11 @@ class Backtester:
                     else position.entry_price * (1 - buf)
                 )
                 candidates.append((breakeven_price, "breakeven_stop"))
+
+        if bars_held >= min_hold_bars:
+            lock = _profit_lock_level(position)
+            if lock is not None:
+                candidates.append((lock, "profit_lock"))
 
         if candidates:
             fills = []

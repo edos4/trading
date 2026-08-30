@@ -755,10 +755,14 @@ class TVClient:
             volume=_f(vol_k) or 0.0,
         )
 
-    def _fetch_history_chart(self, symbol: str, timeframe: str) -> list[OHLCVCandle]:
+    def _fetch_history_chart(
+        self, symbol: str, timeframe: str, *, live: bool = False,
+    ) -> list[OHLCVCandle]:
         """Fetch OHLCV history. PH uses PSE Edge (Yahoo *.PS is a YHD stub).
 
         Local --ui/--web read 33ai.edos.uk (or VPS Postgres) and never Yahoo.
+        Ingest (`live=True`) always hits Yahoo/PSE so 33ai cannot hairpin
+        GET /api/history onto itself during --update-db.
         """
         spec = _CHART_SPECS.get(timeframe)
         if spec is None:
@@ -769,7 +773,7 @@ class TVClient:
 
         from data.history import load_daily_candles, resample_weekly, ui_web_history_enabled
 
-        if ui_web_history_enabled():
+        if ui_web_history_enabled() and not live:
             mkt = "ph" if self._screener == "philippines" else None
             daily = load_daily_candles(symbol, market=mkt)
             if not daily:

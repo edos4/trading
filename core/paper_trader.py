@@ -27,6 +27,7 @@ from core.backtester import (
     _check_exit,
     _close_trade,
     _open_trade,
+    _resolve_profit_lock_trigger_pct,
     _update_trailing_reference,
     _execution_reward_risk_ok,
     trade_r_multiple,
@@ -101,6 +102,18 @@ def position_status(position: BacktestTrade) -> str:
     """Coarse open-position state for a dashboard status column — the exit
     mechanics (_check_exit) already decide what actually triggers; this
     just reflects which protective level is currently armed."""
+    if (
+        position.profit_lock_frac
+        and position.profit_lock_frac > 0
+        and position._best_pnl_pct is not None
+        and position._best_pnl_pct > 0
+        and (
+            position.profit_lock_trigger_pct is None
+            or position.profit_lock_trigger_pct <= 0
+            or position._best_pnl_pct >= position.profit_lock_trigger_pct
+        )
+    ):
+        return "LOCK"
     if position._breakeven_armed:
         return "BREAKEVEN"
     if position._trailing_activated:
@@ -566,6 +579,10 @@ class PaperAccount:
         position.breakeven_trigger_pct = profile.breakeven_trigger_pct
         position.breakeven_buffer_pct = profile.breakeven_buffer_pct
         position.profit_take_pct = ENGINE.profit_take_pct
+        position.profit_lock_frac = ENGINE.profit_lock_frac
+        position.profit_lock_trigger_pct = _resolve_profit_lock_trigger_pct(
+            position, ENGINE.profit_lock_trigger_r,
+        )
         notional = position.entry_price * position.qty
         if signal.action == "BUY":
             self.cash -= notional
@@ -632,6 +649,12 @@ class PaperAccount:
         bar_idx = self.bar_count(symbol, position.timeframe)
         position.profit_take_pct = (
             ENGINE.profit_take_pct if ENGINE.profit_take_pct else None
+        )
+        position.profit_lock_frac = (
+            ENGINE.profit_lock_frac if ENGINE.profit_lock_frac else None
+        )
+        position.profit_lock_trigger_pct = _resolve_profit_lock_trigger_pct(
+            position, ENGINE.profit_lock_trigger_r,
         )
         exit_price, reason = _check_exit(
             candle, position, bar_idx, min_hold_bars=ENGINE.min_hold_bars,
@@ -826,6 +849,12 @@ class PaperAccount:
         for pos in acct.positions.values():
             pos.profit_take_pct = (
                 ENGINE.profit_take_pct if ENGINE.profit_take_pct else None
+            )
+            pos.profit_lock_frac = (
+                ENGINE.profit_lock_frac if ENGINE.profit_lock_frac else None
+            )
+            pos.profit_lock_trigger_pct = _resolve_profit_lock_trigger_pct(
+                pos, ENGINE.profit_lock_trigger_r,
             )
         acct.closed = [_trade_from_dict(d) for d in data.get("closed", [])]
         raw_curve = [tuple(x) for x in data.get("equity_curve", [])]

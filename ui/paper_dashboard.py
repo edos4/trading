@@ -170,11 +170,17 @@ class MarketBookFrame(ttk.LabelFrame):
 
     @staticmethod
     def _stream_start_date_kwargs() -> dict:
-        default = date.today() - timedelta(days=365)
+        from data.stream_server import _roll_forward_session_day
+
+        default = _roll_forward_session_day(
+            date.today() - timedelta(days=365), "us",
+        )
         raw = settings.papertrade_stream_start_date
         if raw:
             try:
-                default = date.fromisoformat(raw.strip())
+                default = _roll_forward_session_day(
+                    date.fromisoformat(raw.strip()), "us",
+                )
             except ValueError:
                 pass
         return {"year": default.year, "month": default.month, "day": default.day}

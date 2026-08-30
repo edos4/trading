@@ -272,7 +272,10 @@ settings = Settings()
 #
 #   pattern_002_double_top / pattern_008_head_and_shoulders — 2026-08-30 US
 #   paper: 10 shorts, 0 wins, −$3,550 realized (002 also hosted the
-#   grind-to-6%-stop cluster). Isolation via --pattern still works.
+#   grind-to-6%-stop cluster). Comment previously called this out but the
+#   patterns were never actually added below, so pattern_only runs (which
+#   skip the SMA200 regime filter) kept shorting into uptrends. Now
+#   disabled by default. Isolation via --pattern still works.
 #
 #   pattern_009_flag_pattern / pattern_010_pennant — previously isolated as
 #   weak; 009 stays off. 010 is not in this list (unused in the current
@@ -285,13 +288,21 @@ settings = Settings()
 #   address grinders without collapsing trade count.
 #
 #   pattern_003_double_bottom stays ON with neckline-break-only entry
-#   (2026-08-17 US paper: 79 day-7-without-break fills, PF 0.29).
+#   (2026-08-17 US paper: 79 day-7-without-break fills, PF 0.29). It is the
+#   standout performer (2026-08-30 US paper: 66.7% win rate, +40.34%
+#   equal-weighted sum over 9 trades) — worth increasing relative size to.
 #
 #   pattern_004_rounding_bottom — n=3, 0% win, pf=0.00 on 2026-08-18 US
-#   paper (−14% equal-weight). Disabled until the saucer rules are reworked.
+#   paper (−14% equal-weight); 0% win again on 2026-08-30 (n=1, -5.24%).
+#   Same as 002/008 above: documented as disabled but never actually added
+#   to the list below. Fixed here. Disabled until the saucer rules are
+#   reworked.
 DISABLED_PATTERNS: list[str] = [
     "pattern_011_breakout_retest",
     "pattern_012_ml_signal",
     "pattern_009_flag_pattern",
     "pattern_006_upward_channel",
+    "pattern_002_double_top",
+    "pattern_008_head_and_shoulders",
+    "pattern_004_rounding_bottom",
 ]

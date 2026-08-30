@@ -17,8 +17,9 @@ Protocol: client connects, sends one JSON object per request
     {"symbol": "AAPL", "timeframe": "1d"}
 server replies with one JSON object
     {"candle": {...}, "history": [{...}, ...]}  # history ends at candle
-or {"error": "...", "code": "no_data"|"asof_mismatch"} if the symbol
-has no data / no bar on the pinned replay date.
+or {"error": "...", "code": "no_data"|"asof_mismatch"|"history_unavailable"}
+if the symbol has no bars, no bar on the pinned replay date, or the
+history API timed out (retry next scan — do not treat as dead).
 
 Replay control:
     {"action": "pin_asof", "symbol": "AAPL"}  # pin control date to that tape
@@ -31,7 +32,8 @@ import asyncio
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import websockets
 
@@ -39,21 +41,63 @@ from config import PATTERN_SCAN_HISTORY_BARS, settings
 from data.stream_client import LOCAL_STREAM_WS
 from utils.logger import log
 
-
-def _parse_start_ts(start_date: str | None) -> int | None:
-    if not start_date:
-        return None
-    try:
-        dt = datetime.strptime(start_date.strip(), "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    except ValueError:
-        log.warning(f"StreamServer | invalid start_date {start_date!r} — ignoring")
-        return None
-    return int(dt.timestamp())
-
-
 # Real daily bars are unix seconds (~1.7e9 in 2026). Unit tests use tiny
 # integers as sequential bar ids — those must match exactly, not by calendar day.
 _UNIX_TS_FLOOR = 1_000_000_000
+
+# US fixed-date holidays that close the NYSE cash session when they fall on a
+# weekday. Floating holidays (MLK, Thanksgiving, …) are not listed — the
+# pin_asof skip below still covers weekends + these fixed dates, which is
+# what pinned paper replay to empty scans on 2026-01-01 (New Year's).
+_US_FIXED_HOLIDAYS = {(1, 1), (6, 19), (7, 4), (12, 25)}
+
+
+def _session_date_for_ts(ts: int, market: str | None) -> date:
+    from core.market import get_market
+
+    tz = ZoneInfo(get_market(market).session_tz)
+    return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(tz).date()
+
+
+def _is_likely_cash_session(day: date, market: str | None) -> bool:
+    """True when the listing's cash session is expected to print a daily bar."""
+    if day.weekday() >= 5:
+        return False
+    from core.market import MARKET_PH, get_market, is_ph_holiday
+
+    if get_market(market).id == MARKET_PH:
+        return not is_ph_holiday(day)
+    return (day.month, day.day) not in _US_FIXED_HOLIDAYS
+
+
+def _roll_forward_session_day(day: date, market: str | None) -> date:
+    for _ in range(14):
+        if _is_likely_cash_session(day, market):
+            return day
+        day += timedelta(days=1)
+    return day
+
+
+def _parse_start_ts(
+    start_date: str | None, market: str | None = None,
+) -> int | None:
+    if not start_date:
+        return None
+    try:
+        day = datetime.strptime(start_date.strip(), "%Y-%m-%d").date()
+    except ValueError:
+        log.warning(f"StreamServer | invalid start_date {start_date!r} — ignoring")
+        return None
+    rolled = _roll_forward_session_day(day, market)
+    if rolled != day:
+        log.info(
+            f"StreamServer | start_date {day.isoformat()} is a weekend/holiday "
+            f"— rolling forward to {rolled.isoformat()}"
+        )
+    # Midnight UTC of the session calendar day. Session-tz conversion happens
+    # when classifying bars; this matches the prior YYYY-MM-DD → UTC parse.
+    dt = datetime(rolled.year, rolled.month, rolled.day, tzinfo=timezone.utc)
+    return int(dt.timestamp())
 
 
 def asof_key(ts: int) -> int | str:
@@ -141,9 +185,13 @@ def _load_symbol_db(
     """
     lookback = _stream_history_bars()
     after_ts = None
-    limit = None
     if start_ts is not None:
         after_ts = int(start_ts) - lookback * 86400 * 2
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        from_start = max(0, now_ts - int(start_ts)) // 86400
+        # Always send a LIMIT so 33ai does an index-bounded fetch instead of
+        # dumping every bar after after_ts (that stalled uvicorn + swap).
+        limit = lookback + from_start + 40
     else:
         limit = lookback
     try:
@@ -161,53 +209,105 @@ class StreamServer:
     def __init__(self, start_date: str | None = None, market: str | None = None):
         from core.market import resolve_market_id
 
-        self._start_ts = _parse_start_ts(
-            start_date if start_date is not None else settings.papertrade_stream_start_date
-        )
         self._market = resolve_market_id(market)
+        self._start_ts = _parse_start_ts(
+            start_date if start_date is not None else settings.papertrade_stream_start_date,
+            market=self._market,
+        )
         self._tapes: dict[str, _SymbolTape] = {}
+        self._known_empty: set[str] = set()
         self._asof_ts: int | None = None
         self._tape_lock = threading.Lock()
         self._load_pool = ThreadPoolExecutor(
             max_workers=4, thread_name_prefix="stream-hist",
         )
 
-    def _tape_for(self, symbol: str) -> _SymbolTape | None:
+    def _tape_lookup(self, symbol: str) -> tuple[_SymbolTape | None, str | None]:
+        """Load-or-cache a tape.
+
+        Returns (tape, None) on success. On miss: (None, "no_data") for an
+        empty/404 symbol, (None, "history_unavailable") for a transport
+        failure — the latter must not be cached, so the next scan retries.
+        """
         symbol = symbol.upper()
         with self._tape_lock:
             tape = self._tapes.get(symbol)
             if tape is not None:
-                return tape
+                return tape, None
+            if symbol in self._known_empty:
+                return None, "no_data"
         rows = _load_symbol_db(
             symbol, start_ts=self._start_ts, market=self._market,
         )
         with self._tape_lock:
             existing = self._tapes.get(symbol)
             if existing is not None:
-                return existing
+                return existing, None
             if rows is None:
-                return None
+                return None, "history_unavailable"
+            if not rows:
+                self._known_empty.add(symbol)
+                return None, "no_data"
             tape = _SymbolTape(rows, start_ts=self._start_ts)
             self._tapes[symbol] = tape
-            return tape
+            return tape, None
 
-    async def _tape_for_async(self, symbol: str) -> _SymbolTape | None:
+    def _tape_for(self, symbol: str) -> _SymbolTape | None:
+        tape, _err = self._tape_lookup(symbol)
+        return tape
+
+    async def _tape_lookup_async(
+        self, symbol: str,
+    ) -> tuple[_SymbolTape | None, str | None]:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self._load_pool, self._tape_for, symbol)
+        return await loop.run_in_executor(self._load_pool, self._tape_lookup, symbol)
 
     def pin_asof(self, symbol: str) -> int | None:
-        """Pin the replay control date to `symbol`'s current cursor bar."""
+        ts, _err = self._pin_asof(symbol)
+        return ts
+
+    def _pin_asof(self, symbol: str) -> tuple[int | None, str | None]:
+        """Pin the replay control date to `symbol`'s current cursor bar.
+
+        Skips weekend / fixed-holiday prints on the control tape. Illiquid
+        names sometimes carry a New Year's print that would otherwise pin
+        the whole universe to a day most symbols have no bar for — paper
+        then reports sim_days=1 with zero signals while drowning in
+        asof_mismatch skips.
+        """
         if self._asof_ts is not None:
-            return self._asof_ts
-        tape = self._tape_for(symbol)
+            return self._asof_ts, None
+        tape, err = self._tape_lookup(symbol)
         if tape is None or not tape.rows:
-            return None
-        self._asof_ts = int(tape.rows[tape.cursor]["timestamp"])
+            return None, err or "no_data"
+        idx = tape.cursor
+        chosen_ts: int | None = None
+        while idx < len(tape.rows):
+            ts = int(tape.rows[idx]["timestamp"])
+            if ts < _UNIX_TS_FLOOR:
+                # Synthetic unit-test bar ids — keep exact match semantics.
+                chosen_ts = ts
+                break
+            day = _session_date_for_ts(ts, self._market)
+            if _is_likely_cash_session(day, self._market):
+                chosen_ts = ts
+                break
+            idx += 1
+        if chosen_ts is None:
+            chosen_ts = int(tape.rows[tape.cursor]["timestamp"])
+            log.warning(
+                f"StreamServer | pin_asof {symbol.upper()}: no weekday/session "
+                f"bar on/after cursor — falling back to "
+                f"{asof_key(chosen_ts)}"
+            )
+        else:
+            tape.cursor = idx
+        self._asof_ts = chosen_ts
         log.info(
             f"StreamServer | pinned asof={asof_key(self._asof_ts)} "
             f"from {symbol.upper()}"
         )
-        return self._asof_ts
+        return self._asof_ts, None
 
     def advance(self) -> int:
         """Advance every loaded tape exactly one bar.
@@ -276,16 +376,21 @@ class StreamServer:
 
                 if req.get("action") == "pin_asof":
                     symbol = str(req.get("symbol") or "")
-                    ts = (
+                    ts, err = (
                         await asyncio.get_running_loop().run_in_executor(
-                            self._load_pool, self.pin_asof, symbol,
+                            self._load_pool, self._pin_asof, symbol,
                         )
-                        if symbol else None
+                        if symbol else (None, "no_data")
                     )
                     if ts is None:
+                        code = err or "no_data"
                         await ws.send(json.dumps({
-                            "error": f"no data for {symbol}",
-                            "code": "no_data",
+                            "error": (
+                                f"no data for {symbol}"
+                                if code == "no_data"
+                                else f"history unavailable for {symbol}"
+                            ),
+                            "code": code,
                         }))
                     else:
                         await ws.send(json.dumps({
@@ -299,11 +404,16 @@ class StreamServer:
                 except (KeyError, TypeError):
                     await ws.send(json.dumps({"error": "bad request"}))
                     continue
-                tape = await self._tape_for_async(symbol)
+                tape, err = await self._tape_lookup_async(symbol)
                 if tape is None:
+                    code = err or "no_data"
                     await ws.send(json.dumps({
-                        "error": f"no data for {symbol}",
-                        "code": "no_data",
+                        "error": (
+                            f"no data for {symbol}"
+                            if code == "no_data"
+                            else f"history unavailable for {symbol}"
+                        ),
+                        "code": code,
                     }))
                     continue
                 snap = tape.snapshot(self._asof_ts)

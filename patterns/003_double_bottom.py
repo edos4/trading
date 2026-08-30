@@ -10,6 +10,15 @@ Inverse of patterns/pattern_002_double_top.py:
   + min R:R 1.5 made confirmed breakouts illegal.
   Exits: structural stop under L2, take-profit = max(measured move from
   entry, +12%), 8% trail after +12%, 30-bar time-stop only if still red.
+
+v9 filter (ported from pattern_007_descending_channel):
+  Skip the trade if any SEC EDGAR 8-K item 2.02 earnings filing date falls
+  within [entry bar, bar + EXIT_BARS_AFTER_NECK_BREAK]. This pattern never
+  had the earnings-blackout guard that 007 got in v9 — the 2026-08-30 US
+  paper book's worst loss (GTX, -13.45%, stop_loss) and a breakeven_stop
+  that gapped to -3.93% (VNT) were both double_bottom trades, consistent
+  with an overnight earnings gap the pattern had no guard against. See
+  data/edgar_client.py.
 """
 
 from __future__ import annotations
@@ -25,8 +34,22 @@ from patterns.base_pattern import (
 )
 from data.tv_client import MarketSnapshot
 from data.ohlcv_store import OHLCVStore
+from data.edgar_client import default_client as edgar_client
 from analysis.indicator_engine import IndicatorEngine
 from utils.logger import log
+
+# NOTE: patterns/007_descending_channel.py can't be a static import target
+# (module filename starts with a digit), so its tiny date-coercion helper is
+# duplicated here rather than imported.
+from datetime import date, datetime
+
+
+def _to_date(value) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return datetime.strptime(str(value).split(" ")[0], "%Y-%m-%d").date()
 
 
 @dataclass(frozen=True)
@@ -88,6 +111,7 @@ class DoubleBottomPattern(BasePattern):
     # it could only ever exit at a loss (2026-08-18 paper: MATV +8.2% → -0.6%).
     TRAILING_ACTIVATION_PCT = 0.12
     EXIT_BARS_AFTER_NECK_BREAK = 30
+    V9_EARNINGS_BLACKOUT = True   # v9: skip trade on EDGAR 8-K 2.02 window
     SWING_LOOKBACK       = 2
     MIN_BARS             = 120
     SHARES               = 25
@@ -135,6 +159,18 @@ class DoubleBottomPattern(BasePattern):
                 if setup is None:
                     continue
                 if setup.entry_idx != cur:
+                    continue
+
+                # v9: earnings blackout over [entry, entry + time-stop window].
+                if self.V9_EARNINGS_BLACKOUT and self._in_earnings_blackout(
+                    df, symbol, setup.entry_idx
+                ):
+                    log.info(
+                        f"[{self.name}] {symbol} {timeframe} | "
+                        f"v9 blackout: 8-K 2.02 in "
+                        f"[{df.index[setup.entry_idx].date()}, "
+                        f"+{self.EXIT_BARS_AFTER_NECK_BREAK}b] — skipping LONG"
+                    )
                     continue
 
                 confidence = self._score_confidence(setup)
@@ -325,6 +361,25 @@ class DoubleBottomPattern(BasePattern):
         floor = close * (1.0 + self.MIN_TARGET_PCT)
         target = round(max(measured, floor), 4)
         return stop, target
+
+    # ── v9 earnings blackout ───────────────────────────────────────────────────
+    def _in_earnings_blackout(
+        self, df: pd.DataFrame, symbol: str, entry_idx: int
+    ) -> bool:
+        end_idx = min(entry_idx + self.EXIT_BARS_AFTER_NECK_BREAK, len(df) - 1)
+        try:
+            start_d = _to_date(df.index[entry_idx])
+            end_d = _to_date(df.index[end_idx])
+        except (AttributeError, ValueError):
+            return False
+        try:
+            return edgar_client().has_earnings_in(symbol, start_d, end_d)
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                f"[{self.name}] {symbol}: v9 EDGAR check error ({exc!r}); "
+                f"treating as no-blackout"
+            )
+            return False
 
     def _neckline_break_idx(
         self,

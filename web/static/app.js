@@ -485,8 +485,8 @@ function initPaper() {
     return raw.replace(/_/g, " ");
   }
   const REASON_LABELS = {
-    stop_loss: "Stop", take_profit: "Target", profit_take: "Lock", trailing_stop: "Trail",
-    time_exit: "Time", breakeven_stop: "BE",
+    stop_loss: "Stop", take_profit: "Target", profit_take: "Take", profit_lock: "Lock",
+    trailing_stop: "Trail", time_exit: "Time", breakeven_stop: "BE",
   };
   function fmtReason(t) {
     const raw = String(t.reason || "").trim();
@@ -500,7 +500,7 @@ function initPaper() {
   }
   function reasonClass(reason) {
     if (reason === "stop_loss") return "reason-loss";
-    if (reason === "take_profit" || reason === "trailing_stop" || reason === "profit_take") return "reason-gain";
+    if (reason === "take_profit" || reason === "trailing_stop" || reason === "profit_take" || reason === "profit_lock") return "reason-gain";
     if (reason === "breakeven_stop") return "reason-flat";
     return "reason-muted";
   }

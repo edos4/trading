@@ -133,21 +133,32 @@ def _ph_book_action() -> str:
 
 
 def _spawn_update_db() -> None:
-    thread = threading.Thread(
-        target=_run_update_db,
-        name="stocks-history-update",
-        daemon=True,
-    )
-    thread.start()
+    """Catch up stale bars in a separate process, not inside --web.
 
+    In-thread fetch used TVClient under ui_web_history, hairpinned
+    GET /api/history through kamal-proxy onto this same uvicorn, and
+    starved TLS for paper scans.
+    """
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
 
-def _run_update_db() -> None:
-    from data.update import run_update
-
-    try:
-        run_update()
-    except Exception:
-        log.exception("Web UI | background --update-db failed")
+    root = Path(__file__).resolve().parent.parent
+    py = root / ".venv" / "bin" / "python"
+    exe = str(py) if py.is_file() else sys.executable
+    log_path = root / "logs" / "db_update.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "a", encoding="utf-8") as logf:
+        subprocess.Popen(
+            [exe, str(root / "main.py"), "--update-db"],
+            cwd=str(root),
+            stdout=logf,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        )
+    log.info("Web UI | spawned `python main.py --update-db` (separate process)")
 
 
 def ensure_freshness_and_cron() -> str:

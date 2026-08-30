@@ -174,10 +174,27 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
     ),
     (
         "profit_take_pct", "Profit take (%)",
-        "Close an open position once unrealized P&L from entry reaches this "
-        "(0.04 = +4% unrl). Banks winners instead of letting them round-trip. "
-        "0 = disabled. Pattern targets closer than this still fire first.",
+        "Optional hard winner cap: close once unrl% from entry reaches this "
+        "(0.08 = +8%). Off by default — prefer Profit lock frac to cap giveback "
+        "without capping upside. 0 = disabled. Pattern targets closer still fire first.",
         "spin", (ENGINE.profit_take_pct or 0.0, 0.0, 0.5, 0.005), None,
+    ),
+    (
+        "profit_lock_frac", "Profit lock frac",
+        "Ratcheting floor: lock this fraction of peak close-to-close unrl "
+        "AFTER the lock trigger is reached (0.5 = after +10% MFE, floor at +5%). "
+        "Never loosens; does not cap upside. 0 = disabled.",
+        "spin", (ENGINE.profit_lock_frac or 0.0, 0.0, 1.0, 0.05), None,
+    ),
+    (
+        "profit_lock_trigger_r", "Profit lock trigger (R)",
+        "Peak gain required, in multiples of THIS TRADE's own initial risk "
+        "(entry-to-stop distance), before the profit-lock ratchet arms "
+        "(1.0 = must be up 1x what it's risking first). Scales with each "
+        "trade's stop distance instead of a flat % that meant 0.25R for a "
+        "12%-stop name and 1R for a 3%-stop name. 0 = arm on any green tick "
+        "(too tight in paper — see engine_defaults.py notes).",
+        "spin", (ENGINE.profit_lock_trigger_r or 0.0, 0.0, 3.0, 0.1), None,
     ),
     (
         "breakeven_trigger_pct", "Breakeven trigger (%)",
@@ -469,7 +486,7 @@ class BacktestDialog:
         for opt_key in (
             "breakeven_trigger_pct", "min_atr_stop_multiple",
             "min_reward_risk_ratio", "hard_stop_percentage", "atr_stop_floor_multiple",
-            "profit_take_pct",
+            "profit_take_pct", "profit_lock_frac", "profit_lock_trigger_r",
         ):
             if opt_key in p and p[opt_key] is not None and p[opt_key] <= 0:
                 p[opt_key] = None
