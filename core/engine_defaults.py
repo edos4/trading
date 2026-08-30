@@ -52,18 +52,52 @@ class EngineDefaults:
     min_atr_stop_multiple: float = 1.0
     synthetic_stop_multiple: float = 2.0
     atr_stop_floor_multiple: float = 1.2
-    hard_stop_percentage: float = 0.06
+    # Backstop only — NOT the intended per-trade risk. 2026-08-30 paper (41
+    # closed US trades) showed 40/41 stops landing at exactly this cap: every
+    # pattern's structural stop (007 SL2-low×0.99, 003 below-L2) is wider than
+    # 6% in practice, so this constant silently overrode the pattern's own
+    # stop on almost every trade instead of only catching the rare missing/
+    # runaway one. Position sizing already targets a fixed risk_per_trade_pct
+    # off the *actual* stop distance (_apply_sizing: qty = risk_$ / stop_
+    # distance), so a wider stop does not add dollar risk — it just sizes the
+    # trade smaller and gives the thesis room to breathe. The tight 6% cap
+    # instead maximized whipsaw: stop_loss exits were 13/41 (32%) of trades,
+    # 100% losers, avg hold 2.8 bars, -$7,710 — the single largest drag on the
+    # book, versus +$3,748/+$8,680 from profit_lock/take_profit exits that
+    # were structurally allowed to run. Raised to 0.12 so it still blocks a
+    # true tail-risk stop (bad print / no structural stop) without clamping
+    # every ordinary swing-pattern stop to the same distance regardless of
+    # the name's actual volatility or structure.
+    hard_stop_percentage: float = 0.12
     min_reward_risk_ratio: float = 1.5
     min_hold_bars: int = 2
-    # Close once unrealized P&L from entry exceeds this (0.08 = +8% unrl).
-    # 2026-08-30 paper review: avg winner +3.80% vs avg loser -7.65% against
-    # a 0.04 target and a 6% hard stop — the old 4% cap was banking winners
-    # at roughly half the distance losers were allowed to run, so a 66.7%
-    # win rate still produced ~breakeven expectancy. Widened so a winning
-    # trade has room comparable to what a losing trade is allowed before it
-    # hits hard_stop_percentage; revisit alongside hard_stop_percentage if
-    # this over/under-shoots once more trades land. 0 = off.
-    profit_take_pct: float | None = 0.08
+    # Hard winner cap from entry (0.08 = close at +8% unrl). Off by default:
+    # a flat take fights pattern measured-move targets and trail-only setups
+    # (009/010). Use profit_lock_frac to cap *giveback* instead of upside.
+    # 0 / None = off.
+    profit_take_pct: float | None = None
+    # Ratcheting profit floor: once peak close-to-close unrl (_best_pnl_pct)
+    # clears the trade's own trigger (see profit_lock_trigger_r below),
+    # protective stop = entry × (1 ± best × frac) for long/short. Never
+    # loosens as best only rises. Caps giveback (e.g. +10% MFE → floor at
+    # +5% with frac=0.5) without capping upside. 0 / None = off.
+    profit_lock_frac: float | None = 0.5
+    # Do not arm the ratchet until peak unrl reaches this many multiples of
+    # the trade's OWN initial risk (entry-to-stop distance, i.e. "R").
+    # 2026-08-30 paper (24 closed US trades): the old knob was a flat
+    # +3% price move (profit_lock_trigger_pct=0.03) regardless of stop
+    # distance. With hard_stop_percentage=0.12 that is only +0.25R — the
+    # floor started ratcheting up before a trade had even earned back a
+    # quarter of what it was risking, let alone approached its 1.5-3.6R
+    # structural target. Result: profit_lock fired on 11/24 trades (46%)
+    # at avg +0.21R while stop_loss losers averaged -1.07R and the 2
+    # trades that reached take_profit averaged +2.04R — winners cut short,
+    # losers run full. Requiring +1R of proof before arming (then still
+    # only locking 50% of whatever peak follows) leaves genuine winners
+    # room to run toward their measured-move target while still trimming
+    # giveback once a trade is unambiguously working. 0 / None = arm on
+    # any positive MFE (the old too-eager behavior).
+    profit_lock_trigger_r: float | None = 1.0
     # Empty on purpose. 006/007 used to skip SMA200 (shorts of strength /
     # longs of weakness) and then dominated the losing paper book. They are
     # disabled by default; --pattern isolation still gets the regime filter.

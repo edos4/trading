@@ -492,8 +492,12 @@ class MarketScanner:
                     except FetchSkip as exc:
                         if exc.code == "no_data":
                             self._note_dead_symbol(symbol, str(exc))
-                        else:
+                        elif exc.code == "asof_mismatch":
                             self.stats["asof_skipped"] += 1
+                        else:
+                            # history_unavailable and other transients: skip
+                            # this cycle, retry the symbol on the next scan.
+                            self.stats["snapshot_errors"] += 1
                         continue
                     except Exception as exc:
                         self.stats["snapshot_errors"] += 1

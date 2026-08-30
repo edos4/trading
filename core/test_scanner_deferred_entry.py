@@ -162,5 +162,37 @@ def test_scanner_seeds_cooldown_from_closed_paper():
     assert passes_cooldown(signal, 30, scanner._cooldown_tracker)
 
 
+def test_scanner_drops_no_data_but_retries_history_unavailable():
+    from data.stream_client import FetchSkip
+
+    class _SkipFeed:
+        def __init__(self, code: str):
+            self.code = code
+
+        @asynccontextmanager
+        async def mcp_session(self):
+            yield None
+
+        async def fetch_snapshot(self, symbol, timeframe, store=None, mcp_session=None):
+            raise FetchSkip(self.code, f"{self.code} for {symbol}")
+
+    dead = MarketScanner(
+        symbols=["EXPH"], data_feed=_SkipFeed("no_data"),
+        kronos_gate=False, volume_gate=False, kronos_rank=False,
+    )
+    dead._patterns = [_FirstBarBuyPattern()]
+    asyncio.run(dead._scan_all())
+    assert "EXPH" in dead._dead_symbols
+
+    busy = MarketScanner(
+        symbols=["KNSL"], data_feed=_SkipFeed("history_unavailable"),
+        kronos_gate=False, volume_gate=False, kronos_rank=False,
+    )
+    busy._patterns = [_FirstBarBuyPattern()]
+    asyncio.run(busy._scan_all())
+    assert "KNSL" not in busy._dead_symbols
+    assert busy.stats["snapshot_errors"] >= 1
+
+
 if __name__ == "__main__":
     demo()

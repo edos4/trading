@@ -175,7 +175,15 @@ def _is_weekly(timeframe: str) -> bool:
 
 
 def list_history_symbols(market: str | None = None) -> list[dict[str, Any]]:
-    """Symbol metas from GET /api/history/symbols."""
+    """Symbol metas from GET /api/history/symbols, or local Postgres on the owner."""
+    if local_history_backfill_enabled():
+        from data import db
+
+        conn = db.get_conn()
+        try:
+            return db.all_symbols(conn, market=market) or []
+        finally:
+            conn.close()
     from data.history_client import fetch_history_symbols
 
     return fetch_history_symbols(market=market) or []
@@ -188,12 +196,21 @@ def load_daily_bars(
     limit: int | None = None,
     market: str | None = None,
 ) -> list[dict[str, Any]] | None:
-    """GET /api/history/{symbol}. None on hard failure; [] if empty."""
-    from data.history_client import fetch_history_bars
+    """Daily bars. Owner with empty STOCKS_HISTORY_URL reads Postgres.
 
+    Laptops hit GET /api/history. None on hard failure; [] if empty.
+    """
     symbol = (symbol or "").upper().strip()
     if not symbol:
         return None
+    if local_history_backfill_enabled():
+        from data.db import load_daily_ohlcv_rows
+
+        return load_daily_ohlcv_rows(
+            symbol, after_ts=after_ts, limit=limit, market=market,
+        )
+    from data.history_client import fetch_history_bars
+
     return fetch_history_bars(
         symbol, after_ts=after_ts, limit=limit, market=market,
     )
@@ -234,9 +251,12 @@ def load_daily_tape_rows(
     limit: int | None = None,
     market: str | None = None,
 ) -> list[dict[str, Any]] | None:
-    """Paper-stream tape rows: open/high/low/close/volume/timestamp (unix)."""
+    """Paper-stream tape rows: open/high/low/close/volume/timestamp (unix).
+
+    None = transport/API failure (retry). [] = symbol has no bars (404).
+    """
     bars = load_daily_bars(symbol, after_ts=after_ts, limit=limit, market=market)
-    if not bars:
+    if bars is None:
         return None
     rows: list[dict[str, Any]] = []
     for bar in bars:
@@ -251,7 +271,7 @@ def load_daily_tape_rows(
             "volume": float(bar.get("volume") or 0),
             "timestamp": int(ts),
         })
-    return rows or None
+    return rows
 
 
 def fetch_ohlcv_candles(

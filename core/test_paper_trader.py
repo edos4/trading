@@ -210,7 +210,7 @@ def test_bar_counters_are_isolated_by_timeframe():
     assert acct.bar_count("TEST", "1h") == 0
 
 
-def test_paper_closes_open_long_when_unrl_hits_profit_take_pct():
+def test_paper_closes_open_long_when_giveback_hits_profit_lock():
     from data.tv_client import OHLCVCandle
 
     acct = PaperAccount(initial_capital=100_000.0, market="us", slippage_pct=0.0)
@@ -224,15 +224,22 @@ def test_paper_closes_open_long_when_unrl_hits_profit_take_pct():
     acct.positions["AAPL"] = t
     acct._last_price["AAPL"] = 100.0
     acct.cash -= 1_000.0
-    # ENGINE.profit_take_pct is 0.08 — clear it comfortably so this test
-    # doesn't need updating again if the knob is retuned slightly.
-    candle = OHLCVCandle(
-        open=108, high=110, low=107, close=109.0, volume=1,
+    # Bar 1: establish +10% peak close-to-close MFE (exit check runs before
+    # trailing-ref update, so lock arms for subsequent bars).
+    peak = OHLCVCandle(
+        open=108, high=111, low=107, close=110.0, volume=1,
         timestamp=datetime(2026, 1, 5, tzinfo=timezone.utc),
     )
-    closed = acct.on_bar("AAPL", candle, "1d", True)
+    assert acct.on_bar("AAPL", peak, "1d", True) is None
+    assert t._best_pnl_pct == 0.10
+    # Bar 2: giveback through the 50% lock floor at 105.
+    giveback = OHLCVCandle(
+        open=106, high=107, low=103, close=104.0, volume=1,
+        timestamp=datetime(2026, 1, 6, tzinfo=timezone.utc),
+    )
+    closed = acct.on_bar("AAPL", giveback, "1d", True)
     assert closed is not None
-    assert closed.exit_reason == "profit_take"
+    assert closed.exit_reason == "profit_lock"
     assert "AAPL" not in acct.positions
 
 
@@ -358,7 +365,11 @@ def test_us_paper_keeps_engine_breakeven():
         pos = acct.positions["AAPL"]
         assert pos.breakeven_trigger_pct == 0.03
         assert pos.breakeven_buffer_pct == 0.0015
-        assert pos.profit_take_pct == 0.08
+        assert pos.profit_take_pct is None
+        assert pos.profit_lock_frac == 0.5
+        # entry=100, stop=94 → risk_pct=0.06; trigger_r=1.0 → resolved
+        # per-trade trigger = 1.0 * 0.06 = 0.06 (must be up 1R before arming).
+        assert pos.profit_lock_trigger_pct == 0.06
     finally:
         settings.min_position_notional = old_min
 

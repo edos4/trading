@@ -22,7 +22,8 @@ def test_format_pattern_name_strips_prefix():
 def test_format_exit_reason_humanizes_and_adds_time_bars():
     assert format_exit_reason("stop_loss") == "Stop"
     assert format_exit_reason("take_profit") == "Target"
-    assert format_exit_reason("profit_take") == "Lock"
+    assert format_exit_reason("profit_take") == "Take"
+    assert format_exit_reason("profit_lock") == "Lock"
     assert format_exit_reason("trailing_stop") == "Trail"
     assert format_exit_reason("time_exit", 14) == "Time 14b"
     assert format_exit_reason("time_exit", 14, 20) == "Time 14/20b"
@@ -30,6 +31,7 @@ def test_format_exit_reason_humanizes_and_adds_time_bars():
     assert reason_tone("stop_loss") == "loss"
     assert reason_tone("take_profit") == "gain"
     assert reason_tone("profit_take") == "gain"
+    assert reason_tone("profit_lock") == "gain"
 
 
 def test_format_hold_and_stamp():

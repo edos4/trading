@@ -120,6 +120,42 @@ def test_fetch_history_bars_retries_connect_timeout() -> None:
     assert calls["n"] == 2
 
 
+def test_fetch_history_bars_timeout_does_not_reset_shared_client() -> None:
+    """Closing the shared httpx.Client on a timeout kills in-flight TLS
+    handshakes on the other 3 inflight slots and stamps out more timeouts."""
+    import httpx
+    from data.history_client import fetch_history_bars
+
+    class _Resp:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"bars": [_bar(1, 1.0)]}
+
+    class _Client:
+        def get(self, *_a, **_k):
+            raise httpx.ReadTimeout("The read operation timed out")
+
+    with patch("data.history_client._client", return_value=_Client()), \
+         patch("data.history_client._reset_client") as reset, \
+         patch("data.history_client.time.sleep"):
+        assert fetch_history_bars("KNSL") is None
+    reset.assert_not_called()
+
+
+def test_load_daily_tape_rows_empty_vs_unavailable() -> None:
+    from data.history import load_daily_tape_rows
+
+    with patch("data.history.load_daily_bars", return_value=None):
+        assert load_daily_tape_rows("TACT") is None
+    with patch("data.history.load_daily_bars", return_value=[]):
+        assert load_daily_tape_rows("MAGE") == []
+
+
+
 def test_history_path_encodes_slash_tickers() -> None:
     from data.history_client import _history_path
 
@@ -148,6 +184,18 @@ def test_load_daily_bars_never_uses_postgres() -> None:
     load.assert_called_once()
     db_load.assert_not_called()
     get_conn.assert_not_called()
+
+
+def test_load_daily_bars_uses_postgres_on_history_owner() -> None:
+    from data.history import load_daily_bars
+
+    rows = [_bar(1, 10.0)]
+    with patch("data.history.local_history_backfill_enabled", return_value=True), \
+         patch("data.db.load_daily_ohlcv_rows", return_value=rows) as db_load, \
+         patch("data.history_client.fetch_history_bars") as api:
+        assert load_daily_bars("AAPL", after_ts=9, limit=10) == rows
+    db_load.assert_called_once_with("AAPL", after_ts=9, limit=10, market=None)
+    api.assert_not_called()
 
 
 def test_history_client_defaults_to_33ai() -> None:

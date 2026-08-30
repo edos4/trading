@@ -72,7 +72,7 @@ def _fetch_symbol(conn, symbol: str, market: str, *, fill_all: bool = False) -> 
         from data.tv_client import TVClient
 
         tv = TVClient(screener="america", exchange="NASDAQ")
-        candles = tv._fetch_history_chart(symbol, "1d")
+        candles = tv._fetch_history_chart(symbol, "1d", live=True)
 
     rows = _candles_to_rows(candles)
     if not rows:

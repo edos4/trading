@@ -80,7 +80,7 @@ class StreamClient:
         if "error" in reply:
             code = str(reply.get("code") or "no_data")
             message = str(reply["error"])
-            if code == "asof_mismatch":
+            if code in ("asof_mismatch", "history_unavailable"):
                 log.debug(f"StreamClient | {symbol}: {message}")
             else:
                 log.warning(f"StreamClient | {symbol}: {message}")
@@ -114,7 +114,11 @@ class StreamClient:
             log.error(f"StreamClient | pin_asof failed: {exc}")
             return None
         if "error" in reply:
-            log.warning(f"StreamClient | pin_asof {symbol}: {reply['error']}")
+            code = str(reply.get("code") or "")
+            if code == "history_unavailable":
+                log.debug(f"StreamClient | pin_asof {symbol}: {reply['error']}")
+            else:
+                log.warning(f"StreamClient | pin_asof {symbol}: {reply['error']}")
             return None
         asof_day = reply.get("asof_day")
         return str(asof_day) if asof_day is not None else None

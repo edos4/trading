@@ -11,7 +11,10 @@ from config import settings
 from utils.logger import log
 
 DEFAULT_STOCKS_HISTORY_URL = "https://33ai.edos.uk"
-_CONNECT_TIMEOUT = 10.0
+# Connect includes TLS. 10s was firing handshake timeouts to 33ai and then
+# the retry path used to close the shared Client, which killed in-flight
+# requests and stamped out more handshake failures.
+_CONNECT_TIMEOUT = 20.0
 _READ_TIMEOUT = 30.0
 _MAX_INFLIGHT = 4
 _RETRIES = 3
@@ -101,14 +104,13 @@ def _get(path: str, params: dict[str, Any] | None = None):
             return client.get(path, params=params or {})
         except Exception as exc:
             last_exc = exc
-            if _is_transport_error(exc) and attempt + 1 < _RETRIES:
-                with _client_lock:
-                    _reset_client()
-                time.sleep(0.4 * (attempt + 1))
-                continue
-            raise
+            if not (_is_transport_error(exc) and attempt + 1 < _RETRIES):
+                raise
         finally:
             _request_sema.release()
+        # Backoff after releasing the slot. Sleeping while holding it stalled
+        # the other 3 inflight workers during a timeout storm.
+        time.sleep(0.4 * (attempt + 1))
     assert last_exc is not None
     raise last_exc
 

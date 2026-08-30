@@ -9,7 +9,8 @@ from typing import Any, Optional
 EXIT_REASON_LABELS = {
     "stop_loss": "Stop",
     "take_profit": "Target",
-    "profit_take": "Lock",
+    "profit_take": "Take",
+    "profit_lock": "Lock",
     "trailing_stop": "Trail",
     "time_exit": "Time",
     "breakeven_stop": "BE",
@@ -38,7 +39,7 @@ def reason_tone(reason: str | None) -> str:
     raw = (reason or "").strip()
     if raw in {"stop_loss"}:
         return "loss"
-    if raw in {"take_profit", "trailing_stop", "profit_take"}:
+    if raw in {"take_profit", "trailing_stop", "profit_take", "profit_lock"}:
         return "gain"
     if raw in {"breakeven_stop"}:
         return "flat"

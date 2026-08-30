@@ -326,6 +326,7 @@ def backtest_rank_sleeve(
         _check_exit,
         _close_trade,
         _open_trade,
+        _resolve_profit_lock_trigger_pct,
         _update_trailing_reference,
         apply_risk_gates,
     )
@@ -419,6 +420,10 @@ def backtest_rank_sleeve(
             pos.breakeven_trigger_pct = config.get("breakeven_trigger_pct")
             pos.breakeven_buffer_pct = config.get("breakeven_buffer_pct", 0.0)
             pos.profit_take_pct = config.get("profit_take_pct", ENGINE.profit_take_pct)
+            pos.profit_lock_frac = config.get("profit_lock_frac", ENGINE.profit_lock_frac)
+            pos.profit_lock_trigger_pct = _resolve_profit_lock_trigger_pct(
+                pos, config.get("profit_lock_trigger_r", ENGINE.profit_lock_trigger_r),
+            )
             open_pos[sym] = pos
 
         # ── Rebalance / emit ──────────────────────────────────────────────

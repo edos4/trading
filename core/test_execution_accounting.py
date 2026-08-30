@@ -79,6 +79,66 @@ def test_profit_take_does_not_fire_under_four_percent():
     assert price is None
 
 
+def test_long_profit_lock_floors_half_of_peak_unrl():
+    # Peak close-to-close +10% → lock floor at +5% with frac=0.5.
+    trade = _trade("BUY", 100, 90, 120)
+    trade.profit_lock_frac = 0.5
+    trade._best_pnl_pct = 0.10
+    trade.entry_bar_idx = 0
+    price, reason = _check_exit(_candle(106, 107, 103, 104), trade, 2)
+    assert reason == "profit_lock"
+    assert price == 105
+
+
+def test_short_profit_lock_floors_half_of_peak_unrl():
+    trade = _trade("SELL", 100, 110, 80)
+    trade.profit_lock_frac = 0.5
+    trade._best_pnl_pct = 0.10
+    trade.entry_bar_idx = 0
+    price, reason = _check_exit(_candle(94, 97, 93, 96), trade, 2)
+    assert reason == "profit_lock"
+    assert price == 95
+
+
+def test_profit_lock_does_not_cap_further_upside():
+    # Still running above the lock floor — no exit; pattern target/trail handle
+    # the rest. Hard profit_take stays off.
+    trade = _trade("BUY", 100, 90, 120)
+    trade.profit_lock_frac = 0.5
+    trade._best_pnl_pct = 0.10
+    trade.entry_bar_idx = 0
+    price, reason = _check_exit(_candle(108, 112, 107, 111), trade, 2)
+    assert reason == ""
+    assert price is None
+
+
+def test_profit_lock_ignores_sub_trigger_noise():
+    # 2026-08-30 paper: PH/BDX/OKE locked +0.3–0.5% after ~1% MFE.
+    trade = _trade("BUY", 100, 90, 120)
+    trade.profit_lock_frac = 0.5
+    trade.profit_lock_trigger_pct = 0.03
+    trade._best_pnl_pct = 0.013
+    trade.entry_bar_idx = 0
+    price, reason = _check_exit(_candle(100.8, 101.2, 100.2, 100.4), trade, 2)
+    assert reason == ""
+    assert price is None
+
+
+def test_profit_lock_beats_breakeven_when_both_crossed():
+    # MFE +10% → lock at 105; BE armed at ~100.15. Low tags both → worst
+    # plausible protective fill for a long is the lower price (harder stop),
+    # but only levels actually crossed count: low=103 crosses lock not BE.
+    trade = _trade("BUY", 100, 90, None)
+    trade.profit_lock_frac = 0.5
+    trade._best_pnl_pct = 0.10
+    trade.breakeven_trigger_pct = 0.03
+    trade.breakeven_buffer_pct = 0.0015
+    trade.entry_bar_idx = 0
+    price, reason = _check_exit(_candle(106, 107, 103, 104), trade, 2)
+    assert reason == "profit_lock"
+    assert price == 105
+
+
 def test_short_ledger_uses_equity_not_short_sale_proceeds():
     trade = _trade("SELL", 100, 110, 90, qty=100)
     accepted, rejected = _apply_capital_ledger(

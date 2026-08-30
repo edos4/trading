@@ -86,10 +86,10 @@ def test_load_symbol_db_uses_after_ts_when_start_set():
         out = _load_symbol_db("AAPL", start_ts=start_ts)
     assert out == rows
     lookback = settings.papertrade_stream_lookback_bars
-    load.assert_called_once_with(
-        "AAPL", after_ts=start_ts - lookback * 86400 * 2, limit=None,
-        market=None,
-    )
+    _, kwargs = load.call_args
+    assert kwargs["after_ts"] == start_ts - lookback * 86400 * 2
+    assert kwargs["limit"] >= lookback
+    assert kwargs["market"] is None
     get_conn.assert_not_called()
 
 
@@ -123,3 +123,68 @@ def test_pin_asof_keeps_existing_control_date_when_symbol_missing():
     server._tapes = {"BDO": _SymbolTape(liquid)}
     assert server.pin_asof("BDO") == 1
     assert server.pin_asof("ICT") == 1
+
+
+def test_parse_start_ts_rolls_new_years_to_next_session():
+    from data.stream_server import _parse_start_ts, asof_key
+
+    ts = _parse_start_ts("2026-01-01", market="us")
+    assert ts is not None
+    assert asof_key(ts) == "2026-01-02"
+
+
+def test_pin_asof_skips_new_years_print_on_control_tape():
+    """Illiquid control names can carry a Jan 1 print. Pinning that date
+    made the rest of the US universe asof_mismatch with zero signals."""
+    from datetime import datetime, timezone
+
+    server = StreamServer(start_date="2026-01-01", market="us")
+    nyd = int(datetime(2026, 1, 1, 21, 0, tzinfo=timezone.utc).timestamp())
+    jan2 = int(datetime(2026, 1, 2, 21, 0, tzinfo=timezone.utc).timestamp())
+    jan5 = int(datetime(2026, 1, 5, 21, 0, tzinfo=timezone.utc).timestamp())
+    rows = [
+        {"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "timestamp": nyd},
+        {"open": 2, "high": 2, "low": 2, "close": 2, "volume": 1, "timestamp": jan2},
+        {"open": 3, "high": 3, "low": 3, "close": 3, "volume": 1, "timestamp": jan5},
+    ]
+    server._tapes = {"BHE": _SymbolTape(rows, start_ts=server._start_ts)}
+    # start_date roll already prefers Jan 2; even if cursor sat on NYD, pin
+    # must not publish 2026-01-01 as the universe control date.
+    server._tapes["BHE"].cursor = 0
+    pinned = server.pin_asof("BHE")
+    assert pinned == jan2
+    assert server._asof_ts == jan2
+
+
+def test_tape_lookup_timeout_is_history_unavailable_not_cached():
+    server = StreamServer()
+    with patch("data.stream_server._load_symbol_db", return_value=None):
+        tape, err = server._tape_lookup("KNSL")
+    assert tape is None
+    assert err == "history_unavailable"
+    assert "KNSL" not in server._tapes
+    assert "KNSL" not in server._known_empty
+    rows = [{"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "timestamp": 1}]
+    with patch("data.stream_server._load_symbol_db", return_value=rows):
+        tape, err = server._tape_lookup("KNSL")
+    assert err is None
+    assert tape is not None
+
+
+def test_tape_lookup_empty_is_no_data_and_cached():
+    server = StreamServer()
+    with patch("data.stream_server._load_symbol_db", return_value=[]) as load:
+        tape, err = server._tape_lookup("EXPH")
+        tape2, err2 = server._tape_lookup("EXPH")
+    assert tape is None and err == "no_data"
+    assert tape2 is None and err2 == "no_data"
+    load.assert_called_once()
+
+
+def test_pin_asof_reports_history_unavailable():
+    server = StreamServer()
+    with patch("data.stream_server._load_symbol_db", return_value=None):
+        ts, err = server._pin_asof("CBIO")
+    assert ts is None
+    assert err == "history_unavailable"
+

@@ -20,6 +20,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, ValidationError
+from starlette.middleware.gzip import GZipMiddleware
 
 from config import settings
 from core.market import default_market, markets_payload
@@ -101,6 +102,7 @@ def create_app() -> FastAPI:
     require_password_configured()
 
     app = FastAPI(title="Trading Bot Web UI", docs_url=None, redoc_url=None)
+    app.add_middleware(GZipMiddleware, minimum_size=500)
 
     app.mount("/static", StaticFiles(directory=str(ROOT / "static")), name="static")
 
@@ -218,7 +220,7 @@ def create_app() -> FastAPI:
         return {"symbols": symbols}
 
     @app.get("/api/history/symbols")
-    async def api_history_symbols(
+    def api_history_symbols(
         market: str = "",
         _user: str = Depends(require_history),
     ):
@@ -252,7 +254,7 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/api/history/{symbol}/meta")
-    async def api_history_meta(
+    def api_history_meta(
         symbol: str,
         market: str = "",
         _user: str = Depends(require_history),
@@ -266,7 +268,7 @@ def create_app() -> FastAPI:
         return meta
 
     @app.get("/api/history/{symbol}")
-    async def api_history_bars(
+    def api_history_bars(
         symbol: str,
         after_ts: int | None = None,
         limit: int | None = None,
@@ -540,14 +542,22 @@ def create_app() -> FastAPI:
 
 def _stream_start_default() -> str:
     """Default stream start date — mirrors the tkinter UI datepicker:
-    PAPERTRADE_STREAM_START_DATE if set, else ~1 year ago."""
+    PAPERTRADE_STREAM_START_DATE if set, else ~1 year ago on a weekday
+    (weekends/NYSE fixed holidays roll forward so pin_asof does not land
+    on an empty cash session)."""
+    from data.stream_server import _roll_forward_session_day
+
     raw = settings.papertrade_stream_start_date
     if raw:
         try:
-            return date.fromisoformat(raw.strip()).isoformat()
+            return _roll_forward_session_day(
+                date.fromisoformat(raw.strip()), "us",
+            ).isoformat()
         except ValueError:
             pass
-    return (date.today() - timedelta(days=365)).isoformat()
+    return _roll_forward_session_day(
+        date.today() - timedelta(days=365), "us",
+    ).isoformat()
 
 
 def _safe_next(next_url: str) -> str:
@@ -595,6 +605,7 @@ def run() -> None:
         host=host,
         port=port,
         log_level="info",
+        timeout_keep_alive=75,
     )
 
 
