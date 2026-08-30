@@ -294,6 +294,4 @@ DISABLED_PATTERNS: list[str] = [
     "pattern_012_ml_signal",
     "pattern_009_flag_pattern",
     "pattern_006_upward_channel",
-    "pattern_002_double_top",
-    "pattern_008_head_and_shoulders",
 ]

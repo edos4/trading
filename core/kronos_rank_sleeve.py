@@ -334,6 +334,7 @@ def backtest_rank_sleeve(
         passes_cooldown,
         passes_min_confidence,
         passes_regime_filter,
+        structure_filters_enabled,
     )
     from data.ohlcv_store import OHLCVStore
 
@@ -342,7 +343,11 @@ def backtest_rank_sleeve(
 
     top_k = int(config.get("kronos_rank_top_k", settings.kronos_rank_top_k))
     bottom_k = int(config.get("kronos_rank_bottom_k", settings.kronos_rank_bottom_k))
-    long_only = bool(config.get("kronos_rank_long_only", settings.kronos_rank_long_only))
+    struct = structure_filters_enabled(config.get("pattern_only", False))
+    long_only = (
+        False if not struct
+        else bool(config.get("kronos_rank_long_only", settings.kronos_rank_long_only))
+    )
     min_move = config.get("kronos_rank_min_move_pct")
     if min_move is None:
         min_move = _min_move()
@@ -413,6 +418,7 @@ def backtest_rank_sleeve(
             pos = _open_trade(sig, candle, idx)
             pos.breakeven_trigger_pct = config.get("breakeven_trigger_pct")
             pos.breakeven_buffer_pct = config.get("breakeven_buffer_pct", 0.0)
+            pos.profit_take_pct = config.get("profit_take_pct", ENGINE.profit_take_pct)
             open_pos[sym] = pos
 
         # ── Rebalance / emit ──────────────────────────────────────────────
@@ -449,13 +455,13 @@ def backtest_rank_sleeve(
             signals_count += 1
             if signal.symbol in open_pos or signal.symbol in pending:
                 continue
-            if not passes_min_confidence(signal, config.get("min_confidence")):
+            if struct and not passes_min_confidence(signal, config.get("min_confidence")):
                 continue
-            if not passes_regime_filter(
+            if struct and not passes_regime_filter(
                 signal, store, enabled=config.get("regime_filter", True),
             ):
                 continue
-            if not passes_cooldown(
+            if struct and not passes_cooldown(
                 signal, di, cooldown_tracker,
                 cooldown_bars=config.get("cooldown_bars", 10),
             ):

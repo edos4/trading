@@ -45,6 +45,7 @@
       <button type="button" class="btn book-reset" data-book="{{ book.id }}">Reset</button>
     </div>
     <div class="book-flags">
+      <label class="check"><input type="checkbox" id="{{ book.id }}-pattern-only" /> Pattern-only</label>
       <label class="check"><input type="checkbox" id="{{ book.id }}-kronos" {% if book.kronos_gate %}checked{% endif %} /> Kronos 3d gate</label>
       <label class="check"><input type="checkbox" id="{{ book.id }}-kronos-rank" {% if book.kronos_rank %}checked{% endif %} /> Kronos rank</label>
       <label class="check" id="{{ book.id }}-kronos-batch-wrap" {% if not book.kronos_gate and not book.kronos_rank %}hidden{% endif %}>
@@ -112,6 +113,7 @@
             <option value="">All</option>
             <option value="stop_loss">Stop</option>
             <option value="take_profit">Target</option>
+            <option value="profit_take">Lock</option>
             <option value="trailing_stop">Trail</option>
             <option value="time_exit">Time</option>
             <option value="breakeven_stop">BE</option>

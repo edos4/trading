@@ -210,6 +210,30 @@ def test_bar_counters_are_isolated_by_timeframe():
     assert acct.bar_count("TEST", "1h") == 0
 
 
+def test_paper_closes_open_long_when_unrl_hits_four_percent():
+    from data.tv_client import OHLCVCandle
+
+    acct = PaperAccount(initial_capital=100_000.0, market="us", slippage_pct=0.0)
+    t = BacktestTrade(
+        symbol="AAPL", timeframe="1d", pattern="test", action="BUY",
+        entry_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        exit_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        entry_price=100.0, exit_price=100.0, pnl=0.0, pnl_pct=0.0, qty=10,
+        stop_loss=90.0, take_profit=120.0, entry_bar_idx=0,
+    )
+    acct.positions["AAPL"] = t
+    acct._last_price["AAPL"] = 100.0
+    acct.cash -= 1_000.0
+    candle = OHLCVCandle(
+        open=103, high=105, low=102, close=104.5, volume=1,
+        timestamp=datetime(2026, 1, 5, tzinfo=timezone.utc),
+    )
+    closed = acct.on_bar("AAPL", candle, "1d", True)
+    assert closed is not None
+    assert closed.exit_reason == "profit_take"
+    assert "AAPL" not in acct.positions
+
+
 def test_sim_clock_isolated_by_timeframe():
     from core.paper_trader import PaperAccount
 
@@ -332,6 +356,7 @@ def test_us_paper_keeps_engine_breakeven():
         pos = acct.positions["AAPL"]
         assert pos.breakeven_trigger_pct == 0.03
         assert pos.breakeven_buffer_pct == 0.0015
+        assert pos.profit_take_pct == 0.04
     finally:
         settings.min_position_notional = old_min
 

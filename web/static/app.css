@@ -219,6 +219,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
   margin: 1rem 0;
 }
 .param input, .param select { width: 100%; }
+.param.dimmed { opacity: 0.45; }
 .ab-box {
   margin: 0.75rem 0;
   padding: 0.75rem;

@@ -95,6 +95,7 @@ def normalize_backtest_form(raw: dict[str, Any]) -> dict[str, Any]:
         "min_reward_risk_ratio",
         "hard_stop_percentage",
         "atr_stop_floor_multiple",
+        "profit_take_pct",
     ):
         if opt_key in p and p[opt_key] is not None and p[opt_key] <= 0:
             p[opt_key] = None

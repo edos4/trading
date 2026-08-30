@@ -64,6 +64,7 @@ class PaperStartRequest(BaseModel):
     kronos_rank: bool = False
     kronos_batch: bool = False
     volume_gate: bool = True
+    pattern_only: bool = False
     stream_start: Optional[str] = None
     market: Optional[Literal["us", "ph"]] = None
 
@@ -377,6 +378,7 @@ def create_app() -> FastAPI:
             kronos_rank=payload.kronos_rank,
             kronos_batch=payload.kronos_batch,
             volume_gate=payload.volume_gate,
+            pattern_only=payload.pattern_only,
             stream_start=payload.stream_start,
         )
 

@@ -128,10 +128,14 @@ class MarketBookFrame(ttk.LabelFrame):
 
         flags = ttk.Frame(self)
         flags.pack(fill=tk.X, padx=8, pady=(2, 8))
+        self.pattern_only_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            flags, text="Pattern-only", variable=self.pattern_only_var,
+        ).pack(side=tk.LEFT)
         ttk.Checkbutton(
             flags, text="Kronos 3d gate", variable=self.kronos_gate_var,
             command=self._sync_batch_kronos,
-        ).pack(side=tk.LEFT)
+        ).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Checkbutton(
             flags, text="Kronos rank", variable=self.kronos_rank_var,
             command=self._sync_batch_kronos,
@@ -196,6 +200,7 @@ class MarketBookFrame(ttk.LabelFrame):
                 and self.kronos_batch_var.get()
             ),
             "volume_gate": bool(self.volume_gate_var.get()),
+            "pattern_only": bool(self.pattern_only_var.get()),
             "stream_start": stream_start,
         }
 

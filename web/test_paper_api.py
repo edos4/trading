@@ -109,6 +109,7 @@ class WebPaperApiTests(unittest.TestCase):
             "kronos_gate": False,
             "kronos_rank": False,
             "volume_gate": False,
+            "pattern_only": True,
         }
         with patch("web.app.paper_books.start", return_value=None) as start:
             r1 = self.client.post("/api/paper/start", json={**body, "market": "us"})
@@ -116,6 +117,8 @@ class WebPaperApiTests(unittest.TestCase):
         self.assertEqual(r1.status_code, 200)
         self.assertEqual(r2.status_code, 200)
         self.assertEqual([c.args[0] for c in start.call_args_list], ["us", "ph"])
+        for call in start.call_args_list:
+            self.assertTrue(call.kwargs.get("pattern_only"))
 
     def test_export_envelope(self) -> None:
         self._login()

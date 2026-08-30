@@ -49,9 +49,10 @@ def demo():
     assert ENGINE.regime_filter is True
     assert ENGINE.pattern_only is False
     assert ENGINE.cooldown_bars == 10
+    assert ENGINE.profit_take_pct == 0.04
     from config import DISABLED_PATTERNS
-    assert "pattern_002_double_top" in DISABLED_PATTERNS
-    assert "pattern_008_head_and_shoulders" in DISABLED_PATTERNS
+    assert "pattern_002_double_top" not in DISABLED_PATTERNS
+    assert "pattern_008_head_and_shoulders" not in DISABLED_PATTERNS
     assert "pattern_007_descending_channel" not in DISABLED_PATTERNS
 
     assert passes_min_confidence(_sig(confidence=0.65))
@@ -110,6 +111,7 @@ def demo():
     ) is not None
     assert ENGINE.regime_exempt_patterns == ()
     assert ENGINE.breakeven_trigger_pct == 0.03
+    assert ENGINE.profit_take_pct == 0.04
 
     # 1.5% hysteresis: ~1% the wrong side of SMA200 is a near-miss, not a block.
     buy_near = [100.0] * 200 + [99.0]
@@ -165,6 +167,7 @@ def demo():
     assert bt["max_position_pct"] == 0.10
     assert bt["max_gross_exposure_pct"] == 1.0
     assert bt["breakeven_trigger_pct"] == 0.03
+    assert bt["profit_take_pct"] == 0.04
     assert bt["breakeven_buffer_pct"] == 0.0015
     assert bt["min_share_price"] == 5.0
     assert "regime_hysteresis_pct" not in bt

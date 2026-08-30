@@ -493,6 +493,7 @@ class PaperAccount:
         position.exit_date = position.entry_date
         position.breakeven_trigger_pct = profile.breakeven_trigger_pct
         position.breakeven_buffer_pct = profile.breakeven_buffer_pct
+        position.profit_take_pct = ENGINE.profit_take_pct
         notional = position.entry_price * position.qty
         if signal.action == "BUY":
             self.cash -= notional
@@ -557,6 +558,9 @@ class PaperAccount:
         # the same pattern diverge. bar_idx is per real new bar (see
         # _bar_count), not per scan cycle.
         bar_idx = self.bar_count(symbol, position.timeframe)
+        position.profit_take_pct = (
+            ENGINE.profit_take_pct if ENGINE.profit_take_pct else None
+        )
         exit_price, reason = _check_exit(
             candle, position, bar_idx, min_hold_bars=ENGINE.min_hold_bars,
         )
@@ -747,6 +751,10 @@ class PaperAccount:
         acct.positions = {
             sym: _trade_from_dict(d) for sym, d in data.get("positions", {}).items()
         }
+        for pos in acct.positions.values():
+            pos.profit_take_pct = (
+                ENGINE.profit_take_pct if ENGINE.profit_take_pct else None
+            )
         acct.closed = [_trade_from_dict(d) for d in data.get("closed", [])]
         raw_curve = [tuple(x) for x in data.get("equity_curve", [])]
         # Migrate older files that stored one mark per scan. Keep the latest
