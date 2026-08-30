@@ -132,5 +132,35 @@ def test_us_reference_symbol_prefers_spy():
     assert scanner._reference_symbol() == "SPY"
 
 
+def test_scanner_seeds_cooldown_from_closed_paper():
+    from datetime import timezone
+
+    from core.backtester import BacktestTrade
+    from core.engine_defaults import passes_cooldown
+    from patterns.base_pattern import TradeSignal
+
+    paper = PaperAccount(initial_capital=100_000.0, market="us", slippage_pct=0.0)
+    paper.closed.append(
+        BacktestTrade(
+            symbol="FOXO", timeframe="1d",
+            pattern="pattern_007_descending_channel", action="BUY",
+            entry_date=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            exit_date=datetime(2026, 8, 2, tzinfo=timezone.utc),
+            entry_price=1.0, exit_price=0.94, pnl=-10.0, pnl_pct=-6.0,
+            qty=10, exit_bar_idx=20,
+        )
+    )
+    scanner = MarketScanner(
+        symbols=["FOXO"], paper_account=paper, data_feed=object(),
+        kronos_gate=False, volume_gate=False, kronos_rank=False, market="us",
+    )
+    signal = TradeSignal(
+        symbol="FOXO", timeframe="1d", pattern="pattern_003_double_bottom",
+        action="BUY", price=5.0, confidence=0.9, qty=1,
+    )
+    assert not passes_cooldown(signal, 25, scanner._cooldown_tracker)
+    assert passes_cooldown(signal, 30, scanner._cooldown_tracker)
+
+
 if __name__ == "__main__":
     demo()

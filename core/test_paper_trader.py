@@ -116,6 +116,46 @@ def test_time_exit_skips_winners_when_unfavorable_only():
     assert reason == "time_exit"
 
 
+def test_unfavorable_time_exit_fires_at_eight_bars():
+    t = BacktestTrade(
+        symbol="TEST", timeframe="1d", pattern="pattern_007_descending_channel",
+        action="BUY",
+        entry_date=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        exit_date=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        entry_price=100.0, exit_price=100.0, pnl=0.0, pnl_pct=0.0,
+        qty=10, entry_bar_idx=101,
+        neckline=99.0, neckline_break_direction="above",
+        neckline_break_bar_idx=100, exit_bars_after_neckline_break=8,
+        time_exit_only_unfavorable=True,
+    )
+    underwater = type("Candle", (), {
+        "open": 99.0, "high": 99.5, "low": 98.0, "close": 98.5,
+    })()
+    fill, reason = _check_exit(underwater, t, 107)
+    assert fill is None
+    fill, reason = _check_exit(underwater, t, 108)
+    assert fill == 98.5
+    assert reason == "time_exit"
+
+    winner = BacktestTrade(
+        symbol="TEST", timeframe="1d", pattern="pattern_007_descending_channel",
+        action="BUY",
+        entry_date=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        exit_date=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        entry_price=100.0, exit_price=100.0, pnl=0.0, pnl_pct=0.0,
+        qty=10, entry_bar_idx=101,
+        neckline=99.0, neckline_break_direction="above",
+        neckline_break_bar_idx=100, exit_bars_after_neckline_break=8,
+        time_exit_only_unfavorable=True,
+    )
+    ahead = type("Candle", (), {
+        "open": 102.0, "high": 103.0, "low": 101.0, "close": 102.0,
+    })()
+    fill, reason = _check_exit(ahead, winner, 108)
+    assert fill is None
+    assert reason == ""
+
+
 def test_mark_to_market_deduplicates_session_marks():
     acct = PaperAccount(initial_capital=100_000.0, market="us", slippage_pct=0.0)
     acct.mark_to_market(datetime(2026, 8, 17, 13, 30, tzinfo=timezone.utc))
@@ -292,5 +332,39 @@ def test_us_paper_keeps_engine_breakeven():
         pos = acct.positions["AAPL"]
         assert pos.breakeven_trigger_pct == 0.03
         assert pos.breakeven_buffer_pct == 0.0015
+    finally:
+        settings.min_position_notional = old_min
+
+
+def test_pattern_only_allows_ph_short_fill():
+    from config import settings
+    from data.tv_client import OHLCVCandle
+    from patterns.base_pattern import TradeSignal
+
+    candle = OHLCVCandle(
+        open=57.6, high=57.7, low=57.5, close=57.65, volume=1_000,
+        timestamp=datetime(2026, 1, 6, tzinfo=timezone.utc),
+    )
+    signal = TradeSignal(
+        symbol="PNB", timeframe="1d", pattern="test",
+        action="SELL", price=57.65, confidence=0.9, qty=10,
+        stop_loss=62.0, take_profit=50.0,
+    )
+    old_min = settings.min_position_notional
+    try:
+        settings.min_position_notional = 0
+        blocked = PaperAccount(initial_capital=1_000_000.0, market="ph", slippage_pct=0.0)
+        blocked.assume_session_open = True
+        blocked.pattern_only = False
+        ok, reason = blocked.open_position(signal, candle, _EmptyStore())
+        assert not ok
+        assert "Long-only" in reason
+
+        allowed = PaperAccount(initial_capital=1_000_000.0, market="ph", slippage_pct=0.0)
+        allowed.assume_session_open = True
+        allowed.pattern_only = True
+        ok, reason = allowed.open_position(signal, candle, _EmptyStore())
+        assert ok, reason
+        assert allowed.positions["PNB"].action == "SELL"
     finally:
         settings.min_position_notional = old_min

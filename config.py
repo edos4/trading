@@ -270,12 +270,19 @@ settings = Settings()
 #   pattern_012_ml_signal — n=3, pf=7826: too few trades for that PF to mean
 #   anything, not a real edge yet. Disabled until the sample grows.
 #
-#   pattern_002_double_top / pattern_009_flag_pattern / pattern_010_pennant —
-#   previously isolated as weak; stay off.
+#   pattern_002_double_top / pattern_008_head_and_shoulders — 2026-08-30 US
+#   paper: 10 shorts, 0 wins, −$3,550 realized (002 also hosted the
+#   grind-to-6%-stop cluster). Isolation via --pattern still works.
 #
-#   pattern_005_rounding_top / pattern_006_upward_channel /
-#   pattern_007_descending_channel / pattern_008_head_and_shoulders —
-#   historically net-negative. Stay off.
+#   pattern_009_flag_pattern / pattern_010_pennant — previously isolated as
+#   weak; 009 stays off. 010 is not in this list (unused in the current
+#   paper book).
+#
+#   pattern_006_upward_channel — historically net-negative. Stay off.
+#
+#   pattern_007_descending_channel stays ON: it is the live long sleeve.
+#   2026-08-30 P&L is lottery-dependent (GP); exit/cooldown fixes below
+#   address grinders without collapsing trade count.
 #
 #   pattern_003_double_bottom stays ON with neckline-break-only entry
 #   (2026-08-17 US paper: 79 day-7-without-break fills, PF 0.29).
@@ -287,4 +294,6 @@ DISABLED_PATTERNS: list[str] = [
     "pattern_012_ml_signal",
     "pattern_009_flag_pattern",
     "pattern_006_upward_channel",
+    "pattern_002_double_top",
+    "pattern_008_head_and_shoulders",
 ]

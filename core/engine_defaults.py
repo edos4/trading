@@ -27,6 +27,9 @@ class EngineDefaults:
 
     min_confidence: float = 0.65
     regime_filter: bool = True
+    # When True, skip min-confidence / min share-price / SMA200 / cooldown /
+    # long-only. Kronos and volume gates stay independently toggled.
+    pattern_only: bool = False
     # Allow BUY/SELL within this band of SMA200 (1.5% near-misses); still
     # block names 20%+ the wrong side of the average.
     regime_hysteresis_pct: float = 0.015
@@ -59,6 +62,12 @@ class EngineDefaults:
 
 
 ENGINE = EngineDefaults()
+
+
+def structure_filters_enabled(pattern_only: bool | None = None) -> bool:
+    """False when Pattern-only is on — skip structure gates, keep Kronos/volume."""
+    use = ENGINE.pattern_only if pattern_only is None else pattern_only
+    return not bool(use)
 
 
 def backtest_kwargs(**overrides: Any) -> dict[str, Any]:
@@ -242,7 +251,7 @@ def passes_cooldown(
     *,
     cooldown_bars: int | None = None,
 ) -> bool:
-    """Block re-entry into (symbol, pattern) after a loss within cooldown_bars."""
+    """Block re-entry into a symbol after any losing exit within cooldown_bars."""
     return describe_cooldown_rejection(
         signal, bar_idx, cooldown_tracker, cooldown_bars=cooldown_bars,
     ) is None
@@ -259,19 +268,43 @@ def describe_cooldown_rejection(
     n = ENGINE.cooldown_bars if cooldown_bars is None else cooldown_bars
     if n <= 0:
         return None
-    key = (signal.symbol, signal.pattern)
-    if key not in cooldown_tracker:
+    latest_loss_bar: int | None = None
+    latest_pattern = signal.pattern
+    for (sym, pat), (exit_bar, was_loss) in cooldown_tracker.items():
+        if sym != signal.symbol or not was_loss:
+            continue
+        if latest_loss_bar is None or exit_bar >= latest_loss_bar:
+            latest_loss_bar = exit_bar
+            latest_pattern = pat
+    if latest_loss_bar is None:
         return None
-    exit_bar, was_loss = cooldown_tracker[key]
-    bars_since = bar_idx - exit_bar
-    if was_loss and bars_since < n:
+    bars_since = bar_idx - latest_loss_bar
+    if bars_since < n:
         log.debug(
             f"EntryGate | {signal.symbol} {signal.timeframe} cooldown "
             f"{bars_since}/{n} bars — skip"
         )
         return (
-            f"Post-loss cooldown: last {signal.pattern} trade on {signal.symbol} "
+            f"Post-loss cooldown: last {latest_pattern} trade on {signal.symbol} "
             f"was a loss; only {bars_since} of {n} required bars have printed "
-            f"since that exit — re-entry blocked to avoid chopping the same setup."
+            f"since that exit — re-entry blocked to avoid chopping the same name."
         )
     return None
+
+
+def seed_cooldown_from_trades(
+    tracker: dict[tuple[str, str], tuple[int, bool]],
+    trades: list[Any],
+) -> None:
+    """Replay closed trades into a cooldown map (latest exit per symbol+pattern)."""
+    for trade in trades:
+        symbol = getattr(trade, "symbol", None)
+        pattern = getattr(trade, "pattern", None)
+        exit_bar = getattr(trade, "exit_bar_idx", None)
+        if not symbol or not pattern or exit_bar is None:
+            continue
+        key = (str(symbol), str(pattern))
+        prev = tracker.get(key)
+        bar = int(exit_bar)
+        if prev is None or bar >= prev[0]:
+            tracker[key] = (bar, bool(getattr(trade, "pnl", 0) < 0))

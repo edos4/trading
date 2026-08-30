@@ -38,6 +38,7 @@ from core.engine_defaults import (
     passes_min_confidence,
     passes_min_share_price,
     passes_regime_filter,
+    structure_filters_enabled,
 )
 from core.kronos_gate import kronos_gate_check
 from core.market import apply_lot_rounding, get_market, ohlcv_cache_key
@@ -1455,10 +1456,11 @@ def _core_backtest_symbol(
                 f"confidence={signal.confidence:.2f} {signal.pattern}"
             )
 
-            if not passes_min_confidence(signal, config["min_confidence"]):
+            struct = structure_filters_enabled(config.get("pattern_only", False))
+            if struct and not passes_min_confidence(signal, config["min_confidence"]):
                 continue
 
-            if not passes_min_share_price(
+            if struct and not passes_min_share_price(
                 signal, config.get("min_share_price"),
             ):
                 continue
@@ -1493,12 +1495,12 @@ def _core_backtest_symbol(
                 signal.rvol = rvol
                 signal.obv_slope = slope
 
-            if not passes_regime_filter(
+            if struct and not passes_regime_filter(
                 signal, store, enabled=config["regime_filter"],
             ):
                 continue
 
-            if not passes_cooldown(
+            if struct and not passes_cooldown(
                 signal, i, cooldown_tracker,
                 cooldown_bars=config["cooldown_bars"],
             ):
@@ -1515,7 +1517,7 @@ def _core_backtest_symbol(
             ):
                 continue
 
-            if config.get("long_only") and signal.action == "SELL":
+            if struct and config.get("long_only") and signal.action == "SELL":
                 continue
 
             _apply_sizing(
@@ -1660,6 +1662,7 @@ class Backtester:
         symbols: list[str],
         min_confidence: float = ENGINE.min_confidence,
         regime_filter: bool = ENGINE.regime_filter,
+        pattern_only: bool = ENGINE.pattern_only,
         cooldown_bars: int = ENGINE.cooldown_bars,
         txn_cost_pct: float = ENGINE.txn_cost_pct,
         position_sizing: str = ENGINE.position_sizing,
@@ -1704,6 +1707,7 @@ class Backtester:
 
         self._min_confidence = min_confidence
         self._regime_filter = regime_filter
+        self._pattern_only = bool(pattern_only)
         self._kronos_gate = (
             profile.kronos_gate_default if kronos_gate is None else kronos_gate
         )
@@ -1841,6 +1845,7 @@ class Backtester:
         config = {
             "min_confidence": self._min_confidence,
             "regime_filter": self._regime_filter,
+            "pattern_only": self._pattern_only,
             "cooldown_bars": self._cooldown_bars,
             "txn_cost_pct": self._txn_cost_pct,
             "position_sizing": self._position_sizing,
@@ -1866,7 +1871,8 @@ class Backtester:
             "kronos_rank_top_k": settings.kronos_rank_top_k,
             "kronos_rank_bottom_k": settings.kronos_rank_bottom_k,
             "kronos_rank_long_only": (
-                True if self._long_only else settings.kronos_rank_long_only
+                False if not structure_filters_enabled(self._pattern_only)
+                else (True if self._long_only else settings.kronos_rank_long_only)
             ),
             "kronos_rank_min_move_pct": settings.kronos_rank_min_move_pct,
             "kronos_rank_rebalance_bars": settings.kronos_rank_rebalance_bars,
@@ -1995,6 +2001,7 @@ class Backtester:
             {
                 "min_confidence": self._min_confidence,
                 "regime_filter": self._regime_filter,
+                "pattern_only": self._pattern_only,
                 "cooldown_bars": self._cooldown_bars,
                 "txn_cost_pct": self._txn_cost_pct,
                 "position_sizing": self._position_sizing,
