@@ -1496,12 +1496,15 @@ def _core_backtest_symbol(
             )
 
             struct = structure_filters_enabled(config.get("pattern_only", False))
-            if struct and not passes_min_confidence(signal, config["min_confidence"]):
-                continue
-
-            if struct and not passes_min_share_price(
+            # Min share-price floor is an execution risk control, not a
+            # pattern-quality filter, so it applies even in Pattern-only
+            # (see matching change in scanner.py's _process_signal).
+            if not passes_min_share_price(
                 signal, config.get("min_share_price"),
             ):
+                continue
+
+            if struct and not passes_min_confidence(signal, config["min_confidence"]):
                 continue
 
             if config.get("kronos_gate"):
@@ -1539,7 +1542,10 @@ def _core_backtest_symbol(
             ):
                 continue
 
-            if struct and not passes_cooldown(
+            # Same reasoning as the min share-price floor above: post-loss
+            # cooldown is a risk control, not a pattern-quality opinion, so
+            # it applies even in Pattern-only.
+            if not passes_cooldown(
                 signal, i, cooldown_tracker,
                 cooldown_bars=config["cooldown_bars"],
             ):

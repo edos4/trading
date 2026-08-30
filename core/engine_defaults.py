@@ -55,9 +55,15 @@ class EngineDefaults:
     hard_stop_percentage: float = 0.06
     min_reward_risk_ratio: float = 1.5
     min_hold_bars: int = 2
-    # Close once unrealized P&L from entry exceeds this (0.04 = +4% unrl).
-    # Banks winners before they round-trip into the 6% hard stop. 0 = off.
-    profit_take_pct: float | None = 0.04
+    # Close once unrealized P&L from entry exceeds this (0.08 = +8% unrl).
+    # 2026-08-30 paper review: avg winner +3.80% vs avg loser -7.65% against
+    # a 0.04 target and a 6% hard stop — the old 4% cap was banking winners
+    # at roughly half the distance losers were allowed to run, so a 66.7%
+    # win rate still produced ~breakeven expectancy. Widened so a winning
+    # trade has room comparable to what a losing trade is allowed before it
+    # hits hard_stop_percentage; revisit alongside hard_stop_percentage if
+    # this over/under-shoots once more trades land. 0 = off.
+    profit_take_pct: float | None = 0.08
     # Empty on purpose. 006/007 used to skip SMA200 (shorts of strength /
     # longs of weakness) and then dominated the losing paper book. They are
     # disabled by default; --pattern isolation still gets the regime filter.

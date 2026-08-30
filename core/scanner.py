@@ -728,10 +728,47 @@ class MarketScanner:
             )
             signal.signal_bar_timestamp = candle.timestamp
 
+        # Execution risk gates — enforced regardless of Pattern-only.
+        # Pattern-only exists to isolate raw pattern edge from *signal-quality*
+        # filters (confidence / regime / long-only) below, but the min-price
+        # floor and post-loss cooldown are basic account-risk controls, not
+        # pattern-quality opinions: skipping them let real (paper) money into
+        # sub-$1 names with outsized slippage risk (2026-08-30 review: a
+        # $0.003 stock lost -10.3% against a stop sized for ~6%) and allowed
+        # same-session re-entry into a name that had just stopped out. Both
+        # now apply even when Pattern-only is checked.
+        price_reason = describe_min_share_price_rejection(
+            signal, self._min_share_price, market=self._market,
+        )
+        if price_reason is not None:
+            log.info(
+                f"Signal REJECTED by min share price — {signal.symbol} "
+                f"{signal.pattern} | {price_reason}"
+            )
+            self.stats["signals_rejected"] += 1
+            self._append_signal_log(signal, status="rejected", reason=price_reason)
+            return
+
+        bar_idx = (
+            self._paper.bar_count(signal.symbol, signal.timeframe)
+            if self._paper is not None else 0
+        )
+        cooldown_reason = describe_cooldown_rejection(
+            signal, bar_idx, self._cooldown_tracker,
+        )
+        if cooldown_reason is not None:
+            log.info(
+                f"Signal REJECTED by cooldown — {signal.symbol} "
+                f"{signal.pattern} | {cooldown_reason}"
+            )
+            self.stats["signals_rejected"] += 1
+            self._append_signal_log(signal, status="rejected", reason=cooldown_reason)
+            return
+
         # Step 0 — Same entry gates the backtester applies before Kronos/volume
-        # (min_confidence + SMA200 regime + post-loss cooldown). Without these,
-        # paper/live took trades the "validated" backtest would have skipped.
-        # Pattern-only skips this cluster; Kronos and volume still apply below.
+        # (min_confidence + SMA200 regime). Without these, paper/live took
+        # trades the "validated" backtest would have skipped. Pattern-only
+        # skips this cluster; Kronos and volume still apply below.
         if structure_filters_enabled(self._pattern_only):
             if not passes_min_confidence(signal):
                 reason = describe_confidence_rejection(signal)
@@ -741,18 +778,6 @@ class MarketScanner:
                 )
                 self.stats["signals_rejected"] += 1
                 self._append_signal_log(signal, status="rejected", reason=reason)
-                return
-
-            price_reason = describe_min_share_price_rejection(
-                signal, self._min_share_price, market=self._market,
-            )
-            if price_reason is not None:
-                log.info(
-                    f"Signal REJECTED by min share price — {signal.symbol} "
-                    f"{signal.pattern} | {price_reason}"
-                )
-                self.stats["signals_rejected"] += 1
-                self._append_signal_log(signal, status="rejected", reason=price_reason)
                 return
 
             regime_reason = describe_regime_rejection(
@@ -765,22 +790,6 @@ class MarketScanner:
                 )
                 self.stats["signals_rejected"] += 1
                 self._append_signal_log(signal, status="rejected", reason=regime_reason)
-                return
-
-            bar_idx = (
-                self._paper.bar_count(signal.symbol, signal.timeframe)
-                if self._paper is not None else 0
-            )
-            cooldown_reason = describe_cooldown_rejection(
-                signal, bar_idx, self._cooldown_tracker,
-            )
-            if cooldown_reason is not None:
-                log.info(
-                    f"Signal REJECTED by cooldown — {signal.symbol} "
-                    f"{signal.pattern} | {cooldown_reason}"
-                )
-                self.stats["signals_rejected"] += 1
-                self._append_signal_log(signal, status="rejected", reason=cooldown_reason)
                 return
 
             profile = get_market(self._market)
