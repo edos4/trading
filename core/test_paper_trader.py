@@ -210,7 +210,7 @@ def test_bar_counters_are_isolated_by_timeframe():
     assert acct.bar_count("TEST", "1h") == 0
 
 
-def test_paper_closes_open_long_when_unrl_hits_four_percent():
+def test_paper_closes_open_long_when_unrl_hits_profit_take_pct():
     from data.tv_client import OHLCVCandle
 
     acct = PaperAccount(initial_capital=100_000.0, market="us", slippage_pct=0.0)
@@ -224,8 +224,10 @@ def test_paper_closes_open_long_when_unrl_hits_four_percent():
     acct.positions["AAPL"] = t
     acct._last_price["AAPL"] = 100.0
     acct.cash -= 1_000.0
+    # ENGINE.profit_take_pct is 0.08 — clear it comfortably so this test
+    # doesn't need updating again if the knob is retuned slightly.
     candle = OHLCVCandle(
-        open=103, high=105, low=102, close=104.5, volume=1,
+        open=108, high=110, low=107, close=109.0, volume=1,
         timestamp=datetime(2026, 1, 5, tzinfo=timezone.utc),
     )
     closed = acct.on_bar("AAPL", candle, "1d", True)
@@ -356,7 +358,7 @@ def test_us_paper_keeps_engine_breakeven():
         pos = acct.positions["AAPL"]
         assert pos.breakeven_trigger_pct == 0.03
         assert pos.breakeven_buffer_pct == 0.0015
-        assert pos.profit_take_pct == 0.04
+        assert pos.profit_take_pct == 0.08
     finally:
         settings.min_position_notional = old_min
 
