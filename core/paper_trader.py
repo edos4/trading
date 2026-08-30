@@ -32,7 +32,7 @@ from core.backtester import (
     trade_r_multiple,
     trade_risk_dollars,
 )
-from core.engine_defaults import ENGINE, sizing_kwargs
+from core.engine_defaults import ENGINE, sizing_kwargs, structure_filters_enabled
 from core.market import (
     apply_lot_rounding,
     format_money,
@@ -194,6 +194,8 @@ class PaperAccount:
         # Historical paper stream replays closed daily bars after hours.
         # Wall-clock PSE AM/PM must not block those assumed fills.
         self.assume_session_open = False
+        # Session flag: not persisted. Scanner sets this from Pattern-only.
+        self.pattern_only = False
         # The scanner runs in a background thread with its own asyncio loop
         # (see ui/paper_dashboard.py) while the UI polls this same account
         # from the Tk main thread every second. Without a lock, the UI's
@@ -354,7 +356,11 @@ class PaperAccount:
                     f"at MAX_OPEN_PER_PATTERN ({settings.max_open_per_pattern})."
                 )
         profile = get_market(self.market)
-        if profile.long_only and signal.action == "SELL":
+        if (
+            structure_filters_enabled(self.pattern_only)
+            and profile.long_only
+            and signal.action == "SELL"
+        ):
             return False, (
                 f"Long-only {profile.label}: SELL/short signals are disabled "
                 f"(PSE retail shorts need SBL)."

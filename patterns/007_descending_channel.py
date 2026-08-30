@@ -35,7 +35,8 @@ Trade management (C16 – C20):
   C17 Measured-move target = entry + channel width (channel height projected
       above the break).
   C18 7% gain cap from entry — exit at whichever of C17 / C18 is closer.
-  C19 Time stop: exit at the close of bar 15 if nothing else triggered.
+  C19 Time stop: exit at the close of bar 8 only if the trade is still
+      underwater. Winners keep running to stop / target / trail.
   C20 Trailing stop activates after 4% gain; trails 2.5% below the best
       (highest) close since entry.
 
@@ -44,11 +45,12 @@ v9 filter:
   within [entry bar, bar 15]. See data/edgar_client.py.
 
 Notes on backtester wiring:
-  - The 15-bar time stop (C19) is delivered via the existing
-    `exit_bars_after_neckline_break` mechanism: `neckline` is set to the
-    upper-channel-line value AT the entry bar (which the entry close is
-    above by construction), so the entry bar itself is recorded as the
-    "neckline break" bar and the time exit fires 15 bars later.
+  - The 8-bar underwater time stop (C19) is delivered via
+    `exit_bars_after_neckline_break` + `time_exit_only_unfavorable`:
+    `neckline` is set to the upper-channel-line value AT the entry bar
+    (which the entry close is above by construction), so the entry bar
+    itself is recorded as the "neckline break" bar. Earnings blackout
+    still uses the 15-bar `TIME_STOP_BARS` window.
   - The trailing stop's 4% activation threshold (C20) is now enforced by
     the backtester via `trailing_activation_pct`. The trail only activates
     after the entry-to-extreme P&L reaches 4%.
@@ -132,7 +134,8 @@ class DescendingChannelPattern(BasePattern):
     PEAK_HEIGHT_MAX         = 0.25        # C12
     STOP_BELOW_SL2          = 0.99        # C16
     GAIN_CAP_PCT            = 0.20        # C18 (increased from 7% to 20% to let winners run)
-    TIME_STOP_BARS          = 15          # C19
+    TIME_STOP_BARS          = 15          # earnings blackout window (v9)
+    UNFAVORABLE_TIME_EXIT_BARS = 8        # C19: cut losers; let winners run
     TRAIL_ACTIVATION_PCT    = 0.04        # C20 (activation threshold, enforced via trailing_activation_pct)
     TRAILING_STOP_PCT       = 0.025       # C20
     SWING_LOOKBACK          = 2
@@ -233,7 +236,8 @@ class DescendingChannelPattern(BasePattern):
                     trailing_activation_pct=self.TRAIL_ACTIVATION_PCT,
                     neckline=round(setup.entry_upper_line, 4),
                     neckline_break_direction="above",
-                    exit_bars_after_neckline_break=self.TIME_STOP_BARS,
+                    exit_bars_after_neckline_break=self.UNFAVORABLE_TIME_EXIT_BARS,
+                    time_exit_only_unfavorable=True,
                     notes=(
                         f"Descending channel | SL1@{sl1_idx} SL2@{sl2_idx} "
                         f"peak@{setup.peak_idx} | "

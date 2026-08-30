@@ -51,6 +51,8 @@ from core.engine_defaults import (
     describe_regime_rejection,
     passes_min_confidence,
     risk_gate_kwargs,
+    seed_cooldown_from_trades,
+    structure_filters_enabled,
 )
 from analysis.price_volume import volume_confirm_gate
 
@@ -91,6 +93,7 @@ class MarketScanner:
         kronos_rank: bool | None = None,
         kronos_batch: bool | None = None,
         market: str | None = None,
+        pattern_only: bool = False,
     ):
         self._symbols = symbols or settings.symbols
         self._disabled_patterns = set(disabled_patterns or [])
@@ -116,6 +119,7 @@ class MarketScanner:
         self._kronos_batch = (
             settings.kronos_batch_enabled if kronos_batch is None else kronos_batch
         )
+        self._pattern_only = bool(pattern_only)
         self._tv = data_feed or TVClient(
             profile.tv_screener,
             profile.tv_exchange,
@@ -131,6 +135,8 @@ class MarketScanner:
         # self._orders   = OrderManager(self._client)
         # self._risk     = RiskGuard(self._client)
         self._paper = paper_account
+        if self._paper is not None:
+            self._paper.pattern_only = self._pattern_only
         self._patterns: list[BasePattern] = []
         self._pattern_files: dict[str, str] = {}
         self._running = False
@@ -162,8 +168,11 @@ class MarketScanner:
         self._pending_entries: dict[tuple[str, str], TradeSignal] = {}
         # Same (symbol, pattern) → (exit_bar_count, was_loss) cooldown map the
         # backtester uses — without this, paper re-entered losers immediately
-        # while backtests waited cooldown_bars.
+        # while backtests waited cooldown_bars. Seed from the persisted ledger
+        # so a scanner restart does not forget a just-stopped name.
         self._cooldown_tracker: dict[tuple[str, str], tuple[int, bool]] = {}
+        if self._paper is not None:
+            seed_cooldown_from_trades(self._cooldown_tracker, self._paper.closed)
         # Kronos rank sleeve: only re-forecast when the daily asof advances
         # (hourly scans otherwise waste GPU on the same bar).
         self._kronos_rank_last_asof: object | None = None
@@ -683,7 +692,11 @@ class MarketScanner:
             run_sleeve,
             self._store,
             list(self._symbols),
-            long_only=True if get_market(self._market).long_only else None,
+            long_only=(
+                False
+                if not structure_filters_enabled(self._pattern_only)
+                else (True if get_market(self._market).long_only else None)
+            ),
             use_batch=self._kronos_batch,
         )
         self._kronos_rank_last_asof = asof
@@ -718,69 +731,71 @@ class MarketScanner:
         # Step 0 — Same entry gates the backtester applies before Kronos/volume
         # (min_confidence + SMA200 regime + post-loss cooldown). Without these,
         # paper/live took trades the "validated" backtest would have skipped.
-        if not passes_min_confidence(signal):
-            reason = describe_confidence_rejection(signal)
-            log.info(
-                f"Signal REJECTED by confidence — {signal.symbol} "
-                f"{signal.pattern} | {reason}"
-            )
-            self.stats["signals_rejected"] += 1
-            self._append_signal_log(signal, status="rejected", reason=reason)
-            return
+        # Pattern-only skips this cluster; Kronos and volume still apply below.
+        if structure_filters_enabled(self._pattern_only):
+            if not passes_min_confidence(signal):
+                reason = describe_confidence_rejection(signal)
+                log.info(
+                    f"Signal REJECTED by confidence — {signal.symbol} "
+                    f"{signal.pattern} | {reason}"
+                )
+                self.stats["signals_rejected"] += 1
+                self._append_signal_log(signal, status="rejected", reason=reason)
+                return
 
-        price_reason = describe_min_share_price_rejection(
-            signal, self._min_share_price, market=self._market,
-        )
-        if price_reason is not None:
-            log.info(
-                f"Signal REJECTED by min share price — {signal.symbol} "
-                f"{signal.pattern} | {price_reason}"
+            price_reason = describe_min_share_price_rejection(
+                signal, self._min_share_price, market=self._market,
             )
-            self.stats["signals_rejected"] += 1
-            self._append_signal_log(signal, status="rejected", reason=price_reason)
-            return
+            if price_reason is not None:
+                log.info(
+                    f"Signal REJECTED by min share price — {signal.symbol} "
+                    f"{signal.pattern} | {price_reason}"
+                )
+                self.stats["signals_rejected"] += 1
+                self._append_signal_log(signal, status="rejected", reason=price_reason)
+                return
 
-        regime_reason = describe_regime_rejection(
-            signal, self._store, market=self._market,
-        )
-        if regime_reason is not None:
-            log.info(
-                f"Signal REJECTED by regime filter — {signal.symbol} "
-                f"{signal.pattern} | {regime_reason}"
+            regime_reason = describe_regime_rejection(
+                signal, self._store, market=self._market,
             )
-            self.stats["signals_rejected"] += 1
-            self._append_signal_log(signal, status="rejected", reason=regime_reason)
-            return
+            if regime_reason is not None:
+                log.info(
+                    f"Signal REJECTED by regime filter — {signal.symbol} "
+                    f"{signal.pattern} | {regime_reason}"
+                )
+                self.stats["signals_rejected"] += 1
+                self._append_signal_log(signal, status="rejected", reason=regime_reason)
+                return
 
-        bar_idx = (
-            self._paper.bar_count(signal.symbol, signal.timeframe)
-            if self._paper is not None else 0
-        )
-        cooldown_reason = describe_cooldown_rejection(
-            signal, bar_idx, self._cooldown_tracker,
-        )
-        if cooldown_reason is not None:
-            log.info(
-                f"Signal REJECTED by cooldown — {signal.symbol} "
-                f"{signal.pattern} | {cooldown_reason}"
+            bar_idx = (
+                self._paper.bar_count(signal.symbol, signal.timeframe)
+                if self._paper is not None else 0
             )
-            self.stats["signals_rejected"] += 1
-            self._append_signal_log(signal, status="rejected", reason=cooldown_reason)
-            return
+            cooldown_reason = describe_cooldown_rejection(
+                signal, bar_idx, self._cooldown_tracker,
+            )
+            if cooldown_reason is not None:
+                log.info(
+                    f"Signal REJECTED by cooldown — {signal.symbol} "
+                    f"{signal.pattern} | {cooldown_reason}"
+                )
+                self.stats["signals_rejected"] += 1
+                self._append_signal_log(signal, status="rejected", reason=cooldown_reason)
+                return
 
-        profile = get_market(self._market)
-        if profile.long_only and signal.action == "SELL":
-            reason = (
-                f"Long-only {profile.label}: pattern SELL/short is disabled "
-                f"(PSE retail shorts need SBL)."
-            )
-            log.info(
-                f"Signal REJECTED by long-only — {signal.symbol} "
-                f"{signal.pattern} | {reason}"
-            )
-            self.stats["signals_rejected"] += 1
-            self._append_signal_log(signal, status="rejected", reason=reason)
-            return
+            profile = get_market(self._market)
+            if profile.long_only and signal.action == "SELL":
+                reason = (
+                    f"Long-only {profile.label}: pattern SELL/short is disabled "
+                    f"(PSE retail shorts need SBL)."
+                )
+                log.info(
+                    f"Signal REJECTED by long-only — {signal.symbol} "
+                    f"{signal.pattern} | {reason}"
+                )
+                self.stats["signals_rejected"] += 1
+                self._append_signal_log(signal, status="rejected", reason=reason)
+                return
 
         risk_reason = describe_risk_gate_rejection(
             signal, self._store, signal.symbol, signal.timeframe,
@@ -918,17 +933,28 @@ class MarketScanner:
             # identity into the position so event-based time stops (notably
             # neckline/channel exits) start from the breakout bar.
             self._pending_entries[(signal.symbol, signal.timeframe)] = signal
+            extras = (
+                f"{', Kronos' if self._kronos_gate else ''}"
+                f"{', volume' if self._volume_gate else ''}"
+            )
+            if self._pattern_only:
+                accept_reason = (
+                    f"Pattern-only: structure filters skipped "
+                    f"(confidence {signal.confidence:.2f}{extras}). "
+                    f"Queued to fill on the next new {signal.timeframe} bar "
+                    f"close — same one-bar deferral as the backtester."
+                )
+            else:
+                accept_reason = (
+                    f"Cleared entry gates (confidence {signal.confidence:.2f}, "
+                    f"SMA200 regime, cooldown{extras}). "
+                    f"Queued to fill on the next new {signal.timeframe} bar "
+                    f"close — same one-bar deferral as the backtester."
+                )
             self._append_signal_log(
                 signal,
                 status="accepted",
-                reason=(
-                    f"Cleared entry gates (confidence {signal.confidence:.2f}, "
-                    f"SMA200 regime, cooldown"
-                    f"{', Kronos' if self._kronos_gate else ''}"
-                    f"{', volume' if self._volume_gate else ''}"
-                    f"). Queued to fill on the next new {signal.timeframe} bar "
-                    f"close — same one-bar deferral as the backtester."
-                ),
+                reason=accept_reason,
             )
         else:
             log.info(

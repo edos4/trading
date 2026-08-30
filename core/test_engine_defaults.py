@@ -12,7 +12,9 @@ from core.engine_defaults import (
     passes_min_share_price,
     passes_regime_filter,
     risk_gate_kwargs,
+    seed_cooldown_from_trades,
     sizing_kwargs,
+    structure_filters_enabled,
 )
 from patterns.base_pattern import TradeSignal
 
@@ -45,10 +47,19 @@ def demo():
     assert ENGINE.regime_hysteresis_pct == 0.015
     assert ENGINE.min_confidence == 0.65
     assert ENGINE.regime_filter is True
+    assert ENGINE.pattern_only is False
     assert ENGINE.cooldown_bars == 10
+    from config import DISABLED_PATTERNS
+    assert "pattern_002_double_top" in DISABLED_PATTERNS
+    assert "pattern_008_head_and_shoulders" in DISABLED_PATTERNS
+    assert "pattern_007_descending_channel" not in DISABLED_PATTERNS
 
     assert passes_min_confidence(_sig(confidence=0.65))
     assert not passes_min_confidence(_sig(confidence=0.64))
+
+    assert structure_filters_enabled(False)
+    assert structure_filters_enabled(None)
+    assert not structure_filters_enabled(True)
 
     assert passes_min_share_price(_sig(price=5.0), min_share_price=5.0)
     assert not passes_min_share_price(_sig(price=4.99), min_share_price=5.0)
@@ -110,7 +121,35 @@ def demo():
     assert not passes_cooldown(_sig(), bar_idx=5, cooldown_tracker=tracker)
     cool = describe_cooldown_rejection(_sig(), 5, tracker)
     assert cool is not None and "Post-loss cooldown" in cool
+    assert "chopping the same name" in cool
     assert passes_cooldown(_sig(), bar_idx=10, cooldown_tracker=tracker)
+
+    # Loss on 007 still blocks a later 003 on the same symbol.
+    other = {("TEST", "pattern_007_descending_channel"): (0, True)}
+    assert not passes_cooldown(_sig(), bar_idx=5, cooldown_tracker=other)
+    assert passes_cooldown(
+        _sig(symbol="OTHER"), bar_idx=5, cooldown_tracker=other,
+    )
+    seeded: dict[tuple[str, str], tuple[int, bool]] = {}
+    seed_cooldown_from_trades(
+        seeded,
+        [
+            _sig(),  # not a trade — missing exit_bar_idx, ignored
+            type("T", (), {
+                "symbol": "FOXO", "pattern": "pattern_007_descending_channel",
+                "exit_bar_idx": 3, "pnl": -50.0,
+            })(),
+            type("T", (), {
+                "symbol": "FOXO", "pattern": "pattern_007_descending_channel",
+                "exit_bar_idx": 12, "pnl": 10.0,
+            })(),
+        ],
+    )
+    assert seeded[("FOXO", "pattern_007_descending_channel")] == (12, False)
+    assert passes_cooldown(
+        _sig(symbol="FOXO", pattern="pattern_003_double_bottom"),
+        bar_idx=15, cooldown_tracker=seeded,
+    )
 
     rg = risk_gate_kwargs()
     assert rg["hard_stop_percentage"] == 0.06
@@ -133,6 +172,7 @@ def demo():
     assert bt["pattern_filter"] == "double_bottom"
     assert bt["market"] == "us"
     assert bt["long_only"] is False
+    assert bt["pattern_only"] is False
 
     print("engine_defaults: all checks passed")
 

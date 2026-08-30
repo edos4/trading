@@ -24,7 +24,7 @@ Locked rules (2026-06-29), 17 conditions:
     C14  Entry = min(day7, consecBreakIdx): 2nd consecutive close below the
          neckline OR day 7 after RS, whichever is earlier.
     C15  Measured target = neck@entry − (HEAD − neck@HEAD).
-    C16  Exit timer: hard close 10 bars after entry.
+    C16  Exit timer: close 8 bars after entry only if still underwater.
     C17  Trailing stop: 3% on CLOSE above running low (close-based, no intraday).
 
 The neckline is the straight line through the left neckline low (LN, lowest low
@@ -118,7 +118,7 @@ class HeadAndShouldersPattern(BasePattern):
     SPAN_MAX                = 120         # C11
     RS_SIDE_RATIO_MAX       = 2.5         # C11: RS side ≤ 2.5× LS side
     ENTRY_BARS_AFTER_RS     = 7           # C14: day 7
-    EXIT_BARS_AFTER_ENTRY   = 10          # C16
+    EXIT_BARS_AFTER_ENTRY   = 8           # C16: underwater-only time stop
     TRAILING_STOP_PCT       = 0.03        # C17: 3% on close above running low (acts as stop loss)
     SHARES                  = 25
     MIN_BARS                = 200
@@ -190,6 +190,7 @@ class HeadAndShouldersPattern(BasePattern):
                 neckline=setup.neckline_at_entry,
                 neckline_break_direction="below",
                 exit_bars_after_neckline_break=self.EXIT_BARS_AFTER_ENTRY,
+                time_exit_only_unfavorable=True,
                 notes=(
                     f"Head & shoulders | LS@{setup.ls_idx} HD@{setup.hd_idx} "
                     f"RS@{setup.rs_idx} | span={setup.span_bars}bars | "
