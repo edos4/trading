@@ -285,6 +285,78 @@ class PaperAccount:
                 "gross_pct": gross_pct,
             }
 
+    def snapshot_metrics(self) -> dict:
+        """Atomic, self-consistent read of cash/positions/prices.
+
+        Callers previously assembled a dashboard snapshot by calling
+        `equity()`, `positions_snapshot()`, `last_price()` (per symbol),
+        `exposure()`, `realized_pnl_dollars()`, and `unrealized_pnl_dollars()`
+        as separate calls. Each of those independently acquires and releases
+        `self._lock`, so a concurrent scanner thread (which mutates cash,
+        positions, and `_last_price` inside `open_position`/`on_bar`, also
+        under this same lock) can run *between* those calls. During a live
+        stream that reprices positions continuously, this let the per-position
+        MTM figures used to build the "Value"/"MTM" table rows be computed
+        against a different price snapshot than the account-level
+        `unrealized_pnl_dollars()`/`equity()` totals shown in the header,
+        so the header total silently drifted from the sum of the visible
+        rows. Taking the lock exactly once here and deriving every figure
+        from that single frozen read keeps them consistent with each other.
+        """
+        with self._lock:
+            cash = self.cash
+            initial_capital = self.initial_capital
+            positions = dict(self.positions)
+            last_price = dict(self._last_price)
+            closed = list(self.closed)
+
+        long_value = 0.0
+        short_value = 0.0
+        unrealized = 0.0
+        rows: list[tuple[str, BacktestTrade, float, float]] = []
+        for sym, p in positions.items():
+            current = last_price.get(sym, p.entry_price)
+            if p.action == "BUY":
+                mtm = (current - p.entry_price) * p.qty
+                long_value += current * p.qty
+            else:
+                mtm = (p.entry_price - current) * p.qty
+                short_value += current * p.qty
+            unrealized += mtm
+            rows.append((sym, p, current, mtm))
+
+        open_value = long_value - short_value
+        equity = cash + open_value
+        realized = sum(t.pnl * t.qty for t in closed)
+        total_pnl = equity - initial_capital
+
+        if equity > 0:
+            long_pct = long_value / equity * 100
+            short_pct = short_value / equity * 100
+            exposure = {
+                "long_pct": long_pct,
+                "short_pct": short_pct,
+                "net_pct": long_pct - short_pct,
+                "gross_pct": (long_value + short_value) / equity * 100,
+            }
+        else:
+            exposure = {
+                "long_pct": 0.0, "short_pct": 0.0,
+                "net_pct": 0.0, "gross_pct": 0.0,
+            }
+
+        return {
+            "cash": cash,
+            "initial_capital": initial_capital,
+            "equity": equity,
+            "exposure": exposure,
+            "realized_pnl_dollars": realized,
+            "unrealized_pnl_dollars": unrealized,
+            "total_pnl_dollars": total_pnl,
+            "positions": rows,  # [(symbol, BacktestTrade, current_price, mtm), ...]
+            "closed": closed,
+        }
+
     def positions_snapshot(self) -> list[tuple[str, BacktestTrade]]:
         """Thread-safe copy for callers (the UI) that iterate positions from
         a different thread than the one mutating them."""
