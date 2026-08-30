@@ -64,6 +64,15 @@ function syncBookBatchKronos(id) {
   wrap.hidden = !((gate && gate.checked) || (rank && rank.checked));
 }
 
+function syncBacktestPatternOnly() {
+  const po = document.getElementById("p-pattern_only");
+  const on = !!(po && po.checked);
+  for (const key of ["regime_filter", "min_confidence", "cooldown_bars"]) {
+    const wrap = document.querySelector(`[data-key="${key}"]`);
+    if (wrap) wrap.classList.toggle("dimmed", on);
+  }
+}
+
 function syncBacktestBatchKronos() {
   const gate = document.getElementById("p-kronos_gate");
   const rank = document.getElementById("p-kronos_rank");
@@ -325,6 +334,9 @@ function initBacktest() {
   if (gateEl) gateEl.addEventListener("change", syncBacktestBatchKronos);
   if (rankEl) rankEl.addEventListener("change", syncBacktestBatchKronos);
   syncBacktestBatchKronos();
+  const poEl = document.getElementById("p-pattern_only");
+  if (poEl) poEl.addEventListener("change", syncBacktestPatternOnly);
+  syncBacktestPatternOnly();
   poll().catch(console.error);
 }
 
@@ -473,7 +485,7 @@ function initPaper() {
     return raw.replace(/_/g, " ");
   }
   const REASON_LABELS = {
-    stop_loss: "Stop", take_profit: "Target", trailing_stop: "Trail",
+    stop_loss: "Stop", take_profit: "Target", profit_take: "Lock", trailing_stop: "Trail",
     time_exit: "Time", breakeven_stop: "BE",
   };
   function fmtReason(t) {
@@ -488,7 +500,7 @@ function initPaper() {
   }
   function reasonClass(reason) {
     if (reason === "stop_loss") return "reason-loss";
-    if (reason === "take_profit" || reason === "trailing_stop") return "reason-gain";
+    if (reason === "take_profit" || reason === "trailing_stop" || reason === "profit_take") return "reason-gain";
     if (reason === "breakeven_stop") return "reason-flat";
     return "reason-muted";
   }
@@ -521,6 +533,7 @@ function initPaper() {
         || !!(document.getElementById(`${id}-kronos-rank`) || {}).checked
       ) && !!(document.getElementById(`${id}-kronos-batch`) || {}).checked,
       volume_gate: !!(document.getElementById(`${id}-volume`) || {}).checked,
+      pattern_only: !!(document.getElementById(`${id}-pattern-only`) || {}).checked,
       stream_start: (document.getElementById(`${id}-stream-start`) || {}).value || null,
     };
   }

@@ -114,6 +114,7 @@ async def run_paper(
     reset: bool = False,
     *,
     volume_gate: bool | None = None,
+    pattern_only: bool = False,
     market: str | None = None,
 ) -> None:
     os.makedirs("logs", exist_ok=True)
@@ -144,7 +145,8 @@ async def run_paper(
     log.info(f"  Kronos gate:{'ON' if kronos_gate else 'OFF'}")
     log.info(f"  Kronos rank:{'ON' if kronos_rank else 'OFF'}")
     log.info(f"  Volume gate:{'ON' if use_volume else 'OFF'}")
-    log.info(f"  Long-only:  {'YES' if profile.long_only else 'no'}")
+    log.info(f"  Pattern-only:{'ON' if pattern_only else 'OFF'}")
+    log.info(f"  Long-only:  {'YES' if profile.long_only and not pattern_only else 'no'}")
     log.info("=" * 60)
 
     log.info(f"Fetching top {n_symbols} symbols from TradingView ({profile.tv_screener})...")
@@ -164,6 +166,7 @@ async def run_paper(
         kronos_gate=kronos_gate,
         kronos_rank=kronos_rank,
         volume_gate=use_volume,
+        pattern_only=pattern_only,
         market=profile.id,
     )
     try:
@@ -214,6 +217,7 @@ async def run_backtest(
     *,
     volume_gate: bool | None = None,
     volume_gate_compare: bool = False,
+    pattern_only: bool = False,
     market: str | None = None,
 ) -> None:
     os.makedirs("logs", exist_ok=True)
@@ -236,6 +240,7 @@ async def run_backtest(
     log.info(f"  Txn cost:   {profile.txn_cost_pct:.4f} one-way")
     log.info(f"  Volume gate:{'ON' if use_volume else 'OFF'}"
              f"{' (A/B compare)' if volume_gate_compare else ''}")
+    log.info(f"  Pattern-only:{'ON' if pattern_only else 'OFF'}")
     log.info("=" * 60)
 
     log.info(f"Fetching {n_symbols} symbols from TradingView (cached, {profile.tv_screener})...")
@@ -255,6 +260,7 @@ async def run_backtest(
         disabled_patterns=DISABLED_PATTERNS,
         kronos_gate=profile.kronos_gate_default,
         kronos_rank=profile.kronos_rank_default,
+        pattern_only=pattern_only,
     )
 
     if volume_gate_compare:
@@ -384,6 +390,13 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable the RVOL+OBV volume confirm gate for this run "
         "(overrides VOLUME_GATE_ENABLED). Use with --backtest / --paper.",
+    )
+    parser.add_argument(
+        "--pattern-only",
+        action="store_true",
+        help="Skip min share-price, SMA200 regime, min confidence, cooldown, "
+        "and long-only. Kronos and volume gates still follow their flags. "
+        "Use with --backtest / --paper.",
     )
     parser.add_argument(
         "--volume-gate-compare",
@@ -685,6 +698,7 @@ async def main(args: argparse.Namespace | None = None) -> None:
             n_symbols=args.paper,
             reset=args.paper_reset,
             volume_gate=True if args.volume_gate else None,
+            pattern_only=args.pattern_only,
             market=args.market,
         )
     elif args.backtest is not None:
@@ -693,6 +707,7 @@ async def main(args: argparse.Namespace | None = None) -> None:
             pattern=args.pattern,
             volume_gate=True if args.volume_gate else None,
             volume_gate_compare=args.volume_gate_compare,
+            pattern_only=args.pattern_only,
             market=args.market,
         )
     else:

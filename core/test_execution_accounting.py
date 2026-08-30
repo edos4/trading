@@ -55,6 +55,30 @@ def test_short_target_gap_fills_at_open():
     assert price == 90
 
 
+def test_long_profit_take_closes_at_four_percent():
+    trade = _trade("BUY", 100, 90, 120)
+    trade.profit_take_pct = 0.04
+    price, reason = _check_exit(_candle(103, 105, 102, 104.5), trade, 2)
+    assert reason == "profit_take"
+    assert price == 104
+
+
+def test_short_profit_take_closes_at_four_percent():
+    trade = _trade("SELL", 100, 110, 80)
+    trade.profit_take_pct = 0.04
+    price, reason = _check_exit(_candle(97, 98, 95, 95.5), trade, 2)
+    assert reason == "profit_take"
+    assert price == 96
+
+
+def test_profit_take_does_not_fire_under_four_percent():
+    trade = _trade("BUY", 100, 90, 120)
+    trade.profit_take_pct = 0.04
+    price, reason = _check_exit(_candle(102, 103.9, 101, 103), trade, 2)
+    assert reason == ""
+    assert price is None
+
+
 def test_short_ledger_uses_equity_not_short_sale_proceeds():
     trade = _trade("SELL", 100, 110, 90, qty=100)
     accepted, rejected = _apply_capital_ledger(

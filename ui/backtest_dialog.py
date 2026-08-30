@@ -78,8 +78,16 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
     (
         "regime_filter", "Regime filter (SMA200)",
         "Only buy above 200-day SMA, only sell below it (1.5% hysteresis band). "
-        "Filters counter-trend trades; near-misses within the band still pass.",
+        "Filters counter-trend trades; near-misses within the band still pass. "
+        "Ignored when Pattern-only is checked.",
         "check", ENGINE.regime_filter, None,
+    ),
+    (
+        "pattern_only", "Pattern-only",
+        "Trade pattern hits only: skip min share-price, SMA200 regime, min "
+        "confidence, post-loss cooldown, and long-only. Kronos 3d gate and "
+        "volume gate still follow their own checkboxes.",
+        "check", ENGINE.pattern_only, None,
     ),
     (
         "kronos_gate", "Kronos 3d gate",
@@ -165,6 +173,13 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
         "spin", (ENGINE.min_hold_bars, 0, 50, 1), None,
     ),
     (
+        "profit_take_pct", "Profit take (%)",
+        "Close an open position once unrealized P&L from entry reaches this "
+        "(0.04 = +4% unrl). Banks winners instead of letting them round-trip. "
+        "0 = disabled. Pattern targets closer than this still fire first.",
+        "spin", (ENGINE.profit_take_pct or 0.0, 0.0, 0.5, 0.005), None,
+    ),
+    (
         "breakeven_trigger_pct", "Breakeven trigger (%)",
         "Once a trade is ahead by this much, its floor is raised to ~entry. "
         "Aligns with trailing activation so any trade that arms trailing also arms breakeven. "
@@ -238,6 +253,7 @@ class BacktestDialog:
         self._top.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._vars: dict[str, tk.Variable] = {}
+        self._structure_widgets: dict[str, tk.Widget] = {}
         self._start_time: float | None = None
         self._timer_running = False
         self._completed = 0
@@ -284,6 +300,11 @@ class BacktestDialog:
             if key in self._vars:
                 self._vars[key].trace_add("write", lambda *_: self._sync_batch_kronos())
         self._sync_batch_kronos()
+        if "pattern_only" in self._vars:
+            self._vars["pattern_only"].trace_add(
+                "write", lambda *_: self._sync_pattern_only(),
+            )
+        self._sync_pattern_only()
 
     def _sync_batch_kronos(self) -> None:
         gate = bool(self._vars.get("kronos_gate") and self._vars["kronos_gate"].get())
@@ -297,6 +318,12 @@ class BacktestDialog:
         else:
             var.set(False)
             widget.configure(state=tk.DISABLED)
+
+    def _sync_pattern_only(self) -> None:
+        on = bool(self._vars.get("pattern_only") and self._vars["pattern_only"].get())
+        state = tk.DISABLED if on else tk.NORMAL
+        for widget in self._structure_widgets.values():
+            widget.configure(state=state)
 
     def _apply_market_defaults(self) -> None:
         profile = get_market(self._vars["market"].get())
@@ -325,6 +352,8 @@ class BacktestDialog:
                 format=f"%.{decimals}f",
             )
             sp.grid(row=grid_row, column=col + 1, sticky=tk.W, padx=(0, 8))
+            if key in ("min_confidence", "cooldown_bars"):
+                self._structure_widgets[key] = sp
         elif ptype == "combo":
             var = tk.StringVar(value=default)
             ttk.Combobox(
@@ -337,6 +366,8 @@ class BacktestDialog:
             cb.grid(row=grid_row, column=col + 1, sticky=tk.W, padx=(0, 8))
             if key == "kronos_batch":
                 self._batch_kronos_widget = cb
+            if key == "regime_filter":
+                self._structure_widgets[key] = cb
         else:
             var = tk.StringVar(value=str(default))
             width = 28 if key == "extra_symbols" else 18
@@ -438,6 +469,7 @@ class BacktestDialog:
         for opt_key in (
             "breakeven_trigger_pct", "min_atr_stop_multiple",
             "min_reward_risk_ratio", "hard_stop_percentage", "atr_stop_floor_multiple",
+            "profit_take_pct",
         ):
             if opt_key in p and p[opt_key] is not None and p[opt_key] <= 0:
                 p[opt_key] = None

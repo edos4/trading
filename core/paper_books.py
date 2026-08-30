@@ -400,6 +400,7 @@ class PaperBook:
         kronos_rank: bool,
         kronos_batch: bool = False,
         volume_gate: bool,
+        pattern_only: bool = False,
         stream_start: Optional[str] = None,
     ) -> str | None:
         with self.lock:
@@ -413,7 +414,7 @@ class PaperBook:
             target=self._run_thread,
             args=(
                 n_symbols, extra_symbols, use_stream, kronos_gate, kronos_rank,
-                kronos_batch, volume_gate, stream_start,
+                kronos_batch, volume_gate, pattern_only, stream_start,
             ),
             name=f"paper-{self.market}",
             daemon=True,
@@ -514,6 +515,7 @@ class PaperBook:
         kronos_rank: bool,
         kronos_batch: bool,
         volume_gate: bool,
+        pattern_only: bool,
         stream_start: Optional[str],
     ) -> None:
         data_feed = None
@@ -580,6 +582,7 @@ class PaperBook:
                 kronos_rank=kronos_rank,
                 kronos_batch=kronos_batch,
                 volume_gate=volume_gate,
+                pattern_only=pattern_only,
                 market=profile.id,
             )
             self.scanner = scanner
@@ -600,6 +603,7 @@ class PaperBook:
                 f", Kronos rank={'ON' if kronos_rank else 'OFF'}"
                 f", Kronos batch={'ON' if kronos_batch else 'OFF'}"
                 f", Volume gate={'ON' if volume_gate else 'OFF'}"
+                f", Pattern-only={'ON' if pattern_only else 'OFF'}"
                 f", session={session_label(profile.id)}"
             )
 
@@ -691,6 +695,7 @@ class PaperBookManager:
         kronos_rank: bool,
         kronos_batch: bool = False,
         volume_gate: bool,
+        pattern_only: bool = False,
         stream_start: Optional[str] = None,
     ) -> str | None:
         book = self._book(market)
@@ -709,6 +714,7 @@ class PaperBookManager:
             kronos_rank=kronos_rank,
             kronos_batch=kronos_batch,
             volume_gate=volume_gate,
+            pattern_only=pattern_only,
             stream_start=stream_start,
         )
 
@@ -728,6 +734,7 @@ class PaperBookManager:
                 kronos_rank=bool(payload.get("kronos_rank")),
                 kronos_batch=bool(payload.get("kronos_batch")),
                 volume_gate=bool(payload.get("volume_gate")),
+                pattern_only=bool(payload.get("pattern_only")),
                 stream_start=payload.get("stream_start"),
             )
             if err:

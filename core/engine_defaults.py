@@ -55,6 +55,9 @@ class EngineDefaults:
     hard_stop_percentage: float = 0.06
     min_reward_risk_ratio: float = 1.5
     min_hold_bars: int = 2
+    # Close once unrealized P&L from entry exceeds this (0.04 = +4% unrl).
+    # Banks winners before they round-trip into the 6% hard stop. 0 = off.
+    profit_take_pct: float | None = 0.04
     # Empty on purpose. 006/007 used to skip SMA200 (shorts of strength /
     # longs of weakness) and then dominated the losing paper book. They are
     # disabled by default; --pattern isolation still gets the regime filter.

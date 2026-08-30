@@ -108,6 +108,9 @@ class BacktestTrade:
     # trailing values are untouched.
     breakeven_trigger_pct: float | None = None
     breakeven_buffer_pct: float = 0.0015
+    # Engine-level take: close when unrl% from entry reaches this (0.04 = 4%).
+    # Independent of the pattern's measured-move take_profit. None/0 = off.
+    profit_take_pct: float | None = None
 
     _trailing_activated: bool = False
     _best_pnl_pct: float | None = None
@@ -793,6 +796,42 @@ def _time_exit_ready(position: BacktestTrade, candle, bar_idx: int) -> bool:
     return True
 
 
+def _profit_take_level(position: BacktestTrade) -> float | None:
+    pct = position.profit_take_pct
+    if pct is None or pct <= 0 or position.entry_price <= 0:
+        return None
+    if position.action == "SELL":
+        return position.entry_price * (1.0 - pct)
+    return position.entry_price * (1.0 + pct)
+
+
+def _first_favorable_fill(
+    candle: OHLCVCandle, position: BacktestTrade, is_short: bool,
+) -> tuple[float | None, str]:
+    """Pattern target and engine profit-take. First level hit wins."""
+    targets: list[tuple[float, str]] = []
+    if position.take_profit is not None:
+        targets.append((position.take_profit, "take_profit"))
+    lock = _profit_take_level(position)
+    if lock is not None:
+        targets.append((lock, "profit_take"))
+    fills: list[tuple[float, str, float]] = []
+    for level, reason in targets:
+        fill = _gap_aware_trigger_fill(
+            candle, level, is_short=is_short, favorable=True,
+        )
+        if fill is not None:
+            fills.append((fill, reason, level))
+    if not fills:
+        return None, ""
+    # First target touched: longs the lower price, shorts the higher.
+    if is_short:
+        fill, reason, _ = max(fills, key=lambda f: f[2])
+    else:
+        fill, reason, _ = min(fills, key=lambda f: f[2])
+    return fill, reason
+
+
 def _check_exit(
     candle: OHLCVCandle,
     position: BacktestTrade,
@@ -845,13 +884,10 @@ def _check_exit(
             position.exit_bar_idx = bar_idx
             return fill, reason
 
-    if position.take_profit is not None:
-        fill = _gap_aware_trigger_fill(
-            candle, position.take_profit, is_short=is_short, favorable=True,
-        )
-        if fill is not None:
-            position.exit_bar_idx = bar_idx
-            return fill, "take_profit"
+    fill, reason = _first_favorable_fill(candle, position, is_short)
+    if fill is not None:
+        position.exit_bar_idx = bar_idx
+        return fill, reason
     if _time_exit_ready(position, candle, bar_idx):
         elapsed = bar_idx - position.neckline_break_bar_idx
         position.exit_bar_idx = bar_idx
@@ -1439,6 +1475,9 @@ def _core_backtest_symbol(
             open_position = candidate
             open_position.breakeven_trigger_pct = config["breakeven_trigger_pct"]
             open_position.breakeven_buffer_pct = config["breakeven_buffer_pct"]
+            open_position.profit_take_pct = config.get(
+                "profit_take_pct", ENGINE.profit_take_pct,
+            )
             i += 1
             continue
 
@@ -1675,6 +1714,7 @@ class Backtester:
         min_hold_bars: int = ENGINE.min_hold_bars,
         breakeven_trigger_pct: float | None = ENGINE.breakeven_trigger_pct,
         breakeven_buffer_pct: float = ENGINE.breakeven_buffer_pct,
+        profit_take_pct: float | None = ENGINE.profit_take_pct,
         min_atr_stop_multiple: float | None = ENGINE.min_atr_stop_multiple,
         synthetic_stop_multiple: float = ENGINE.synthetic_stop_multiple,
         atr_stop_floor_multiple: float | None = ENGINE.atr_stop_floor_multiple,
@@ -1741,6 +1781,7 @@ class Backtester:
         # supplies; they never change a pattern's own signal logic.
         self._breakeven_trigger_pct = breakeven_trigger_pct
         self._breakeven_buffer_pct = breakeven_buffer_pct
+        self._profit_take_pct = profit_take_pct
         self._min_atr_stop_multiple = min_atr_stop_multiple
         self._synthetic_stop_multiple = synthetic_stop_multiple
         # Widens (never tightens) a pattern's own stop_loss up to
@@ -1857,6 +1898,7 @@ class Backtester:
             "min_hold_bars": self._min_hold_bars,
             "breakeven_trigger_pct": self._breakeven_trigger_pct,
             "breakeven_buffer_pct": self._breakeven_buffer_pct,
+            "profit_take_pct": self._profit_take_pct,
             "min_atr_stop_multiple": self._min_atr_stop_multiple,
             "synthetic_stop_multiple": self._synthetic_stop_multiple,
             "atr_stop_floor_multiple": self._atr_stop_floor_multiple,
@@ -2013,6 +2055,7 @@ class Backtester:
                 "min_hold_bars": self._min_hold_bars,
                 "breakeven_trigger_pct": self._breakeven_trigger_pct,
                 "breakeven_buffer_pct": self._breakeven_buffer_pct,
+                "profit_take_pct": self._profit_take_pct,
                 "min_atr_stop_multiple": self._min_atr_stop_multiple,
                 "synthetic_stop_multiple": self._synthetic_stop_multiple,
                 "atr_stop_floor_multiple": self._atr_stop_floor_multiple,
@@ -2202,12 +2245,9 @@ class Backtester:
                     fill, reason = min(fills, key=lambda f: f[0])
                 return fill, reason
 
-        if position.take_profit is not None:
-            fill = _gap_aware_trigger_fill(
-                candle, position.take_profit, is_short=is_short, favorable=True,
-            )
-            if fill is not None:
-                return fill, "take_profit"
+        fill, reason = _first_favorable_fill(candle, position, is_short)
+        if fill is not None:
+            return fill, reason
 
         if _time_exit_ready(position, candle, bar_idx):
             position.time_exit_bars_elapsed = (
