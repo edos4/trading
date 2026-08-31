@@ -117,7 +117,7 @@ class DoubleBottomPattern(BasePattern):
     SHARES               = 25
     # Require close ≥ neckline × (1+buffer). Barely-above breaks were still
     # failing on the next bar in the 2026-08-18 US paper book (59% stop_loss).
-    NECKLINE_BREAK_BUFFER = 0.005
+    NECKLINE_BREAK_BUFFER = 0.01
 
     # ── Core logic ─────────────────────────────────────────────────────────────
     def analyze(
