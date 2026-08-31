@@ -779,12 +779,18 @@ def _gap_aware_trigger_fill(
     *,
     is_short: bool,
     favorable: bool,
+    prior_ref: float | None = None,
 ) -> float | None:
     """Return a realistic daily-bar fill for a triggered stop/target.
 
     If the session opens through the trigger, the order cannot be filled at
     the stale trigger price; it is assumed filled at the open. Otherwise the
     trigger price is used once the intrabar range crosses it.
+
+    `prior_ref` is the close-to-close extreme known *before* this bar's
+    close (highest close for longs, lowest for shorts). A trail/lock
+    invented from *this* bar's close on the favorable side of that reference
+    did not exist at the open, so an open "through" it is not a gap.
     """
     if trigger <= 0 or candle.open <= 0:
         return None
@@ -792,13 +798,58 @@ def _gap_aware_trigger_fill(
     if is_short:
         crossed = candle.low <= trigger if favorable else candle.high >= trigger
         gapped = candle.open <= trigger if favorable else candle.open >= trigger
+        if (
+            not favorable
+            and gapped
+            and prior_ref is not None
+            and trigger < prior_ref
+        ):
+            gapped = False
     else:
         crossed = candle.high >= trigger if favorable else candle.low <= trigger
         gapped = candle.open >= trigger if favorable else candle.open <= trigger
+        if (
+            not favorable
+            and gapped
+            and prior_ref is not None
+            and trigger > prior_ref
+        ):
+            gapped = False
 
     if not crossed and not gapped:
         return None
     return candle.open if gapped else trigger
+
+
+def _first_adverse_protective_fill(
+    candle: OHLCVCandle,
+    candidates: list[tuple[float, str]],
+    *,
+    is_short: bool,
+    prior_ref: float | None,
+) -> tuple[float | None, str]:
+    """First protective level hit as price moves from the open adversely.
+
+    A daily bar can cross trail, lock, breakeven, and the hard stop. Price
+    falling from a profitable open hits the nearest floor first, not the
+    catastrophe stop. Gaps through a level that already existed still fill
+    at the open.
+    """
+    fills: list[tuple[float, str, float]] = []
+    for level, reason in candidates:
+        fill = _gap_aware_trigger_fill(
+            candle, level, is_short=is_short, favorable=False, prior_ref=prior_ref,
+        )
+        if fill is not None:
+            fills.append((fill, reason, level))
+    if not fills:
+        return None, ""
+    # First hit from the open: longs the highest floor, shorts the lowest.
+    if is_short:
+        fill, reason, _ = min(fills, key=lambda f: f[2])
+    else:
+        fill, reason, _ = max(fills, key=lambda f: f[2])
+    return fill, reason
 
 
 def _time_exit_ready(position: BacktestTrade, candle, bar_idx: int) -> bool:
@@ -910,6 +961,17 @@ def _check_exit(
 ) -> tuple[float | None, str]:
     is_short = position.action == "SELL"
     bars_held = bar_idx - position.entry_bar_idx
+    prior_ref = (
+        position.lowest_close_since_entry if is_short
+        else position.highest_close_since_entry
+    )
+    if prior_ref is None:
+        prior_ref = position.entry_price
+    # Arm trail/lock/breakeven from this bar's close before the exit check
+    # so a peak close protects the same session's giveback. A newly
+    # invented floor above (long) / below (short) prior_ref cannot gap
+    # at the open — see _gap_aware_trigger_fill.
+    _update_trailing_reference(position, candle)
     candidates: list[tuple[float, str]] = []
     if position.stop_loss is not None:
         candidates.append((position.stop_loss, "stop_loss"))
@@ -938,23 +1000,10 @@ def _check_exit(
         if lock is not None:
             candidates.append((lock, "profit_lock"))
     if candidates:
-        fills = []
-        for level, reason in candidates:
-            fill = _gap_aware_trigger_fill(
-                candle, level, is_short=is_short, favorable=False,
-            )
-            if fill is not None:
-                fills.append((fill, reason))
-        if fills:
-            # A single daily bar can cross several protective levels (hard
-            # stop, trailing stop, breakeven floor, profit lock). Without
-            # intrabar sequencing we cannot know which one actually filled
-            # first, so model the worst plausible protective fill for the
-            # trade direction instead of the most favourable one.
-            if is_short:
-                fill, reason = max(fills, key=lambda f: f[0])
-            else:
-                fill, reason = min(fills, key=lambda f: f[0])
+        fill, reason = _first_adverse_protective_fill(
+            candle, candidates, is_short=is_short, prior_ref=prior_ref,
+        )
+        if fill is not None:
             position.exit_bar_idx = bar_idx
             return fill, reason
 
@@ -1532,7 +1581,6 @@ def _core_backtest_symbol(
                 open_position = None
                 i += 1
                 continue
-            _update_trailing_reference(open_position, candles[i])
             i += 1
             continue
 
@@ -2285,77 +2333,7 @@ class Backtester:
         candle: OHLCVCandle, position: BacktestTrade, bar_idx: int,
         min_hold_bars: int = 0,
     ) -> tuple[float | None, str]:
-        is_short = position.action == "SELL"
-
-        # Enforce minimum holding period before trailing stop can fire.
-        # Static stop-loss and take-profit still work immediately.
-        bars_held = bar_idx - position.entry_bar_idx
-
-        candidates: list[tuple[float, str]] = []
-        if position.stop_loss is not None:
-            candidates.append((position.stop_loss, "stop_loss"))
-        trail = None
-        if bars_held >= min_hold_bars:
-            trail = Backtester._trailing_stop_price(position, is_short)
-        if trail is not None:
-            candidates.append((trail, "trailing_stop"))
-
-        # ── Engine-level breakeven floor ────────────────────────────────────
-        # Once a trade has been ahead by breakeven_trigger_pct at some point,
-        # arm a protective level at ~entry price. This only ever tightens the
-        # exit (it competes with stop_loss/trailing via min/max below) — it
-        # never loosens the pattern's own risk management, and it never
-        # fires before min_hold_bars. A round trip back through entry then
-        # exits near scratch instead of at the pattern's full stop distance.
-        if (
-            bars_held >= min_hold_bars
-            and position.breakeven_trigger_pct is not None
-            and position._best_pnl_pct is not None
-        ):
-            if position._best_pnl_pct >= position.breakeven_trigger_pct:
-                position._breakeven_armed = True
-            if position._breakeven_armed:
-                buf = position.breakeven_buffer_pct
-                breakeven_price = (
-                    position.entry_price * (1 + buf)
-                    if not is_short
-                    else position.entry_price * (1 - buf)
-                )
-                candidates.append((breakeven_price, "breakeven_stop"))
-
-        if bars_held >= min_hold_bars:
-            lock = _profit_lock_level(position)
-            if lock is not None:
-                candidates.append((lock, "profit_lock"))
-
-        if candidates:
-            fills = []
-            for level, reason in candidates:
-                fill = _gap_aware_trigger_fill(
-                    candle, level, is_short=is_short, favorable=False,
-                )
-                if fill is not None:
-                    fills.append((fill, reason))
-            if fills:
-                # Mirror module-level _check_exit: pick the worst plausible
-                # protective fill when several stops are crossed in one bar.
-                if is_short:
-                    fill, reason = max(fills, key=lambda f: f[0])
-                else:
-                    fill, reason = min(fills, key=lambda f: f[0])
-                return fill, reason
-
-        fill, reason = _first_favorable_fill(candle, position, is_short)
-        if fill is not None:
-            return fill, reason
-
-        if _time_exit_ready(position, candle, bar_idx):
-            position.time_exit_bars_elapsed = (
-                bar_idx - position.neckline_break_bar_idx
-            )
-            return candle.close, "time_exit"
-
-        return None, ""
+        return _check_exit(candle, position, bar_idx, min_hold_bars=min_hold_bars)
 
     # ── Trade lifecycle ─────────────────────────────────────────────────────────
     @staticmethod

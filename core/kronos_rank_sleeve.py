@@ -327,7 +327,6 @@ def backtest_rank_sleeve(
         _close_trade,
         _open_trade,
         _resolve_profit_lock_trigger_pct,
-        _update_trailing_reference,
         apply_risk_gates,
     )
     from core.engine_defaults import (
@@ -403,8 +402,6 @@ def backtest_rank_sleeve(
                 trades.append(pos)
                 cooldown_tracker[(sym, PATTERN_NAME)] = (di, pos.pnl < 0)
                 del open_pos[sym]
-            else:
-                _update_trailing_reference(pos, candle)
 
         # ── Fill pendings on next bar ─────────────────────────────────────
         for sym in list(pending.keys()):

@@ -224,8 +224,8 @@ def test_paper_closes_open_long_when_giveback_hits_profit_lock():
     acct.positions["AAPL"] = t
     acct._last_price["AAPL"] = 100.0
     acct.cash -= 1_000.0
-    # Bar 1: establish +10% peak close-to-close MFE (exit check runs before
-    # trailing-ref update, so lock arms for subsequent bars).
+    # Bar 1: establish +10% peak close-to-close MFE (same-bar arming;
+    # lock floors the subsequent giveback bar).
     peak = OHLCVCandle(
         open=108, high=111, low=107, close=110.0, volume=1,
         timestamp=datetime(2026, 1, 5, tzinfo=timezone.utc),
@@ -455,3 +455,36 @@ def test_position_marks_record_entry_and_each_session_bar():
     assert len(t.position_marks) == 3
     assert t.position_marks[-1]["date"] == "2026-08-20"
     assert t.position_marks[-1]["unrl_pct"] == 2.5
+
+
+def test_position_marks_record_exit_fill_not_bar_close():
+    from data.tv_client import OHLCVCandle
+
+    acct = PaperAccount(initial_capital=100_000.0, market="us", slippage_pct=0.0)
+    t = BacktestTrade(
+        symbol="AAPL", timeframe="1d", pattern="test", action="BUY",
+        entry_date=datetime(2026, 8, 18, 20, 0, tzinfo=timezone.utc),
+        exit_date=datetime(2026, 8, 18, 20, 0, tzinfo=timezone.utc),
+        entry_price=100.0, exit_price=100.0, pnl=0.0, pnl_pct=0.0, qty=10,
+        stop_loss=90.0, take_profit=120.0, entry_bar_idx=0,
+        sim_entry_date=datetime(2026, 8, 18, 20, 0, tzinfo=timezone.utc),
+    )
+    acct.positions["AAPL"] = t
+    acct._last_price["AAPL"] = 100.0
+    acct.cash -= 1_000.0
+    acct._record_position_mark(
+        "AAPL", t, 100.0, datetime(2026, 8, 18, 20, 0, tzinfo=timezone.utc), 0,
+    )
+    # Close is green; the low tagged the hard stop. Last mark must be the
+    # fill, not the +8.8% close that made the trade look like a winner.
+    dump = OHLCVCandle(
+        open=103.0, high=109.0, low=89.0, close=108.8, volume=1_000,
+        timestamp=datetime(2026, 8, 19, 20, 0, tzinfo=timezone.utc),
+    )
+    closed = acct.on_bar("AAPL", dump, "1d", True)
+    assert closed is not None
+    assert closed.exit_reason == "stop_loss"
+    assert t.position_marks[-1]["close"] == 90.0
+    assert t.position_marks[-1]["status"] == "stop_loss"
+    assert t.position_marks[-1]["unrl_pct"] == -10.0
+

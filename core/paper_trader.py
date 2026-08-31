@@ -28,7 +28,6 @@ from core.backtester import (
     _close_trade,
     _open_trade,
     _resolve_profit_lock_trigger_pct,
-    _update_trailing_reference,
     _execution_reward_risk_ok,
     trade_r_multiple,
     trade_risk_dollars,
@@ -150,6 +149,7 @@ def _position_mark_row(
     as_of: datetime,
     bar_idx: int | None,
     session_date: str,
+    status: str | None = None,
 ) -> dict:
     if position.action == "BUY":
         mtm = (price - position.entry_price) * position.qty
@@ -164,7 +164,7 @@ def _position_mark_row(
         "mtm": mtm,
         "r": r_val,
         "value": price * position.qty,
-        "status": position_status(position),
+        "status": status if status is not None else position_status(position),
         "bars": bars_held(position, bar_idx),
         "stop": position.stop_loss,
         "target": position.take_profit,
@@ -255,6 +255,7 @@ class PaperAccount:
         price: float,
         as_of: datetime,
         bar_idx: int | None,
+        status: str | None = None,
     ) -> None:
         """Append or refresh one session mark for an open position."""
         ts = as_of if as_of.tzinfo else as_of.replace(tzinfo=timezone.utc)
@@ -266,6 +267,7 @@ class PaperAccount:
             as_of=ts,
             bar_idx=bar_idx,
             session_date=session_date,
+            status=status,
         )
         marks = position.position_marks
         if marks and marks[-1].get("date") == session_date:
@@ -714,7 +716,6 @@ class PaperAccount:
         now = candle.timestamp or datetime.now(timezone.utc)
         self._reset_daily_if_needed(now)
         bar_idx = self.bar_count(symbol, position.timeframe)
-        self._record_position_mark(symbol, position, candle.close, now, bar_idx)
 
         # Match ENGINE.min_hold_bars so trailing/breakeven don't arm earlier
         # here than in backtests — otherwise live and backtested results for
@@ -749,11 +750,7 @@ class PaperAccount:
                 f"exit_bar={bar_idx} "
                 f"position_bars={position_bars}"
             )
-        if exit_price is None:
-            _update_trailing_reference(position, candle)
-            return None
-
-        if self.slippage_pct:
+        if exit_price is not None and self.slippage_pct:
             # Exit is a sell (closing a BUY) or a buy-to-cover (closing a
             # SELL) — same slippage direction logic as the entry fill, so
             # exits aren't priced better than a real fill would be.
@@ -762,6 +759,15 @@ class PaperAccount:
                 if position.action == "BUY"
                 else exit_price * (1 + self.slippage_pct)
             )
+        # Mark after the exit check so the last row is the fill, not a
+        # close that can still look green on a bar that stopped out.
+        mark_price = exit_price if exit_price is not None else candle.close
+        self._record_position_mark(
+            symbol, position, mark_price, now, bar_idx,
+            status=reason if exit_price is not None else None,
+        )
+        if exit_price is None:
+            return None
 
         _close_trade(position, exit_price, reason, candle, self.txn_cost_pct)
         position.sim_exit_date = position.exit_date  # bar timestamp, for days_held()
