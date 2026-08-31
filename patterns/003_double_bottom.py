@@ -4,12 +4,20 @@ patterns/pattern_003_double_bottom.py — Double Bottom (W pattern) long setup.
 Inverse of patterns/pattern_002_double_top.py:
   Detection: two swing lows (L1, L2) with bullish RSI divergence,
   peak height, volume weakness on leg 2, and no post-L2 breach before entry.
-  Entry: first close above the neckline (peak high). Day-7-without-break
-  entries are rejected — the 2026-08-17 US paper book (79 fills, PF 0.29)
-  was 100% unconfirmed W bounces because TP=neckline×1.07 + 6% hard stop
-  + min R:R 1.5 made confirmed breakouts illegal.
+  Entry: two consecutive closes above the neckline (peak high), buffered by
+  NECKLINE_BREAK_BUFFER (mirrors pattern_007's dual-close confirmation — a
+  single confirming close was still whipsawing straight to the structural
+  stop; see v10 note below). Day-7-without-break entries are rejected — the
+  2026-08-17 US paper book (79 fills, PF 0.29) was 100% unconfirmed W
+  bounces because TP=neckline×1.07 + 6% hard stop + min R:R 1.5 made
+  confirmed breakouts illegal.
   Exits: structural stop under L2, take-profit = max(measured move from
   entry, +12%), 8% trail after +12%, 30-bar time-stop only if still red.
+
+v10: require 2 consecutive closes above the buffered neckline (not just 1)
+  before firing entry — see _neckline_break_idx. Ported from pattern_007's
+  C13 dual-close confirmation after the 2026-08-31 US paper book showed
+  single-close breaks reversing straight through the stop within 1-2 bars.
 
 v9 filter (ported from pattern_007_descending_channel):
   Skip the trade if any SEC EDGAR 8-K item 2.02 earnings filing date falls
@@ -388,8 +396,23 @@ class DoubleBottomPattern(BasePattern):
         cur: int,
         neckline: float,
     ) -> int | None:
+        """First bar i where close[i-1] and close[i] both clear the neckline
+        by NECKLINE_BREAK_BUFFER. A single confirming close was still not
+        enough: the 2026-08-31 US paper book's three fastest, full-size
+        stop_loss exits (EBS, CGTL, CLRO — all -10.2%, all within 1-2 bars
+        of entry) were one-bar neckline pokes that reversed immediately.
+        007 already requires two consecutive closes above its break line;
+        align 003 to the same standard rather than trading a single wick-y
+        close.
+        """
+        threshold = neckline * (1.0 + self.NECKLINE_BREAK_BUFFER)
+        consec = 0
         for i in range(l2_idx + 1, cur + 1):
-            if float(close.iloc[i]) > neckline * (1.0 + self.NECKLINE_BREAK_BUFFER):
+            if float(close.iloc[i]) > threshold:
+                consec += 1
+            else:
+                consec = 0
+            if consec >= 2:
                 return i
         return None
 

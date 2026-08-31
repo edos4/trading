@@ -142,6 +142,15 @@ class DescendingChannelPattern(BasePattern):
     MIN_BARS                = 210
     POSITION_NOTIONAL       = 10_000.0
     V9_EARNINGS_BLACKOUT    = True        # v9: skip trade on EDGAR 8-K 2.02 window
+    # v10: require the close to clear the falling upper line by this buffer
+    # (mirrors 003's NECKLINE_BREAK_BUFFER, added there after barely-above
+    # breaks kept failing on the next bar). 007 had no buffer at all — a
+    # close a single cent over the line counted as a confirmed break. In the
+    # 2026-08-31 US paper book this pattern's fast losers (ZSTK stop_loss in
+    # 1 bar, KIDS breakeven_stop, TRNS trailing_stop negative x2, KRNT
+    # time_exit negative — 5 of 10 closed trades) all broke the line by a
+    # trivial margin before reversing. Gate the break the same way 003 does.
+    UPPER_LINE_BREAK_BUFFER = 0.01
 
     # ── Core logic ─────────────────────────────────────────────────────────────
     def analyze(
@@ -193,7 +202,14 @@ class DescendingChannelPattern(BasePattern):
                         f"[{df.index[setup.entry_idx].date()}, +{self.TIME_STOP_BARS}b] "
                         f"— skipping LONG"
                     )
-                    return None
+                    # `continue` (not `return None`): this only rules out the
+                    # current SL1/SL2 pair. An outer `return None` here aborted
+                    # the whole symbol scan and threw away other valid SL1
+                    # candidates for the same SL2 — the earnings-blackout skip
+                    # was silently suppressing legitimate alternate setups.
+                    # 003's identical guard already used `continue`; 007 was
+                    # the odd one out.
+                    continue
 
                 confidence = self._score_confidence(setup)
                 close = float(ind.close.iloc[cur])
@@ -400,7 +416,8 @@ class DescendingChannelPattern(BasePattern):
         cur: int,
     ) -> int | None:
         """First bar k where close[k-1] and close[k] both close above the
-        falling upper line. Returns None if C14 cancels or no break yet.
+        falling upper line by at least UPPER_LINE_BREAK_BUFFER. Returns None
+        if C14 cancels or no break yet.
 
         C14: cancel if any close between SL2 and the break falls below SL2 low.
         """
@@ -410,7 +427,7 @@ class DescendingChannelPattern(BasePattern):
             # C14: floor breach before a confirmed break cancels the setup.
             if close_k < sl2_low:
                 return None
-            if close_k > upper_line(k):
+            if close_k > upper_line(k) * (1.0 + self.UPPER_LINE_BREAK_BUFFER):
                 consec += 1
             else:
                 consec = 0

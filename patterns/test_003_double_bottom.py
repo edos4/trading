@@ -32,8 +32,28 @@ def test_neckline_break_requires_buffer_above_peak():
     close = pd.Series([90.0] * 30)
     close.iloc[25] = 100.01  # barely above neckline 100
     assert p._neckline_break_idx(close, l2_idx=20, cur=25, neckline=100.0) is None
-    close.iloc[26] = 100.6  # 0.6% above neckline
-    assert p._neckline_break_idx(close, l2_idx=20, cur=26, neckline=100.0) == 26
+    close.iloc[26] = 100.6  # 0.6% above neckline: still under the 1% buffer
+    assert p._neckline_break_idx(close, l2_idx=20, cur=26, neckline=100.0) is None
+
+
+def test_neckline_break_requires_two_consecutive_confirming_closes():
+    """v10: a single-bar poke above the neckline must not fire entry — the
+    2026-08-31 book's fastest full-stop losers (EBS/CGTL/CLRO) were exactly
+    that: one strong close, then an immediate reversal through the stop."""
+    import pandas as pd
+
+    p = DoubleBottomPattern()
+    close = pd.Series([90.0] * 30)
+    close.iloc[25] = 102.0  # clears the 1% buffer...
+    close.iloc[26] = 95.0   # ...but fails to confirm on the next bar
+    assert p._neckline_break_idx(close, l2_idx=20, cur=26, neckline=100.0) is None
+
+    close.iloc[27] = 102.0  # only a single confirming close so far
+    assert p._neckline_break_idx(close, l2_idx=20, cur=27, neckline=100.0) is None
+    close.iloc[27] = 92.0
+    close.iloc[28] = 101.5  # first confirming close after the failed poke
+    close.iloc[29] = 101.6  # second consecutive confirming close -> entry
+    assert p._neckline_break_idx(close, l2_idx=20, cur=29, neckline=100.0) == 29
 
 
 def test_w_requires_about_one_month_to_form():

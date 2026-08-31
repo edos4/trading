@@ -125,9 +125,8 @@ def test_profit_lock_ignores_sub_trigger_noise():
 
 
 def test_profit_lock_beats_breakeven_when_both_crossed():
-    # MFE +10% → lock at 105; BE armed at ~100.15. Low tags both → worst
-    # plausible protective fill for a long is the lower price (harder stop),
-    # but only levels actually crossed count: low=103 crosses lock not BE.
+    # MFE +10% → lock at 105; BE armed at ~100.15. Low=103 crosses lock
+    # not BE, so the first floor from the open is the lock.
     trade = _trade("BUY", 100, 90, None)
     trade.profit_lock_frac = 0.5
     trade._best_pnl_pct = 0.10
@@ -175,26 +174,55 @@ def test_ledger_accounts_for_transaction_costs_on_both_legs():
     assert abs(actual - expected) < 1e-9
 
 
-def test_long_multiple_stops_fill_worst_plausible():
+def test_long_multiple_stops_fill_first_floor_from_open():
     trade = _trade("BUY", 100, 95, None)
     trade.breakeven_trigger_pct = 0.0
     trade._best_pnl_pct = 0.0
-    # Open above both levels, low crossing both the breakeven floor (100.15)
-    # and the hard stop (95) in one bar. Worst plausible protective fill is 95.
+    # Open above both levels, low crossing BE (100.15) then the hard stop.
+    # First floor from the open is breakeven, not the catastrophe stop.
     price, reason = _check_exit(_candle(102, 103, 93, 94), trade, 2)
-    assert reason == "stop_loss"
-    assert price == 95
+    assert reason == "breakeven_stop"
+    assert price == 100.15
 
 
-def test_short_multiple_stops_fill_worst_plausible():
+def test_short_multiple_stops_fill_first_floor_from_open():
     trade = _trade("SELL", 100, 105, None)
     trade.breakeven_trigger_pct = 0.0
     trade._best_pnl_pct = 0.0
-    # Open below both levels, high crossing both the breakeven floor (99.85)
-    # and the hard stop (105) in one bar. Worst plausible protective fill is 105.
+    # Open below both levels, high crossing BE (99.85) then the hard stop.
+    # First ceiling from the open is breakeven, not the catastrophe stop.
     price, reason = _check_exit(_candle(98, 107, 97, 106), trade, 2)
-    assert reason == "stop_loss"
-    assert price == 105
+    assert reason == "breakeven_stop"
+    assert abs(price - 99.85) < 1e-9
+
+
+def test_same_bar_peak_close_arms_trail_not_hard_stop():
+    # AVNW-style: close +8.8% would have been a winner; the low tagged the
+    # 10% hard stop. Same-bar arming + first-floor fill keeps the trail.
+    trade = _trade("BUY", 100, 90, 120)
+    trade.trailing_stop_pct = 0.025
+    trade.trailing_stop_mode = "highest_close"
+    trade.trailing_activation_pct = 0.04
+    trade.entry_bar_idx = 0
+    trade.highest_close_since_entry = 103.5
+    price, reason = _check_exit(_candle(103.5, 109, 89, 108.8), trade, 3)
+    assert reason == "trailing_stop"
+    assert abs(price - 108.8 * 0.975) < 1e-9
+
+
+def test_prearmed_trail_gap_still_fills_at_open():
+    trade = _trade("BUY", 100, 90, 120)
+    trade.trailing_stop_pct = 0.025
+    trade.trailing_stop_mode = "highest_close"
+    trade.trailing_activation_pct = 0.04
+    trade._trailing_activated = True
+    trade._best_pnl_pct = 0.0546
+    trade.highest_close_since_entry = 105.46
+    trade.entry_bar_idx = 0
+    # Prior close 105.46 → trail 102.82. Open 101 gaps through that floor.
+    price, reason = _check_exit(_candle(101, 102, 100.5, 101.2), trade, 3)
+    assert reason == "trailing_stop"
+    assert price == 101
 
 
 def test_deferred_neckline_time_stop_starts_on_signal_bar():
