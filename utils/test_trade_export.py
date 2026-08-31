@@ -47,6 +47,34 @@ def _envelope():
                         "target": 13.0,
                         "opened": "2026-01-01T00:00:00+00:00",
                         "timeframe": "1d",
+                        "daily_marks": [
+                            {
+                                "date": "2026-01-01",
+                                "sim_bar": "2026-01-01T00:00:00+00:00",
+                                "close": 10.0,
+                                "unrl_pct": 0.0,
+                                "mtm": 0.0,
+                                "r": 0.0,
+                                "value": 100.0,
+                                "status": "OPEN",
+                                "bars": 0,
+                                "stop": 9.0,
+                                "target": 13.0,
+                            },
+                            {
+                                "date": "2026-01-02",
+                                "sim_bar": "2026-01-02T00:00:00+00:00",
+                                "close": 11.0,
+                                "unrl_pct": 10.0,
+                                "mtm": 10.0,
+                                "r": 0.4,
+                                "value": 110.0,
+                                "status": "OPEN",
+                                "bars": 1,
+                                "stop": 9.0,
+                                "target": 13.0,
+                            },
+                        ],
                     }
                 ],
                 "closed": [
@@ -66,6 +94,20 @@ def _envelope():
                         "target": 110.0,
                         "closed": "2026-01-10T00:00:00+00:00",
                         "timeframe": "1d",
+                        "daily_marks": [
+                            {
+                                "date": "2026-01-05",
+                                "close": 105.0,
+                                "unrl_pct": 5.0,
+                                "mtm": 25.0,
+                                "r": 0.83,
+                                "value": 525.0,
+                                "status": "OPEN",
+                                "bars": 2,
+                                "stop": 94.0,
+                                "target": 110.0,
+                            }
+                        ],
                     }
                 ],
             },
@@ -121,6 +163,9 @@ def test_export_includes_both_books_and_review_prompt():
     assert ph["open_positions"][0]["entry"] == 900.0
     assert us["closed_trades"][0]["exit_reason"] == "take_profit"
     assert us["closed_trades"][0]["stop"] == 94.0
+    assert len(us["open_positions"][0]["daily_marks"]) == 2
+    assert us["open_positions"][0]["daily_marks"][-1]["close"] == 11.0
+    assert us["closed_trades"][0]["daily_marks"][0]["date"] == "2026-01-05"
     assert "equity_png_b64" not in us
     assert "equity_png_b64" not in us["metrics"]
     assert us["scan_stats"]["rejection_by_gate"] == {"kronos": 2}

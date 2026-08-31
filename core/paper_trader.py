@@ -138,7 +138,37 @@ def _trade_from_dict(d: dict) -> BacktestTrade:
         d["sim_entry_date"] = datetime.fromisoformat(d["sim_entry_date"])
     if d.get("sim_exit_date"):
         d["sim_exit_date"] = datetime.fromisoformat(d["sim_exit_date"])
+    if d.get("position_marks") is None:
+        d["position_marks"] = []
     return BacktestTrade(**d)
+
+
+def _position_mark_row(
+    position: BacktestTrade,
+    *,
+    price: float,
+    as_of: datetime,
+    bar_idx: int | None,
+    session_date: str,
+) -> dict:
+    if position.action == "BUY":
+        mtm = (price - position.entry_price) * position.qty
+    else:
+        mtm = (position.entry_price - price) * position.qty
+    r_val = r_multiple(position, price)
+    return {
+        "date": session_date,
+        "sim_bar": as_of.isoformat(),
+        "close": price,
+        "unrl_pct": unrealized_pct(position, price),
+        "mtm": mtm,
+        "r": r_val,
+        "value": price * position.qty,
+        "status": position_status(position),
+        "bars": bars_held(position, bar_idx),
+        "stop": position.stop_loss,
+        "target": position.take_profit,
+    }
 
 
 class PaperAccount:
@@ -217,6 +247,40 @@ class PaperAccount:
         # trade mid-refresh. RLock (not Lock) because open_position() calls
         # self.equity(), which also acquires it, on the same thread.
         self._lock = threading.RLock()
+
+    def _record_position_mark(
+        self,
+        symbol: str,
+        position: BacktestTrade,
+        price: float,
+        as_of: datetime,
+        bar_idx: int | None,
+    ) -> None:
+        """Append or refresh one session mark for an open position."""
+        ts = as_of if as_of.tzinfo else as_of.replace(tzinfo=timezone.utc)
+        tz = ZoneInfo(get_market(self.market).session_tz)
+        session_date = ts.astimezone(tz).strftime("%Y-%m-%d")
+        mark = _position_mark_row(
+            position,
+            price=price,
+            as_of=ts,
+            bar_idx=bar_idx,
+            session_date=session_date,
+        )
+        marks = position.position_marks
+        if marks and marks[-1].get("date") == session_date:
+            marks[-1] = mark
+        else:
+            marks.append(mark)
+        r_txt = f"{mark['r']:.2f}" if mark["r"] is not None else "—"
+        bars_txt = mark["bars"] if mark["bars"] is not None else "—"
+        log.info(
+            f"Paper | MARK {symbol} {session_date} close={price:.4f} "
+            f"unrl={mark['unrl_pct']:+.2f}% "
+            f"mtm={format_money(mark['mtm'], self.market, signed=True)} "
+            f"r={r_txt} status={mark['status']} bars={bars_txt} "
+            f"value={format_money(mark['value'], self.market)}"
+        )
 
     # ── Equity / accounting ─────────────────────────────────────────────
     def last_price(self, symbol: str, default: float) -> float:
@@ -591,6 +655,14 @@ class PaperAccount:
 
         self.positions[signal.symbol] = position
         self._last_price[signal.symbol] = position.entry_price
+        mark_ts = position.sim_entry_date or fill_candle.timestamp or datetime.now(timezone.utc)
+        self._record_position_mark(
+            signal.symbol,
+            position,
+            position.entry_price,
+            mark_ts,
+            self.bar_count(signal.symbol, signal.timeframe),
+        )
         log.info(
             f"Paper | OPEN {signal.action} {signal.qty} {signal.symbol} "
             f"@ {position.entry_price:.2f} (pattern={signal.pattern})"
@@ -641,12 +713,13 @@ class PaperAccount:
             return None
         now = candle.timestamp or datetime.now(timezone.utc)
         self._reset_daily_if_needed(now)
+        bar_idx = self.bar_count(symbol, position.timeframe)
+        self._record_position_mark(symbol, position, candle.close, now, bar_idx)
 
         # Match ENGINE.min_hold_bars so trailing/breakeven don't arm earlier
         # here than in backtests — otherwise live and backtested results for
         # the same pattern diverge. bar_idx is per real new bar (see
         # _bar_count), not per scan cycle.
-        bar_idx = self.bar_count(symbol, position.timeframe)
         position.profit_take_pct = (
             ENGINE.profit_take_pct if ENGINE.profit_take_pct else None
         )

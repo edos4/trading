@@ -19,7 +19,7 @@ Rules:
 - Treat each book separately. Never combine USD ($) and PHP (₱) into one P&L.
 - Tickers are (market, symbol). SM, AC, TEL and others exist on both tapes.
 - Judge by R-multiple, exit-reason mix, hold time, pattern, side, and sample size.
-- Open positions are unmarked until exit; comment on risk vs stop/target.
+- Open positions include daily_marks (one row per session close while held).
 - Call out overfitting. A handful of trades is not an edge.
 - Prefer changes the operator can actually ship (pattern filters, gate knobs,
   stops/targets, time-exits, universe size) over vague advice.
@@ -58,6 +58,23 @@ def _open_row(row: dict[str, Any]) -> dict[str, Any]:
         "port_pct": _round(row.get("port_pct")),
         "risk": _round(row.get("risk")),
         "opened": row.get("opened"),
+        "daily_marks": [_daily_mark(m) for m in (row.get("daily_marks") or [])],
+    }
+
+
+def _daily_mark(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "date": row.get("date"),
+        "sim_bar": row.get("sim_bar"),
+        "close": _round(row.get("close")),
+        "unrl_pct": _round(row.get("unrl_pct")),
+        "mtm": _round(row.get("mtm"), 2),
+        "r": _round(row.get("r")),
+        "value": _round(row.get("value"), 2),
+        "status": row.get("status"),
+        "bars": row.get("bars"),
+        "stop": _round(row.get("stop")),
+        "target": _round(row.get("target")),
     }
 
 
@@ -83,6 +100,7 @@ def _closed_row(row: dict[str, Any]) -> dict[str, Any]:
         "time_exit_bars_configured": row.get("time_exit_bars_configured"),
         "opened": row.get("opened"),
         "closed": row.get("closed"),
+        "daily_marks": [_daily_mark(m) for m in (row.get("daily_marks") or [])],
     }
 
 
