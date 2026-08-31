@@ -38,6 +38,7 @@ from core.engine_defaults import (
     passes_min_confidence,
     passes_min_share_price,
     passes_regime_filter,
+    regime_filter_required,
     structure_filters_enabled,
 )
 from core.kronos_gate import kronos_gate_check
@@ -1267,6 +1268,33 @@ def _close_trade(
     )
 
 
+def _gap_risk_atr_floor(
+    store: OHLCVStore,
+    symbol: str,
+    timeframe: str,
+    current_price: float,
+    *,
+    multiple: float = ENGINE.gap_risk_atr_multiple,
+) -> float | None:
+    """ATR(14) x multiple, in price terms — a proxy for plausible gap size.
+
+    Returns None (no floor applied) when there isn't enough history to
+    compute ATR; callers should fall back to the structural stop alone.
+    """
+    if current_price <= 0 or multiple <= 0:
+        return None
+    df = store.get_df(symbol, timeframe, min_bars=1)
+    if df is None or len(df) < 14:
+        return None
+    try:
+        atr_val = float(IndicatorEngine(df).atr(14).iloc[-1])
+    except Exception:
+        return None
+    if atr_val <= 0:
+        return None
+    return atr_val * multiple
+
+
 def _apply_sizing(
     signal: TradeSignal,
     store: OHLCVStore,
@@ -1305,7 +1333,17 @@ def _apply_sizing(
         elif signal.trailing_stop_pct is not None:
             stop_distance = current_price * signal.trailing_stop_pct
         if stop_distance is not None and stop_distance > 0:
-            qty = int(risk_amount / stop_distance)
+            # Gap/tail-risk floor: an overnight gap can fill well past the
+            # structural stop (2026-08-31 paper: AARD gapped -35% through a
+            # 10% stop). Size against whichever is wider — the structural
+            # stop or this name's own realized volatility — so a violently
+            # gappy name gets a smaller position instead of a full-size bet
+            # sized off a stop distance its own ATR says is unreliable.
+            sizing_distance = stop_distance
+            atr_floor = _gap_risk_atr_floor(store, symbol, timeframe, current_price)
+            if atr_floor is not None and atr_floor > sizing_distance:
+                sizing_distance = atr_floor
+            qty = int(risk_amount / sizing_distance)
             qty = min(qty, notional_max_shares)
             signal.qty = max(1, int(qty))
         else:
@@ -1636,6 +1674,12 @@ def _core_backtest_symbol(
             if struct and not passes_min_confidence(signal, config["min_confidence"]):
                 continue
 
+            # Regime gate is mandatory for REGIME_REQUIRED_PATTERNS (006/007)
+            # even in Pattern-only — see regime_filter_required() docstring.
+            regime_required = regime_filter_required(
+                signal.pattern, config.get("pattern_only", False),
+            )
+
             if config.get("kronos_gate"):
                 gate = kronos_gate_check(signal, store)
                 if not gate.passed:
@@ -1666,7 +1710,7 @@ def _core_backtest_symbol(
                 signal.rvol = rvol
                 signal.obv_slope = slope
 
-            if struct and not passes_regime_filter(
+            if regime_required and not passes_regime_filter(
                 signal, store, enabled=config["regime_filter"],
             ):
                 continue

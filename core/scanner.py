@@ -50,6 +50,7 @@ from core.engine_defaults import (
     describe_min_share_price_rejection,
     describe_regime_rejection,
     passes_min_confidence,
+    regime_filter_required,
     risk_gate_kwargs,
     seed_cooldown_from_trades,
     structure_filters_enabled,
@@ -772,7 +773,9 @@ class MarketScanner:
         # Step 0 — Same entry gates the backtester applies before Kronos/volume
         # (min_confidence + SMA200 regime). Without these, paper/live took
         # trades the "validated" backtest would have skipped. Pattern-only
-        # skips this cluster; Kronos and volume still apply below.
+        # skips confidence for all patterns, but the regime gate stays on
+        # for REGIME_REQUIRED_PATTERNS (006/007) even in Pattern-only — see
+        # regime_filter_required() / REGIME_REQUIRED_PATTERNS.
         if structure_filters_enabled(self._pattern_only):
             if not passes_min_confidence(signal):
                 reason = describe_confidence_rejection(signal)
@@ -784,6 +787,7 @@ class MarketScanner:
                 self._append_signal_log(signal, status="rejected", reason=reason)
                 return
 
+        if regime_filter_required(signal.pattern, self._pattern_only):
             regime_reason = describe_regime_rejection(
                 signal, self._store, market=self._market,
             )
@@ -796,6 +800,7 @@ class MarketScanner:
                 self._append_signal_log(signal, status="rejected", reason=regime_reason)
                 return
 
+        if structure_filters_enabled(self._pattern_only):
             profile = get_market(self._market)
             if profile.long_only and signal.action == "SELL":
                 reason = (

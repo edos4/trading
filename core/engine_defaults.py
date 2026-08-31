@@ -102,15 +102,59 @@ class EngineDefaults:
     # longs of weakness) and then dominated the losing paper book. They are
     # disabled by default; --pattern isolation still gets the regime filter.
     regime_exempt_patterns: tuple[str, ...] = ()
+    # Position-sizing floor for gap/tail risk. "risk" sizing normally divides
+    # risk_$ by the *structural* stop distance, which assumes the stop can
+    # actually be hit before further slippage. Illiquid/volatile names can
+    # gap straight through it overnight (2026-08-31 paper: AARD, ~$6.73
+    # entry, 10% structural stop, opened -35% the next session — a name
+    # whose own ATR% was already several multiples of the nominal stop
+    # distance). Sizing now also floors the effective stop distance at
+    # ATR(14) x this multiple, so names with outsized realized volatility
+    # get a smaller position instead of a full-size bet on a stop that
+    # volatility says is unlikely to hold. Does not change the placed
+    # stop_loss price — only how many shares that risk buys.
+    gap_risk_atr_multiple: float = 2.5
 
 
 ENGINE = EngineDefaults()
+
+
+# Patterns whose entries are defined *relative to trend* (breakout of a
+# channel drawn against the prevailing direction) rather than a reversal
+# structure. 2026-01 paper review: running these with the SMA200 regime
+# filter off (pattern_only=True skips it for every pattern, not just the
+# ones regime_exempt_patterns names) let 007 alone account for 79/110
+# (72%) of all trades in the 2026-08-31 patterns-only run, at a 30% win
+# rate and 0.74 profit factor — the single largest drag on the book,
+# versus 57% win / 2.60 pf for 003 in the same run. The regime filter is
+# therefore mandatory for these patterns even when Pattern-only is set;
+# Pattern-only still isolates confidence/long-only for them as before.
+REGIME_REQUIRED_PATTERNS: tuple[str, ...] = (
+    "pattern_006_upward_channel",
+    "pattern_007_descending_channel",
+)
 
 
 def structure_filters_enabled(pattern_only: bool | None = None) -> bool:
     """False when Pattern-only is on — skip structure gates, keep Kronos/volume."""
     use = ENGINE.pattern_only if pattern_only is None else pattern_only
     return not bool(use)
+
+
+def regime_filter_required(
+    pattern_name: str | None,
+    pattern_only: bool | None = None,
+) -> bool:
+    """True if the SMA200 regime gate must run for this signal.
+
+    Same as structure_filters_enabled() for most patterns, but always True
+    for REGIME_REQUIRED_PATTERNS (006/007) regardless of Pattern-only — see
+    the comment on that constant. Pattern-only still isolates confidence/
+    long-only for those patterns; only the regime gate is forced back on.
+    """
+    if structure_filters_enabled(pattern_only):
+        return True
+    return pattern_name in REGIME_REQUIRED_PATTERNS
 
 
 def backtest_kwargs(**overrides: Any) -> dict[str, Any]:
