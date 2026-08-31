@@ -47,7 +47,7 @@ class EngineDefaults:
     # backtest_kwargs (PSE round-trip ~0.70% made a 0.15% floor a −0.6% tax).
     # Arm entry floor once +3%. 1.5% armed too early — 2026-08-18 paper had
     # five breakeven_stop exits at ~−0.1% after a brief +1.5% flicker.
-    breakeven_trigger_pct: float | None = 0.03
+    breakeven_trigger_pct: float | None = 0.06
     breakeven_buffer_pct: float = 0.0015
     min_atr_stop_multiple: float = 1.0
     synthetic_stop_multiple: float = 2.0
@@ -68,7 +68,7 @@ class EngineDefaults:
     # true tail-risk stop (bad print / no structural stop) without clamping
     # every ordinary swing-pattern stop to the same distance regardless of
     # the name's actual volatility or structure.
-    hard_stop_percentage: float = 0.12
+    hard_stop_percentage: float = 0.10
     min_reward_risk_ratio: float = 1.5
     min_hold_bars: int = 2
     # Hard winner cap from entry (0.08 = close at +8% unrl). Off by default:
