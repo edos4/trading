@@ -37,7 +37,7 @@ Trade management (C16 – C20):
   C18 7% gain cap from entry — exit at whichever of C17 / C18 is closer.
   C19 Time stop: exit at the close of bar 8 only if the trade is still
       underwater. Winners keep running to stop / target / trail.
-  C20 Trailing stop activates after 4% gain; trails 2.5% below the best
+  C20 Trailing stop activates after 2% gain; trails 2.5% below the best
       (highest) close since entry.
 
 v9 filter:
@@ -136,7 +136,16 @@ class DescendingChannelPattern(BasePattern):
     GAIN_CAP_PCT            = 0.20        # C18 (increased from 7% to 20% to let winners run)
     TIME_STOP_BARS          = 15          # earnings blackout window (v9)
     UNFAVORABLE_TIME_EXIT_BARS = 8        # C19: cut losers; let winners run
-    TRAIL_ACTIVATION_PCT    = 0.04        # C20 (activation threshold, enforced via trailing_activation_pct)
+    # C20 activation threshold (enforced via trailing_activation_pct). Was
+    # 0.04 — the 2026-08-31 US paper book showed 4 of 7 time_exit losers in
+    # this pattern (LOVE +3.18%, FENC +3.60%, CNK +2.59%, TRNS +1.10% peak
+    # unrealized) round-tripped a real intraday gain into a loss because the
+    # gain never reached 4% and the trail never armed, leaving the position
+    # naked until the bar-8 underwater time stop finally cut it. Lowering to
+    # 0.02 (matching core.engine_defaults.trailing_activation_default) arms
+    # the 2.5%-trail early enough to lock in moves this pattern actually
+    # produces instead of only ones that reach 4%.
+    TRAIL_ACTIVATION_PCT    = 0.02
     TRAILING_STOP_PCT       = 0.025       # C20
     SWING_LOOKBACK          = 2
     MIN_BARS                = 210
