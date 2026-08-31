@@ -406,3 +406,52 @@ def test_pattern_only_allows_ph_short_fill():
         assert allowed.positions["PNB"].action == "SELL"
     finally:
         settings.min_position_notional = old_min
+
+
+def test_position_marks_record_entry_and_each_session_bar():
+    from data.tv_client import OHLCVCandle
+
+    acct = PaperAccount(initial_capital=100_000.0, market="us", slippage_pct=0.0)
+    t = BacktestTrade(
+        symbol="AAPL", timeframe="1d", pattern="test", action="BUY",
+        entry_date=datetime(2026, 8, 18, 20, 0, tzinfo=timezone.utc),
+        exit_date=datetime(2026, 8, 18, 20, 0, tzinfo=timezone.utc),
+        entry_price=100.0, exit_price=100.0, pnl=0.0, pnl_pct=0.0, qty=10,
+        stop_loss=94.0, take_profit=120.0, entry_bar_idx=0,
+        sim_entry_date=datetime(2026, 8, 18, 20, 0, tzinfo=timezone.utc),
+    )
+    acct.positions["AAPL"] = t
+    acct._last_price["AAPL"] = 100.0
+    acct.cash -= 1_000.0
+    acct._record_position_mark(
+        "AAPL", t, 100.0, datetime(2026, 8, 18, 20, 0, tzinfo=timezone.utc), 0,
+    )
+    assert len(t.position_marks) == 1
+    assert t.position_marks[0]["date"] == "2026-08-18"
+    assert t.position_marks[0]["close"] == 100.0
+
+    bar1 = OHLCVCandle(
+        open=101.0, high=102.0, low=100.5, close=101.5, volume=1_000,
+        timestamp=datetime(2026, 8, 19, 20, 0, tzinfo=timezone.utc),
+    )
+    bar1_late = OHLCVCandle(
+        open=101.0, high=102.0, low=100.5, close=101.8, volume=1_000,
+        timestamp=datetime(2026, 8, 19, 23, 0, tzinfo=timezone.utc),
+    )
+    bar2 = OHLCVCandle(
+        open=102.0, high=103.0, low=101.0, close=102.5, volume=1_000,
+        timestamp=datetime(2026, 8, 20, 20, 0, tzinfo=timezone.utc),
+    )
+    acct.on_bar("AAPL", bar1, "1d", True)
+    assert len(t.position_marks) == 2
+    assert t.position_marks[-1]["date"] == "2026-08-19"
+    assert t.position_marks[-1]["close"] == 101.5
+
+    acct.on_bar("AAPL", bar1_late, "1d", True)
+    assert len(t.position_marks) == 2
+    assert t.position_marks[-1]["close"] == 101.8
+
+    acct.on_bar("AAPL", bar2, "1d", True)
+    assert len(t.position_marks) == 3
+    assert t.position_marks[-1]["date"] == "2026-08-20"
+    assert t.position_marks[-1]["unrl_pct"] == 2.5

@@ -122,6 +122,7 @@ class PaperBook:
                     "target": p.take_profit,
                     "opened": p.entry_date.isoformat(),
                     "timeframe": p.timeframe,
+                    "daily_marks": list(p.position_marks or []),
                 }
             )
 
@@ -150,6 +151,7 @@ class PaperBook:
                     "opened": t.entry_date.isoformat() if t.entry_date else "",
                     "closed": t.exit_date.isoformat() if t.exit_date else "",
                     "timeframe": t.timeframe,
+                    "daily_marks": list(t.position_marks or []),
                 }
             )
 

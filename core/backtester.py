@@ -119,6 +119,11 @@ class BacktestTrade:
     # positive MFE (too tight in paper — 1% flicker locks).
     profit_lock_trigger_pct: float | None = None
 
+    # One mark per market session while open (paper trading). Populated by
+    # PaperAccount on entry and each new bar so UI/export can trace value
+    # day-by-day without re-walking OHLCV.
+    position_marks: list[dict] = field(default_factory=list)
+
     _trailing_activated: bool = False
     _best_pnl_pct: float | None = None
     _breakeven_armed: bool = False
