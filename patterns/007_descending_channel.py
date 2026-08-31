@@ -37,7 +37,7 @@ Trade management (C16 – C20):
   C18 7% gain cap from entry — exit at whichever of C17 / C18 is closer.
   C19 Time stop: exit at the close of bar 8 only if the trade is still
       underwater. Winners keep running to stop / target / trail.
-  C20 Trailing stop activates after 2% gain; trails 2.5% below the best
+  C20 Trailing stop activates after 3% gain; trails 2.5% below the best
       (highest) close since entry.
 
 v9 filter:
@@ -136,16 +136,23 @@ class DescendingChannelPattern(BasePattern):
     GAIN_CAP_PCT            = 0.20        # C18 (increased from 7% to 20% to let winners run)
     TIME_STOP_BARS          = 15          # earnings blackout window (v9)
     UNFAVORABLE_TIME_EXIT_BARS = 8        # C19: cut losers; let winners run
-    # C20 activation threshold (enforced via trailing_activation_pct). Was
-    # 0.04 — the 2026-08-31 US paper book showed 4 of 7 time_exit losers in
-    # this pattern (LOVE +3.18%, FENC +3.60%, CNK +2.59%, TRNS +1.10% peak
-    # unrealized) round-tripped a real intraday gain into a loss because the
-    # gain never reached 4% and the trail never armed, leaving the position
-    # naked until the bar-8 underwater time stop finally cut it. Lowering to
-    # 0.02 (matching core.engine_defaults.trailing_activation_default) arms
-    # the 2.5%-trail early enough to lock in moves this pattern actually
-    # produces instead of only ones that reach 4%.
-    TRAIL_ACTIVATION_PCT    = 0.02
+    # C20 activation threshold (enforced via trailing_activation_pct).
+    # History: 0.04 originally. The 2026-08-31 03:24 US paper book showed
+    # 4 of 7 time_exit losers in this pattern (LOVE +3.18%, FENC +3.60%,
+    # CNK +2.59%, TRNS +1.10% peak unrealized) round-tripped a real gain
+    # into a loss because it never reached 4% and the trail never armed.
+    # Dropped to 0.02 to catch those — but the very next paper run
+    # (2026-08-31 04:52, 6 trailing_stop exits) showed the opposite failure:
+    # arming that early, with the same 2.5% trail band, clips normal
+    # daily noise before a trade can develop. Trailing_stop exits on this
+    # pattern flipped from 5/6 winners averaging +4.94% (pre-change) to
+    # 1/6 winners averaging -0.75% (post-change), and the pattern's overall
+    # PF fell 0.70 -> 0.24. Settling at 0.03 as a middle point between the
+    # two observed failure modes. Both prior data points are thin (n=6
+    # trailing_stop exits each) — re-evaluate once a larger sample (~30+
+    # trailing_stop exits) is available rather than tuning this further off
+    # single-session reads.
+    TRAIL_ACTIVATION_PCT    = 0.03
     TRAILING_STOP_PCT       = 0.025       # C20
     SWING_LOOKBACK          = 2
     MIN_BARS                = 210
