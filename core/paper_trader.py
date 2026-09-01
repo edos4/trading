@@ -670,7 +670,7 @@ class PaperAccount:
             f"@ {position.entry_price:.2f} (pattern={signal.pattern})"
         )
         return True, (
-            f"Filled next-bar entry: {signal.action} {signal.qty:g} {signal.symbol} "
+            f"Filled signal-bar entry: {signal.action} {signal.qty:g} {signal.symbol} "
             f"@ {format_money(position.entry_price, self.market)} (pattern={signal.pattern})."
         )
 

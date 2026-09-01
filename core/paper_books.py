@@ -10,6 +10,7 @@ import asyncio
 import base64
 import io
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -23,7 +24,6 @@ import matplotlib
 
 matplotlib.use("Agg", force=True)
 import matplotlib.pyplot as plt
-import websockets
 
 from config import settings, DISABLED_PATTERNS
 from core.market import (
@@ -459,15 +459,10 @@ class PaperBook:
 
     @staticmethod
     def _port_open(host: str, port: int) -> bool:
-        async def _probe() -> bool:
-            try:
-                async with websockets.connect(f"ws://{host}:{port}", open_timeout=0.5):
-                    return True
-            except OSError:
-                return False
-
+        """TCP probe — must stay sync; callers already sit on an asyncio loop."""
         try:
-            return asyncio.run(_probe())
+            with socket.create_connection((host, port), timeout=0.5):
+                return True
         except OSError:
             return False
 

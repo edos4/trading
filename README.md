@@ -114,7 +114,7 @@ python main.py --paper --symbols=500 --pattern-only --collect-first=4 \
 |---|---|
 | `--paper` | Paper ledger + scanner (optional `N` is universe size, default 50) |
 | `--symbols=N` | Universe size; overrides the optional `N` on `--paper` / `--backtest` |
-| `--pattern-only` | Skip min share-price, SMA200 regime, min confidence, cooldown, and long-only. Kronos / volume gates still follow `.env` / `--volume-gate` |
+| `--pattern-only` | Skip min share-price, SMA200 regime, min confidence, cooldown, and long-only. Kronos / volume confirm gates default OFF unless `--kronos-gate` / `--volume-gate` are passed |
 | `--collect-first=N` | Collect chart-pattern hits for the scan, rank by R:R, open only the top N (default `COLLECT_FIRST_TOP_N`). Bare `--collect-first` uses the `.env` default |
 | `--stream=DATE` | Replay daily bars from DATE. Auto-starts `main.py --papertrade-stream`. Resume a saved ledger from its last sim date when that date is later than DATE |
 | `--duration-days=N` | Stop after N unique market sessions (with `--stream`, N replayed daily bars). `--stream=01/05/2026 --duration-days=30` replays ~30 trading days then exits |

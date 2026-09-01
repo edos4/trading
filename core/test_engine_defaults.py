@@ -48,18 +48,21 @@ def demo():
     assert ENGINE.min_confidence == 0.65
     assert ENGINE.regime_filter is True
     assert ENGINE.pattern_only is False
-    assert ENGINE.cooldown_bars == 10
+    assert ENGINE.cooldown_bars == 20
     assert ENGINE.profit_take_pct is None
     assert ENGINE.profit_lock_frac == 0.5
-    assert ENGINE.profit_lock_trigger_r == 1.0
+    assert ENGINE.profit_lock_trigger_r == 0.4
+    assert ENGINE.first_bar_invalidation_enabled is True
+    assert ENGINE.dead_trade_flatten_bars == 3
     from config import DISABLED_PATTERNS
     # 002/004/008 posted 0-25% win rates whenever the regime filter was
     # bypassed (pattern_only paper runs) — disabled by default now.
     assert "pattern_002_double_top" in DISABLED_PATTERNS
     assert "pattern_008_head_and_shoulders" in DISABLED_PATTERNS
     assert "pattern_004_rounding_bottom" in DISABLED_PATTERNS
-    # 007 is the intentional live long sleeve — stays on.
-    assert "pattern_007_descending_channel" not in DISABLED_PATTERNS
+    assert "pattern_006_upward_channel" in DISABLED_PATTERNS
+    # 007 off until first-bar invalidation proves out in paper A/B.
+    assert "pattern_007_descending_channel" in DISABLED_PATTERNS
 
     assert passes_min_confidence(_sig(confidence=0.65))
     assert not passes_min_confidence(_sig(confidence=0.64))
@@ -116,10 +119,10 @@ def demo():
         _Store(above),
     ) is not None
     assert ENGINE.regime_exempt_patterns == ()
-    assert ENGINE.breakeven_trigger_pct == 0.03
+    assert ENGINE.breakeven_trigger_pct == 0.06
     assert ENGINE.profit_take_pct is None
     assert ENGINE.profit_lock_frac == 0.5
-    assert ENGINE.profit_lock_trigger_r == 1.0
+    assert ENGINE.profit_lock_trigger_r == 0.4
 
     # 1.5% hysteresis: ~1% the wrong side of SMA200 is a near-miss, not a block.
     buy_near = [100.0] * 200 + [99.0]
@@ -132,7 +135,7 @@ def demo():
     cool = describe_cooldown_rejection(_sig(), 5, tracker)
     assert cool is not None and "Post-loss cooldown" in cool
     assert "chopping the same name" in cool
-    assert passes_cooldown(_sig(), bar_idx=10, cooldown_tracker=tracker)
+    assert passes_cooldown(_sig(), bar_idx=20, cooldown_tracker=tracker)
 
     # Loss on 007 still blocks a later 003 on the same symbol.
     other = {("TEST", "pattern_007_descending_channel"): (0, True)}
@@ -162,11 +165,7 @@ def demo():
     )
 
     rg = risk_gate_kwargs()
-    # NOTE: was asserting 0.06 (the pre-2026-08-30 default). The code moved
-    # to 0.12 (see engine_defaults.py) but this test was never updated, so
-    # it would not have caught a regression back to the tight cap that
-    # caused 32% of a book's trades to be 100%-loser stop_loss exits.
-    assert rg["hard_stop_percentage"] == 0.12
+    assert rg["hard_stop_percentage"] == 0.10
     assert "max_position_pct" not in rg
 
     sk = sizing_kwargs(account_value=50_000.0)
@@ -178,10 +177,10 @@ def demo():
     assert bt["min_confidence"] == 0.65
     assert bt["max_position_pct"] == 0.10
     assert bt["max_gross_exposure_pct"] == 1.0
-    assert bt["breakeven_trigger_pct"] == 0.03
+    assert bt["breakeven_trigger_pct"] == 0.06
     assert bt["profit_take_pct"] is None
     assert bt["profit_lock_frac"] == 0.5
-    assert bt["profit_lock_trigger_r"] == 1.0
+    assert bt["profit_lock_trigger_r"] == 0.4
     assert bt["breakeven_buffer_pct"] == 0.0015
     assert bt["min_share_price"] == 5.0
     assert "regime_hysteresis_pct" not in bt

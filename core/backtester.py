@@ -959,6 +959,10 @@ def _check_exit(
     position: BacktestTrade,
     bar_idx: int,
     min_hold_bars: int = 0,
+    *,
+    first_bar_invalidation: bool | None = None,
+    dead_trade_flatten_bars: int | None = None,
+    dead_trade_mfe_threshold_pct: float | None = None,
 ) -> tuple[float | None, str]:
     is_short = position.action == "SELL"
     bars_held = bar_idx - position.entry_bar_idx
@@ -1007,6 +1011,40 @@ def _check_exit(
         if fill is not None:
             position.exit_bar_idx = bar_idx
             return fill, reason
+
+    use_first_bar = (
+        ENGINE.first_bar_invalidation_enabled
+        if first_bar_invalidation is None
+        else first_bar_invalidation
+    )
+    if use_first_bar and position.entry_bar_idx >= 0 and bars_held == 1:
+        against = (
+            (is_short and candle.close > position.entry_price)
+            or (not is_short and candle.close < position.entry_price)
+        )
+        if against:
+            position.exit_bar_idx = bar_idx
+            return candle.close, "first_bar_invalidation"
+
+    flatten_bars = (
+        ENGINE.dead_trade_flatten_bars
+        if dead_trade_flatten_bars is None
+        else dead_trade_flatten_bars
+    )
+    mfe_thresh = (
+        ENGINE.dead_trade_mfe_threshold_pct
+        if dead_trade_mfe_threshold_pct is None
+        else dead_trade_mfe_threshold_pct
+    )
+    if (
+        position.entry_bar_idx >= 0
+        and flatten_bars > 0
+        and bars_held == flatten_bars
+    ):
+        best = position._best_pnl_pct
+        if best is None or best <= mfe_thresh:
+            position.exit_bar_idx = bar_idx
+            return candle.close, "dead_trade_exit"
 
     fill, reason = _first_favorable_fill(candle, position, is_short)
     if fill is not None:
@@ -1585,7 +1623,6 @@ def _core_backtest_symbol(
     )
     trades: list[BacktestTrade] = []
     signals_count = 0
-    pending_entry: TradeSignal | None = None
     open_position: BacktestTrade | None = None
 
     min_bars = _min_required_bars(timeframe)
@@ -1619,32 +1656,6 @@ def _core_backtest_symbol(
                 open_position = None
                 i += 1
                 continue
-            i += 1
-            continue
-
-        if pending_entry is not None:
-            candidate = _open_trade(pending_entry, candles[i], i)
-            pending_entry = None
-            if not _execution_reward_risk_ok(
-                candidate, config.get("min_reward_risk_ratio")
-            ):
-                # A gap between signal and fill can change the actual R:R.
-                # Do not enter a trade that only passed the gate at signal time.
-                i += 1
-                continue
-            open_position = candidate
-            open_position.breakeven_trigger_pct = config["breakeven_trigger_pct"]
-            open_position.breakeven_buffer_pct = config["breakeven_buffer_pct"]
-            open_position.profit_take_pct = config.get(
-                "profit_take_pct", ENGINE.profit_take_pct,
-            )
-            open_position.profit_lock_frac = config.get(
-                "profit_lock_frac", ENGINE.profit_lock_frac,
-            )
-            open_position.profit_lock_trigger_pct = _resolve_profit_lock_trigger_pct(
-                open_position,
-                config.get("profit_lock_trigger_r", ENGINE.profit_lock_trigger_r),
-            )
             i += 1
             continue
 
@@ -1745,7 +1756,7 @@ def _core_backtest_symbol(
                 config["position_sizing"],
                 max_position_pct=config["max_position_pct"],
             )
-            # Record the event bar before deferring the entry to i+1.
+            # Record the event bar on the same bar we fill (signal-bar entry).
             signal.signal_bar_idx = i
             signal.signal_bar_timestamp = candles[i].timestamp
             if config.get("lot_round"):
@@ -1753,15 +1764,30 @@ def _core_backtest_symbol(
                 if not apply_lot_rounding(signal):
                     continue
 
-            pending_entry = signal
-            break
+            candidate = _open_trade(signal, candles[i], i)
+            if not _execution_reward_risk_ok(
+                candidate, config.get("min_reward_risk_ratio")
+            ):
+                i += 1
+                continue
+            open_position = candidate
+            open_position.breakeven_trigger_pct = config["breakeven_trigger_pct"]
+            open_position.breakeven_buffer_pct = config["breakeven_buffer_pct"]
+            open_position.profit_take_pct = config.get(
+                "profit_take_pct", ENGINE.profit_take_pct,
+            )
+            open_position.profit_lock_frac = config.get(
+                "profit_lock_frac", ENGINE.profit_lock_frac,
+            )
+            open_position.profit_lock_trigger_pct = _resolve_profit_lock_trigger_pct(
+                open_position,
+                config.get("profit_lock_trigger_r", ENGINE.profit_lock_trigger_r),
+            )
+            i += 1
+            continue
 
         i += 1
 
-    if pending_entry is not None and len(candles) > 0:
-        open_position = _open_trade(
-            pending_entry, candles[-1], len(candles) - 1
-        )
     if open_position is not None:
         _close_trade(
             open_position, candles[-1].close, "end_of_data", candles[-1],

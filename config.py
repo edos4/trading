@@ -32,10 +32,10 @@ class Settings(BaseSettings):
     market: str = "us"
     max_daily_loss_usd: float = 1500.0
     max_daily_loss_php: float = 15000.0
-    max_open_positions: int = 8  # <=0 means unlimited
+    max_open_positions: int = 4  # <=0 means unlimited
     # Cap concurrent seats in any one pattern so the book cannot collapse
     # into a single setup (paper was 8/10 descending-channel). 0 = unlimited.
-    max_open_per_pattern: int = 4
+    max_open_per_pattern: int = 2
     # Skip leftover crumbs after risk/exposure caps (e.g. BUY 1 share).
     min_position_notional: float = 1000.0
 
@@ -325,14 +325,15 @@ settings = Settings()
 #
 #   pattern_006_upward_channel — historically net-negative. Stay off.
 #
-#   pattern_007_descending_channel stays ON: it is the live long sleeve.
-#   2026-08-30 P&L is lottery-dependent (GP); exit/cooldown fixes below
-#   address grinders without collapsing trade count.
+#   pattern_007_descending_channel — OFF until first-bar invalidation proves
+#   out in paper. 2026-09-01 in-sample: disabling shorts (002/004/006/008)
+#   but keeping 007 still leaves −$562 closed; 003-only is +$2,543 (PF 1.77)
+#   plus +$1,466 open. With bar-1 green gate, 003+007 paper A/B is +$4,552
+#   (PF 2.60, n=25) — re-enable 007 only behind that gate.
 #
 #   pattern_003_double_bottom stays ON with neckline-break-only entry
-#   (2026-08-17 US paper: 79 day-7-without-break fills, PF 0.29). It is the
-#   standout performer (2026-08-30 US paper: 66.7% win rate, +40.34%
-#   equal-weighted sum over 9 trades) — worth increasing relative size to.
+#   (2026-08-17 US paper: 79 day-7-without-break fills, PF 0.29). 2026-09-01
+#   in-sample: only +EV sleeve (+$2,543 closed, PF 1.77).
 #
 #   pattern_004_rounding_bottom — n=3, 0% win, pf=0.00 on 2026-08-18 US
 #   paper (−14% equal-weight); 0% win again on 2026-08-30 (n=1, -5.24%).
@@ -343,8 +344,9 @@ DISABLED_PATTERNS: list[str] = [
     "pattern_011_breakout_retest",
     "pattern_012_ml_signal",
     "pattern_009_flag_pattern",
-    # "pattern_006_upward_channel",
-    # "pattern_002_double_top",
-    # "pattern_008_head_and_shoulders",
-    # "pattern_004_rounding_bottom",
+    "pattern_006_upward_channel",
+    "pattern_002_double_top",
+    "pattern_008_head_and_shoulders",
+    "pattern_004_rounding_bottom",
+    "pattern_007_descending_channel",
 ]
