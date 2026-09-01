@@ -70,7 +70,7 @@ class EngineDefaults:
     # true tail-risk stop (bad print / no structural stop) without clamping
     # every ordinary swing-pattern stop to the same distance regardless of
     # the name's actual volatility or structure.
-    hard_stop_percentage: float = 0.10
+    hard_stop_percentage: float = 0.12
     min_reward_risk_ratio: float = 1.5
     min_hold_bars: int = 2
     # Hard winner cap from entry (0.08 = close at +8% unrl). Off by default:
@@ -82,28 +82,24 @@ class EngineDefaults:
     # clears the trade's own trigger (see profit_lock_trigger_r below),
     # protective stop = entry × (1 ± best × frac) for long/short. Never
     # loosens as best only rises. Caps giveback (e.g. +10% MFE → floor at
-    # +5% with frac=0.5) without capping upside. 0 / None = off.
-    profit_lock_frac: float | None = 0.5
+    # +2.5% with frac=0.25) without capping upside. 0 / None = off.
+    profit_lock_frac: float | None = 0.25
     # Do not arm the ratchet until peak unrl reaches this many multiples of
     # the trade's OWN initial risk (entry-to-stop distance, i.e. "R").
     # 2026-08-30 paper (24 closed US trades): the old knob was a flat
     # +3% price move (profit_lock_trigger_pct=0.03) regardless of stop
-    # distance. With hard_stop_percentage=0.12 that is only +0.25R — the
-    # floor started ratcheting up before a trade had even earned back a
-    # quarter of what it was risking, let alone approached its 1.5-3.6R
-    # structural target. Result: profit_lock fired on 11/24 trades (46%)
-    # at avg +0.21R while stop_loss losers averaged -1.07R and the 2
-    # trades that reached take_profit averaged +2.04R — winners cut short,
-    # losers run full. Requiring +1R of proof before arming (then still
-    # only locking 50% of whatever peak follows) leaves genuine winners
-    # room to run toward their measured-move target while still trimming
-    # giveback once a trade is unambiguously working. 0 / None = arm on
-    # any positive MFE (the old too-eager behavior).
-    # 2026-09-01 paper: 33 trades went green (MFE ≥ +1%) then closed red
-    # (−$7,075); none reached +1R so the lock never armed. 0.4R (~+4% on a
-    # 10% stop) arms earlier without capping take_profit tails (+$6,367 on
-    # seven +19% / +2.0R hits). profit_take_pct stays off.
-    profit_lock_trigger_r: float | None = 0.4
+    # distance — the floor started ratcheting up before a trade had earned
+    # back a fraction of what it was risking, let alone approached its
+    # 1.5-3.6R structural target. Result: winners cut short, losers run full.
+    # 0.4R (~+4% on a 10% stop) still armed too early: the 2026-09-01 paper
+    # stream clipped both winners at avg +0.36R (EZPW +0.27R, ATLX +0.45R
+    # after peaking +0.91R) while stop_loss losers averaged −1.0R — a
+    # structurally negative asymmetry for a 3.6R-target swing setup. Require
+    # +1.0R of proof before arming, then lock only frac=0.25 of whatever
+    # peak follows, so a trade must actually work (not just flicker green)
+    # before giveback gets trimmed and real winners keep room to run.
+    # 0 / None = arm on any positive MFE (the old too-eager behavior).
+    profit_lock_trigger_r: float | None = 1.0
     # Fill on the signal bar; if the next session closes against entry, exit
     # at that close (bar 1). Not deferred entry — keeps STAA-style bar-1
     # take-profits while dumping ICLR-style gap losers before the 10% stop.

@@ -232,9 +232,9 @@ def test_paper_closes_open_long_when_giveback_hits_profit_lock():
     )
     assert acct.on_bar("AAPL", peak, "1d", True) is None
     assert t._best_pnl_pct == 0.10
-    # Bar 2: giveback through the 50% lock floor at 105.
+    # Bar 2: giveback through the 25% lock floor at 102.5.
     giveback = OHLCVCandle(
-        open=106, high=107, low=103, close=104.0, volume=1,
+        open=104, high=105, low=101, close=102.0, volume=1,
         timestamp=datetime(2026, 1, 6, tzinfo=timezone.utc),
     )
     closed = acct.on_bar("AAPL", giveback, "1d", True)
@@ -366,10 +366,10 @@ def test_us_paper_keeps_engine_breakeven():
         assert pos.breakeven_trigger_pct == 0.06
         assert pos.breakeven_buffer_pct == 0.0015
         assert pos.profit_take_pct is None
-        assert pos.profit_lock_frac == 0.5
-        # entry=100, stop=94 → risk_pct=0.06; trigger_r=0.4 → resolved
-        # per-trade trigger = 0.4 * 0.06 = 0.024 (arm after +0.4R).
-        assert pos.profit_lock_trigger_pct == 0.024
+        assert pos.profit_lock_frac == 0.25
+        # entry=100, stop=94 → risk_pct=0.06; trigger_r=1.0 → resolved
+        # per-trade trigger = 1.0 * 0.06 = 0.06 (arm after +1.0R).
+        assert pos.profit_lock_trigger_pct == 0.06
     finally:
         settings.min_position_notional = old_min
 
