@@ -232,5 +232,64 @@ def test_scan_interval_zero_is_kept():
     asyncio.run(scanner._sleep_until_next_scan())
 
 
+def test_duration_days_stops_when_sim_days_reached():
+    scanner = MarketScanner(
+        symbols=["AAPL"], duration_days=2,
+        kronos_gate=False, volume_gate=False, kronos_rank=False, market="us",
+    )
+    assert scanner._duration_days == 2
+    scanner._running = True
+    scanner._sim_days = 1
+    assert scanner._stop_if_duration_reached() is False
+    assert scanner._running is True
+    scanner._sim_days = 2
+    assert scanner._stop_if_duration_reached() is True
+    assert scanner._running is False
+
+
+def test_duration_days_unlimited_never_stops():
+    scanner = MarketScanner(
+        symbols=["AAPL"],
+        kronos_gate=False, volume_gate=False, kronos_rank=False, market="us",
+    )
+    assert scanner._duration_days is None
+    scanner._running = True
+    scanner._sim_days = 99
+    assert scanner._stop_if_duration_reached() is False
+    assert scanner._running is True
+
+
+def test_run_stops_after_duration_days():
+    from contextlib import asynccontextmanager
+
+    scanner = MarketScanner(
+        symbols=["AAPL"], duration_days=3, scan_interval_seconds=0,
+        kronos_gate=False, volume_gate=False, kronos_rank=False, market="us",
+    )
+    scans = {"n": 0}
+
+    async def fake_scan(**kwargs):
+        scans["n"] += 1
+        scanner._sim_days = scans["n"]
+        if scans["n"] > 10:
+            raise AssertionError("scanner did not stop after duration-days")
+
+    async def fake_sleep():
+        return
+
+    @asynccontextmanager
+    async def fake_sessions(n):
+        yield [None]
+
+    scanner.start = lambda: setattr(scanner, "_running", True)
+    scanner.stop = lambda: setattr(scanner, "_running", False)
+    scanner._scan_all = fake_scan
+    scanner._sleep_until_next_scan = fake_sleep
+    scanner._open_feed_sessions = fake_sessions
+    scanner._feed_worker_count = lambda: 1
+    asyncio.run(scanner.run())
+    assert scans["n"] == 3
+
+
 if __name__ == "__main__":
     demo()

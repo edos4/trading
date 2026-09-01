@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
-from core.market import MARKET_PH, MARKET_US
+from core.market import MARKET_PH, MARKET_US, clock_payload, get_market
 
 BOOK_IDS = (MARKET_US, MARKET_PH)
 
@@ -142,6 +142,135 @@ def _book_export(snap: dict[str, Any]) -> dict[str, Any]:
         "open_positions": [_open_row(p) for p in (snap.get("positions") or [])],
         "closed_trades": [_closed_row(t) for t in (snap.get("closed") or [])],
     }
+
+
+def snapshot_from_paper_account(
+    account,
+    *,
+    scan_stats: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """PaperBook-shaped snapshot so CLI dumps reuse the same export schema."""
+    from core.paper_trader import (
+        bars_held,
+        days_held,
+        position_status,
+        r_multiple,
+        risk_dollars,
+        sim_days_held,
+        unrealized_pct,
+    )
+
+    profile = get_market(account.market)
+    clock = clock_payload(profile.id)
+    now = datetime.now(timezone.utc)
+    snap = account.snapshot_metrics()
+    equity = snap["equity"]
+    result = account.to_result()
+
+    positions = []
+    for sym, p, current, mtm in snap["positions"]:
+        r = r_multiple(p, current)
+        value = current * p.qty
+        positions.append(
+            {
+                "market": profile.id,
+                "symbol": sym,
+                "status": position_status(p),
+                "action": p.action,
+                "pattern": p.pattern,
+                "qty": p.qty,
+                "entry": p.entry_price,
+                "current": current,
+                "unrl_pct": unrealized_pct(p, current),
+                "r": r,
+                "days": sim_days_held(p, account.sim_now() or now),
+                "bars": bars_held(p, account.bar_count(sym)),
+                "value": value,
+                "mtm": mtm,
+                "port_pct": (value / equity * 100) if equity > 0 else 0.0,
+                "risk": risk_dollars(p),
+                "stop": p.stop_loss,
+                "target": p.take_profit,
+                "opened": p.entry_date.isoformat() if p.entry_date else "",
+                "timeframe": p.timeframe,
+                "daily_marks": list(p.position_marks or []),
+            }
+        )
+
+    closed = []
+    for t in snap["closed"]:
+        exit_px = t.exit_price if t.exit_price is not None else t.entry_price
+        closed.append(
+            {
+                "market": profile.id,
+                "symbol": t.symbol,
+                "action": t.action,
+                "pattern": t.pattern,
+                "qty": t.qty,
+                "entry": t.entry_price,
+                "exit": t.exit_price,
+                "pnl_pct": t.pnl_pct,
+                "pnl": t.pnl * t.qty,
+                "r": r_multiple(t, exit_px),
+                "days": days_held(t),
+                "bars": bars_held(t),
+                "time_exit_bars_elapsed": t.time_exit_bars_elapsed,
+                "time_exit_bars_configured": t.exit_bars_after_neckline_break,
+                "reason": t.exit_reason,
+                "stop": t.stop_loss,
+                "target": t.take_profit,
+                "opened": t.entry_date.isoformat() if t.entry_date else "",
+                "closed": t.exit_date.isoformat() if t.exit_date else "",
+                "timeframe": t.timeframe,
+                "daily_marks": list(t.position_marks or []),
+            }
+        )
+
+    total_pnl = snap["total_pnl_dollars"]
+    return {
+        "market": profile.id,
+        "label": profile.label,
+        "currency": profile.currency,
+        "currency_symbol": profile.currency_symbol,
+        "long_only": profile.long_only,
+        "session": clock["session"],
+        "running": False,
+        "cash": snap["cash"],
+        "equity": equity,
+        "open_count": len(snap["positions"]),
+        "closed_count": len(snap["closed"]),
+        "exposure": snap["exposure"],
+        "scan_stats": scan_stats,
+        "positions": positions,
+        "closed": closed,
+        "summary": result.summary() if result.trades else "No closed trades yet.",
+        "metrics": {
+            "total_pnl_dollars": total_pnl,
+            "total_pnl_pct": (total_pnl / snap["initial_capital"] * 100)
+            if snap["initial_capital"] else 0.0,
+            "realized_pnl_dollars": snap["realized_pnl_dollars"],
+            "unrealized_pnl_dollars": snap["unrealized_pnl_dollars"],
+            "avg_r": result.avg_r,
+            "median_r": result.median_r,
+            "avg_hold_bars": result.avg_hold_bars,
+            "exit_reason_breakdown": result.exit_reason_breakdown,
+            "max_drawdown_pct": result.max_drawdown_pct,
+            "sharpe_ratio": result.sharpe_ratio,
+        },
+    }
+
+
+def build_paper_account_export(
+    account,
+    *,
+    scan_stats: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """CLI paper dump: same JSON as the UI Export Trades button, one book."""
+    snap = snapshot_from_paper_account(account, scan_stats=scan_stats)
+    return build_paper_trade_export(
+        {"books": {snap["market"]: snap}},
+        market=snap["market"],
+    )
 
 
 def build_paper_trade_export(

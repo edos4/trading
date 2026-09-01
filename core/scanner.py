@@ -103,6 +103,7 @@ class MarketScanner:
         pattern_only: bool = False,
         collect_first: bool | None = None,
         collect_first_top_n: int | None = None,
+        duration_days: int | None = None,
     ):
         self._symbols = symbols or settings.symbols
         self._disabled_patterns = set(disabled_patterns or [])
@@ -140,6 +141,9 @@ class MarketScanner:
             settings.collect_first_top_n
             if collect_first_top_n is None
             else max(1, int(collect_first_top_n))
+        )
+        self._duration_days = (
+            None if duration_days is None else max(1, int(duration_days))
         )
         self._tv = data_feed or TVClient(
             profile.tv_screener,
@@ -342,6 +346,8 @@ class MarketScanner:
             f"kronos_batch={'ON' if self._kronos_batch else 'OFF'} | "
             f"volume_gate={'ON' if self._volume_gate else 'OFF'} | "
             f"collect_first={'ON' if self._collect_first else 'OFF'} | "
+            f"duration_days="
+            f"{self._duration_days if self._duration_days is not None else 'unlimited'} | "
             f"analyze_workers={self._analyze_workers} | "
             f"interval={self._scan_interval}s"
         )
@@ -353,6 +359,19 @@ class MarketScanner:
             p.on_stop()
         # self._client.disconnect()
         log.info("Scanner stopped")
+
+    def _stop_if_duration_reached(self) -> bool:
+        """End the scan loop after N unique market sessions (sim_days)."""
+        if self._duration_days is None:
+            return False
+        if self._sim_days < self._duration_days:
+            return False
+        log.info(
+            f"Scanner | duration-days={self._duration_days} reached "
+            f"(sim_days={self._sim_days}) — stopping"
+        )
+        self._running = False
+        return True
 
     def _open_analyze_pool(self) -> None:
         from core.pattern_jobs import analyze_worker_count, make_analyze_pool
@@ -498,6 +517,8 @@ class MarketScanner:
                                 await self._scan_all(feed_sessions=sessions)
                                 if self._paper is not None:
                                     self._paper.save()
+                                if self._stop_if_duration_reached():
+                                    continue
                             except Exception:
                                 # Broken MCP/stdio pipe: drop the pool and
                                 # reopen rather than reuse a dead session.
