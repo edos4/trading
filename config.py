@@ -56,14 +56,19 @@ class Settings(BaseSettings):
     papertrade_stream_port: int = 8765
     # Warm enough for Kronos gate LOOKBACK=400 when replaying near tape end.
     papertrade_stream_lookback_bars: int = 420
-    # Legacy pacing knob retained for .env compatibility. Replay advancement
-    # is now scanner-controlled and happens once per completed universe scan,
-    # so scan duration can never desynchronize symbols.
-    papertrade_stream_interval_seconds: int = 60
+    # 0 = scan-paced: start the next simulated day as soon as the previous
+    # scan finishes. >0 sleeps the leftover so live-like polling can apply.
+    papertrade_stream_interval_seconds: int = 0
     # YYYY-MM-DD cursor start for stream replay. None = near end of each tape
     # (last papertrade_stream_lookback_bars). UI datepicker overrides this
     # when launching via "Use paper trade stream".
     papertrade_stream_start_date: str | None = None
+    # Scanner asks the stream server for this many symbols per WebSocket
+    # round-trip. First fill still includes lookback bars; later scans send
+    # only the new candle. 50 × 420 bars stays under the 8MiB WS cap.
+    papertrade_stream_batch_size: int = 50
+    # Parallel history-API fetches when preloading the paper-stream universe.
+    papertrade_stream_preload_workers: int = 16
 
     # ── Scanner ────────────────────────────────────────────────────────────
     watchlist: str
@@ -84,6 +89,10 @@ class Settings(BaseSettings):
     # Each concurrent worker opens its own MCP session. Screener POSTs are
     # still paced by tv_screener_min_interval_seconds across all workers.
     scanner_concurrency: int = 15
+    # Spawned processes for pattern.analyze(). Fetch, paper ledger, and
+    # Kronos/vision stay on the scan loop. 0 = auto (2–8 from cpu_count);
+    # 1 = inline on that loop (debug / tests that skip scanner.start()).
+    scanner_analyze_workers: int = 0
     # Min gap between TradingView scanner POSTs (america/scan). Undocumented
     # IP limit — ~10+ req/s trips HTTP 429 mid-universe. 0.5s ≈ 2 req/s.
     tv_screener_min_interval_seconds: float = 0.5
@@ -213,6 +222,26 @@ class Settings(BaseSettings):
     @classmethod
     def _clamp_stream_lookback(cls, value: int) -> int:
         return max(PATTERN_SCAN_HISTORY_BARS, int(value))
+
+    @field_validator("papertrade_stream_interval_seconds")
+    @classmethod
+    def _clamp_stream_interval(cls, value: int) -> int:
+        return max(0, min(int(value), 3600))
+
+    @field_validator("papertrade_stream_batch_size")
+    @classmethod
+    def _clamp_stream_batch(cls, value: int) -> int:
+        return max(1, min(int(value), 200))
+
+    @field_validator("papertrade_stream_preload_workers")
+    @classmethod
+    def _clamp_stream_preload_workers(cls, value: int) -> int:
+        return max(1, min(int(value), 32))
+
+    @field_validator("scanner_analyze_workers")
+    @classmethod
+    def _clamp_analyze_workers(cls, value: int) -> int:
+        return max(0, min(int(value), 32))
 
     @field_validator("tv_screener_min_interval_seconds")
     @classmethod

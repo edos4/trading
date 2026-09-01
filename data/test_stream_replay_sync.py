@@ -188,3 +188,95 @@ def test_pin_asof_reports_history_unavailable():
     assert ts is None
     assert err == "history_unavailable"
 
+
+def test_delta_snapshot_omits_history():
+    tape = _SymbolTape([
+        {"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "timestamp": 1},
+        {"open": 2, "high": 2, "low": 2, "close": 2, "volume": 1, "timestamp": 2},
+    ])
+    full = tape.snapshot()
+    assert "history" in full
+    assert full["history"][-1] == full["candle"]
+    delta = tape.snapshot(include_history=False)
+    assert "history" not in delta
+    assert delta["candle"] == full["candle"]
+
+
+def test_batch_snapshots_history_for_subset():
+    server = StreamServer()
+    server._tapes = {
+        "A": _SymbolTape([
+            {"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "timestamp": 1},
+        ]),
+        "B": _SymbolTape([
+            {"open": 9, "high": 9, "low": 9, "close": 9, "volume": 1, "timestamp": 1},
+        ]),
+    }
+    out = server.snapshots_payload(["A", "B"], history_for={"A"})
+    assert "history" in out["results"]["A"]
+    assert "history" not in out["results"]["B"]
+    assert out["results"]["B"]["candle"]["close"] == 9
+
+
+def test_preload_symbols_fetches_missing_tapes():
+    server = StreamServer()
+    rows = [{"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "timestamp": 1}]
+    with patch("data.stream_server._load_symbol_db", return_value=rows) as load:
+        summary = server.preload_symbols(["aaa", "AAA", "bbb"])
+    assert summary["loaded"] == 2
+    assert summary["symbols"] == 2
+    assert load.call_count == 2
+    assert "AAA" in server._tapes
+    assert "BBB" in server._tapes
+
+
+def test_store_apply_candle_appends_then_replaces_same_ts():
+    from datetime import datetime, timezone
+
+    from data.ohlcv_store import OHLCVStore
+    from data.tv_client import OHLCVCandle
+
+    store = OHLCVStore(window=8)
+    t0 = datetime(2026, 1, 5, tzinfo=timezone.utc)
+    t1 = datetime(2026, 1, 6, tzinfo=timezone.utc)
+    first = OHLCVCandle(1, 1, 1, 1, 1, t0)
+    nxt = OHLCVCandle(2, 2, 2, 2, 1, t1)
+    same = OHLCVCandle(3, 3, 3, 3, 1, t1)
+    store.apply_candle("AAPL", "1d", first)
+    store.apply_candle("AAPL", "1d", nxt)
+    assert store.available("AAPL", "1d") == 2
+    store.apply_candle("AAPL", "1d", same)
+    assert store.available("AAPL", "1d") == 2
+    assert store.latest_close("AAPL", "1d") == 3.0
+    copied = store.copy_candles("AAPL", "1d")
+    assert len(copied) == 2
+    assert copied[-1].close == 3.0
+
+
+def test_client_delta_hydrates_store_without_rewriting_history():
+    from datetime import datetime, timezone
+
+    from data.ohlcv_store import OHLCVStore
+    from data.stream_client import StreamClient
+    from data.tv_client import OHLCVCandle
+
+    store = OHLCVStore(window=8)
+    t0 = datetime(2026, 1, 5, tzinfo=timezone.utc)
+    client = StreamClient()
+    seed = OHLCVCandle(1, 1, 1, 1, 1, t0)
+    store.replace_all("AAPL", "1d", [seed])
+    ts = int(t0.timestamp())
+    snap = client._snapshot_from_reply(
+        "AAPL",
+        "1d",
+        {"candle": {
+            "open": 2, "high": 2, "low": 2, "close": 2, "volume": 1,
+            "timestamp": ts + 86400,
+        }},
+        store,
+    )
+    assert snap.candle.close == 2
+    assert store.available("AAPL", "1d") == 2
+    assert ("AAPL", "1d") in client._warm
+    assert client._needs_history("AAPL", "1d", store) is False
+

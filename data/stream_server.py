@@ -14,12 +14,22 @@ on/after that date. Without it, each tape starts near the end of its data
 (last papertrade_stream_lookback_bars).
 
 Protocol: client connects, sends one JSON object per request
-    {"symbol": "AAPL", "timeframe": "1d"}
+    {"symbol": "AAPL", "timeframe": "1d", "history": true|false}
 server replies with one JSON object
     {"candle": {...}, "history": [{...}, ...]}  # history ends at candle
+    {"candle": {...}}                            # delta: history omitted
 or {"error": "...", "code": "no_data"|"asof_mismatch"|"history_unavailable"}
 if the symbol has no bars, no bar on the pinned replay date, or the
 history API timed out (retry next scan — do not treat as dead).
+
+Batch:
+    {"action": "snapshots", "symbols": ["AAPL", ...],
+     "history_for": ["AAPL"]}  # those names get full lookback; others candle-only
+    → {"results": {"AAPL": {candle, history?}|{error, code}, ...}}
+
+Preload (fetch all tapes before the first scan):
+    {"action": "preload", "symbols": ["AAPL", ...]}
+    → {"loaded": N, "empty": N, "unavailable": N, "symbols": N}
 
 Replay control:
     {"action": "pin_asof", "symbol": "AAPL"}  # pin control date to that tape
@@ -137,20 +147,25 @@ class _SymbolTape:
         if self.cursor >= len(self.rows):
             self.cursor = self.start
 
-    def snapshot(self, asof_ts: int | None = None) -> dict | None:
+    def snapshot(
+        self, asof_ts: int | None = None, *, include_history: bool = True,
+    ) -> dict | None:
         lookback = _stream_history_bars()
         if asof_ts is not None:
             idx = self.index_for_asof(asof_ts)
             if idx is None:
                 return None
             end = idx + 1
-            start = max(0, end - lookback)
-            history = self.rows[start:end]
-            return {"candle": history[-1], "history": history}
-        end = self.cursor + 1
+        else:
+            end = self.cursor + 1
         start = max(0, end - lookback)
         history = self.rows[start:end]
-        return {"candle": history[-1], "history": history}
+        if not history:
+            return None
+        payload: dict = {"candle": history[-1]}
+        if include_history:
+            payload["history"] = history
+        return payload
 
     def index_for_asof(self, asof_ts: int) -> int | None:
         key = asof_key(asof_ts)
@@ -218,8 +233,9 @@ class StreamServer:
         self._known_empty: set[str] = set()
         self._asof_ts: int | None = None
         self._tape_lock = threading.Lock()
+        pool_n = max(4, int(settings.papertrade_stream_preload_workers))
         self._load_pool = ThreadPoolExecutor(
-            max_workers=4, thread_name_prefix="stream-hist",
+            max_workers=pool_n, thread_name_prefix="stream-hist",
         )
 
     def _tape_lookup(self, symbol: str) -> tuple[_SymbolTape | None, str | None]:
@@ -261,6 +277,139 @@ class StreamServer:
     ) -> tuple[_SymbolTape | None, str | None]:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._load_pool, self._tape_lookup, symbol)
+
+    def _skip_message(self, symbol: str, code: str) -> dict:
+        symbol = (symbol or "").upper()
+        if code == "asof_mismatch":
+            asof = asof_key(self._asof_ts) if self._asof_ts is not None else "?"
+            return {
+                "error": f"asof mismatch: {symbol} has no bar on {asof}",
+                "code": "asof_mismatch",
+            }
+        if code == "history_unavailable":
+            return {
+                "error": f"history unavailable for {symbol}",
+                "code": "history_unavailable",
+            }
+        return {"error": f"no data for {symbol}", "code": "no_data"}
+
+    def _snapshot_message(self, symbol: str, include_history: bool = True) -> dict:
+        tape, err = self._tape_lookup(symbol)
+        if tape is None:
+            return self._skip_message(symbol, err or "no_data")
+        snap = tape.snapshot(self._asof_ts, include_history=include_history)
+        if snap is None:
+            return self._skip_message(symbol, "asof_mismatch")
+        return snap
+
+    def _snapshot_if_cached(self, symbol: str, include_history: bool) -> dict | None:
+        """In-memory tape or known-empty. None = still needs a history fetch."""
+        symbol = symbol.upper()
+        with self._tape_lock:
+            tape = self._tapes.get(symbol)
+            if tape is None:
+                if symbol in self._known_empty:
+                    return self._skip_message(symbol, "no_data")
+                return None
+        snap = tape.snapshot(self._asof_ts, include_history=include_history)
+        if snap is None:
+            return self._skip_message(symbol, "asof_mismatch")
+        return snap
+
+    def snapshots_payload(
+        self,
+        symbols: list[str],
+        history_for: set[str] | None = None,
+    ) -> dict:
+        """Batch reply; cache hits stay on this thread (no HTTP)."""
+        want_hist = {str(s).upper().strip() for s in (history_for or ()) if s}
+        results: dict[str, dict] = {}
+        for raw in symbols:
+            symbol = str(raw or "").upper().strip()
+            if not symbol:
+                continue
+            include_history = symbol in want_hist
+            cached = self._snapshot_if_cached(symbol, include_history)
+            results[symbol] = (
+                cached
+                if cached is not None
+                else self._snapshot_message(symbol, include_history)
+            )
+        return {"results": results}
+
+    def preload_symbols(self, symbols: list[str]) -> dict:
+        """Fetch every tape up front so the first scan is in-memory."""
+        from data.history_client import inflight_slots
+
+        uniq: list[str] = []
+        seen: set[str] = set()
+        for raw in symbols:
+            symbol = str(raw or "").upper().strip()
+            if not symbol or symbol in seen:
+                continue
+            seen.add(symbol)
+            uniq.append(symbol)
+        workers = max(4, int(settings.papertrade_stream_preload_workers))
+        with inflight_slots(workers):
+            with ThreadPoolExecutor(
+                max_workers=workers, thread_name_prefix="stream-preload",
+            ) as pool:
+                pairs = list(pool.map(self._tape_lookup, uniq))
+        loaded = empty = unavailable = 0
+        for tape, err in pairs:
+            if tape is not None:
+                loaded += 1
+            elif err == "no_data":
+                empty += 1
+            else:
+                unavailable += 1
+        log.info(
+            f"StreamServer | preload {len(uniq)} symbols: "
+            f"loaded={loaded} empty={empty} unavailable={unavailable}"
+        )
+        return {
+            "loaded": loaded,
+            "empty": empty,
+            "unavailable": unavailable,
+            "symbols": len(uniq),
+        }
+
+    def _history_for(self, req: dict, symbols: list[str]) -> set[str]:
+        if req.get("history_for"):
+            return {str(s).upper().strip() for s in req["history_for"] if s}
+        if req.get("history") is False:
+            return set()
+        if req.get("history") is True:
+            return set(symbols)
+        # Old clients omit the flag — send full lookback.
+        return set(symbols)
+
+    async def _snapshots_reply(self, req: dict) -> dict:
+        raw_symbols = req.get("symbols") or []
+        symbols = [str(s).upper().strip() for s in raw_symbols if str(s).strip()]
+        want_hist = self._history_for(req, symbols)
+        results: dict[str, dict] = {}
+        misses: list[str] = []
+        for symbol in symbols:
+            cached = self._snapshot_if_cached(symbol, symbol in want_hist)
+            if cached is None:
+                misses.append(symbol)
+            else:
+                results[symbol] = cached
+        if misses:
+            loop = asyncio.get_running_loop()
+            loaded = await asyncio.gather(*[
+                loop.run_in_executor(
+                    self._load_pool,
+                    self._snapshot_message,
+                    symbol,
+                    symbol in want_hist,
+                )
+                for symbol in misses
+            ])
+            for symbol, payload in zip(misses, loaded):
+                results[symbol] = payload
+        return {"results": results}
 
     def pin_asof(self, symbol: str) -> int | None:
         ts, _err = self._pin_asof(symbol)
@@ -383,15 +532,9 @@ class StreamServer:
                         if symbol else (None, "no_data")
                     )
                     if ts is None:
-                        code = err or "no_data"
-                        await ws.send(json.dumps({
-                            "error": (
-                                f"no data for {symbol}"
-                                if code == "no_data"
-                                else f"history unavailable for {symbol}"
-                            ),
-                            "code": code,
-                        }))
+                        await ws.send(json.dumps(
+                            self._skip_message(symbol, err or "no_data"),
+                        ))
                     else:
                         await ws.send(json.dumps({
                             "asof": ts,
@@ -399,34 +542,35 @@ class StreamServer:
                         }))
                     continue
 
+                if req.get("action") == "preload":
+                    summary = await asyncio.to_thread(
+                        self.preload_symbols, req.get("symbols") or [],
+                    )
+                    await ws.send(json.dumps(summary))
+                    continue
+
+                if req.get("action") == "snapshots":
+                    await ws.send(json.dumps(await self._snapshots_reply(req)))
+                    continue
+
                 try:
                     symbol = req["symbol"]
                 except (KeyError, TypeError):
                     await ws.send(json.dumps({"error": "bad request"}))
                     continue
-                tape, err = await self._tape_lookup_async(symbol)
-                if tape is None:
-                    code = err or "no_data"
-                    await ws.send(json.dumps({
-                        "error": (
-                            f"no data for {symbol}"
-                            if code == "no_data"
-                            else f"history unavailable for {symbol}"
-                        ),
-                        "code": code,
-                    }))
+                include_history = req.get("history", True) is not False
+                cached = self._snapshot_if_cached(str(symbol), include_history)
+                if cached is not None:
+                    await ws.send(json.dumps(cached))
                     continue
-                snap = tape.snapshot(self._asof_ts)
-                if snap is None:
-                    await ws.send(json.dumps({
-                        "error": (
-                            f"asof mismatch: {symbol} has no bar on "
-                            f"{asof_key(self._asof_ts) if self._asof_ts is not None else '?'}"
-                        ),
-                        "code": "asof_mismatch",
-                    }))
-                    continue
-                await ws.send(json.dumps(snap))
+                loop = asyncio.get_running_loop()
+                payload = await loop.run_in_executor(
+                    self._load_pool,
+                    self._snapshot_message,
+                    str(symbol),
+                    include_history,
+                )
+                await ws.send(json.dumps(payload))
             except Exception as exc:
                 log.exception(f"StreamServer | request handling failed: {raw!r}")
                 await ws.send(json.dumps({"error": f"server error: {exc}"}))

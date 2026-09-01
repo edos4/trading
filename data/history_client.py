@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 from urllib.parse import quote
 
 from config import settings
@@ -75,10 +76,23 @@ def _client():
         auth=(user, password) if user or password else None,
         timeout=_timeout(),
         headers={"Accept": "application/json", "Accept-Encoding": "gzip"},
-        limits=httpx.Limits(max_connections=8, max_keepalive_connections=4),
+        limits=httpx.Limits(max_connections=32, max_keepalive_connections=16),
     )
     _cached_key = key
     return _cached_client
+
+
+@contextmanager
+def inflight_slots(n: int) -> Iterator[None]:
+    """Temporarily raise the HTTP concurrency cap (paper-stream preload)."""
+    global _request_sema
+    n = max(1, int(n))
+    previous = _request_sema
+    _request_sema = threading.BoundedSemaphore(n)
+    try:
+        yield
+    finally:
+        _request_sema = previous
 
 
 def _is_transport_error(exc: BaseException) -> bool:

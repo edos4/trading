@@ -605,8 +605,12 @@ class PaperBook:
                 f", stream from {effective_stream_start}"
                 if use_stream and effective_stream_start else ""
             )
+            if use_stream and interval <= 0:
+                pace = "scan-paced replay"
+            else:
+                pace = f"scanning every {interval}s"
             self.status = (
-                f"Running — {profile.label}, {len(symbols)} symbols, scanning every {interval}s"
+                f"Running — {profile.label}, {len(symbols)} symbols, {pace}"
                 f"{stream_note}"
                 f", Kronos gate={'ON' if kronos_gate else 'OFF'}"
                 f", Kronos rank={'ON' if kronos_rank else 'OFF'}"
