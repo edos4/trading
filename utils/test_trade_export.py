@@ -186,3 +186,62 @@ def test_export_rejects_bad_market():
         assert "market" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_export_from_paper_account():
+    from datetime import datetime, timezone
+
+    from core.backtester import BacktestTrade
+    from core.paper_trader import PaperAccount
+    from utils.trade_export import build_paper_account_export
+
+    acct = PaperAccount(initial_capital=100_000.0, market="us", slippage_pct=0.0)
+    now = datetime(2026, 1, 10, tzinfo=timezone.utc)
+    closed = BacktestTrade(
+        symbol="AAPL",
+        timeframe="1d",
+        pattern="pattern_003_double_bottom",
+        action="BUY",
+        entry_date=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        exit_date=now,
+        entry_price=100.0,
+        exit_price=110.0,
+        pnl=10.0,
+        pnl_pct=10.0,
+        qty=5,
+        stop_loss=94.0,
+        take_profit=110.0,
+        exit_reason="take_profit",
+    )
+    acct.closed.append(closed)
+    open_t = BacktestTrade(
+        symbol="MSFT",
+        timeframe="1d",
+        pattern="pattern_007_descending_channel",
+        action="BUY",
+        entry_date=datetime(2026, 1, 5, tzinfo=timezone.utc),
+        exit_date=now,
+        entry_price=50.0,
+        exit_price=50.0,
+        pnl=0.0,
+        pnl_pct=0.0,
+        qty=10,
+        stop_loss=45.0,
+        take_profit=60.0,
+    )
+    acct.positions["MSFT"] = open_t
+    acct._last_price["MSFT"] = 55.0
+
+    payload = build_paper_account_export(
+        acct, scan_stats={"trades_opened": 2, "rejection_by_gate": {}},
+    )
+    assert payload["purpose"] == "paper_trade_evaluation"
+    assert payload["filter"] == "us"
+    assert len(payload["books"]) == 1
+    book = payload["books"][0]
+    assert book["market"] == "us"
+    assert book["closed_trades"][0]["symbol"] == "AAPL"
+    assert book["closed_trades"][0]["exit_reason"] == "take_profit"
+    assert book["open_positions"][0]["symbol"] == "MSFT"
+    assert book["open_positions"][0]["current"] == 55.0
+    assert book["scan_stats"]["trades_opened"] == 2

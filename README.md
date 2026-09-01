@@ -92,6 +92,42 @@ cp .env.example .env
 python main.py
 ```
 
+## Paper trading (CLI)
+
+`python main.py --paper` runs the live scanner against a virtual account
+(simulated fills, no broker). Universe size can be `--paper 50` or
+`--paper --symbols=500`. Add `--paper-reset` to wipe the saved ledger first.
+
+Historical replay (markets closed, or a dated walk-forward) uses `--stream`.
+That flag starts the paper-trade stream server if needed, then the scanner
+reads bars from it instead of live TradingView. Dates are **US `MM/DD/YYYY`**
+or `YYYY-MM-DD` — `01/05/2026` is 5 January 2026.
+
+```bash
+# Pattern-only paper stream: top 500 names, collect-then-open the best 4
+# setups by reward:risk each scan, dump trades when the process exits
+python main.py --paper --symbols=500 --pattern-only --collect-first=4 \
+    --stream=01/05/2026 --duration-days=30 --export-trades-log=output_trades.json
+```
+
+| Flag | What it does |
+|---|---|
+| `--paper` | Paper ledger + scanner (optional `N` is universe size, default 50) |
+| `--symbols=N` | Universe size; overrides the optional `N` on `--paper` / `--backtest` |
+| `--pattern-only` | Skip min share-price, SMA200 regime, min confidence, cooldown, and long-only. Kronos / volume gates still follow `.env` / `--volume-gate` |
+| `--collect-first=N` | Collect chart-pattern hits for the scan, rank by R:R, open only the top N (default `COLLECT_FIRST_TOP_N`). Bare `--collect-first` uses the `.env` default |
+| `--stream=DATE` | Replay daily bars from DATE. Auto-starts `main.py --papertrade-stream`. Resume a saved ledger from its last sim date when that date is later than DATE |
+| `--duration-days=N` | Stop after N unique market sessions (with `--stream`, N replayed daily bars). `--stream=01/05/2026 --duration-days=30` replays ~30 trading days then exits |
+| `--export-trades-log=PATH` | On exit (including Ctrl+C after the scan loop unwinds), write open + closed trades JSON — same schema as the UI **Export Trades** button |
+
+`--stream`, `--duration-days`, and `--export-trades-log` require `--paper`. You can still run the
+stream server on its own with `python main.py --papertrade-stream` and point
+the UI at it; the combined `--paper --stream=...` form is for unattended CLI
+replays.
+
+`--collect-first --collect-first-top-n 4` still works; `--collect-first=4` is
+the short form.
+
 ## Backtesting
 
 Test the strategy against historical data (no live connection needed):

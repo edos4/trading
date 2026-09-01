@@ -12,6 +12,10 @@ Usage:
     python main.py --backtest 50 --volume-gate-compare  # A/B: gate OFF vs ON
     python main.py --paper                          # Paper trade top 50 liquid symbols (simulated fills)
     python main.py --paper --paper-reset            # ...starting from a fresh virtual account
+    python main.py --paper --symbols=500 --pattern-only --collect-first=4 \\
+        --stream=01/05/2026 --duration-days=30 --export-trades-log=output_trades.json
+                                                    # 500-name paper stream from 2026-01-05, 30 sessions,
+                                                    # top-4 R:R, dump open+closed trades on exit
     python main.py --ui                             # Launch the symbol explorer GUI
     python main.py --web                            # Launch the authenticated web UI (VPS)
                                                     # On start: connect to stocks_history and
@@ -57,6 +61,92 @@ from core.paper_trader import PaperAccount, days_held, r_multiple, unrealized_pc
 from data.tv_client import TVClient
 from utils.logger import log
 
+# Bare `--collect-first` (no N) enables the mode with COLLECT_FIRST_TOP_N.
+_COLLECT_FIRST_USE_DEFAULT = -1
+
+
+def parse_stream_date(value: str) -> str:
+    """Normalize a CLI stream date to YYYY-MM-DD.
+
+    Accepts YYYY-MM-DD or US MM/DD/YYYY (also M/D/YYYY). Slash dates are
+    month/day/year — `01/05/2026` is 5 January 2026, not 1 May.
+    """
+    raw = (value or "").strip()
+    if not raw:
+        raise argparse.ArgumentTypeError("empty stream date")
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y"):
+        try:
+            return datetime.strptime(raw, fmt).date().isoformat()
+        except ValueError:
+            continue
+    raise argparse.ArgumentTypeError(
+        f"invalid stream date {value!r}; use MM/DD/YYYY or YYYY-MM-DD"
+    )
+
+
+def _resolve_n_symbols(
+    args: argparse.Namespace,
+    fallback: int | None = None,
+    default: int = 50,
+) -> int:
+    if args.symbols is not None:
+        return args.symbols
+    if fallback is not None:
+        return fallback
+    return default
+
+
+def _resolve_collect_first(
+    args: argparse.Namespace,
+) -> tuple[bool | None, int | None]:
+    if args.collect_first is None:
+        return None, args.collect_first_top_n
+    top_n = args.collect_first_top_n
+    if args.collect_first > 0:
+        top_n = args.collect_first
+    return True, top_n
+
+
+def _effective_stream_start(
+    account: PaperAccount,
+    stream_start: str | None,
+    market: str,
+) -> str | None:
+    """Resume a saved ledger's sim date when it is ahead of --stream."""
+    from zoneinfo import ZoneInfo
+
+    effective = stream_start
+    if account.sim_now() is None:
+        return effective
+    resume_from = account.sim_now()
+    if resume_from is None:
+        return effective
+    profile = get_market(market)
+    resume_date = resume_from.astimezone(ZoneInfo(profile.session_tz)).date()
+    configured_date = None
+    if stream_start:
+        try:
+            configured_date = datetime.strptime(stream_start, "%Y-%m-%d").date()
+        except ValueError:
+            configured_date = None
+    if configured_date is None or configured_date <= resume_date:
+        return resume_date.isoformat()
+    return effective
+
+
+def _write_trades_log(
+    path: str,
+    account: PaperAccount,
+    scan_stats: dict | None = None,
+) -> None:
+    from utils.trade_export import build_paper_account_export
+
+    payload = build_paper_account_export(account, scan_stats=scan_stats)
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    json.dump(payload, out.open("w", encoding="utf-8"), indent=2)
+    log.info(f"Paper | trades log written to {out}")
+
 
 async def run_scanner(
     n_symbols: int = 50,
@@ -84,6 +174,15 @@ async def run_scanner(
     log.info(f"  Kronos rank:{'ON' if profile.kronos_rank_default else 'OFF'}")
     log.info(f"  Volume gate:{'ON' if use_volume else 'OFF'}")
     log.info(f"  Long-only:  {'YES' if profile.long_only else 'no'}")
+    cf_on = settings.collect_first_enabled if collect_first is None else collect_first
+    cf_n = (
+        settings.collect_first_top_n
+        if collect_first_top_n is None
+        else max(1, int(collect_first_top_n))
+    )
+    log.info(
+        f"  Collect-first:{'ON top-' + str(cf_n) if cf_on else 'OFF'}"
+    )
     log.info(f"  IBKR:       disabled (commented out)")
     log.info("=" * 60)
 
@@ -122,6 +221,10 @@ async def run_paper(
     market: str | None = None,
     collect_first: bool | None = None,
     collect_first_top_n: int | None = None,
+    use_stream: bool = False,
+    stream_start: str | None = None,
+    export_trades_log: str | None = None,
+    duration_days: int | None = None,
 ) -> None:
     os.makedirs("logs", exist_ok=True)
     os.makedirs("charts", exist_ok=True)
@@ -142,45 +245,116 @@ async def run_paper(
     )
     kronos_gate = profile.kronos_gate_default
     kronos_rank = profile.kronos_rank_default
+    cf_on = settings.collect_first_enabled if collect_first is None else collect_first
+    cf_n = (
+        settings.collect_first_top_n
+        if collect_first_top_n is None
+        else max(1, int(collect_first_top_n))
+    )
+    effective_stream_start = (
+        _effective_stream_start(account, stream_start, profile.id)
+        if use_stream else None
+    )
+    scan_interval = (
+        settings.papertrade_stream_interval_seconds
+        if use_stream
+        else profile.scan_interval_seconds
+    )
 
     log.info("=" * 60)
     log.info("  Trading Bot — PAPER TRADING MODE (simulated fills, no broker)")
     log.info(f"  Market:     {profile.label} ({profile.currency})")
+    log.info(f"  Symbols:    {n_symbols}")
     log.info(f"  Starting equity: {format_money(account.equity(), profile.id)}")
-    log.info(f"  Scan every: {profile.scan_interval_seconds}s")
+    if use_stream and scan_interval <= 0:
+        log.info("  Scan pace:  scan-paced stream replay")
+    else:
+        log.info(f"  Scan every: {scan_interval}s")
+    log.info(f"  Stream:     {effective_stream_start or ('ON' if use_stream else 'OFF')}")
     log.info(f"  Kronos gate:{'ON' if kronos_gate else 'OFF'}")
     log.info(f"  Kronos rank:{'ON' if kronos_rank else 'OFF'}")
     log.info(f"  Volume gate:{'ON' if use_volume else 'OFF'}")
     log.info(f"  Pattern-only:{'ON' if pattern_only else 'OFF'}")
+    log.info(
+        f"  Collect-first:{'ON top-' + str(cf_n) if cf_on else 'OFF'}"
+    )
+    log.info(
+        f"  Duration:    {duration_days} market sessions"
+        if duration_days is not None else "  Duration:    unlimited"
+    )
     log.info(f"  Long-only:  {'YES' if profile.long_only and not pattern_only else 'no'}")
     log.info("=" * 60)
 
-    log.info(f"Fetching top {n_symbols} symbols from TradingView ({profile.tv_screener})...")
-    symbol_rows = TVClient.fetch_universe(n_symbols, profile.id)
-    if not symbol_rows:
-        log.error("Failed to fetch symbols from TradingView — aborting")
-        return
-    symbols = [symbol for symbol, _exchange in symbol_rows]
-    exchange_overrides = dict(symbol_rows)
-    log.info(f"Watchlist:  {symbols}")
-
-    scanner = MarketScanner(
-        symbols=symbols,
-        exchange_overrides=exchange_overrides,
-        paper_account=account,
-        disabled_patterns=DISABLED_PATTERNS,
-        kronos_gate=kronos_gate,
-        kronos_rank=kronos_rank,
-        volume_gate=use_volume,
-        pattern_only=pattern_only,
-        market=profile.id,
-        collect_first=collect_first,
-        collect_first_top_n=collect_first_top_n,
-    )
+    scanner = None
+    stream_book = None
     try:
+        if use_stream:
+            from core.paper_books import PaperBook
+            from data.stream_client import StreamClient
+
+            stream_book = PaperBook(profile.id)
+            error = stream_book._ensure_stream_server(
+                start_date=effective_stream_start,
+            )
+            if error:
+                log.error(error)
+                return
+            data_feed = StreamClient()
+            account.assume_session_open = True
+            log.info(
+                f"Fetching top {n_symbols} symbols from TradingView "
+                f"(cached, {profile.tv_screener})..."
+            )
+            symbol_rows = TVClient.fetch_universe_cached(n_symbols, profile.id)
+        else:
+            data_feed = None
+            log.info(
+                f"Fetching top {n_symbols} symbols from TradingView "
+                f"({profile.tv_screener})..."
+            )
+            symbol_rows = TVClient.fetch_universe(n_symbols, profile.id)
+
+        if not symbol_rows:
+            log.error("Failed to fetch symbols from TradingView — aborting")
+            return
+        symbols = [symbol for symbol, _exchange in symbol_rows]
+        exchange_overrides = dict(symbol_rows)
+        log.info(f"Watchlist:  {symbols}")
+
+        scanner = MarketScanner(
+            symbols=symbols,
+            exchange_overrides=exchange_overrides,
+            paper_account=account,
+            disabled_patterns=DISABLED_PATTERNS,
+            data_feed=data_feed,
+            scan_interval_seconds=scan_interval if use_stream else None,
+            kronos_gate=kronos_gate,
+            kronos_rank=kronos_rank,
+            volume_gate=use_volume,
+            pattern_only=pattern_only,
+            market=profile.id,
+            collect_first=collect_first,
+            collect_first_top_n=collect_first_top_n,
+            duration_days=duration_days,
+        )
         await scanner.run()
     finally:
         account.save()
+        if (
+            stream_book is not None
+            and stream_book._stream_proc is not None
+            and stream_book._stream_proc.poll() is None
+        ):
+            stream_book._stream_proc.terminate()
+            stream_book._stream_proc = None
+        if export_trades_log:
+            stats = scanner.stats if scanner is not None else None
+            try:
+                _write_trades_log(export_trades_log, account, stats)
+            except OSError:
+                log.exception(
+                    f"Paper | failed to write trades log {export_trades_log}"
+                )
         print()
         print(account.to_result().summary())
         print(f"  Open positions:    {len(account.positions)}")
@@ -363,7 +537,7 @@ async def run_backtest(
     log.info(f"Backtest | JSON saved to {json_path}")
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Trading Bot - market scanner / backtester / GUI"
     )
@@ -407,19 +581,61 @@ def _parse_args() -> argparse.Namespace:
         "Use with --backtest / --paper.",
     )
     parser.add_argument(
+        "--symbols",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Universe size (top N liquid names). Overrides the optional N on "
+        "--paper / --backtest. E.g. --paper --symbols=500.",
+    )
+    parser.add_argument(
         "--collect-first",
-        action="store_true",
+        nargs="?",
+        const=_COLLECT_FIRST_USE_DEFAULT,
+        type=int,
+        default=None,
+        metavar="N",
         help="Collect chart-pattern signals during a scan without opening "
-        "anything, rank them by reward:risk, and open only the top "
-        "--collect-first-top-n. Use with --paper / scan mode.",
+        "anything, rank them by reward:risk, and open only the top N "
+        "(default: COLLECT_FIRST_TOP_N). "
+        "--collect-first=4 is the same as --collect-first --collect-first-top-n 4. "
+        "Use with --paper / scan mode.",
     )
     parser.add_argument(
         "--collect-first-top-n",
         type=int,
         default=None,
         metavar="N",
-        help="With --collect-first, how many top-ranked signals to open "
-        "(default: COLLECT_FIRST_TOP_N).",
+        help="With --collect-first (no N), how many top-ranked signals to open "
+        "(default: COLLECT_FIRST_TOP_N). Ignored when --collect-first=N is set.",
+    )
+    parser.add_argument(
+        "--stream",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="DATE",
+        help="With --paper, replay historical daily bars via the paper-trade "
+        "stream (starts the stream server if needed). DATE is MM/DD/YYYY or "
+        "YYYY-MM-DD; omitted DATE uses PAPERTRADE_STREAM_START_DATE. "
+        "E.g. --stream=01/05/2026.",
+    )
+    parser.add_argument(
+        "--export-trades-log",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="With --paper, write open+closed trades JSON to PATH on exit "
+        "(same schema as the UI Export Trades button). "
+        "E.g. --export-trades-log=output_trades.json.",
+    )
+    parser.add_argument(
+        "--duration-days",
+        type=int,
+        default=None,
+        metavar="N",
+        help="With --paper, stop after N unique market sessions "
+        "(stream replay: N daily bars). E.g. --duration-days=30.",
     )
     parser.add_argument(
         "--volume-gate-compare",
@@ -446,7 +662,8 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         metavar="N",
         help="Run paper trading on top N liquid symbols (default: 50) — live scan, "
-        "simulated fills, no real broker.",
+        "simulated fills, no real broker. Combine with --symbols, --stream, "
+        "--pattern-only, --collect-first, --duration-days, --export-trades-log.",
     )
     parser.add_argument(
         "--paper-reset",
@@ -629,7 +846,7 @@ def _parse_args() -> argparse.Namespace:
         metavar="DIR",
         help="Load PH CSV dump into stocks_history (refuses US / bare tickers).",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 async def main(args: argparse.Namespace | None = None) -> None:
@@ -716,19 +933,49 @@ async def main(args: argparse.Namespace | None = None) -> None:
         run_learn(max_tickers=args.learn_max_tickers)
         return
 
+    if args.stream is not None and args.paper is None:
+        log.error("--stream requires --paper")
+        raise SystemExit(2)
+    if args.export_trades_log and args.paper is None:
+        log.error("--export-trades-log requires --paper")
+        raise SystemExit(2)
+    if args.duration_days is not None and args.paper is None:
+        log.error("--duration-days requires --paper")
+        raise SystemExit(2)
+    if args.duration_days is not None and args.duration_days < 1:
+        log.error("--duration-days must be >= 1")
+        raise SystemExit(2)
+    if args.symbols is not None and args.symbols < 1:
+        log.error("--symbols must be >= 1")
+        raise SystemExit(2)
+
+    collect_first, collect_first_top_n = _resolve_collect_first(args)
+    stream_start = None
+    use_stream = args.stream is not None
+    if use_stream and args.stream:
+        try:
+            stream_start = parse_stream_date(args.stream)
+        except argparse.ArgumentTypeError as exc:
+            log.error(str(exc))
+            raise SystemExit(2)
+
     if args.paper is not None:
         await run_paper(
-            n_symbols=args.paper,
+            n_symbols=_resolve_n_symbols(args, args.paper),
             reset=args.paper_reset,
             volume_gate=True if args.volume_gate else None,
             pattern_only=args.pattern_only,
             market=args.market,
-            collect_first=True if args.collect_first else None,
-            collect_first_top_n=args.collect_first_top_n,
+            collect_first=collect_first,
+            collect_first_top_n=collect_first_top_n,
+            use_stream=use_stream,
+            stream_start=stream_start,
+            export_trades_log=args.export_trades_log,
+            duration_days=args.duration_days,
         )
     elif args.backtest is not None:
         await run_backtest(
-            n_symbols=args.backtest,
+            n_symbols=_resolve_n_symbols(args, args.backtest),
             pattern=args.pattern,
             volume_gate=True if args.volume_gate else None,
             volume_gate_compare=args.volume_gate_compare,
@@ -737,10 +984,11 @@ async def main(args: argparse.Namespace | None = None) -> None:
         )
     else:
         await run_scanner(
+            n_symbols=_resolve_n_symbols(args),
             volume_gate=True if args.volume_gate else None,
             market=args.market,
-            collect_first=True if args.collect_first else None,
-            collect_first_top_n=args.collect_first_top_n,
+            collect_first=collect_first,
+            collect_first_top_n=collect_first_top_n,
         )
 
 
