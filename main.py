@@ -63,6 +63,8 @@ async def run_scanner(
     *,
     volume_gate: bool | None = None,
     market: str | None = None,
+    collect_first: bool | None = None,
+    collect_first_top_n: int | None = None,
 ) -> None:
     os.makedirs("logs", exist_ok=True)
     os.makedirs("charts", exist_ok=True)
@@ -105,6 +107,8 @@ async def run_scanner(
         kronos_rank=profile.kronos_rank_default,
         volume_gate=use_volume,
         market=profile.id,
+        collect_first=collect_first,
+        collect_first_top_n=collect_first_top_n,
     )
     await scanner.run()
 
@@ -116,6 +120,8 @@ async def run_paper(
     volume_gate: bool | None = None,
     pattern_only: bool = False,
     market: str | None = None,
+    collect_first: bool | None = None,
+    collect_first_top_n: int | None = None,
 ) -> None:
     os.makedirs("logs", exist_ok=True)
     os.makedirs("charts", exist_ok=True)
@@ -168,6 +174,8 @@ async def run_paper(
         volume_gate=use_volume,
         pattern_only=pattern_only,
         market=profile.id,
+        collect_first=collect_first,
+        collect_first_top_n=collect_first_top_n,
     )
     try:
         await scanner.run()
@@ -397,6 +405,21 @@ def _parse_args() -> argparse.Namespace:
         help="Skip min share-price, SMA200 regime, min confidence, cooldown, "
         "and long-only. Kronos and volume gates still follow their flags. "
         "Use with --backtest / --paper.",
+    )
+    parser.add_argument(
+        "--collect-first",
+        action="store_true",
+        help="Collect chart-pattern signals during a scan without opening "
+        "anything, rank them by reward:risk, and open only the top "
+        "--collect-first-top-n. Use with --paper / scan mode.",
+    )
+    parser.add_argument(
+        "--collect-first-top-n",
+        type=int,
+        default=None,
+        metavar="N",
+        help="With --collect-first, how many top-ranked signals to open "
+        "(default: COLLECT_FIRST_TOP_N).",
     )
     parser.add_argument(
         "--volume-gate-compare",
@@ -700,6 +723,8 @@ async def main(args: argparse.Namespace | None = None) -> None:
             volume_gate=True if args.volume_gate else None,
             pattern_only=args.pattern_only,
             market=args.market,
+            collect_first=True if args.collect_first else None,
+            collect_first_top_n=args.collect_first_top_n,
         )
     elif args.backtest is not None:
         await run_backtest(
@@ -714,6 +739,8 @@ async def main(args: argparse.Namespace | None = None) -> None:
         await run_scanner(
             volume_gate=True if args.volume_gate else None,
             market=args.market,
+            collect_first=True if args.collect_first else None,
+            collect_first_top_n=args.collect_first_top_n,
         )
 
 

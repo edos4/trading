@@ -53,6 +53,7 @@ from core.engine_defaults import (
     regime_filter_required,
     risk_gate_kwargs,
     seed_cooldown_from_trades,
+    signal_reward_risk,
     structure_filters_enabled,
 )
 from analysis.price_volume import volume_confirm_gate
@@ -95,6 +96,8 @@ class MarketScanner:
         kronos_batch: bool | None = None,
         market: str | None = None,
         pattern_only: bool = False,
+        collect_first: bool | None = None,
+        collect_first_top_n: int | None = None,
     ):
         self._symbols = symbols or settings.symbols
         self._disabled_patterns = set(disabled_patterns or [])
@@ -121,6 +124,14 @@ class MarketScanner:
             settings.kronos_batch_enabled if kronos_batch is None else kronos_batch
         )
         self._pattern_only = bool(pattern_only)
+        self._collect_first = (
+            settings.collect_first_enabled if collect_first is None else collect_first
+        )
+        self._collect_first_top_n = (
+            settings.collect_first_top_n
+            if collect_first_top_n is None
+            else max(1, int(collect_first_top_n))
+        )
         self._tv = data_feed or TVClient(
             profile.tv_screener,
             profile.tv_exchange,
@@ -179,6 +190,9 @@ class MarketScanner:
         self._kronos_rank_last_asof: object | None = None
         self._pending_kronos: list[tuple[TradeSignal, BasePattern | None, object]] = []
         self._pending_kronos_lock = asyncio.Lock()
+        # Collect-first: chart-pattern signals gathered during a scan, ranked
+        # after the scan completes, then only the top-N finished.
+        self._collect_pool: list[tuple[TradeSignal, BasePattern | None, object]] = []
         # Scan-cycle health counters — surfaced by the paper trading UI/CLI
         # so a stalled or misbehaving scan is visible without reading logs.
         self.stats: dict = {
@@ -188,6 +202,8 @@ class MarketScanner:
             "signals_rejected": 0,
             "volume_gate_rejected": 0,
             "kronos_rank_emitted": 0,
+            "collect_first_ranked": 0,
+            "collect_first_selected": 0,
             "trades_opened": 0,
             "sim_days": 0,
             # Rejection counts are grouped by the first gate that vetoed the
@@ -269,6 +285,8 @@ class MarketScanner:
                 gate = "lot_rounding"
             elif "session " in reason_lower:
                 gate = "session"
+            elif "collect-first" in reason_lower:
+                gate = "collect_first"
             elif "confidence" in reason_lower:
                 gate = "confidence"
             elif "share-price" in reason_lower or "share price" in reason_lower:
@@ -311,6 +329,7 @@ class MarketScanner:
             f"kronos_rank={'ON' if self._kronos_rank else 'OFF'} | "
             f"kronos_batch={'ON' if self._kronos_batch else 'OFF'} | "
             f"volume_gate={'ON' if self._volume_gate else 'OFF'} | "
+            f"collect_first={'ON' if self._collect_first else 'OFF'} | "
             f"interval={self._scan_interval}s"
         )
 
@@ -439,6 +458,7 @@ class MarketScanner:
         """
         scan_start = time.monotonic()
         self._pending_kronos = []
+        self._collect_pool = []
         self.stats["patterns_found"] = 0
         self.stats["signals_rejected"] = 0
         self.stats["trades_opened"] = 0
@@ -631,6 +651,9 @@ class MarketScanner:
             await asyncio.gather(*workers)
         finally:
             pbar.close()
+
+        if self._collect_first:
+            await self._flush_collect_first()
 
         if self._kronos_batch and self._pending_kronos:
             await self._flush_kronos_batch()
@@ -828,6 +851,18 @@ class MarketScanner:
             self._append_signal_log(signal, status="rejected", reason=risk_reason)
             return
 
+        # Collect-first: don't finish yet. Defer Kronos/volume/vision until the
+        # full scan has drained, then rank the pool by R:R and finish only the
+        # top-N. The Kronos rank sleeve keeps its own top-K path (skipped here).
+        if self._collect_first and not is_kronos_rank_signal(signal):
+            self._collect_pool.append((signal, pattern, candle))
+            return
+
+        await self._kronos_then_finish(signal, pattern, candle)
+
+    async def _kronos_then_finish(
+        self, signal: TradeSignal, pattern: BasePattern | None = None, candle=None,
+    ) -> None:
         # Step 0b — Kronos 3d confirm gate. Sequential unless Batch Kronos.
         # Skip for pattern_kronos_rank — the forecast *is* the entry signal.
         if self._kronos_gate and not is_kronos_rank_signal(signal):
@@ -861,6 +896,65 @@ class MarketScanner:
                 f"pred_3d={gate.pred_1w:+.2%} in 3d | {gate.reason}"
             )
         return True
+
+    async def _flush_collect_first(self) -> None:
+        """Rank the collected chart-pattern signals by R:R; finish the top-N."""
+        if not self._collect_first or not self._collect_pool:
+            return
+        pool = self._collect_pool
+        self._collect_pool = []
+
+        # One entry per (symbol, timeframe) — keep the highest R:R signal.
+        best: dict[tuple[str, str], tuple[TradeSignal, BasePattern | None, object]] = {}
+        for signal, pattern, candle in pool:
+            key = (signal.symbol, signal.timeframe)
+            rr = signal_reward_risk(signal)
+            existing = best.get(key)
+            if existing is None:
+                best[key] = (signal, pattern, candle)
+                continue
+            existing_rr = signal_reward_risk(existing[0])
+            if rr is not None and (existing_rr is None or rr > existing_rr):
+                best[key] = (signal, pattern, candle)
+
+        def _sort_key(item):
+            rr = signal_reward_risk(item[0])
+            return (
+                rr is None,
+                -(rr if rr is not None else 0.0),
+                -float(item[0].confidence),
+                item[0].symbol,
+            )
+
+        ranked = sorted(best.values(), key=_sort_key)
+        selected = ranked[: self._collect_first_top_n]
+        rejected = ranked[self._collect_first_top_n :]
+
+        self.stats["collect_first_ranked"] = self.stats.get("collect_first_ranked", 0) + len(ranked)
+        self.stats["collect_first_selected"] = self.stats.get("collect_first_selected", 0) + len(selected)
+
+        log.info(
+            f"Collect-first | {len(ranked)} ranked by R:R, "
+            f"selected top {len(selected)} of {self._collect_first_top_n}"
+        )
+
+        for signal, _pattern, _candle in rejected:
+            self.stats["signals_rejected"] += 1
+            self._append_signal_log(
+                signal,
+                status="rejected",
+                reason=(
+                    f"Collect-first: R:R ranked below top "
+                    f"{self._collect_first_top_n} this scan."
+                ),
+            )
+
+        for signal, pattern, candle in selected:
+            log.info(
+                f"Collect-first | selected {signal.symbol} {signal.pattern} "
+                f"R:R={signal_reward_risk(signal):.2f}"
+            )
+            await self._kronos_then_finish(signal, pattern, candle)
 
     async def _flush_kronos_batch(self) -> None:
         pending = self._pending_kronos

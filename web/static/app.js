@@ -534,6 +534,10 @@ function initPaper() {
       ) && !!(document.getElementById(`${id}-kronos-batch`) || {}).checked,
       volume_gate: !!(document.getElementById(`${id}-volume`) || {}).checked,
       pattern_only: !!(document.getElementById(`${id}-pattern-only`) || {}).checked,
+      collect_first: !!(document.getElementById(`${id}-collect-first`) || {}).checked,
+      collect_first_top_n: Number(
+        (document.getElementById(`${id}-collect-first-top-n`) || {}).value || 4
+      ),
       stream_start: (document.getElementById(`${id}-stream-start`) || {}).value || null,
     };
   }
