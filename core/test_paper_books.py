@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 import threading
 import tempfile
 import time
@@ -311,6 +312,27 @@ def test_kronos_infer_lock_does_not_overlap():
     t1.join()
     t2.join()
     assert overlap == []
+
+
+def test_port_open_works_inside_running_event_loop() -> None:
+    """CLI `--paper --stream` already owns a loop; probe must not asyncio.run."""
+    srv = socket.socket()
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    host, port = srv.getsockname()[:2]
+    try:
+        async def _check() -> bool:
+            return PaperBook._port_open(host, port)
+
+        assert asyncio.run(_check()) is True
+    finally:
+        srv.close()
+
+    async def _closed() -> bool:
+        return PaperBook._port_open(host, port)
+
+    assert asyncio.run(_closed()) is False
 
 
 def test_ensure_stream_server_passes_history_url() -> None:

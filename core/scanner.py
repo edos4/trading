@@ -188,11 +188,6 @@ class MarketScanner:
         self._sim_days: int = 0
         self._dead_symbols: set[str] = set()
         self._thin_logged: set[tuple[str, str]] = set()
-        # Signal detected on bar i, filled on bar i+1's close — mirrors the
-        # backtester's pending_entry deferral (core/backtester.py) so paper/
-        # live trading isn't more optimistic than the backtest that validated
-        # the strategy (filling on the very candle whose close triggered it).
-        self._pending_entries: dict[tuple[str, str], TradeSignal] = {}
         # Same (symbol, pattern) → (exit_bar_count, was_loss) cooldown map the
         # backtester uses — without this, paper re-entered losers immediately
         # while backtests waited cooldown_bars. Seed from the persisted ledger
@@ -798,24 +793,6 @@ class MarketScanner:
         if not is_new_bar:
             return new_closed_daily, None
 
-        pending = self._pending_entries.pop((symbol, timeframe), None)
-        if pending is not None and self._paper is not None:
-            opened, fill_reason = self._paper.open_position(
-                pending, snapshot.candle, self._store
-            )
-            if opened:
-                self.stats["trades_opened"] += 1
-                self._append_signal_log(
-                    pending, status="filled", reason=fill_reason,
-                )
-            elif fill_reason.startswith("Session "):
-                self._pending_entries[(symbol, timeframe)] = pending
-            else:
-                self.stats["signals_rejected"] += 1
-                self._append_signal_log(
-                    pending, status="rejected", reason=fill_reason,
-                )
-
         if self._has_ready_pattern(symbol, timeframe):
             return new_closed_daily, snapshot
         return new_closed_daily, None
@@ -1260,37 +1237,22 @@ class MarketScanner:
                 return
 
         # Step 3 — Place the order (disabled while IBKR is commented out).
-        # Not filled here: queued to fill on this symbol's *next* new bar,
-        # same one-bar deferral the backtester's pending_entry uses — see
-        # self._pending_entries.
+        # Fill on the signal bar's close — same signal-bar entry as the
+        # backtester (not next-bar deferred entry).
         if self._paper is not None and candle is not None:
-            # The signal bar is one bar before the deferred fill. Carry its
-            # identity into the position so event-based time stops (notably
-            # neckline/channel exits) start from the breakout bar.
-            self._pending_entries[(signal.symbol, signal.timeframe)] = signal
-            extras = (
-                f"{', Kronos' if self._kronos_gate else ''}"
-                f"{', volume' if self._volume_gate else ''}"
+            opened, fill_reason = self._paper.open_position(
+                signal, candle, self._store,
             )
-            if self._pattern_only:
-                accept_reason = (
-                    f"Pattern-only: structure filters skipped "
-                    f"(confidence {signal.confidence:.2f}{extras}). "
-                    f"Queued to fill on the next new {signal.timeframe} bar "
-                    f"close — same one-bar deferral as the backtester."
+            if opened:
+                self.stats["trades_opened"] += 1
+                self._append_signal_log(
+                    signal, status="filled", reason=fill_reason,
                 )
             else:
-                accept_reason = (
-                    f"Cleared entry gates (confidence {signal.confidence:.2f}, "
-                    f"SMA200 regime, cooldown{extras}). "
-                    f"Queued to fill on the next new {signal.timeframe} bar "
-                    f"close — same one-bar deferral as the backtester."
+                self.stats["signals_rejected"] += 1
+                self._append_signal_log(
+                    signal, status="rejected", reason=fill_reason,
                 )
-            self._append_signal_log(
-                signal,
-                status="accepted",
-                reason=accept_reason,
-            )
         else:
             log.info(
                 f"Signal APPROVED (IBKR disabled) — would {signal.action} "

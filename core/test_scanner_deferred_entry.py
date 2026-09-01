@@ -1,6 +1,5 @@
-"""Smallest possible check that a live/paper signal fills one bar late —
-same one-bar deferral core/backtester.py's pending_entry gives backtests —
-instead of the same candle whose close produced the signal."""
+"""Smallest possible check that a live/paper signal fills on the signal bar —
+same signal-bar entry core/backtester.py uses — not one bar late."""
 
 import asyncio
 import tempfile
@@ -101,24 +100,26 @@ def _demo_body():
     scanner._patterns = [_FirstBarBuyPattern()]
 
     asyncio.run(scanner._scan_all())
-    assert "TEST" not in paper.positions, (
-        "signal on bar 1 must NOT fill on bar 1 (same-bar execution)"
+    assert "TEST" in paper.positions, (
+        "signal on bar 1 must fill on bar 1 (signal-bar execution)"
+    )
+    assert paper.positions["TEST"].entry_price == 100.0, (
+        f"expected fill at bar 1's close (100.0), got {paper.positions['TEST'].entry_price}"
     )
     assert scanner._last_bar_ts.get(("TEST", "1d")) == date(2024, 1, 2)
 
     feed.bar = 1
     asyncio.run(scanner._scan_all())
-    assert "TEST" in paper.positions, "signal on bar 1 must fill on bar 2"
-    assert paper.positions["TEST"].entry_price == 110.0, (
-        f"expected fill at bar 2's close (110.0), got {paper.positions['TEST'].entry_price}"
+    assert paper.positions["TEST"].entry_price == 100.0, (
+        "bar 2 must not re-fill or change the entry price"
     )
 
     # Same session date, later last-print time is not a new daily bar.
     feed.candles[1] = _candle(112.0, datetime(2024, 1, 3, 18, 0, tzinfo=ZoneInfo("America/New_York")))
     asyncio.run(scanner._scan_all())
-    assert paper.positions["TEST"].entry_price == 110.0
+    assert paper.positions["TEST"].entry_price == 100.0
 
-    print("deferred entry fill: all checks passed")
+    print("signal-bar entry fill: all checks passed")
 
 
 def test_ph_reference_symbol_prefers_bdo():
@@ -159,7 +160,7 @@ def test_scanner_seeds_cooldown_from_closed_paper():
         action="BUY", price=5.0, confidence=0.9, qty=1,
     )
     assert not passes_cooldown(signal, 25, scanner._cooldown_tracker)
-    assert passes_cooldown(signal, 30, scanner._cooldown_tracker)
+    assert passes_cooldown(signal, 40, scanner._cooldown_tracker)
 
 
 def test_scanner_drops_no_data_but_retries_history_unavailable():

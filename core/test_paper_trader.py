@@ -363,13 +363,13 @@ def test_us_paper_keeps_engine_breakeven():
         ok, reason = acct.open_position(signal, candle, _EmptyStore())
         assert ok, reason
         pos = acct.positions["AAPL"]
-        assert pos.breakeven_trigger_pct == 0.03
+        assert pos.breakeven_trigger_pct == 0.06
         assert pos.breakeven_buffer_pct == 0.0015
         assert pos.profit_take_pct is None
         assert pos.profit_lock_frac == 0.5
-        # entry=100, stop=94 → risk_pct=0.06; trigger_r=1.0 → resolved
-        # per-trade trigger = 1.0 * 0.06 = 0.06 (must be up 1R before arming).
-        assert pos.profit_lock_trigger_pct == 0.06
+        # entry=100, stop=94 → risk_pct=0.06; trigger_r=0.4 → resolved
+        # per-trade trigger = 0.4 * 0.06 = 0.024 (arm after +0.4R).
+        assert pos.profit_lock_trigger_pct == 0.024
     finally:
         settings.min_position_notional = old_min
 

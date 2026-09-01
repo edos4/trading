@@ -14,6 +14,8 @@ EXIT_REASON_LABELS = {
     "trailing_stop": "Trail",
     "time_exit": "Time",
     "breakeven_stop": "BE",
+    "first_bar_invalidation": "Bar1",
+    "dead_trade_exit": "Dead",
 }
 
 _PATTERN_RE = re.compile(r"^pattern_(\d+)_(.+)$")

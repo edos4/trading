@@ -225,7 +225,7 @@ def test_prearmed_trail_gap_still_fills_at_open():
     assert price == 101
 
 
-def test_deferred_neckline_time_stop_starts_on_signal_bar():
+def test_signal_bar_neckline_time_stop_starts_on_signal_bar():
     from core.backtester import _open_trade
     from patterns.base_pattern import TradeSignal
 
@@ -241,13 +241,41 @@ def test_deferred_neckline_time_stop_starts_on_signal_bar():
         open=101, high=105, low=100, close=102, volume=1000,
         timestamp=datetime(2026, 1, 12, tzinfo=timezone.utc),
     )
-    position = _open_trade(signal, fill, bar_idx=11)
-    assert position.entry_bar_idx == 11
+    position = _open_trade(signal, fill, bar_idx=10)
+    assert position.entry_bar_idx == 10
     assert position.neckline_break_bar_idx == 10
 
-    # Three bars after the signal bar is the time-stop, even though the fill
-    # itself occurred on the following bar.
+    # Three bars after the signal bar is the time-stop on signal-bar entry.
     later = _candle(102, 103, 101, 102)
-    price, reason = _check_exit(later, position, bar_idx=13, min_hold_bars=0)
+    price, reason = _check_exit(
+        later, position, bar_idx=13, min_hold_bars=0, dead_trade_flatten_bars=0,
+    )
     assert reason == "time_exit"
     assert price == 102
+
+
+def test_first_bar_invalidation_exits_on_bar_one_close():
+    trade = _trade("BUY", 100.0, 90.0, 120.0)
+    trade.entry_bar_idx = 5
+    candle = _candle(99.5, 100.0, 99.0, 98.5)
+    price, reason = _check_exit(candle, trade, bar_idx=6, min_hold_bars=2)
+    assert reason == "first_bar_invalidation"
+    assert price == 98.5
+
+
+def test_first_bar_invalidation_skips_favorable_bar_one_close():
+    trade = _trade("BUY", 100.0, 90.0, 120.0)
+    trade.entry_bar_idx = 5
+    candle = _candle(100.5, 101.0, 100.0, 100.5)
+    price, reason = _check_exit(candle, trade, bar_idx=6, min_hold_bars=2)
+    assert reason != "first_bar_invalidation"
+
+
+def test_dead_trade_exit_flattens_at_bar_three_without_mfe():
+    trade = _trade("BUY", 100.0, 90.0, 120.0)
+    trade.entry_bar_idx = 5
+    trade._best_pnl_pct = 0.001
+    candle = _candle(99.0, 99.5, 98.5, 99.0)
+    price, reason = _check_exit(candle, trade, bar_idx=8, min_hold_bars=2)
+    assert reason == "dead_trade_exit"
+    assert price == 99.0

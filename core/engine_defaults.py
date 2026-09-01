@@ -33,7 +33,9 @@ class EngineDefaults:
     # Allow BUY/SELL within this band of SMA200 (1.5% near-misses); still
     # block names 20%+ the wrong side of the average.
     regime_hysteresis_pct: float = 0.015
-    cooldown_bars: int = 10
+    # Post stop_loss on same symbol (any pattern). 10 bars let CSL/DHI chop
+    # 0/3 and 1/3 for −$805/−$884; raised to 20 after 2026-09-01 review.
+    cooldown_bars: int = 20
     txn_cost_pct: float = 0.001
     position_sizing: str = "risk"
     account_value: float = 100_000.0
@@ -97,7 +99,20 @@ class EngineDefaults:
     # room to run toward their measured-move target while still trimming
     # giveback once a trade is unambiguously working. 0 / None = arm on
     # any positive MFE (the old too-eager behavior).
-    profit_lock_trigger_r: float | None = 1.0
+    # 2026-09-01 paper: 33 trades went green (MFE ≥ +1%) then closed red
+    # (−$7,075); none reached +1R so the lock never armed. 0.4R (~+4% on a
+    # 10% stop) arms earlier without capping take_profit tails (+$6,367 on
+    # seven +19% / +2.0R hits). profit_take_pct stays off.
+    profit_lock_trigger_r: float | None = 0.4
+    # Fill on the signal bar; if the next session closes against entry, exit
+    # at that close (bar 1). Not deferred entry — keeps STAA-style bar-1
+    # take-profits while dumping ICLR-style gap losers before the 10% stop.
+    # Legal on bar 1 (min_hold_bars does not apply).
+    first_bar_invalidation_enabled: bool = True
+    # Backstop: 49 trades never printed MFE > 0.15% through bar 3 (WR 8%,
+    # −$14,687). Flatten at bar-3 close saves ~$3,500 vs the 8-bar time stop.
+    dead_trade_flatten_bars: int = 3
+    dead_trade_mfe_threshold_pct: float = 0.0015
     # Empty on purpose. 006/007 used to skip SMA200 (shorts of strength /
     # longs of weakness) and then dominated the losing paper book. They are
     # disabled by default; --pattern isolation still gets the regime filter.

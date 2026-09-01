@@ -21,7 +21,9 @@ class DiscoverPatternsDisabledTests(unittest.TestCase):
 
         losers = {
             "pattern_002_double_top",
+            "pattern_004_rounding_bottom",
             "pattern_006_upward_channel",
+            "pattern_007_descending_channel",
             "pattern_008_head_and_shoulders",
             "pattern_009_flag_pattern",
             "pattern_011_breakout_retest",
@@ -31,7 +33,7 @@ class DiscoverPatternsDisabledTests(unittest.TestCase):
         names = {p.name for p in discover_patterns()}
         self.assertTrue(losers.isdisjoint(names))
         self.assertIn("pattern_003_double_bottom", names)
-        self.assertIn("pattern_007_descending_channel", names)
+        self.assertNotIn("pattern_007_descending_channel", names)
 
     def test_explicit_disabled_list_overrides_config(self):
         all_names = {p.name for p in discover_patterns(disabled_patterns=[])}
