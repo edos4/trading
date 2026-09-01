@@ -92,6 +92,32 @@ class OHLCVStore:
         self._store[key] = deque(candles[-self._window :], maxlen=self._window)
         self._bump(key)
 
+    def apply_candle(self, symbol: str, timeframe: str, candle: OHLCVCandle) -> None:
+        """Append a new bar, or replace the last bar when the timestamp matches.
+
+        Paper-stream delta snapshots send only the current as-of candle after
+        the first full history fill. Same-timestamp updates are in-progress
+        reprints of the bar already stored (do not duplicate).
+        """
+        key = (symbol, timeframe)
+        if key not in self._store:
+            self._store[key] = deque(maxlen=self._window)
+        candles = self._store[key]
+        if (
+            candles
+            and candle.timestamp is not None
+            and candles[-1].timestamp == candle.timestamp
+        ):
+            candles[-1] = candle
+        else:
+            candles.append(candle)
+        self._bump(key)
+
+    def copy_candles(self, symbol: str, timeframe: str) -> list[OHLCVCandle]:
+        """Snapshot of stored bars for off-loop pattern.analyze() workers."""
+        candles = self._store.get((symbol, timeframe))
+        return list(candles) if candles else []
+
     def get_df(
         self, symbol: str, timeframe: str, min_bars: int = 2
     ) -> pd.DataFrame | None:

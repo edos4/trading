@@ -13,9 +13,14 @@ Every SCAN_INTERVAL_SECONDS it:
         d. Risk gates (ATR trail / R:R) then Kronos/vision; queue pending
            for next closed bar fill (same deferral as the backtester)
 
-Concurrency: symbols are processed in parallel across N MCP sessions
-(one session per worker, controlled by scanner_concurrency setting).
-A tqdm progress bar shows scan progress on the CLI.
+Concurrency: symbols are processed in parallel across N feed sessions
+(one session per worker, controlled by scanner_concurrency). Paper stream
+uses batch snapshots (papertrade_stream_batch_size) so each worker's
+round-trip covers many symbols; after the first fill only the new candle
+is sent. pattern.analyze() runs in a spawn process pool
+(scanner_analyze_workers) against a copied candle list — the paper ledger
+and Kronos/vision gates stay on this loop. A tqdm progress bar shows
+scan progress on the CLI.
 """
 
 from __future__ import annotations
@@ -107,7 +112,11 @@ class MarketScanner:
         from data.edgar_client import set_skip_edgar
 
         set_skip_edgar(profile.skip_edgar)
-        self._scan_interval = scan_interval_seconds or profile.scan_interval_seconds
+        self._scan_interval = (
+            profile.scan_interval_seconds
+            if scan_interval_seconds is None
+            else int(scan_interval_seconds)
+        )
         # None → follow settings; explicit True/False lets UI/CLI override for a session.
         self._kronos_gate = (
             profile.kronos_gate_default if kronos_gate is None else kronos_gate
@@ -151,6 +160,8 @@ class MarketScanner:
             self._paper.pattern_only = self._pattern_only
         self._patterns: list[BasePattern] = []
         self._pattern_files: dict[str, str] = {}
+        self._analyze_pool = None
+        self._analyze_workers = 1
         self._running = False
         # Last *session* bar identity per (symbol, timeframe) — daily/weekly
         # keys are session dates, not last-print timestamps, so hourly scans
@@ -320,6 +331,7 @@ class MarketScanner:
         self._init_patterns_detected_file()
         for p in self._patterns:
             p.on_start()
+        self._open_analyze_pool()
         self._running = True
         log.info(
             f"Scanner started | "
@@ -330,22 +342,53 @@ class MarketScanner:
             f"kronos_batch={'ON' if self._kronos_batch else 'OFF'} | "
             f"volume_gate={'ON' if self._volume_gate else 'OFF'} | "
             f"collect_first={'ON' if self._collect_first else 'OFF'} | "
+            f"analyze_workers={self._analyze_workers} | "
             f"interval={self._scan_interval}s"
         )
 
     def stop(self) -> None:
         self._running = False
+        self._close_analyze_pool()
         for p in self._patterns:
             p.on_stop()
         # self._client.disconnect()
         log.info("Scanner stopped")
 
+    def _open_analyze_pool(self) -> None:
+        from core.pattern_jobs import analyze_worker_count, make_analyze_pool
+
+        self._close_analyze_pool()
+        n = analyze_worker_count()
+        self._analyze_workers = n
+        self._analyze_pool = make_analyze_pool(
+            disabled=self._disabled_patterns,
+            session_tz=get_market(self._market).session_tz,
+            skip_edgar=get_market(self._market).skip_edgar,
+            window=max(DEFAULT_WINDOW, settings.tv_history_days),
+            workers=n,
+        )
+        if self._analyze_pool is not None:
+            log.info(f"Scanner | pattern analyze pool: {n} spawn workers")
+
+    def _close_analyze_pool(self) -> None:
+        pool = self._analyze_pool
+        self._analyze_pool = None
+        if pool is None:
+            return
+        try:
+            pool.shutdown(wait=False, cancel_futures=True)
+        except TypeError:
+            pool.shutdown(wait=False)
+
     async def _sleep_until_next_scan(self) -> None:
         """Sleep only the unused remainder of the scan interval.
 
-        Stream replay already advances once per completed scan. Sleeping a
-        full 60s after a 111s scan just idles the replay.
+        Stream replay already advances once per completed scan. Interval 0
+        means scan-paced (no leftover sleep). Sleeping a full 60s after a
+        long scan just idles the replay.
         """
+        if self._scan_interval <= 0:
+            return
         elapsed = float(self.stats.get("scan_duration_s") or 0.0)
         remaining = self._scan_interval - elapsed
         if remaining > 0:
@@ -375,6 +418,41 @@ class MarketScanner:
         self._dead_symbols.add(symbol)
         self.stats["dead_symbols"] = len(self._dead_symbols)
         log.warning(f"Scan | drop {symbol} for this run — {reason}")
+
+    def _note_fetch_skip(self, symbol: str, exc: FetchSkip) -> None:
+        if exc.code == "no_data":
+            self._note_dead_symbol(symbol, str(exc))
+        elif exc.code == "asof_mismatch":
+            self.stats["asof_skipped"] += 1
+        else:
+            # history_unavailable and other transients: skip this cycle.
+            self.stats["snapshot_errors"] += 1
+
+    def _feed_worker_count(self) -> int:
+        n = max(len(self._symbols), 1)
+        conc = min(settings.scanner_concurrency, n)
+        fetch_many = getattr(self._tv, "fetch_snapshots", None)
+        batch = int(getattr(self._tv, "snapshot_batch_size", 1) or 1)
+        if fetch_many is None or batch <= 1:
+            return conc
+        n_batches = max(1, (n + batch - 1) // batch)
+        return min(conc, n_batches)
+
+    async def _preload_feed(self, feed_sessions: list | None) -> None:
+        preload = getattr(self._tv, "preload_universe", None)
+        if preload is None:
+            return
+        session = feed_sessions[0] if feed_sessions else None
+        try:
+            summary = await preload(self._symbols, session)
+        except Exception:
+            log.exception("Scanner | universe preload failed — scan will lazy-load")
+            return
+        if summary:
+            log.info(
+                f"Scan | preloaded tapes loaded={summary.get('loaded')} "
+                f"empty={summary.get('empty')} unavailable={summary.get('unavailable')}"
+            )
 
     def _pin_candidates(self) -> list[str]:
         """Liquid names first; skip symbols already dropped as dead."""
@@ -407,11 +485,12 @@ class MarketScanner:
     # ── Main async loop ────────────────────────────────────────────────────────
     async def run(self) -> None:
         self.start()
-        n_workers = min(settings.scanner_concurrency, max(len(self._symbols), 1))
+        n_workers = self._feed_worker_count()
         try:
             while self._running:
                 try:
                     async with self._open_feed_sessions(n_workers) as sessions:
+                        await self._preload_feed(sessions)
                         while self._running:
                             try:
                                 if self._paper is not None:
@@ -431,7 +510,9 @@ class MarketScanner:
                     log.exception(
                         "Scanner | failed to open data sessions — retrying next interval"
                     )
-                    await asyncio.sleep(self._scan_interval)
+                    await asyncio.sleep(
+                        self._scan_interval if self._scan_interval > 0 else 1.0
+                    )
         finally:
             self.stop()
 
@@ -468,11 +549,20 @@ class MarketScanner:
         for p in self._patterns:
             all_timeframes.update(p.timeframes)
 
+        fetch_many = getattr(self._tv, "fetch_snapshots", None)
+        batch_size = 1
+        if fetch_many is not None:
+            batch_size = max(1, int(getattr(self._tv, "snapshot_batch_size", 1) or 1))
         concurrency = settings.scanner_concurrency
         log.info(
             f"Scan | {len(self._symbols)} symbols x {len(all_timeframes)} timeframes "
             f"({sorted(all_timeframes)}) x {len(self._patterns)} patterns | "
             f"concurrency={concurrency}"
+            + (f" batch={batch_size}" if batch_size > 1 else "")
+            + (
+                f" analyze_pool={self._analyze_workers}"
+                if self._analyze_pool is not None else " analyze=inline"
+            )
         )
 
         # Latest detected signal per (symbol, timeframe) — unused for disk
@@ -492,157 +582,88 @@ class MarketScanner:
 
         pbar = tqdm(total=len(self._symbols), desc="Scanning", unit="sym", ncols=80)
 
-        async def _drain(mcp) -> None:
-            nonlocal new_closed_daily
-            while True:
+        def _take_batch() -> list[str]:
+            batch: list[str] = []
+            take = batch_size if fetch_many is not None else 1
+            while len(batch) < take:
                 try:
                     symbol = queue.get_nowait()
                 except asyncio.QueueEmpty:
-                    return
+                    break
                 if symbol in self._dead_symbols:
                     pbar.update(1)
                     continue
+                batch.append(symbol)
+            return batch
 
-                for timeframe in all_timeframes:
-                    self.stats["timeframe_requests"] += 1
-                    try:
-                        snapshot = await self._tv.fetch_snapshot(
-                            symbol, timeframe,
-                            store=self._store, mcp_session=mcp,
-                        )
-                    except FetchSkip as exc:
-                        if exc.code == "no_data":
-                            self._note_dead_symbol(symbol, str(exc))
-                        elif exc.code == "asof_mismatch":
-                            self.stats["asof_skipped"] += 1
-                        else:
-                            # history_unavailable and other transients: skip
-                            # this cycle, retry the symbol on the next scan.
-                            self.stats["snapshot_errors"] += 1
-                        continue
-                    except Exception as exc:
-                        self.stats["snapshot_errors"] += 1
-                        log.warning(
-                            f"Scan | snapshot failed {symbol} {timeframe}: {exc}"
-                        )
-                        continue
-                    if snapshot is None:
-                        self.stats["snapshot_errors"] += 1
-                        continue
-                    self.stats["timeframe_snapshots_ok"] += 1
-                    # Count a symbol once if at least one timeframe produced a
-                    # usable snapshot in this cycle.
-                    self._scan_snapshot_symbols.add(symbol)
+        async def _apply_result(symbol: str, timeframe: str, result) -> MarketSnapshot | None:
+            nonlocal new_closed_daily
+            self.stats["timeframe_requests"] += 1
+            if isinstance(result, FetchSkip):
+                self._note_fetch_skip(symbol, result)
+                return None
+            if result is None:
+                self.stats["snapshot_errors"] += 1
+                return None
+            closed, pending = self._apply_bar(symbol, timeframe, result)
+            if closed:
+                new_closed_daily = True
+            return pending
 
-                    bar_key = (symbol, timeframe)
-                    bar_ts = snapshot.candle.timestamp
-                    identity = bar_identity(
-                        timeframe, bar_ts, market=self._market,
-                    )
-                    closed_bar = is_closed_session_bar(
-                        timeframe, bar_ts, market=self._market,
-                    )
-                    identity_key = repr(identity) if identity is not None else None
-                    persisted_key = self._persisted_bar_ids.get(f"{symbol}|{timeframe}")
-                    is_new_bar = (
-                        closed_bar
-                        and identity is not None
-                        and self._last_bar_ts.get(bar_key) != identity
-                        and identity_key != persisted_key
-                    )
-                    if identity is not None and closed_bar:
-                        self._last_bar_ts[bar_key] = identity
-                        if identity_key is not None and self._paper is not None:
-                            self._paper.mark_bar_processed(symbol, timeframe, identity_key)
-                            self._persisted_bar_ids[f"{symbol}|{timeframe}"] = identity_key
-                    if is_new_bar and bar_ts is not None:
-                        self.stats["new_bars"] += 1
-                        # One simulated day per unique daily session, not one
-                        # day per symbol or per timeframe.
-                        if is_swing_timeframe(timeframe) and not is_weekly_timeframe(timeframe):
-                            local_ts = bar_ts.astimezone(
-                                ZoneInfo(get_market(self._market).session_tz)
+        async def _drain(mcp) -> None:
+            while True:
+                batch = _take_batch()
+                if not batch:
+                    return
+                pending: list[MarketSnapshot] = []
+                if fetch_many is not None:
+                    for timeframe in all_timeframes:
+                        try:
+                            results = await fetch_many(
+                                batch, timeframe,
+                                store=self._store, mcp_session=mcp,
                             )
-                            session_date = local_ts.strftime("%Y-%m-%d")
-                            self._scan_daily_dates.add(session_date)
-                            self._sim_day_keys.add(session_date)
-                            self._sim_days = len(self._sim_day_keys)
-                            self.stats["sim_days"] = self._sim_days
-                    if (
-                        is_new_bar
-                        and is_swing_timeframe(timeframe)
-                        and not is_weekly_timeframe(timeframe)
-                    ):
-                        new_closed_daily = True
-
-                    if self._paper is not None:
-                        closed = self._paper.on_bar(
-                            symbol, snapshot.candle, timeframe, is_new_bar,
-                        )
-                        if closed is not None:
-                            bar_idx = self._paper.bar_count(
-                                closed.symbol, closed.timeframe,
+                        except Exception as exc:
+                            self.stats["snapshot_errors"] += len(batch)
+                            log.warning(f"Scan | batch snapshot failed: {exc}")
+                            break
+                        for symbol in batch:
+                            snap = await _apply_result(
+                                symbol, timeframe, (results or {}).get(symbol),
                             )
-                            self._cooldown_tracker[
-                                (closed.symbol, closed.pattern)
-                            ] = (bar_idx, closed.pnl < 0)
-
-                    if not is_new_bar:
-                        # Forming 1d/1w bar (cash session still open) or same
-                        # closed session as last scan — skip detect/fill.
-                        continue
-
-                    pending = self._pending_entries.pop((symbol, timeframe), None)
-                    if pending is not None and self._paper is not None:
-                        opened, fill_reason = self._paper.open_position(
-                            pending, snapshot.candle, self._store
-                        )
-                        if opened:
-                            self.stats["trades_opened"] += 1
-                            self._append_signal_log(
-                                pending, status="filled", reason=fill_reason,
-                            )
-                        elif fill_reason.startswith("Session "):
-                            # Live PH after hours: keep the deferred fill for
-                            # the next AM/PM session. Stream replay sets
-                            # assume_session_open so this branch is unused.
-                            self._pending_entries[(symbol, timeframe)] = pending
-                        else:
-                            self.stats["signals_rejected"] += 1
-                            self._append_signal_log(
-                                pending, status="rejected", reason=fill_reason,
-                            )
-
-                    n_bars = self._store.available(symbol, timeframe)
-                    for pattern in self._patterns:
-                        if timeframe not in pattern.timeframes:
-                            continue
-                        min_bars = max(
-                            int(getattr(pattern, "MIN_BARS", 2) or 2),
-                            PATTERN_SCAN_HISTORY_BARS,
-                        )
-                        if n_bars < min_bars:
-                            if (symbol, timeframe) not in self._thin_logged:
-                                self._thin_logged.add((symbol, timeframe))
-                                log.debug(
-                                    f"Scan | {symbol} {timeframe} has {n_bars} bars "
-                                    f"(need {min_bars}) — skip patterns this run"
+                            if snap is not None:
+                                pending.append(snap)
+                else:
+                    for symbol in batch:
+                        for timeframe in all_timeframes:
+                            try:
+                                snapshot = await self._tv.fetch_snapshot(
+                                    symbol, timeframe,
+                                    store=self._store, mcp_session=mcp,
                                 )
-                            continue
-                        self.stats["pattern_evaluations"] += 1
-                        signal = pattern.analyze(snapshot, self._store)
-                        if signal:
-                            self.stats["patterns_found"] += 1
-                            self._record_detection(signal)
-                            await self._process_signal(signal, pattern, snapshot.candle)
-
-                pbar.update(1)
+                            except FetchSkip as exc:
+                                self.stats["timeframe_requests"] += 1
+                                self._note_fetch_skip(symbol, exc)
+                                continue
+                            except Exception as exc:
+                                self.stats["timeframe_requests"] += 1
+                                self.stats["snapshot_errors"] += 1
+                                log.warning(
+                                    f"Scan | snapshot failed {symbol} {timeframe}: {exc}"
+                                )
+                                continue
+                            snap = await _apply_result(symbol, timeframe, snapshot)
+                            if snap is not None:
+                                pending.append(snap)
+                if pending:
+                    await self._run_analyzes(pending)
+                pbar.update(len(batch))
 
         async def _owned_session_worker() -> None:
             async with self._tv.mcp_session() as mcp:
                 await _drain(mcp)
 
-        n_workers = min(concurrency, len(self._symbols))
+        n_workers = min(self._feed_worker_count(), max(len(self._symbols), 1))
         if feed_sessions:
             workers = [_drain(mcp) for mcp in feed_sessions[:n_workers]]
         else:
@@ -700,6 +721,187 @@ class MarketScanner:
         self.stats["last_scan_at"] = datetime.now(timezone.utc).isoformat()
         self.stats["scan_duration_s"] = round(time.monotonic() - scan_start, 2)
         log.info("Scan complete")
+
+    def _apply_bar(self, symbol: str, timeframe: str, snapshot) -> tuple[bool, MarketSnapshot | None]:
+        """Ledger + bar identity on the scan loop. Snapshot if patterns should run."""
+        self.stats["timeframe_snapshots_ok"] += 1
+        self._scan_snapshot_symbols.add(symbol)
+
+        bar_key = (symbol, timeframe)
+        bar_ts = snapshot.candle.timestamp
+        identity = bar_identity(
+            timeframe, bar_ts, market=self._market,
+        )
+        closed_bar = is_closed_session_bar(
+            timeframe, bar_ts, market=self._market,
+        )
+        identity_key = repr(identity) if identity is not None else None
+        persisted_key = self._persisted_bar_ids.get(f"{symbol}|{timeframe}")
+        is_new_bar = (
+            closed_bar
+            and identity is not None
+            and self._last_bar_ts.get(bar_key) != identity
+            and identity_key != persisted_key
+        )
+        if identity is not None and closed_bar:
+            self._last_bar_ts[bar_key] = identity
+            if identity_key is not None and self._paper is not None:
+                self._paper.mark_bar_processed(symbol, timeframe, identity_key)
+                self._persisted_bar_ids[f"{symbol}|{timeframe}"] = identity_key
+        new_closed_daily = False
+        if is_new_bar and bar_ts is not None:
+            self.stats["new_bars"] += 1
+            if is_swing_timeframe(timeframe) and not is_weekly_timeframe(timeframe):
+                local_ts = bar_ts.astimezone(
+                    ZoneInfo(get_market(self._market).session_tz)
+                )
+                session_date = local_ts.strftime("%Y-%m-%d")
+                self._scan_daily_dates.add(session_date)
+                self._sim_day_keys.add(session_date)
+                self._sim_days = len(self._sim_day_keys)
+                self.stats["sim_days"] = self._sim_days
+                new_closed_daily = True
+
+        if self._paper is not None:
+            closed = self._paper.on_bar(
+                symbol, snapshot.candle, timeframe, is_new_bar,
+            )
+            if closed is not None:
+                bar_idx = self._paper.bar_count(
+                    closed.symbol, closed.timeframe,
+                )
+                self._cooldown_tracker[
+                    (closed.symbol, closed.pattern)
+                ] = (bar_idx, closed.pnl < 0)
+
+        if not is_new_bar:
+            return new_closed_daily, None
+
+        pending = self._pending_entries.pop((symbol, timeframe), None)
+        if pending is not None and self._paper is not None:
+            opened, fill_reason = self._paper.open_position(
+                pending, snapshot.candle, self._store
+            )
+            if opened:
+                self.stats["trades_opened"] += 1
+                self._append_signal_log(
+                    pending, status="filled", reason=fill_reason,
+                )
+            elif fill_reason.startswith("Session "):
+                self._pending_entries[(symbol, timeframe)] = pending
+            else:
+                self.stats["signals_rejected"] += 1
+                self._append_signal_log(
+                    pending, status="rejected", reason=fill_reason,
+                )
+
+        if self._has_ready_pattern(symbol, timeframe):
+            return new_closed_daily, snapshot
+        return new_closed_daily, None
+
+    def _has_ready_pattern(self, symbol: str, timeframe: str) -> bool:
+        n_bars = self._store.available(symbol, timeframe)
+        logged = False
+        ready = False
+        for pattern in self._patterns:
+            if timeframe not in pattern.timeframes:
+                continue
+            min_bars = max(
+                int(getattr(pattern, "MIN_BARS", 2) or 2),
+                PATTERN_SCAN_HISTORY_BARS,
+            )
+            if n_bars < min_bars:
+                if (
+                    not logged
+                    and (symbol, timeframe) not in self._thin_logged
+                ):
+                    self._thin_logged.add((symbol, timeframe))
+                    log.debug(
+                        f"Scan | {symbol} {timeframe} has {n_bars} bars "
+                        f"(need {min_bars}) — skip patterns this run"
+                    )
+                    logged = True
+                continue
+            ready = True
+        return ready
+
+    def _analyze_local(self, snapshot: MarketSnapshot) -> tuple[int, list[TradeSignal]]:
+        """Inline analyze on this loop — tests, workers=1, or pool fallback."""
+        symbol, timeframe = snapshot.symbol, snapshot.timeframe
+        n_bars = self._store.available(symbol, timeframe)
+        n_eval = 0
+        hits: list[TradeSignal] = []
+        for pattern in self._patterns:
+            if timeframe not in pattern.timeframes:
+                continue
+            min_bars = max(
+                int(getattr(pattern, "MIN_BARS", 2) or 2),
+                PATTERN_SCAN_HISTORY_BARS,
+            )
+            if n_bars < min_bars:
+                continue
+            n_eval += 1
+            try:
+                signal = pattern.analyze(snapshot, self._store)
+            except Exception:
+                log.exception(
+                    f"Scan | {pattern.name} {symbol} {timeframe}"
+                )
+                continue
+            if signal:
+                hits.append(signal)
+        return n_eval, hits
+
+    async def _emit_signals(
+        self, snapshot: MarketSnapshot, signals: list[TradeSignal],
+    ) -> None:
+        by_name = {p.name: p for p in self._patterns}
+        for signal in signals:
+            self.stats["patterns_found"] += 1
+            self._record_detection(signal)
+            await self._process_signal(
+                signal, by_name.get(signal.pattern), snapshot.candle,
+            )
+
+    async def _run_analyzes(self, snapshots: list[MarketSnapshot]) -> None:
+        """Run pattern.analyze() off-loop when a spawn pool is open."""
+        if not snapshots:
+            return
+        if self._analyze_pool is None:
+            for snapshot in snapshots:
+                n_eval, hits = self._analyze_local(snapshot)
+                self.stats["pattern_evaluations"] += n_eval
+                await self._emit_signals(snapshot, hits)
+            return
+
+        from core.pattern_jobs import analyze_batch
+
+        jobs = [
+            (snapshot, self._store.copy_candles(snapshot.symbol, snapshot.timeframe))
+            for snapshot in snapshots
+        ]
+        n = max(1, int(self._analyze_workers) or 1)
+        chunk_size = max(4, min(16, (len(jobs) + n - 1) // n))
+        chunks = [jobs[i:i + chunk_size] for i in range(0, len(jobs), chunk_size)]
+        loop = asyncio.get_running_loop()
+        try:
+            parts = await asyncio.gather(*[
+                loop.run_in_executor(self._analyze_pool, analyze_batch, chunk)
+                for chunk in chunks
+            ])
+        except Exception:
+            log.exception("Scan | analyze pool failed — inline this batch")
+            for snapshot in snapshots:
+                n_eval, hits = self._analyze_local(snapshot)
+                self.stats["pattern_evaluations"] += n_eval
+                await self._emit_signals(snapshot, hits)
+            return
+        flat: list[tuple[int, list[TradeSignal]]] = []
+        for part in parts:
+            flat.extend(part)
+        for snapshot, (n_eval, signals) in zip(snapshots, flat):
+            self.stats["pattern_evaluations"] += n_eval
+            await self._emit_signals(snapshot, signals)
 
     async def _run_kronos_rank_sleeve(self) -> None:
         """Cross-sectional top-K forecast sleeve — runs once per new daily asof."""

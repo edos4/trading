@@ -194,5 +194,43 @@ def test_scanner_drops_no_data_but_retries_history_unavailable():
     assert busy.stats["snapshot_errors"] >= 1
 
 
+def test_scanner_batch_fetch_snapshots_marks_no_data_dead():
+    from data.stream_client import FetchSkip
+
+    class _BatchSkipFeed:
+        snapshot_batch_size = 50
+
+        @asynccontextmanager
+        async def mcp_session(self):
+            yield None
+
+        async def fetch_snapshot(self, symbol, timeframe, store=None, mcp_session=None):
+            raise AssertionError("batch path should not call fetch_snapshot")
+
+        async def fetch_snapshots(self, symbols, timeframe, store=None, mcp_session=None):
+            return {
+                s: FetchSkip("no_data", f"no data for {s}") for s in symbols
+            }
+
+    scanner = MarketScanner(
+        symbols=["EXPH", "GYGC"], data_feed=_BatchSkipFeed(),
+        kronos_gate=False, volume_gate=False, kronos_rank=False,
+    )
+    scanner._patterns = [_FirstBarBuyPattern()]
+    asyncio.run(scanner._scan_all())
+    assert "EXPH" in scanner._dead_symbols
+    assert "GYGC" in scanner._dead_symbols
+
+
+def test_scan_interval_zero_is_kept():
+    scanner = MarketScanner(
+        symbols=["AAPL"], scan_interval_seconds=0,
+        kronos_gate=False, volume_gate=False, kronos_rank=False, market="us",
+    )
+    assert scanner._scan_interval == 0
+    scanner.stats["scan_duration_s"] = 12.0
+    asyncio.run(scanner._sleep_until_next_scan())
+
+
 if __name__ == "__main__":
     demo()
