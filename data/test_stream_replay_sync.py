@@ -189,6 +189,54 @@ def test_pin_asof_reports_history_unavailable():
     assert err == "history_unavailable"
 
 
+def test_pinned_advance_returns_zero_at_end_of_tape():
+    server = StreamServer()
+    rows = [
+        {"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "timestamp": 1},
+    ]
+    server._tapes = {"AAPL": _SymbolTape(rows)}
+    assert server.pin_asof("AAPL") == 1
+    assert server.advance() == 0
+    assert server._asof_ts == 1
+
+
+def test_client_advance_replay_reports_end_of_tape():
+    import asyncio
+    import json
+
+    from data.stream_client import StreamClient
+
+    class _FakeSession:
+        async def send(self, _msg):
+            pass
+
+        async def recv(self):
+            return json.dumps({"advanced": 0, "asof_day": "2026-08-31", "end": True})
+
+    ok, reached_end = asyncio.run(StreamClient().advance_replay(_FakeSession()))
+    assert ok is True
+    assert reached_end is True
+
+
+def test_client_advance_replay_not_end_while_more_bars():
+    import asyncio
+    import json
+
+    from data.stream_client import StreamClient
+
+    class _FakeSession:
+        async def send(self, _msg):
+            pass
+
+        async def recv(self):
+            return json.dumps({"advanced": 3, "asof_day": "2026-08-30"})
+
+    ok, reached_end = asyncio.run(StreamClient().advance_replay(_FakeSession()))
+    assert ok is True
+    assert reached_end is False
+
+
+
 def test_delta_snapshot_omits_history():
     tape = _SymbolTape([
         {"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "timestamp": 1},

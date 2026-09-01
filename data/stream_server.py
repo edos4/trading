@@ -520,6 +520,10 @@ class StreamServer:
                     if self._asof_ts is not None:
                         payload["asof"] = self._asof_ts
                         payload["asof_day"] = asof_key(self._asof_ts)
+                        # In pinned mode advance() returns 0 only when no
+                        # loaded tape has a later bar — the replay is
+                        # exhausted and the scanner should stop its loop.
+                        payload["end"] = advanced == 0
                     await ws.send(json.dumps(payload))
                     continue
 
