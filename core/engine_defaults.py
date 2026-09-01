@@ -271,6 +271,27 @@ def describe_min_share_price_rejection(
     return None
 
 
+def signal_reward_risk(signal: TradeSignal) -> float | None:
+    """Reward:risk of a signal from price/stop/target; None if not computable.
+
+    Matches the R:R the backtester/risk-gate use after stop backstops finalize
+    ``stop_loss`` (core/backtester.py describe_risk_gate_rejection). Used by the
+    collect-first pipeline to rank chart-pattern signals.
+    """
+    if (
+        signal.price is None
+        or signal.price <= 0
+        or signal.stop_loss is None
+        or signal.take_profit is None
+    ):
+        return None
+    reward = abs(signal.take_profit - signal.price)
+    risk = abs(signal.price - signal.stop_loss)
+    if risk <= 0:
+        return None
+    return reward / risk
+
+
 def passes_regime_filter(
     signal: TradeSignal,
     store: OHLCVStore,

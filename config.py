@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     # Skip leftover crumbs after risk/exposure caps (e.g. BUY 1 share).
     min_position_notional: float = 1000.0
 
+    # ── Collect-first ─────────────────────────────────────────────────────
+    # When enabled, a scan pass collects chart-pattern signals without opening
+    # anything, then ranks them by reward:risk and opens only the top N
+    # (collect_first_top_n). Expensive gates (Kronos/volume/vision) run only
+    # on the selected winners. Off by default so existing runs are unchanged.
+    collect_first_enabled: bool = False
+    collect_first_top_n: int = 4
+
     # ── Paper trading ─────────────────────────────────────────────────────
     paper_initial_capital: float = 100_000.0
     paper_slippage_pct: float = 0.0005
@@ -225,6 +233,11 @@ class Settings(BaseSettings):
     @classmethod
     def _clamp_kronos_batch_size(cls, value: int) -> int:
         return max(1, min(int(value), 256))
+
+    @field_validator("collect_first_top_n")
+    @classmethod
+    def _clamp_collect_first_top_n(cls, value: int) -> int:
+        return max(1, int(value))
 
     @property
     def stocks_history_auth(self) -> tuple[str, str]:

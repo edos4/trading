@@ -90,6 +90,8 @@ class MarketBookFrame(ttk.LabelFrame):
         self.kronos_rank_var = tk.BooleanVar(value=profile.kronos_rank_default)
         self.kronos_batch_var = tk.BooleanVar(value=settings.kronos_batch_enabled)
         self.volume_gate_var = tk.BooleanVar(value=settings.volume_gate_enabled)
+        self.collect_first_var = tk.BooleanVar(value=settings.collect_first_enabled)
+        self.collect_first_top_n_var = tk.IntVar(value=settings.collect_first_top_n)
         self.equity_var = tk.StringVar()
         self.exposure_var = tk.StringVar()
         self.scan_var = tk.StringVar(value="Last scan: —")
@@ -147,6 +149,15 @@ class MarketBookFrame(ttk.LabelFrame):
             flags, text="Volume gate", variable=self.volume_gate_var,
         )
         self._volume_gate_cb.pack(side=tk.LEFT, padx=(8, 0))
+        self._collect_first_cb = ttk.Checkbutton(
+            flags, text="Collect-first", variable=self.collect_first_var,
+        )
+        self._collect_first_cb.pack(side=tk.LEFT, padx=(8, 0))
+        self._collect_first_top_n_spin = ttk.Spinbox(
+            flags, from_=1, to=50, increment=1, width=3,
+            textvariable=self.collect_first_top_n_var,
+        )
+        self._collect_first_top_n_spin.pack(side=tk.LEFT, padx=(4, 0))
         self.stream_check = ttk.Checkbutton(
             flags, text="Stream", variable=self.stream_var, command=self._on_stream_toggle,
         )
@@ -207,6 +218,8 @@ class MarketBookFrame(ttk.LabelFrame):
             ),
             "volume_gate": bool(self.volume_gate_var.get()),
             "pattern_only": bool(self.pattern_only_var.get()),
+            "collect_first": bool(self.collect_first_var.get()),
+            "collect_first_top_n": int(self.collect_first_top_n_var.get()),
             "stream_start": stream_start,
         }
 

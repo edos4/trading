@@ -52,6 +52,10 @@
         <input type="checkbox" id="{{ book.id }}-kronos-batch" /> Batch Kronos
       </label>
       <label class="check"><input type="checkbox" id="{{ book.id }}-volume" {% if volume_gate %}checked{% endif %} /> Volume gate</label>
+      <label class="check">
+        <input type="checkbox" id="{{ book.id }}-collect-first" /> Collect-first
+        <input type="number" id="{{ book.id }}-collect-first-top-n" value="4" min="1" max="50" step="1" style="width:3.2em" />
+      </label>
       <label class="check"><input type="checkbox" id="{{ book.id }}-stream" /> Stream</label>
       <label class="stream-date" id="{{ book.id }}-stream-date-wrap" hidden>Start
         <input type="date" id="{{ book.id }}-stream-start" value="{{ stream_start_default }}" />
