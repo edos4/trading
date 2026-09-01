@@ -50,8 +50,8 @@ def demo():
     assert ENGINE.pattern_only is False
     assert ENGINE.cooldown_bars == 20
     assert ENGINE.profit_take_pct is None
-    assert ENGINE.profit_lock_frac == 0.5
-    assert ENGINE.profit_lock_trigger_r == 0.4
+    assert ENGINE.profit_lock_frac == 0.25
+    assert ENGINE.profit_lock_trigger_r == 1.0
     assert ENGINE.first_bar_invalidation_enabled is True
     assert ENGINE.dead_trade_flatten_bars == 3
     from config import DISABLED_PATTERNS
@@ -121,8 +121,8 @@ def demo():
     assert ENGINE.regime_exempt_patterns == ()
     assert ENGINE.breakeven_trigger_pct == 0.06
     assert ENGINE.profit_take_pct is None
-    assert ENGINE.profit_lock_frac == 0.5
-    assert ENGINE.profit_lock_trigger_r == 0.4
+    assert ENGINE.profit_lock_frac == 0.25
+    assert ENGINE.profit_lock_trigger_r == 1.0
 
     # 1.5% hysteresis: ~1% the wrong side of SMA200 is a near-miss, not a block.
     buy_near = [100.0] * 200 + [99.0]
@@ -165,7 +165,7 @@ def demo():
     )
 
     rg = risk_gate_kwargs()
-    assert rg["hard_stop_percentage"] == 0.10
+    assert rg["hard_stop_percentage"] == 0.12
     assert "max_position_pct" not in rg
 
     sk = sizing_kwargs(account_value=50_000.0)
@@ -179,10 +179,10 @@ def demo():
     assert bt["max_gross_exposure_pct"] == 1.0
     assert bt["breakeven_trigger_pct"] == 0.06
     assert bt["profit_take_pct"] is None
-    assert bt["profit_lock_frac"] == 0.5
-    assert bt["profit_lock_trigger_r"] == 0.4
+    assert bt["profit_lock_frac"] == 0.25
+    assert bt["profit_lock_trigger_r"] == 1.0
     assert bt["breakeven_buffer_pct"] == 0.0015
-    assert bt["min_share_price"] == 5.0
+    assert bt["min_share_price"] == 10.0
     assert "regime_hysteresis_pct" not in bt
     assert "regime_exempt_patterns" not in bt
     assert bt["pattern_filter"] == "double_bottom"

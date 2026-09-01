@@ -54,7 +54,7 @@ def test_resolve_and_profiles():
     assert PH.breakeven_buffer_pct == 0.008
     assert US.default_n_symbols == 50
     assert US.min_adv == 20_000_000.0
-    assert US.min_share_price == 5.0
+    assert US.min_share_price == 10.0
     assert PH.min_share_price is None
     assert US.universe_order == "value"
     assert PH.paper_account_path != US.paper_account_path
