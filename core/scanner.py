@@ -709,8 +709,15 @@ class MarketScanner:
         advance_replay = getattr(self._tv, "advance_replay", None)
         if advance_replay is not None:
             control_session = feed_sessions[0] if feed_sessions else None
-            if not await advance_replay(control_session):
+            ok, reached_end = await advance_replay(control_session)
+            if not ok:
                 log.warning("Scanner | paper replay did not advance after scan")
+            elif reached_end:
+                log.info(
+                    "Scanner | paper replay reached end of tape — stopping "
+                    f"after {self._sim_days} session(s)"
+                )
+                self._running = False
 
         if self._kronos_rank:
             if new_closed_daily:

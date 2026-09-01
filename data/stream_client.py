@@ -217,8 +217,13 @@ class StreamClient:
         asof_day = reply.get("asof_day")
         return str(asof_day) if asof_day is not None else None
 
-    async def advance_replay(self, mcp_session=None) -> bool:
-        """Advance the historical replay by exactly one bar after a full scan."""
+    async def advance_replay(self, mcp_session=None) -> tuple[bool, bool]:
+        """Advance the historical replay by exactly one bar after a full scan.
+
+        Returns ``(ok, reached_end)``. ``ok`` is False on a transport/protocol
+        error; ``reached_end`` is True when the server reports no later bar to
+        replay (the tape is exhausted and the scanner should stop).
+        """
         if mcp_session is None:
             # Use a short-lived control connection when the scanner's worker
             # sessions are not available. This method is normally called with
@@ -227,17 +232,17 @@ class StreamClient:
                 async with self.mcp_session() as ws:
                     await ws.send(json.dumps({"action": "advance"}))
                     reply = json.loads(await ws.recv())
-                    return "error" not in reply
+                    return ("error" not in reply), bool(reply.get("end"))
             except Exception as exc:
                 log.error(f"StreamClient | replay advance failed: {exc}")
-                return False
+                return False, False
         try:
             await mcp_session.send(json.dumps({"action": "advance"}))
             reply = json.loads(await mcp_session.recv())
             if "error" in reply:
                 log.error(f"StreamClient | replay advance failed: {reply['error']}")
-                return False
-            return True
+                return False, False
+            return True, bool(reply.get("end"))
         except Exception as exc:
             log.error(f"StreamClient | replay advance failed: {exc}")
-            return False
+            return False, False
