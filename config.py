@@ -350,18 +350,9 @@ settings = Settings()
 # "proving out" — one loss is not that proof). Restored to match the
 # documented verdicts; re-enable individually only behind a fresh,
 # multi-run A/B that clears the bar each comment above sets.
-DISABLED_PATTERNS: list[str] = [
-    "pattern_011_breakout_retest",
-    "pattern_009_flag_pattern",
-    # 010 pennant: "previously isolated as weak" (same bucket as 009 above).
-    # The comment above marked it "unused in the current paper book" because
-    # collect-first ordering happened to de-prioritise it, NOT because it
-    # was intentionally live. Disabled explicitly so a future run with a
-    # different --symbols ordering cannot queue it ahead of 003.
-    # "pattern_010_pennant",
-    # "pattern_006_upward_channel",
-    # "pattern_002_double_top",
-    # "pattern_008_head_and_shoulders",
-    # "pattern_004_rounding_bottom",
-    # "pattern_007_descending_channel",
-]
+# 2026-09 refactor: the engine now runs each pattern's own conditions + exit
+# ladder at a flat $10k with no ML/regime/confidence overlays, matching the
+# locked .cjs pattern-backtest scripts. Every ported pattern (002-010) runs by
+# default; 011 is retired via `skipped = True` on its class. Re-add a name here
+# only to mute it in an unattended combined run.
+DISABLED_PATTERNS: list[str] = []

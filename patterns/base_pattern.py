@@ -87,6 +87,23 @@ class TradeSignal:
         "highest_low", "lowest_high"
     ] | None = None
     trailing_stop_on_close: bool = False
+    # Dual stop: the engine exits at the nearer-to-entry of `stop_loss` and
+    # entry*(1 ± stop_loss_pct_cap), whichever is hit first. `.cjs` upward-
+    # channel C24 (5% fixed leg alongside the structural SH2×1.01 stop).
+    stop_loss_pct_cap: float | None = None
+    # Channel-reclaim exit (`.cjs` upward-channel C21): once in the trade,
+    # exit at the close when price closes back above the rising lower rail
+    # AND the bar makes a higher high + higher low vs the prior bar.
+    reclaim_exit: bool = False
+    # (rail price at the entry bar, slope per bar) so the engine can
+    # extrapolate the rail forward: rail(k) = rail0 + slope*(k - entry_bar).
+    reclaim_lower_rail: tuple[float, float] | None = None
+    # Set by a pattern's own analyze() to record a setup it refused to trade
+    # (pattern_006: earnings blackout -> blocked_reason; C22/C23 -> filtered_
+    # reason). The engine logs these into BacktestResult.blocked / .filtered
+    # and takes no position.
+    blocked_reason: str | None = None
+    filtered_reason: str | None = None
     neckline: float | None = None
     neckline_break_direction: Literal["below", "above"] | None = None
     exit_bars_after_neckline_break: int | None = None

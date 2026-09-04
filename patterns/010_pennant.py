@@ -81,6 +81,7 @@ class PennantPattern(BasePattern):
             trailing_stop_mode="highest_close" if bullish else "lowest_close",
             trailing_activation_pct=0.0,
             trailing_stop_on_close=True,
+            exit_bars_after_entry=60,   # .cjs backtest_pennant_200: MAX_HOLD_BARS
             notes=f"{setup.direction} pennant pole={setup.pole_start}->{setup.pole_end} move={setup.pole_move:.1%} pole_volume={setup.pole_volume_ratio:.2f}x consolidation={setup.consolidation_start}->{setup.consolidation_end} retrace={setup.retrace:.1%} breakout_volume={setup.breakout_volume_ratio:.2f}x",
             chart_annotations=[
                 ann_marker(self.bar_date(df, setup.pole_start), start_price, "pole start", ANN_REF, "o", "below" if bullish else "above"),

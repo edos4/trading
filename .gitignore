@@ -11,3 +11,6 @@ logs/stocks_history_updated.txt
 logs/stocks_history_updated.txt.tmp
 .env
 patterns_detected.md
+# offline research bar-cache snapshots (rebuild with scripts/build_barcache.py)
+data/barcache/
+data/barcache_flag/

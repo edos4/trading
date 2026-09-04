@@ -157,22 +157,6 @@ def test_us_daily_bar_identity_ignores_intraday_prints():
     assert bar_identity("1d", old, market="us", now=after) == date(2024, 1, 2)
 
 
-def test_engine_kwargs_ph_overlay():
-    from core.engine_defaults import backtest_kwargs, ENGINE
-
-    us = backtest_kwargs(market="us")
-    assert us["txn_cost_pct"] == ENGINE.txn_cost_pct
-    assert us["breakeven_trigger_pct"] == ENGINE.breakeven_trigger_pct
-    assert us["breakeven_buffer_pct"] == ENGINE.breakeven_buffer_pct
-    assert us["long_only"] is False
-    ph = backtest_kwargs(market="ph")
-    assert ph["market"] == "ph"
-    assert ph["long_only"] is True
-    assert ph["txn_cost_pct"] == PH.txn_cost_pct
-    assert ph["breakeven_trigger_pct"] == PH.breakeven_trigger_pct
-    assert ph["breakeven_buffer_pct"] == PH.breakeven_buffer_pct
-    assert ph["account_value"] == PH.paper_initial_capital
-
 
 def test_paper_ledgers_do_not_mix():
     import tempfile

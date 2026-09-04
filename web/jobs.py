@@ -12,7 +12,7 @@ from core.backtester import Backtester, BacktestResult, discover_pattern_names
 from core.market import default_market, get_market
 from core.paper_books import paper_books
 from data.tv_client import TVClient
-from ui.backtest_dialog import PARAMS
+from ui.backtest_dialog import PARAMS, _universe_for_pattern
 from utils.logger import log
 
 
@@ -73,45 +73,22 @@ def normalize_backtest_form(raw: dict[str, Any]) -> dict[str, Any]:
             v = str(raw.get(key) or "").strip()
             p[key] = v if v else None
 
-    n_symbols = int(p.pop("n_symbols"))
     extra_symbols = p.pop("extra_symbols", None) or ""
     market = p.pop("market", None) or default_market().id
-    if "max_workers" in p and p["max_workers"] is not None:
-        p["max_workers"] = int(p["max_workers"])
-    if "max_open_positions" in p and p["max_open_positions"] is not None:
-        p["max_open_positions"] = int(p["max_open_positions"])
     pattern_filter = p.pop("pattern_filter")
-    disabled_raw = p.pop("disabled_patterns", None)
-    if disabled_raw is None:
-        # Field omitted from POST — fall back to config DISABLED_PATTERNS
-        # (same default the form schema advertises).
-        disabled_raw = ",".join(DISABLED_PATTERNS)
-    p["disabled_patterns"] = [
-        name.strip() for name in str(disabled_raw).split(",") if name.strip()
-    ]
-    for opt_key in (
-        "breakeven_trigger_pct",
-        "min_atr_stop_multiple",
-        "min_reward_risk_ratio",
-        "hard_stop_percentage",
-        "atr_stop_floor_multiple",
-        "profit_take_pct",
-        "profit_lock_frac",
-        "profit_lock_trigger_r",
-    ):
-        if opt_key in p and p[opt_key] is not None and p[opt_key] <= 0:
-            p[opt_key] = None
-    if "synthetic_stop_multiple" in p and p["synthetic_stop_multiple"] <= 0:
-        p["synthetic_stop_multiple"] = 0
-    p["market"] = market
-    p["long_only"] = get_market(market).long_only
-    if not p.get("kronos_gate") and not p.get("kronos_rank"):
-        p["kronos_batch"] = False
+    universe = p.pop("universe", None)
+    kwargs = {
+        "barcache_dir": p.get("barcache_dir") or "data/barcache",
+        "market": market,
+        "txn_cost_pct": float(p.get("txn_cost_pct") or 0.0),
+        "max_workers": int(p.get("max_workers") or 0),
+        "disabled_patterns": list(DISABLED_PATTERNS),
+    }
     return {
-        "n_symbols": n_symbols,
         "extra_symbols": extra_symbols,
         "pattern": pattern_filter,
-        "kwargs": p,
+        "universe": universe,
+        "kwargs": kwargs,
         "market": market,
     }
 
@@ -185,19 +162,15 @@ class BacktestJob:
             self.total = total
 
     def start(
-        self, n_symbols: int, pattern: Optional[str], kwargs: dict, *, ab: bool,
-        extra_symbols: str = "",
+        self, pattern: Optional[str], kwargs: dict, *, ab: bool = False,
+        extra_symbols: str = "", universe: Optional[str] = None,
     ) -> str | None:
         with self.lock:
             if self.busy:
                 return "Backtest already running."
             self.busy = True
-            self.mode = "ab" if ab else "run"
-            self.status = (
-                f"Volume A/B compare (top {n_symbols})..."
-                if ab
-                else f"Running backtest (top {n_symbols})..."
-            )
+            self.mode = "run"
+            self.status = "Running backtest..."
             self.completed = 0
             self.total = 0
             self.started_at = time.time()
@@ -205,23 +178,22 @@ class BacktestJob:
             self.result = None
             self.ab = None
         threading.Thread(
-            target=self._run_ab if ab else self._run,
-            args=(n_symbols, extra_symbols, pattern, kwargs),
+            target=self._run,
+            args=(universe, extra_symbols, pattern, kwargs),
             daemon=True,
         ).start()
         return None
 
-    def _run(self, n_symbols: int, extra_symbols: str, pattern: Optional[str], kwargs: dict) -> None:
+    def _run(self, universe: Optional[str], extra_symbols: str, pattern: Optional[str], kwargs: dict) -> None:
         try:
-            symbol_rows = TVClient.fetch_universe_cached(
-                n_symbols, kwargs.get("market"), extra_symbols=extra_symbols,
-            )
-            if not symbol_rows:
-                with self.lock:
-                    self.error = "No symbols from screener or additional list."
-                    self.status = self.error
-                return
-            symbols = [s for s, _ex in symbol_rows]
+            from data.universes import load as _load_universe
+
+            name = universe or _universe_for_pattern(pattern)
+            symbols = list(_load_universe(name))
+            for extra in str(extra_symbols).replace(",", " ").split():
+                u = extra.strip().upper()
+                if u and u not in symbols:
+                    symbols.append(u)
             backtester = Backtester(
                 symbols,
                 pattern_filter=pattern,
@@ -245,52 +217,8 @@ class BacktestJob:
             with self.lock:
                 self.busy = False
 
-    def _run_ab(self, n_symbols: int, extra_symbols: str, pattern: Optional[str], kwargs: dict) -> None:
-        try:
-            from analysis.price_volume import ab_metrics_from_result
-
-            kwargs = dict(kwargs)
-            kwargs.pop("volume_gate", None)
-            symbol_rows = TVClient.fetch_universe_cached(
-                n_symbols, kwargs.get("market"), extra_symbols=extra_symbols,
-            )
-            if not symbol_rows:
-                with self.lock:
-                    self.error = "No symbols from screener or additional list."
-                    self.status = self.error
-                return
-            symbols = [s for s, _ex in symbol_rows]
-
-            off_bt = Backtester(
-                symbols,
-                pattern_filter=pattern,
-                volume_gate=False,
-                progress_callback=self._on_progress,
-                **kwargs,
-            )
-            result_off = asyncio.run(off_bt.run())
-            on_bt = Backtester(
-                symbols,
-                pattern_filter=pattern,
-                volume_gate=True,
-                progress_callback=self._on_progress,
-                **kwargs,
-            )
-            result_on = asyncio.run(on_bt.run())
-            off_m = ab_metrics_from_result(result_off)
-            on_m = ab_metrics_from_result(result_on)
-            with self.lock:
-                self.result = _result_to_payload(result_on)
-                self.ab = {"off": off_m, "on": on_m}
-                self.status = "Volume A/B complete."
-        except Exception:
-            log.exception("Web Backtest A/B | failed")
-            with self.lock:
-                self.error = "Backtest A/B failed. Check server logs for details."
-                self.status = "ERROR: backtest A/B failed"
-        finally:
-            with self.lock:
-                self.busy = False
+    # Volume A/B is retired — the engine no longer has a volume gate.
+    _run_ab = _run
 
 
 

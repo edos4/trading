@@ -46,22 +46,65 @@ from data.stream_client import FetchSkip
 from analysis.chart_renderer import ChartRenderer
 from analysis.vision_checker import VisionChecker, VisionVerdict
 from core.paper_trader import PaperAccount
-from core.kronos_gate import kronos_gate_check, kronos_gate_check_many
-from core.kronos_rank_sleeve import is_kronos_rank_signal, run_sleeve
-from core.backtester import describe_risk_gate_rejection
-from core.engine_defaults import (
-    describe_confidence_rejection,
-    describe_cooldown_rejection,
-    describe_min_share_price_rejection,
-    describe_regime_rejection,
-    passes_min_confidence,
-    regime_filter_required,
-    risk_gate_kwargs,
-    seed_cooldown_from_trades,
-    signal_reward_risk,
-    structure_filters_enabled,
-)
-from analysis.price_volume import volume_confirm_gate
+from core.engine_defaults import ENGINE
+
+
+# ── 2026-09 refactor: the live scan path now mirrors the offline backtester —
+# a pattern's own analyze() is the only filter; there is no ML/confidence/
+# regime/cooldown/volume/vision gauntlet. These stubs keep the (now dead)
+# gate call sites harmless without a wider rewrite of this file.
+def structure_filters_enabled(_pattern_only=None) -> bool:
+    return False
+
+
+def regime_filter_required(_pattern=None, _pattern_only=None) -> bool:
+    return False
+
+
+def passes_min_confidence(_signal, _min=None) -> bool:
+    return True
+
+
+def describe_confidence_rejection(_signal, _min=None) -> str:
+    return ""
+
+
+def describe_min_share_price_rejection(_signal, _min=None, *, market=None):
+    return None
+
+
+def describe_cooldown_rejection(_signal, _bar_idx=None, _tracker=None, *, cooldown_bars=None):
+    return None
+
+
+def describe_regime_rejection(_signal, _store=None, *, enabled=None, market=None):
+    return None
+
+
+def describe_risk_gate_rejection(*_a, **_k):
+    return None
+
+
+def risk_gate_kwargs(**_k) -> dict:
+    return {}
+
+
+def seed_cooldown_from_trades(_tracker, _trades) -> None:
+    return None
+
+
+def is_kronos_rank_signal(_signal) -> bool:
+    return False
+
+
+def signal_reward_risk(signal) -> float | None:
+    if (
+        getattr(signal, "price", None) is None or signal.price <= 0
+        or signal.stop_loss is None or signal.take_profit is None
+    ):
+        return None
+    risk = abs(signal.price - signal.stop_loss)
+    return abs(signal.take_profit - signal.price) / risk if risk > 0 else None
 
 # TODO: re-enable IBKR when TWS/Gateway is available
 # from broker.ibkr_client import IBKRClient
@@ -118,25 +161,15 @@ class MarketScanner:
             if scan_interval_seconds is None
             else int(scan_interval_seconds)
         )
-        # None → follow settings; explicit True/False lets UI/CLI override for a session.
-        self._kronos_gate = (
-            profile.kronos_gate_default if kronos_gate is None else kronos_gate
-        )
-        self._volume_gate = (
-            settings.volume_gate_enabled if volume_gate is None else volume_gate
-        )
-        self._kronos_rank = (
-            profile.kronos_rank_default if kronos_rank is None else kronos_rank
-        )
-        # Collect-then-batch Kronos only when this is on. Sequential check()
-        # remains the default.
-        self._kronos_batch = (
-            settings.kronos_batch_enabled if kronos_batch is None else kronos_batch
-        )
+        # 2026-09 refactor: ML gate / volume gate / collect-first / kronos rank
+        # are all removed from the money path. Accept the kwargs for API
+        # compatibility but hard-disable them.
+        self._kronos_gate = False
+        self._volume_gate = False
+        self._kronos_rank = False
+        self._kronos_batch = False
         self._pattern_only = bool(pattern_only)
-        self._collect_first = (
-            settings.collect_first_enabled if collect_first is None else collect_first
-        )
+        self._collect_first = False
         self._collect_first_top_n = (
             settings.collect_first_top_n
             if collect_first_top_n is None

@@ -139,7 +139,18 @@ def _resolve_mcp_command() -> str:
     )
 
 
-MCP_COMMAND = _resolve_mcp_command()
+# Resolved lazily: the tradingview-mcp binary is only needed for live snapshot
+# fetches. Offline backtests (data/barcache.py) import this module for the
+# OHLCVCandle dataclass alone and must not require the MCP server to be installed.
+_MCP_COMMAND: str | None = None
+
+
+def mcp_command() -> str:
+    global _MCP_COMMAND
+    if _MCP_COMMAND is None:
+        _MCP_COMMAND = _resolve_mcp_command()
+    return _MCP_COMMAND
+
 
 MCP_TIMEFRAME_MAP: dict[str, str] = {
     "1m": "15m",
@@ -600,7 +611,7 @@ class TVClient:
     @asynccontextmanager
     async def mcp_session(self):
         import subprocess as _subprocess
-        server_params = StdioServerParameters(command=MCP_COMMAND, args=[])
+        server_params = StdioServerParameters(command=mcp_command(), args=[])
         async with stdio_client(server_params, errlog=_subprocess.DEVNULL) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
@@ -898,7 +909,7 @@ class TVClient:
                 mcp_session, symbol, exchange, timeframe
             )
 
-        server_params = StdioServerParameters(command=MCP_COMMAND, args=[])
+        server_params = StdioServerParameters(command=mcp_command(), args=[])
         try:
             async with stdio_client(server_params) as (read, write):
                 async with ClientSession(read, write) as session:

@@ -42,7 +42,7 @@ class DescendingChannelPattern(BasePattern):
         if df is None:
             return None
         ind = IndicatorEngine(df)
-        setup = find_channel(ind, ind.rsi(14), len(df) - 1, "down")
+        setup = find_channel(ind, ind.rsi_wilder(14), len(df) - 1, "down")
         if setup is None:
             return None
         if earnings_blackout(df, snapshot.symbol, setup.entry, 15):

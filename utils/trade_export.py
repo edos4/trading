@@ -253,12 +253,13 @@ def snapshot_from_paper_account(
             if snap["initial_capital"] else 0.0,
             "realized_pnl_dollars": snap["realized_pnl_dollars"],
             "unrealized_pnl_dollars": snap["unrealized_pnl_dollars"],
-            "avg_r": result.avg_r,
-            "median_r": result.median_r,
+            "win_rate_pct": result._s["win_rate_pct"],
+            "avg_pnl_pct": result._s["avg_pnl_pct"],
+            "total_usd": result._s["total_usd"],
+            "worst_usd": result._s["worst_usd"],
+            "profit_factor": result._s["profit_factor"],
             "avg_hold_bars": result.avg_hold_bars,
             "exit_reason_breakdown": result.exit_reason_breakdown,
-            "max_drawdown_pct": result.max_drawdown_pct,
-            "sharpe_ratio": result.sharpe_ratio,
         },
     }
 

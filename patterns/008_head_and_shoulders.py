@@ -36,7 +36,7 @@ class _Setup:
 
 class HeadAndShouldersPattern(BasePattern):
     MIN_BARS = 130
-    SHARES = 25
+    POSITION_NOTIONAL = 10_000.0
 
     @property
     def name(self) -> str:
@@ -62,6 +62,7 @@ class HeadAndShouldersPattern(BasePattern):
             if setup is None or setup.entry != current:
                 continue
             price = float(ind.close.iloc[current])
+            rs_close = float(ind.close.iloc[setup.right_shoulder])
             return TradeSignal(
                 symbol=snapshot.symbol,
                 action="SELL",
@@ -69,7 +70,11 @@ class HeadAndShouldersPattern(BasePattern):
                 timeframe=snapshot.timeframe,
                 confidence=1.0,
                 price=price,
-                qty=self.SHARES,
+                qty=self.POSITION_NOTIONAL / price if price > 0 else 0.0,
+                # .cjs backtest_hs_200: a close back above the right shoulder
+                # invalidates the short.
+                stop_loss=round(rs_close, 4),
+                stop_loss_on_close=True,
                 take_profit=round(setup.target, 4),
                 trailing_stop_pct=0.03,
                 trailing_stop_mode="lowest_close",

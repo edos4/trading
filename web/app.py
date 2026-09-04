@@ -364,8 +364,9 @@ def create_app() -> FastAPI:
             return JSONResponse({"detail": str(exc)}, status_code=400)
         params = normalize_backtest_form(payload)
         err = backtest_job.start(
-            params["n_symbols"], params["pattern"], params["kwargs"], ab=False,
+            params["pattern"], params["kwargs"],
             extra_symbols=params.get("extra_symbols") or "",
+            universe=params.get("universe"),
         )
         if err:
             return JSONResponse({"detail": err}, status_code=409)
@@ -379,8 +380,9 @@ def create_app() -> FastAPI:
             return JSONResponse({"detail": str(exc)}, status_code=400)
         params = normalize_backtest_form(payload)
         err = backtest_job.start(
-            params["n_symbols"], params["pattern"], params["kwargs"], ab=True,
+            params["pattern"], params["kwargs"],
             extra_symbols=params.get("extra_symbols") or "",
+            universe=params.get("universe"),
         )
         if err:
             return JSONResponse({"detail": err}, status_code=409)
