@@ -40,6 +40,7 @@ from web.jobs import (
     normalize_backtest_form,
     paper_books,
 )
+from web import replay_store
 from web.services import TIMEFRAMES, get_explorer
 
 ROOT = Path(__file__).resolve().parent
@@ -85,6 +86,23 @@ class KronosPredictRequest(BaseModel):
     symbol: str
     days: int = Field(5, ge=1, le=120)
     market: Optional[Literal["us", "ph"]] = None
+
+
+class ReplayChartRequest(BaseModel):
+    market: Optional[Literal["us", "ph"]] = None
+    symbol: str
+    side: str = "open"
+    action: Optional[str] = None
+    pattern: Optional[str] = None
+    timeframe: str = "1d"
+    entry: Optional[float] = None
+    stop: Optional[float] = None
+    target: Optional[float] = None
+    exit: Optional[float] = None
+    exit_reason: Optional[str] = None
+    current: Optional[float] = None
+    entry_time: Optional[str] = None
+    exit_time: Optional[str] = None
 
 
 async def _json_body(request: Request) -> dict[str, Any]:
@@ -204,6 +222,17 @@ def create_app() -> FastAPI:
             active="kronos",
             default_market=default_market().id,
             markets=markets_payload(),
+        )
+
+    @app.get("/replay", response_class=HTMLResponse)
+    async def replay_page(request: Request, _user: str = Depends(require_login)):
+        markets = markets_payload()
+        return render(
+            request,
+            "replay.html",
+            active="replay",
+            markets=markets,
+            book_cards=markets,
         )
 
     # ── Explorer API ──────────────────────────────────────────────────────
@@ -505,6 +534,93 @@ def create_app() -> FastAPI:
         if result.get("error"):
             return JSONResponse({"detail": result["error"]}, status_code=404)
         return result
+
+    # ── Replay API ───────────────────────────────────────────────────────
+    @app.post("/api/replay/upload")
+    async def api_replay_upload(request: Request, _user: str = Depends(require_login)):
+        try:
+            payload = await _json_body(request)
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        books = payload.get("books")
+        if not isinstance(books, (list, dict)) or not books:
+            return JSONResponse(
+                {"detail": "payload must contain a non-empty 'books' field."},
+                status_code=400,
+            )
+        try:
+            replay_store.save(payload)
+        except OSError:
+            log.exception("Web | replay upload failed to persist")
+            return JSONResponse({"detail": "Failed to persist replay."}, status_code=500)
+        return {"ok": True}
+
+    @app.get("/api/replay/load")
+    async def api_replay_load(_user: str = Depends(require_login)):
+        payload = await asyncio.to_thread(replay_store.load)
+        if payload is None:
+            return {"replay": None}
+        return {"replay": payload}
+
+    @app.post("/api/replay/clear")
+    async def api_replay_clear(_user: str = Depends(require_login)):
+        await asyncio.to_thread(replay_store.clear)
+        return {"ok": True}
+
+    @app.post("/api/replay/chart")
+    async def api_replay_chart(
+        request: Request, _user: str = Depends(require_login),
+    ):
+        try:
+            body = ReplayChartRequest.model_validate(await _json_body(request))
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        except ValidationError as exc:
+            msg = exc.errors()[0].get("msg") if exc.errors() else "Invalid request"
+            return JSONResponse({"detail": str(msg)}, status_code=400)
+
+        from analysis.chart_renderer import build_trade_viewer_payload
+        from core.market import get_market
+        from data.history import load_daily_ohlcv_df
+
+        symbol = body.symbol.upper().strip()
+        market = body.market or default_market().id
+        if market not in ("us", "ph"):
+            return JSONResponse({"detail": "market must be us or ph."}, status_code=400)
+        side = (body.side or "open").lower()
+        if side not in ("open", "closed"):
+            return JSONResponse({"detail": "side must be open or closed."}, status_code=400)
+
+        try:
+            df = await asyncio.to_thread(
+                load_daily_ohlcv_df, symbol, tv_fallback=False, market=market,
+            )
+        except Exception:
+            log.exception("Web | replay chart history load failed")
+            return JSONResponse({"detail": "History database unavailable."}, status_code=503)
+        if df is None or len(df) < 2:
+            return JSONResponse({"detail": f"No daily bars for {symbol}."}, status_code=404)
+
+        try:
+            payload = build_trade_viewer_payload(
+                df,
+                symbol=symbol,
+                timeframe=body.timeframe or "1d",
+                pattern=body.pattern,
+                action=body.action,
+                session_tz=get_market(market).session_tz,
+                entry=body.entry,
+                stop=body.stop,
+                target=body.target,
+                exit_price=body.exit if side == "closed" else None,
+                exit_reason=body.exit_reason if side == "closed" else None,
+                current=body.current if side == "open" else None,
+                entry_time=body.entry_time,
+                exit_time=body.exit_time if side == "closed" else None,
+            )
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        return payload
 
     @app.post("/api/kronos/predict")
     async def api_kronos_predict(request: Request, _user: str = Depends(require_login)):

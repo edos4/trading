@@ -214,7 +214,15 @@ class ChartRenderer:
         }
         out = df.rename(columns=rename)
         if isinstance(out.index, pd.DatetimeIndex):
+            # Sort by the raw timestamps first so that, after session-date
+            # normalization below, "keep last per date" retains the latest
+            # intra-day bar. Some tapes carry two bars for one session (a
+            # bogus pre-market bar at 04:00 UTC plus the real 13:30 UTC bar).
+            # Duplicate dates yield non-monotonic candle times that break
+            # TradingView/LightweightCharts, so they must be collapsed here.
+            out = out.sort_index()
             out = self._normalize_session_index(out)
+            out = out[~out.index.duplicated(keep="last")]
         if not isinstance(out.index, pd.DatetimeIndex):
             end = pd.Timestamp.now().normalize()
             if timeframe == "1W":

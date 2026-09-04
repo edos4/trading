@@ -1181,11 +1181,659 @@ function initKronos() {
   });
 }
 
+/* ── Replay ───────────────────────────────────────────────────────────── */
+function initReplay() {
+  const BOOKS = ["us", "ph"];
+  const posBody = document.querySelector("#replay-pos tbody");
+  const closedBody = document.querySelector("#replay-closed tbody");
+  const closedStats = document.getElementById("replay-closed-stats");
+  const closedSymbol = document.getElementById("replay-closed-symbol");
+  const closedReason = document.getElementById("replay-closed-reason");
+  const closedPattern = document.getElementById("replay-closed-pattern");
+  const closedSearch = document.getElementById("replay-closed-search");
+  const sortNote = document.getElementById("replay-sort-note");
+
+  const esc = (value) => String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+  let marketFilter = "all";
+  let closedRows = [];
+  let closedSort = { col: "closed", desc: true };
+  let envelope = { books: {} };
+
+  function fmtQty(q) {
+    const n = Number(q);
+    if (!Number.isFinite(n)) return "—";
+    return Number.isInteger(n) ? String(n) : n.toFixed(2);
+  }
+  function fmtDays(d) {
+    const n = Number(d);
+    if (!Number.isFinite(n)) return "—";
+    if (n < 1) return `${(n * 24).toFixed(1)}h`;
+    return `${n.toFixed(1)}d`;
+  }
+  function fmtMoney(n, { signed = false, digits = 0, symbol = "$" } = {}) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return "—";
+    const body = Math.abs(v).toLocaleString(undefined, {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    });
+    if (signed) return `${v >= 0 ? "+" : "-"}${symbol}${body}`;
+    return v < 0 ? `-${symbol}${body}` : `${symbol}${body}`;
+  }
+  function fmtSigned(n, digits = 2, suffix = "") {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return "—";
+    return `${v >= 0 ? "+" : ""}${v.toFixed(digits)}${suffix}`;
+  }
+  function fmtStamp(iso) {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mi = String(d.getMinutes()).padStart(2, "0");
+    return `${mm}-${dd} ${hh}:${mi}`;
+  }
+  function fmtPattern(name) {
+    const raw = String(name || "").trim();
+    if (!raw) return "—";
+    const m = raw.match(/^pattern_(\d+)_(.+)$/);
+    if (m) return `${m[1]} ${m[2].replace(/_/g, " ")}`;
+    return raw.replace(/_/g, " ");
+  }
+  const REASON_LABELS = {
+    stop_loss: "Stop", take_profit: "Target", profit_take: "Take", profit_lock: "Lock",
+    trailing_stop: "Trail", time_exit: "Time", breakeven_stop: "BE",
+  };
+  function fmtReason(t) {
+    const raw = String(t.reason || "").trim();
+    if (!raw) return "—";
+    const label = REASON_LABELS[raw] || raw.replace(/_/g, " ");
+    if (raw === "time_exit" && t.time_exit_bars_elapsed != null) {
+      const conf = t.time_exit_bars_configured;
+      return conf != null ? `${label} ${t.time_exit_bars_elapsed}/${conf}b` : `${label} ${t.time_exit_bars_elapsed}b`;
+    }
+    return label;
+  }
+  function reasonClass(reason) {
+    if (reason === "stop_loss") return "reason-loss";
+    if (reason === "take_profit" || reason === "trailing_stop" || reason === "profit_take" || reason === "profit_lock") return "reason-gain";
+    if (reason === "breakeven_stop") return "reason-flat";
+    return "reason-muted";
+  }
+  function fmtHold(days, bars) {
+    const parts = [];
+    if (Number.isFinite(Number(days))) {
+      const d = Number(days);
+      parts.push(d < 1 ? `${(d * 24).toFixed(1)}h` : `${d.toFixed(1)}d`);
+    }
+    if (bars != null && Number.isFinite(Number(bars))) parts.push(`${bars}b`);
+    return parts.join(" · ") || "—";
+  }
+
+  function toStatusBook(book) {
+    const positions = (book.open_positions || []).map((p) => ({
+      market: p.market,
+      symbol: p.symbol,
+      status: p.status,
+      action: p.action,
+      pattern: p.pattern,
+      timeframe: p.timeframe,
+      qty: p.qty,
+      entry: p.entry,
+      current: p.current,
+      unrl_pct: p.unrealized_pct,
+      r: p.r,
+      days: p.hold_days,
+      bars: p.hold_bars,
+      value: p.value,
+      mtm: p.mtm,
+      port_pct: p.port_pct,
+      risk: p.risk,
+      stop: p.stop,
+      target: p.target,
+      opened: p.opened,
+      sim_opened: p.sim_opened || p.sim_entry_date || null,
+      daily_marks: p.daily_marks || [],
+    }));
+    const closed = (book.closed_trades || []).map((t) => ({
+      market: t.market,
+      symbol: t.symbol,
+      action: t.action,
+      pattern: t.pattern,
+      timeframe: t.timeframe,
+      qty: t.qty,
+      entry: t.entry,
+      exit: t.exit,
+      stop: t.stop,
+      target: t.target,
+      pnl: t.pnl,
+      pnl_pct: t.pnl_pct,
+      r: t.r,
+      days: t.hold_days,
+      bars: t.hold_bars,
+      reason: t.exit_reason,
+      exit_reason: t.exit_reason,
+      time_exit_bars_elapsed: t.time_exit_bars_elapsed,
+      time_exit_bars_configured: t.time_exit_bars_configured,
+      opened: t.opened,
+      closed: t.closed,
+      sim_opened: t.sim_opened || t.sim_entry_date || null,
+      sim_closed: t.sim_closed || t.sim_exit_date || null,
+      daily_marks: t.daily_marks || [],
+    }));
+    return {
+      running: !!book.running,
+      status: "Replay",
+      error: null,
+      use_stream: false,
+      cash: book.cash,
+      equity: book.equity,
+      open_count: book.open_count != null ? book.open_count : positions.length,
+      closed_count: book.closed_count != null ? book.closed_count : closed.length,
+      exposure: book.exposure || {},
+      scan_stats: book.scan_stats || null,
+      positions,
+      closed,
+      signal_logs: [],
+      summary: book.summary || "No closed trades yet.",
+      metrics: book.metrics || {},
+      market: book.market,
+      label: book.label,
+      currency: book.currency,
+      currency_symbol: book.currency_symbol || "$",
+      session: book.session,
+      long_only: !!book.long_only,
+    };
+  }
+
+  function toStatusEnvelope(payload) {
+    const raw = (payload && payload.books) || {};
+    const arr = Array.isArray(raw) ? raw : Object.values(raw);
+    const books = {};
+    for (const b of arr) {
+      if (!b || !b.market) continue;
+      const id = String(b.market).toLowerCase();
+      const isExport = Array.isArray(b.open_positions) || Array.isArray(b.closed_trades);
+      books[id] = isExport ? toStatusBook(b) : b;
+    }
+    return { books };
+  }
+
+  function visibleBooks() {
+    const books = envelope.books || {};
+    if (marketFilter === "all") return BOOKS.map((id) => books[id]).filter(Boolean);
+    return books[marketFilter] ? [books[marketFilter]] : [];
+  }
+
+  function renderCard(id, snap) {
+    const sym = snap.currency_symbol || "$";
+    const equityEl = document.getElementById(`replay-${id}-equity`);
+    const exposureEl = document.getElementById(`replay-${id}-exposure`);
+    const scanEl = document.getElementById(`replay-${id}-scan`);
+    const statusEl = document.getElementById(`replay-${id}-status`);
+    const totalPnl = Number(snap.metrics?.total_pnl_dollars || 0);
+    const totalPnlPct = Number(snap.metrics?.total_pnl_pct || 0);
+    if (equityEl) {
+      equityEl.textContent =
+        `Cash: ${fmtMoney(snap.cash, { digits: 2, symbol: sym })}   ` +
+        `Equity: ${fmtMoney(snap.equity, { digits: 2, symbol: sym })}   ` +
+        `Total P&L: ${fmtMoney(totalPnl, { signed: true, symbol: sym })} (${fmtSigned(totalPnlPct, 2, "%")})   ` +
+        `Open: ${snap.open_count}   Closed: ${snap.closed_count}`;
+    }
+    const exp = snap.exposure || {};
+    if (exposureEl) {
+      const shortBit = snap.long_only
+        ? "Short: 0% · long-only"
+        : `Short: ${(exp.short_pct || 0).toFixed(1)}%`;
+      exposureEl.textContent =
+        `Long: ${(exp.long_pct || 0).toFixed(1)}%   ${shortBit}   ` +
+        `Net: ${(exp.net_pct || 0) >= 0 ? "+" : ""}${(exp.net_pct || 0).toFixed(1)}%   ` +
+        `Gross: ${(exp.gross_pct || 0).toFixed(1)}%   ` +
+        `Realized: ${fmtMoney(snap.metrics?.realized_pnl_dollars || 0, { signed: true, symbol: sym })}   ` +
+        `Unrealized: ${fmtMoney(snap.metrics?.unrealized_pnl_dollars || 0, { signed: true, symbol: sym })}`;
+    }
+    if (scanEl) {
+      const st = snap.scan_stats;
+      if (!st) scanEl.textContent = "";
+      else {
+        const last = st.last_scan_at ? new Date(st.last_scan_at).toLocaleString() : "—";
+        scanEl.textContent =
+          `Snapshot: ${last}   Patterns found: ${st.patterns_found}   ` +
+          `Trades opened: ${st.trades_opened}   Rejected: ${st.signals_rejected}` +
+          (st.sim_days != null ? `   Sim days: ${st.sim_days}` : "");
+      }
+    }
+    if (statusEl) statusEl.textContent = "Replay data.";
+  }
+
+  function closedSortValue(t, col) {
+    if (col === "market") return String(t.market || "");
+    if (col === "closed") return Date.parse(t.closed || "") || 0;
+    if (col === "symbol") return String(t.symbol || "");
+    if (col === "action") return String(t.action || "");
+    if (col === "qty") return Number(t.qty) || 0;
+    if (col === "entry") return Number(t.entry) || 0;
+    if (col === "exit") return Number(t.exit) || 0;
+    if (col === "pnl") return Number(t.pnl) || 0;
+    if (col === "pnl_pct") return Number(t.pnl_pct) || 0;
+    if (col === "r") return t.r == null ? Number.NEGATIVE_INFINITY : Number(t.r);
+    if (col === "reason") return String(t.reason || "");
+    if (col === "hold") return Number(t.days) || 0;
+    if (col === "pattern") return String(t.pattern || "");
+    return 0;
+  }
+
+  function renderClosed() {
+    if (!closedBody) return;
+    let rows = closedRows.slice();
+    const sf = (closedSymbol?.value || "").trim().toLowerCase();
+    const rf = (closedReason?.value || "").trim();
+    const pf = (closedPattern?.value || "").trim().toLowerCase();
+    const q = (closedSearch?.value || "").trim().toLowerCase();
+    rows = rows.filter((t) => {
+      if (sf && !String(t.symbol || "").toLowerCase().includes(sf)) return false;
+      if (rf && t.reason !== rf) return false;
+      if (pf && !String(t.pattern || "").toLowerCase().includes(pf)) return false;
+      if (q) {
+        const hay = [t.symbol, t.action, t.reason, t.pattern].map((x) => String(x || "")).join(" ").toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    let sortCol = closedSort.col;
+    if (marketFilter === "all" && (sortCol === "pnl" || sortCol === "pnl_pct")) sortCol = "closed";
+    rows.sort((a, b) => {
+      const av = closedSortValue(a, sortCol);
+      const bv = closedSortValue(b, sortCol);
+      if (av < bv) return closedSort.desc ? 1 : -1;
+      if (av > bv) return closedSort.desc ? -1 : 1;
+      return 0;
+    });
+    if (closedStats) {
+      if (!closedRows.length) {
+        closedStats.textContent = "No closed trades yet.";
+      } else if (marketFilter === "all") {
+        closedStats.textContent = `${closedRows.length} closed across books (showing ${rows.length}).`;
+      } else {
+        const wins = closedRows.filter((t) => Number(t.pnl) > 0).length;
+        closedStats.textContent = `${closedRows.length} closed · ${wins}/${closedRows.length} wins.`;
+      }
+    }
+    closedBody.innerHTML = "";
+    if (!rows.length) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td class="empty" colspan="13">${esc(
+        closedRows.length ? "No trades match filters." : "No closed trades in this replay."
+      )}</td>`;
+      closedBody.appendChild(tr);
+      return;
+    }
+    rows.forEach((t) => {
+      const cls = t.pnl > 0 ? "gain" : t.pnl < 0 ? "loss" : "";
+      const tr = document.createElement("tr");
+      tr.classList.add(`book-${t.market || "us"}`);
+      tr.classList.toggle("gain-row", cls === "gain");
+      tr.classList.toggle("loss-row", cls === "loss");
+      const sym = (envelope.books[t.market] || {}).currency_symbol || "$";
+      tr.innerHTML =
+        `<td><span class="pill mkt-${esc(t.market)}">${esc((t.market || "").toUpperCase())}</span></td>` +
+        `<td>${esc(fmtStamp(t.closed))}</td>` +
+        `<td>${esc(t.symbol)}</td>` +
+        `<td><span class="pill ${t.action === "SELL" ? "side-sell" : "side-buy"}">${esc(t.action)}</span></td>` +
+        `<td class="num">${fmtQty(t.qty)}</td>` +
+        `<td class="num">${Number(t.entry).toFixed(2)}</td>` +
+        `<td class="num">${Number(t.exit).toFixed(2)}</td>` +
+        `<td class="num ${cls}">${fmtMoney(t.pnl, { signed: true, symbol: sym })}</td>` +
+        `<td class="num ${cls}">${fmtSigned(t.pnl_pct, 2, "%")}</td>` +
+        `<td class="num">${t.r == null ? "—" : fmtSigned(t.r)}</td>` +
+        `<td><span class="pill ${reasonClass(t.reason)}">${esc(fmtReason(t))}</span></td>` +
+        `<td class="num">${esc(fmtHold(t.days, t.bars))}</td>` +
+        `<td class="muted" title="${esc(t.pattern)}">${esc(fmtPattern(t.pattern))}</td>`;
+      tr.addEventListener("dblclick", () => openReplayTradeChart("closed", t));
+      closedBody.appendChild(tr);
+    });
+  }
+
+  function renderPositions() {
+    if (!posBody) return;
+    posBody.innerHTML = "";
+    const rows = [];
+    for (const book of visibleBooks()) {
+      const sym = book.currency_symbol || "$";
+      for (const p of book.positions || []) {
+        rows.push({ ...p, market: p.market || book.market, _sym: sym });
+      }
+    }
+    if (!rows.length) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td class="empty" colspan="15">No open positions in this replay.</td>`;
+      posBody.appendChild(tr);
+      return;
+    }
+    for (const p of rows) {
+      const tr = document.createElement("tr");
+      const cls = p.unrl_pct > 0 ? "gain" : p.unrl_pct < 0 ? "loss" : "";
+      tr.classList.add(`book-${p.market || "us"}`);
+      tr.title = "Double-click to open chart";
+      tr.innerHTML =
+        `<td><span class="pill mkt-${esc(p.market)}">${esc((p.market || "").toUpperCase())}</span></td>` +
+        `<td>${esc(p.symbol)}</td><td>${esc(p.status)}</td><td>${esc(p.action)}</td>` +
+        `<td>${fmtQty(p.qty)}</td>` +
+        `<td>${Number(p.entry).toFixed(2)}</td><td>${Number(p.current).toFixed(2)}</td>` +
+        `<td class="${cls}">${fmtSigned(p.unrl_pct, 2, "%")}</td>` +
+        `<td class="${cls}">${fmtMoney(p.mtm, { signed: true, symbol: p._sym })}</td>` +
+        `<td>${p.r == null ? "—" : fmtSigned(p.r)}</td>` +
+        `<td>${fmtDays(p.days)}</td><td>${p.bars == null ? "—" : p.bars}</td>` +
+        `<td>${fmtMoney(p.value, { symbol: p._sym })}</td>` +
+        `<td>${p.port_pct == null ? "—" : `${Number(p.port_pct).toFixed(1)}%`}</td>` +
+        `<td>${esc(p.pattern)}</td>`;
+      tr.addEventListener("dblclick", () => openReplayTradeChart("open", p));
+      posBody.appendChild(tr);
+    }
+  }
+
+  function renderPerfBook(id, snap) {
+    const metricsEl = document.getElementById(`replay-metrics-${id}`);
+    const summary = document.getElementById(`replay-summary-${id}`);
+    const panel = document.querySelector(`[data-replay-perf="${id}"]`);
+    if (panel) panel.hidden = marketFilter !== "all" && marketFilter !== id;
+    const m = snap.metrics || {};
+    const sym = snap.currency_symbol || "$";
+    if (metricsEl) {
+      const exits = Object.entries(m.exit_reason_breakdown || {})
+        .map(([k, v]) => `${k}=${v}`).join(", ") || "—";
+      metricsEl.textContent = snap.closed_count
+        ? [
+            `Total P&L: ${fmtMoney(m.total_pnl_dollars, { signed: true, symbol: sym })} (${fmtSigned(m.total_pnl_pct, 2, "%")})`,
+            `Realized: ${fmtMoney(m.realized_pnl_dollars, { signed: true, symbol: sym })}   Unrealized: ${fmtMoney(m.unrealized_pnl_dollars, { signed: true, symbol: sym })}`,
+            `Avg R: ${fmtSigned(m.avg_r)}   Median R: ${fmtSigned(m.median_r)}   Avg hold: ${Number(m.avg_hold_bars || 0).toFixed(1)} bars`,
+            `Max DD: ${fmtSigned(m.max_drawdown_pct, 2, "%")}   Sharpe: ${fmtSigned(m.sharpe_ratio)}`,
+            `Exit reasons: ${exits}`,
+          ].join("\n")
+        : "No closed trades yet.";
+    }
+    if (summary) summary.textContent = snap.summary || "No closed trades yet.";
+  }
+
+  function renderPerf() {
+    const books = envelope.books || {};
+    BOOKS.forEach((id) => renderPerfBook(id, books[id] || {}));
+  }
+
+  function renderBlotter() {
+    closedRows = [];
+    for (const book of visibleBooks()) {
+      closedRows.push(...(book.closed || []));
+    }
+    renderPositions();
+    renderClosed();
+  }
+
+  function render() {
+    const books = envelope.books || {};
+    BOOKS.forEach((id) => renderCard(id, books[id] || {}));
+    renderBlotter();
+    renderPerf();
+  }
+
+  // ── Chart modal ────────────────────────────────────────────────────────
+  const chartModal = document.getElementById("replay-chart-modal");
+  const chartTitle = document.getElementById("replay-chart-title");
+  const chartOhlc = document.getElementById("replay-chart-ohlc");
+  const chartStatus = document.getElementById("replay-chart-status");
+  const chartHost = document.getElementById("replay-chart-host");
+
+  function fmtTvOhlc(data) {
+    const o = data && data.ohlc;
+    if (!o) return "";
+    const sign = o.change >= 0 ? "+" : "";
+    return (
+      `O ${Number(o.open).toFixed(2)}  H ${Number(o.high).toFixed(2)}  ` +
+      `L ${Number(o.low).toFixed(2)}  C ${Number(o.close).toFixed(2)}  ` +
+      `${sign}${Number(o.change).toFixed(2)} (${sign}${Number(o.change_pct).toFixed(2)}%)`
+    );
+  }
+  function closeTradeChart() {
+    if (!chartModal) return;
+    chartModal.hidden = true;
+    if (window.TVChart) window.TVChart.unmount();
+    if (chartOhlc) chartOhlc.textContent = "";
+  }
+  function openChartLoading(label) {
+    chartModal.hidden = false;
+    if (chartTitle) chartTitle.textContent = label;
+    if (chartOhlc) chartOhlc.textContent = "";
+    if (chartStatus) {
+      chartStatus.hidden = false;
+      chartStatus.textContent = "Loading…";
+    }
+  }
+  function showChartError(e) {
+    if (chartStatus) {
+      chartStatus.hidden = false;
+      chartStatus.textContent = String(e.message || e);
+    }
+  }
+  function renderTradeChartData(data) {
+    if (chartTitle) chartTitle.textContent = data.title || "Chart";
+    if (chartOhlc) {
+      chartOhlc.textContent = fmtTvOhlc(data);
+      chartOhlc.classList.toggle("gain", Number(data.ohlc && data.ohlc.change) >= 0);
+      chartOhlc.classList.toggle("loss", Number(data.ohlc && data.ohlc.change) < 0);
+    }
+    if (window.TVChart && chartHost) {
+      window.TVChart.mount(chartHost, data, {
+        onCandle(bar) {
+          if (!chartOhlc) return;
+          if (!bar) {
+            chartOhlc.textContent = fmtTvOhlc(data);
+            chartOhlc.classList.toggle("gain", Number(data.ohlc && data.ohlc.change) >= 0);
+            chartOhlc.classList.toggle("loss", Number(data.ohlc && data.ohlc.change) < 0);
+            return;
+          }
+          const prev = (data.candles || []).findIndex((c) => c.time === bar.time);
+          const prevClose = prev > 0 ? data.candles[prev - 1].close : bar.open;
+          const change = bar.close - prevClose;
+          const pct = prevClose ? (change / prevClose) * 100 : 0;
+          const sign = change >= 0 ? "+" : "";
+          chartOhlc.textContent =
+            `${bar.time}  O ${Number(bar.open).toFixed(2)}  H ${Number(bar.high).toFixed(2)}  ` +
+            `L ${Number(bar.low).toFixed(2)}  C ${Number(bar.close).toFixed(2)}  ` +
+            `${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)`;
+          chartOhlc.classList.toggle("gain", change >= 0);
+          chartOhlc.classList.toggle("loss", change < 0);
+        },
+      });
+    }
+    if (chartStatus) {
+      chartStatus.textContent = "";
+      chartStatus.hidden = true;
+    }
+  }
+  // Exported `opened`/`closed` are wall-clock fill times when the replay ran,
+  // not the simulated bar dates — markers derived from them snap to the
+  // latest bar, so the chart looks unrelated to the trade. Prefer the sim
+  // dates the export carries (new files), else the per-session daily marks.
+  function replayMarkDate(trade, which) {
+    const marks = trade.daily_marks || [];
+    const first = marks.length ? (marks[0].sim_bar || marks[0].date) : null;
+    const last = marks.length ? (marks[marks.length - 1].sim_bar || marks[marks.length - 1].date) : null;
+    if (which === "entry") {
+      return trade.sim_opened || first || trade.opened || null;
+    }
+    return trade.sim_closed || last || trade.closed || null;
+  }
+  async function openReplayTradeChart(side, trade) {
+    if (!chartModal) return;
+    openChartLoading(`${(trade.market || "").toUpperCase()} ${trade.symbol || "Chart"}`);
+    const body = {
+      market: trade.market,
+      symbol: trade.symbol,
+      side,
+      action: trade.action,
+      pattern: trade.pattern,
+      timeframe: trade.timeframe || "1d",
+      entry: trade.entry,
+      stop: trade.stop,
+      target: trade.target,
+      entry_time: replayMarkDate(trade, "entry"),
+    };
+    if (side === "closed") {
+      body.exit = trade.exit;
+      body.exit_reason = trade.reason || null;
+      body.exit_time = replayMarkDate(trade, "exit");
+    } else {
+      body.current = trade.current;
+    }
+    try {
+      const data = await api("/api/replay/chart", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      renderTradeChartData(data);
+    } catch (e) {
+      showChartError(e);
+    }
+  }
+
+  document.getElementById("replay-chart-close")?.addEventListener("click", closeTradeChart);
+  document.getElementById("replay-chart-backdrop")?.addEventListener("click", closeTradeChart);
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") closeTradeChart();
+  });
+
+  // ── Tabs / filter / sort ───────────────────────────────────────────────
+  document.querySelectorAll(".tabs .tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const name = btn.dataset.tab;
+      document.querySelectorAll(".tabs .tab").forEach((b) => {
+        const on = b === btn;
+        b.classList.toggle("active", on);
+        b.setAttribute("aria-selected", on ? "true" : "false");
+      });
+      document.querySelectorAll(".tab-panel").forEach((panel) => {
+        const on = panel.id === `replay-tab-${name}`;
+        panel.classList.toggle("active", on);
+        panel.hidden = !on;
+      });
+    });
+  });
+
+  document.querySelectorAll(".filter-pills .pill-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      marketFilter = btn.dataset.filter || "all";
+      document.querySelectorAll(".filter-pills .pill-btn").forEach((b) => {
+        b.classList.toggle("active", b === btn);
+      });
+      if (sortNote) sortNote.hidden = marketFilter !== "all";
+      renderBlotter();
+      renderPerf();
+    });
+  });
+
+  document.querySelectorAll("#replay-closed th.sortable").forEach((th) => {
+    th.addEventListener("click", () => {
+      const col = th.dataset.col;
+      if (closedSort.col === col) closedSort.desc = !closedSort.desc;
+      else {
+        closedSort.col = col;
+        closedSort.desc = true;
+      }
+      renderClosed();
+    });
+  });
+  [closedSymbol, closedPattern, closedSearch].forEach((el) => {
+    el?.addEventListener("input", renderClosed);
+  });
+  closedReason?.addEventListener("change", renderClosed);
+
+  // ── Persisted replay load/upload/clear ─────────────────────────────────
+  const replayBar = document.getElementById("replay-bar");
+  const replayFile = document.getElementById("replay-file");
+  const replayLoad = document.getElementById("replay-load");
+  const replayClear = document.getElementById("replay-clear");
+  const replayStatus = document.getElementById("replay-status");
+
+  function setReplayStatus(text) {
+    if (replayStatus) replayStatus.textContent = text;
+  }
+  function setReplayActive(active) {
+    if (replayBar) replayBar.classList.toggle("replaying", active);
+    if (replayClear) replayClear.disabled = !active;
+  }
+  function showEmpty() {
+    envelope = { books: {} };
+    setReplayActive(false);
+    render();
+    setReplayStatus("No replay loaded. Upload a trades JSON to inspect a past run.");
+  }
+  function applyReplay(payload) {
+    const env = toStatusEnvelope(payload);
+    const count = Object.keys(env.books).length;
+    if (!count) {
+      showEmpty();
+      return;
+    }
+    envelope = env;
+    setReplayActive(true);
+    render();
+    const ids = Object.keys(env.books).map((m) => m.toUpperCase()).join(", ");
+    setReplayStatus(`Showing ${count} book(s): ${ids}. Clear to remove.`);
+  }
+
+  replayLoad?.addEventListener("click", async () => {
+    const file = replayFile?.files && replayFile.files[0];
+    if (!file) {
+      setReplayStatus("Choose a JSON trades file first.");
+      return;
+    }
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      await api("/api/replay/upload", { method: "POST", body: JSON.stringify(data) });
+      applyReplay(data);
+    } catch (e) {
+      setReplayStatus(String(e.message || e));
+    }
+  });
+
+  replayClear?.addEventListener("click", async () => {
+    try {
+      await api("/api/replay/clear", { method: "POST", body: JSON.stringify({}) });
+    } catch (e) {
+      setReplayStatus(String(e.message || e));
+      return;
+    }
+    if (replayFile) replayFile.value = "";
+    showEmpty();
+  });
+
+  (async () => {
+    try {
+      const res = await api("/api/replay/load");
+      if (res && res.replay) applyReplay(res.replay);
+      else showEmpty();
+    } catch (e) {
+      setReplayStatus(String(e.message || e));
+      render();
+    }
+  })();
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   initBookLamps();
   if (window.TB_PAGE === "explorer") initExplorer();
   if (window.TB_PAGE === "backtest") initBacktest();
   if (window.TB_PAGE === "paper") initPaper();
+  if (window.TB_PAGE === "replay") initReplay();
   if (window.TB_PAGE === "kronos") initKronos();
 });
 

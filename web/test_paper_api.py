@@ -155,6 +155,123 @@ class WebPaperApiTests(unittest.TestCase):
             self.assertEqual(r.status_code, 200)
             chart.assert_called_once_with("us", side="log", symbol="TSLA", index=None)
 
+    def test_replay_chart_bad_market(self) -> None:
+        self._login()
+        r = self.client.post(
+            "/api/replay/chart",
+            json={"market": "eu", "symbol": "AAPL", "side": "open"},
+        )
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("market", str(r.json().get("detail", "")).lower())
+
+    def test_replay_chart_builds_payload(self) -> None:
+        self._login()
+        import pandas as pd
+
+        df = pd.DataFrame(
+            {
+                "open": [10.0, 11.0],
+                "high": [12.0, 12.0],
+                "low": [9.0, 10.0],
+                "close": [11.0, 11.5],
+                "volume": [1000, 1200],
+            }
+        )
+        with patch(
+            "data.history.load_daily_ohlcv_df", return_value=df,
+        ) as loader, patch(
+            "analysis.chart_renderer.build_trade_viewer_payload",
+            return_value={"title": "DY 1D · SELL"},
+        ) as builder:
+            r = self.client.post(
+                "/api/replay/chart",
+                json={
+                    "market": "us",
+                    "symbol": "DY",
+                    "side": "open",
+                    "action": "SELL",
+                    "pattern": "pattern_008_head_and_shoulders",
+                    "entry": 310.75,
+                    "stop": 348.04,
+                    "target": 202.02,
+                    "current": 295.56,
+                    "entry_time": "2026-09-04T01:43:36+00:00",
+                },
+            )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["title"], "DY 1D · SELL")
+        loader.assert_called_once_with("DY", tv_fallback=False, market="us")
+        self.assertEqual(builder.call_args.kwargs["entry"], 310.75)
+        self.assertEqual(builder.call_args.kwargs["exit_price"], None)
+        self.assertEqual(builder.call_args.kwargs["current"], 295.56)
+
+    def test_replay_chart_closed_side(self) -> None:
+        self._login()
+        import pandas as pd
+
+        df = pd.DataFrame(
+            {
+                "open": [10.0, 11.0],
+                "high": [12.0, 12.0],
+                "low": [9.0, 10.0],
+                "close": [11.0, 11.5],
+                "volume": [1000, 1200],
+            }
+        )
+        with patch(
+            "data.history.load_daily_ohlcv_df", return_value=df,
+        ), patch(
+            "analysis.chart_renderer.build_trade_viewer_payload",
+            return_value={"title": "SYNA 1D · BUY"},
+        ) as builder:
+            r = self.client.post(
+                "/api/replay/chart",
+                json={
+                    "market": "us",
+                    "symbol": "SYNA",
+                    "side": "closed",
+                    "action": "BUY",
+                    "exit": 84.0,
+                    "exit_reason": "trailing_stop",
+                    "entry": 80.0,
+                    "entry_time": "2026-09-01T00:00:00+00:00",
+                    "exit_time": "2026-09-04T00:46:41+00:00",
+                },
+            )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(builder.call_args.kwargs["exit_price"], 84.0)
+        self.assertEqual(builder.call_args.kwargs["exit_reason"], "trailing_stop")
+        self.assertEqual(builder.call_args.kwargs["current"], None)
+
+    def test_replay_upload_requires_books(self) -> None:
+        self._login()
+        r = self.client.post("/api/replay/upload", json={"foo": 1})
+        self.assertEqual(r.status_code, 400)
+
+    def test_replay_upload_load_clear_roundtrip(self) -> None:
+        self._login()
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "replay.json"
+            payload = {"books": [{"market": "us", "open_positions": [], "closed_trades": []}]}
+            with patch("web.replay_store.REPLAY_PATH", path):
+                up = self.client.post("/api/replay/upload", json=payload)
+                self.assertEqual(up.status_code, 200)
+                self.assertTrue(path.exists())
+
+                ld = self.client.get("/api/replay/load")
+                self.assertEqual(ld.status_code, 200)
+                self.assertEqual(ld.json()["replay"]["books"][0]["market"], "us")
+
+                cl = self.client.post("/api/replay/clear", json={})
+                self.assertEqual(cl.status_code, 200)
+                self.assertFalse(path.exists())
+
+                ld2 = self.client.get("/api/replay/load")
+                self.assertEqual(ld2.json()["replay"], None)
+
     def test_reset_logs_validates_market(self) -> None:
         self._login()
         with patch("web.app.paper_books.reset_logs") as reset_logs:

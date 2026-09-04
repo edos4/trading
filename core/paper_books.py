@@ -121,6 +121,7 @@ class PaperBook:
                     "stop": p.stop_loss,
                     "target": p.take_profit,
                     "opened": p.entry_date.isoformat(),
+                    "sim_opened": p.sim_entry_date.isoformat() if p.sim_entry_date else None,
                     "timeframe": p.timeframe,
                     "daily_marks": list(p.position_marks or []),
                 }
@@ -150,6 +151,8 @@ class PaperBook:
                     "target": t.take_profit,
                     "opened": t.entry_date.isoformat() if t.entry_date else "",
                     "closed": t.exit_date.isoformat() if t.exit_date else "",
+                    "sim_opened": t.sim_entry_date.isoformat() if t.sim_entry_date else None,
+                    "sim_closed": t.sim_exit_date.isoformat() if t.sim_exit_date else None,
                     "timeframe": t.timeframe,
                     "daily_marks": list(t.position_marks or []),
                 }
