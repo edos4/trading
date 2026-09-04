@@ -23,16 +23,14 @@ from config import settings
 from core.backtester import (
     BacktestResult,
     BacktestTrade,
-    _apply_sizing,
+    _apply_notional_sizing,
     _check_exit,
     _close_trade,
     _open_trade,
-    _resolve_profit_lock_trigger_pct,
-    _execution_reward_risk_ok,
     trade_r_multiple,
     trade_risk_dollars,
 )
-from core.engine_defaults import ENGINE, sizing_kwargs, structure_filters_enabled
+from core.engine_defaults import ENGINE, is_fractional_qty
 from core.market import (
     apply_lot_rounding,
     format_money,
@@ -98,23 +96,7 @@ def bars_held(position: BacktestTrade, current_bar_idx: int | None = None) -> in
 
 
 def position_status(position: BacktestTrade) -> str:
-    """Coarse open-position state for a dashboard status column — the exit
-    mechanics (_check_exit) already decide what actually triggers; this
-    just reflects which protective level is currently armed."""
-    if (
-        position.profit_lock_frac
-        and position.profit_lock_frac > 0
-        and position._best_pnl_pct is not None
-        and position._best_pnl_pct > 0
-        and (
-            position.profit_lock_trigger_pct is None
-            or position.profit_lock_trigger_pct <= 0
-            or position._best_pnl_pct >= position.profit_lock_trigger_pct
-        )
-    ):
-        return "LOCK"
-    if position._breakeven_armed:
-        return "BREAKEVEN"
+    """Coarse open-position state for a dashboard status column."""
     if position._trailing_activated:
         return "TRAILING"
     return "OPEN"
@@ -130,6 +112,8 @@ def _trade_to_dict(t: BacktestTrade) -> dict:
 
 
 def _trade_from_dict(d: dict) -> BacktestTrade:
+    import dataclasses
+
     d = dict(d)
     d["entry_date"] = datetime.fromisoformat(d["entry_date"])
     d["exit_date"] = datetime.fromisoformat(d["exit_date"])
@@ -139,7 +123,11 @@ def _trade_from_dict(d: dict) -> BacktestTrade:
         d["sim_exit_date"] = datetime.fromisoformat(d["sim_exit_date"])
     if d.get("position_marks") is None:
         d["position_marks"] = []
-    return BacktestTrade(**d)
+    if isinstance(d.get("reclaim_lower_rail"), list):
+        d["reclaim_lower_rail"] = tuple(d["reclaim_lower_rail"])
+    # Tolerate ledgers saved under the old (pre-refactor) BacktestTrade schema.
+    known = {f.name for f in dataclasses.fields(BacktestTrade)}
+    return BacktestTrade(**{k: v for k, v in d.items() if k in known})
 
 
 def _position_mark_row(
@@ -196,15 +184,11 @@ class PaperAccount:
         self.txn_cost_pct = (
             profile.txn_cost_pct if txn_cost_pct is None else txn_cost_pct
         )
-        self.slippage_pct = (
-            slippage_pct if slippage_pct is not None else settings.paper_slippage_pct
-        )
-        if max_daily_loss is not None:
-            self.max_daily_loss = max_daily_loss
-        elif profile.id == "ph":
-            self.max_daily_loss = settings.max_daily_loss_php
-        else:
-            self.max_daily_loss = settings.max_daily_loss_usd
+        # Slippage defaults OFF (backtest/paper parity, `.cjs` methodology).
+        # Set > 0 explicitly to model fill slippage on the paper book.
+        self.slippage_pct = slippage_pct if slippage_pct is not None else 0.0
+        # Vestigial — no daily-loss limit is enforced anymore.
+        self.max_daily_loss = float("inf") if max_daily_loss is None else max_daily_loss
         self.positions: dict[str, BacktestTrade] = {}
         self.closed: list[BacktestTrade] = []
         self.equity_curve: list[tuple[str, float]] = []
@@ -486,169 +470,59 @@ class PaperAccount:
                 f"Already flat-blocked: an open position exists in {signal.symbol}, "
                 f"so a second concurrent entry was skipped."
             )
-        if settings.max_open_positions > 0 and len(self.positions) >= settings.max_open_positions:
-            log.info("Paper | max_open_positions reached — skipping signal")
-            return False, (
-                f"Portfolio full: {len(self.positions)} open positions already at the "
-                f"MAX_OPEN_POSITIONS cap ({settings.max_open_positions})."
-            )
-        if settings.max_open_per_pattern > 0:
-            pattern_open = sum(
-                1 for p in self.positions.values() if p.pattern == signal.pattern
-            )
-            if pattern_open >= settings.max_open_per_pattern:
-                log.info(
-                    f"Paper | max_open_per_pattern reached for {signal.pattern} "
-                    f"({pattern_open}/{settings.max_open_per_pattern}) — skipping "
-                    f"{signal.symbol}"
-                )
-                return False, (
-                    f"Pattern cap: {pattern_open} open {signal.pattern} seats already "
-                    f"at MAX_OPEN_PER_PATTERN ({settings.max_open_per_pattern})."
-                )
         profile = get_market(self.market)
-        if (
-            structure_filters_enabled(self.pattern_only)
-            and profile.long_only
-            and signal.action == "SELL"
-        ):
+        # PH is long-only (retail shorts need SBL); every other constraint the
+        # engine used to enforce (portfolio caps, daily loss, gross exposure,
+        # cash affordability, R:R) is gone — trades are independent flat $10k.
+        if profile.long_only and signal.action == "SELL":
             return False, (
-                f"Long-only {profile.label}: SELL/short signals are disabled "
-                f"(PSE retail shorts need SBL)."
+                f"Long-only {profile.label}: SELL/short signals are disabled."
             )
-        if (
-            not self.assume_session_open
-            and not may_assume_fill(self.market)
-        ):
+        if not self.assume_session_open and not may_assume_fill(self.market):
             window = session_label(self.market)
             return False, (
                 f"Session {window}: paper will not assume a fill outside continuous "
-                f"AM/PM matching (09:30–12:00 and 13:00–14:45 PHT)."
-            )
-        if self._daily_pnl <= -self.max_daily_loss:
-            log.info("Paper | daily loss limit hit — skipping signal")
-            return False, (
-                f"Daily loss limit: realized P&L today is "
-                f"{format_money(self._daily_pnl, self.market, signed=True)}, "
-                f"at or beyond {format_money(-self.max_daily_loss, self.market)}."
+                f"AM/PM matching."
             )
 
-        # Stop backstops / R:R already ran in MarketScanner before the
-        # pending queue (same moment the backtester gates, on the signal
-        # bar). Re-running here on the fill bar would diverge from BT.
-
-        _apply_sizing(
-            signal, store, signal.symbol, signal.timeframe,
-            entry_price=candle.close,
-            **sizing_kwargs(account_value=self.equity()),
+        signal.price = candle.close
+        _apply_notional_sizing(
+            signal, ENGINE.position_notional,
+            fractional=is_fractional_qty(signal.pattern),
         )
-        fill_px = candle.close
-        if fill_px > 0 and ENGINE.max_gross_exposure_pct > 0:
-            eq = self.equity()
-            gross_now = sum(
-                self._last_price.get(sym, p.entry_price) * p.qty
-                for sym, p in self.positions.items()
+        if signal.qty <= 0 or (
+            signal.qty < 1 and not is_fractional_qty(signal.pattern)
+        ):
+            return False, (
+                f"Sizing: ${ENGINE.position_notional:,.0f} buys < 1 share of "
+                f"{signal.symbol} at {format_money(candle.close, self.market)}."
             )
-            cap = eq * ENGINE.max_gross_exposure_pct
-            room = cap - gross_now
-            max_qty = int(room / fill_px) if room > 0 else 0
-            if signal.qty > max_qty:
-                signal.qty = max_qty
-            if signal.qty < 1:
-                return False, (
-                    f"Gross exposure cap: open notional already "
-                    f"{format_money(gross_now, self.market)} vs "
-                    f"{ENGINE.max_gross_exposure_pct:.0%} of equity "
-                    f"({format_money(eq, self.market)}) — skipped."
-                )
-        if profile.lot_round:
-            signal.price = candle.close
-            if not apply_lot_rounding(signal):
-                return False, (
-                    f"Lot rounding: {signal.symbol} size rounded below one board lot "
-                    f"at {format_money(candle.close, self.market)} — skipped."
-                )
+        if profile.lot_round and not apply_lot_rounding(signal):
+            return False, (
+                f"Lot rounding: {signal.symbol} size rounded below one board lot."
+            )
 
         fill_candle = candle
         slip = self.slippage_pct
         if slip:
             slipped_close = (
-                candle.close * (1 + slip)
-                if signal.action == "BUY"
+                candle.close * (1 + slip) if signal.action == "BUY"
                 else candle.close * (1 - slip)
             )
             fill_candle = OHLCVCandle(
                 open=candle.open, high=candle.high, low=candle.low,
-                close=slipped_close, volume=candle.volume,
-                timestamp=candle.timestamp,
-            )
-
-        # Cash affordability cap — _apply_sizing only bounds a position to a
-        # % of equity, not of actually-available cash. Nothing upstream
-        # tracks aggregate exposure across positions, so a burst of signals
-        # (e.g. every symbol firing "new bar" on the first stream-replay scan)
-        # could otherwise buy far more than the account has, driving cash
-        # deeply negative. The backtester's portfolio simulation already
-        # caps by cash (see _apply_portfolio_constraints); mirror that here.
-        if signal.action == "BUY" and fill_candle.close > 0:
-            affordable_qty = int(self.cash / fill_candle.close)
-            if profile.lot_round:
-                from core.market import round_qty_to_lot
-
-                affordable_qty = round_qty_to_lot(affordable_qty, fill_candle.close)
-            if affordable_qty < signal.qty:
-                signal.qty = affordable_qty
-            if signal.qty < 1:
-                log.info(f"Paper | insufficient cash for {signal.symbol} — skipping signal")
-                return False, (
-                    f"Insufficient cash: need buying power for at least 1 share of "
-                    f"{signal.symbol} at ~{format_money(fill_candle.close, self.market)}, "
-                    f"but cash is {format_money(self.cash, self.market)}."
-                )
-        if (
-            settings.min_position_notional > 0
-            and fill_candle.close > 0
-            and signal.qty * fill_candle.close < settings.min_position_notional
-        ):
-            log.info(
-                f"Paper | skip {signal.symbol} — notional "
-                f"{signal.qty * fill_candle.close:.2f} below "
-                f"MIN_POSITION_NOTIONAL {settings.min_position_notional:.0f}"
-            )
-            return False, (
-                f"Min notional: sized {signal.qty:g} {signal.symbol} "
-                f"({format_money(signal.qty * fill_candle.close, self.market)}) "
-                f"is below MIN_POSITION_NOTIONAL "
-                f"{format_money(settings.min_position_notional, self.market)}."
+                close=slipped_close, volume=candle.volume, timestamp=candle.timestamp,
             )
 
         position = _open_trade(
-            signal,
-            fill_candle,
-            self.bar_count(signal.symbol, signal.timeframe),
+            signal, fill_candle, self.bar_count(signal.symbol, signal.timeframe),
         )
-        if not _execution_reward_risk_ok(position, ENGINE.min_reward_risk_ratio):
-            return False, (
-                f"Execution R:R rejection: actual fill {position.entry_price:.4f} "
-                f"produced reward:risk below the engine minimum "
-                f"{ENGINE.min_reward_risk_ratio:.2f}."
-            )
-        # _open_trade stamps entry_date from the OHLCV bar's timestamp, which
-        # is just the trading day (correct for the backtester replaying
-        # history). A live paper fill needs the real wall-clock moment it
-        # happened, so multiple fills on the same trading day are distinguishable.
-        # Keep the bar's own timestamp in sim_entry_date so days_held() can
-        # still report simulated (not wall-clock) holding time.
+        # _open_trade stamps entry_date from the bar timestamp; a live paper
+        # fill needs the real wall-clock moment. Keep the bar time in
+        # sim_entry_date so days_held() still reports simulated holding time.
         position.sim_entry_date = position.entry_date
         position.entry_date = datetime.now(timezone.utc)
         position.exit_date = position.entry_date
-        position.breakeven_trigger_pct = profile.breakeven_trigger_pct
-        position.breakeven_buffer_pct = profile.breakeven_buffer_pct
-        position.profit_take_pct = ENGINE.profit_take_pct
-        position.profit_lock_frac = ENGINE.profit_lock_frac
-        position.profit_lock_trigger_pct = _resolve_profit_lock_trigger_pct(
-            position, ENGINE.profit_lock_trigger_r,
-        )
         notional = position.entry_price * position.qty
         if signal.action == "BUY":
             self.cash -= notional
@@ -717,22 +591,13 @@ class PaperAccount:
         self._reset_daily_if_needed(now)
         bar_idx = self.bar_count(symbol, position.timeframe)
 
-        # Match ENGINE.min_hold_bars so trailing/breakeven don't arm earlier
-        # here than in backtests — otherwise live and backtested results for
-        # the same pattern diverge. bar_idx is per real new bar (see
-        # _bar_count), not per scan cycle.
-        position.profit_take_pct = (
-            ENGINE.profit_take_pct if ENGINE.profit_take_pct else None
-        )
-        position.profit_lock_frac = (
-            ENGINE.profit_lock_frac if ENGINE.profit_lock_frac else None
-        )
-        position.profit_lock_trigger_pct = _resolve_profit_lock_trigger_pct(
-            position, ENGINE.profit_lock_trigger_r,
-        )
-        exit_price, reason = _check_exit(
-            candle, position, bar_idx, min_hold_bars=ENGINE.min_hold_bars,
-        )
+        # bar_idx is per real new bar (see _bar_count), not per scan cycle, so
+        # the exit ladder's bar counting matches the backtester's walk index.
+        from core.backtester import _update_neckline_state, _update_prev_hl
+        _update_neckline_state(position, candle, bar_idx)
+        exit_price, reason = _check_exit(candle, position, bar_idx)
+        if exit_price is None:
+            _update_prev_hl(position, candle)
         if reason == "time_exit":
             elapsed = position.time_exit_bars_elapsed
             configured = position.exit_bars_after_neckline_break
@@ -839,8 +704,8 @@ class PaperAccount:
             return BacktestResult(
                 trades=list(self.closed),
                 total_signals=len(self.closed) + len(self.positions),
-                initial_capital=self.initial_capital,
-                equity_curve=list(self.equity_curve),
+                position_notional=ENGINE.position_notional,
+                version=f"paper/{self.market}",
             )
 
     # ── Persistence ───────────────────────────────────────────────────────
@@ -925,16 +790,6 @@ class PaperAccount:
         acct.positions = {
             sym: _trade_from_dict(d) for sym, d in data.get("positions", {}).items()
         }
-        for pos in acct.positions.values():
-            pos.profit_take_pct = (
-                ENGINE.profit_take_pct if ENGINE.profit_take_pct else None
-            )
-            pos.profit_lock_frac = (
-                ENGINE.profit_lock_frac if ENGINE.profit_lock_frac else None
-            )
-            pos.profit_lock_trigger_pct = _resolve_profit_lock_trigger_pct(
-                pos, ENGINE.profit_lock_trigger_r,
-            )
         acct.closed = [_trade_from_dict(d) for d in data.get("closed", [])]
         raw_curve = [tuple(x) for x in data.get("equity_curve", [])]
         # Migrate older files that stored one mark per scan. Keep the latest

@@ -1,0 +1,3 @@
+# Rounding bottom (pattern_004) — 20 ranked candidates from backtest_rb_v3.cjs PATTERNS[]
+ADBE ON PANW CRWD DDOG MRVL INTU TEAM ZS MSFT
+TSLA MCHP SNPS CDNS WDAY CTSH FAST PYPL NVDA ISRG

@@ -54,11 +54,12 @@ class RoundingBottomPattern(BasePattern):
             price=price,
             qty=notional_qty(self.POSITION_NOTIONAL, price),
             stop_loss=stop,
+            stop_loss_on_close=True,           # .cjs rb_v3: fixed 5% close-based
             take_profit=target,
-            trailing_stop_pct=0.15,
+            trailing_stop_pct=0.15,            # .cjs: highestHigh x 0.85
             trailing_stop_mode="highest_high",
+            trailing_stop_on_close=True,
             trailing_activation_pct=0.0,
-            protective_exit_on_close=True,
             notes=f"Rounding bottom start={setup.start} bottom={setup.center} depth={setup.depth:.1%} fit={setup.fit:.1%} RSI={setup.center_rsi:.1f} divergence={setup.divergence}",
             chart_annotations=[
                 ann_hline(setup.neckline, "neckline", ANN_LINE),

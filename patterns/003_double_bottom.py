@@ -68,7 +68,7 @@ class DoubleBottomPattern(BasePattern):
         if df is None:
             return None
         ind = IndicatorEngine(df)
-        rsi = ind.rsi(self.RSI_PERIOD)
+        rsi = ind.rsi_wilder(self.RSI_PERIOD)
         current = len(df) - 1
         lows = extrema(ind.low, "low", self.SWING_LOOKBACK)
         for l2 in reversed(lows):

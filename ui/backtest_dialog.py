@@ -44,217 +44,55 @@ def _decimals_for_increment(inc: float) -> int:
 PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
     (
         "market", "Market",
-        "US = NASDAQ/NYSE, USD, shorts allowed. PH = PSE, PHP, long-only, "
-        "Manila session, higher round-trip costs. Separate paper ledgers.",
+        "US = NASDAQ/NYSE, USD, shorts allowed. PH = PSE, PHP, long-only.",
         "combo", default_market().id, ["us", "ph"],
     ),
     (
-        "n_symbols", "Symbols (count)",
-        "Number of symbols to backtest (US: top by market cap; PH: top by peso volume).",
-        "spin", (100, 5, 5000, 1), None,
-    ),
-    (
-        "extra_symbols", "Additional symbols",
-        "Optional tickers to include besides the screener top-N (comma or space). "
-        "Duplicates already in the screener list are skipped.",
-        "entry", "", None,
-    ),
-    (
         "pattern_filter", "Pattern filter",
-        "Filter to one pattern. Leave blank for all patterns.",
+        "Filter to one pattern (case-insensitive substring). Blank = all patterns.",
         "combo", "", None,
     ),
     (
-        "disabled_patterns", "Disabled patterns",
-        "Comma-separated pattern names to exclude from the default multi-pattern run "
-        "(ignored if Pattern filter above targets one of them explicitly).",
-        "entry", ",".join(DISABLED_PATTERNS), None,
+        "universe", "Universe",
+        "Ticker list under data/universes/. Blank = the pattern's own .cjs "
+        "universe when a Pattern filter is set, else 'default'.",
+        "entry", "", None,
     ),
     (
-        "min_confidence", "Min confidence",
-        "Minimum pattern confidence to act on a signal (0.0-1.0). Higher = fewer but higher-quality trades.",
-        "spin", (ENGINE.min_confidence, 0.0, 1.0, 0.01), None,
+        "barcache_dir", "Barcache dir",
+        "Offline daily-bar cache (build with scripts/build_barcache.py).",
+        "entry", "data/barcache", None,
     ),
     (
-        "regime_filter", "Regime filter (SMA200)",
-        "Only buy above 200-day SMA, only sell below it (1.5% hysteresis band). "
-        "Filters counter-trend trades; near-misses within the band still pass. "
-        "Ignored when Pattern-only is checked.",
-        "check", ENGINE.regime_filter, None,
+        "extra_symbols", "Additional symbols",
+        "Optional extra tickers (comma or space separated).",
+        "entry", "", None,
     ),
     (
-        "pattern_only", "Pattern-only",
-        "Trade pattern hits only: skip min share-price, SMA200 regime, min "
-        "confidence, post-loss cooldown, and long-only. Kronos 3d gate and "
-        "volume gate still follow their own checkboxes.",
-        "check", ENGINE.pattern_only, None,
-    ),
-    (
-        "kronos_gate", "Kronos 3d gate",
-        "Require Kronos-base +3 trading-day forecast to agree with the pattern's BUY/SELL "
-        "and clear 3% in 3 days (KRONOS_MIN_MOVE_PCT, default 0.03) before taking the "
-        "trade. Fail-closed by default if weights are missing (set "
-        "KRONOS_GATE_FAIL_OPEN=true to pass instead). Does not rewrite TP/SL unless "
-        "KRONOS_GATE_ADJUST_EXITS=true.",
-        "check", settings.kronos_gate_enabled, None,
-    ),
-    (
-        "kronos_rank", "Kronos rank sleeve",
-        "Cross-sectional top-K by predicted 3d return (pattern_kronos_rank). "
-        "Runs beside Toby patterns — not a gate. Uses KRONOS_RANK_TOP_K / LONG_ONLY. "
-        "GPU-heavy; rebalances every KRONOS_RANK_REBALANCE_BARS.",
-        "check", settings.kronos_rank_enabled, None,
-    ),
-    (
-        "kronos_batch", "Batch Kronos",
-        "Collect pattern hits (and the rank sleeve universe) then call "
-        "KronosPredictor.predict_batch. Only used when Kronos 3d gate or rank "
-        "sleeve is on. Pattern-BT workers still gate sequentially.",
-        "check", settings.kronos_batch_enabled, None,
-    ),
-    (
-        "volume_gate", "Volume gate (RVOL+OBV)",
-        "Require relative volume ≥ VOLUME_GATE_RVOL_MIN and OBV slope agreeing with "
-        "BUY/SELL. Off by default — 2026-07-26 A/B showed no expectancy edge "
-        "(ON→0 trades). Fail-open on short history.",
-        "check", settings.volume_gate_enabled, None,
-    ),
-    (
-        "cooldown_bars", "Cooldown (bars)",
-        "Bars to wait before re-entering the same symbol+pattern after a loss. Reduces re-entering into chop.",
-        "spin", (ENGINE.cooldown_bars, 0, 200, 1), None,
-    ),
-    (
-        "txn_cost_pct", "Txn cost (%)",
-        "Per-trade transaction cost as a fraction of price (0.001 = 0.1%). Applied on entry + exit.",
-        "spin", (ENGINE.txn_cost_pct, 0.0, 0.01, 0.0001), None,
-    ),
-    (
-        "position_sizing", "Position sizing",
-        "Sizing method: 'risk' risks a fixed % of account per trade based on stop distance; "
-        "'pattern' uses pattern's qty; 'notional' uses fixed notional; 'atr' sizes by ATR.",
-        "combo", ENGINE.position_sizing, ["risk", "pattern", "notional", "atr"],
-    ),
-    (
-        "account_value", "Account value ($)",
-        "Starting capital for the backtest.",
-        "spin", (ENGINE.account_value, 1000.0, 50_000_000.0, 1000.0), None,
-    ),
-    (
-        "risk_per_trade_pct", "Risk per trade (%)",
-        "Fraction of account risked per trade when position_sizing='risk' (0.0075 = 0.75%).",
-        "spin", (ENGINE.risk_per_trade_pct, 0.0, 0.1, 0.0005), None,
-    ),
-    (
-        "max_position_pct", "Max position (%)",
-        "Diversification ceiling: largest fraction of account any single position may "
-        "occupy, regardless of sizing mode. If tighter than what risk_per_trade_pct "
-        "implies for a given stop, every trade gets capped to this. 0.10 with 0.75% "
-        "risk keeps names from becoming 33% of the book against a 6% hard stop.",
-        "spin", (ENGINE.max_position_pct, 0.01, 1.0, 0.01), None,
-    ),
-    (
-        "max_gross_exposure_pct", "Max gross exposure (%)",
-        "Cap on long+short notional as a fraction of equity (1.0 = 100%). "
-        "Blocks stacking 33% names into 160% gross. 0 = unlimited.",
-        "spin", (ENGINE.max_gross_exposure_pct, 0.0, 3.0, 0.05), None,
-    ),
-    (
-        "trailing_activation_default", "Trailing activation (%)",
-        "Cushion of unrealized profit before trailing stop arms (0.02 = 2%). "
-        "Prevents entry-day chop from stopping trades early. Only applies to "
-        "patterns that don't set their own trailing_activation_pct.",
-        "spin", (ENGINE.trailing_activation_default, 0.0, 0.1, 0.001), None,
-    ),
-    (
-        "min_hold_bars", "Min hold (bars)",
-        "Mandatory holding period before trailing/breakeven stops can fire. "
-        "Static stop-loss and take-profit still work immediately.",
-        "spin", (ENGINE.min_hold_bars, 0, 50, 1), None,
-    ),
-    (
-        "profit_take_pct", "Profit take (%)",
-        "Optional hard winner cap: close once unrl% from entry reaches this "
-        "(0.08 = +8%). Off by default — prefer Profit lock frac to cap giveback "
-        "without capping upside. 0 = disabled. Pattern targets closer still fire first.",
-        "spin", (ENGINE.profit_take_pct or 0.0, 0.0, 0.5, 0.005), None,
-    ),
-    (
-        "profit_lock_frac", "Profit lock frac",
-        "Ratcheting floor: lock this fraction of peak close-to-close unrl "
-        "AFTER the lock trigger is reached (0.5 = after +10% MFE, floor at +5%). "
-        "Never loosens; does not cap upside. 0 = disabled.",
-        "spin", (ENGINE.profit_lock_frac or 0.0, 0.0, 1.0, 0.05), None,
-    ),
-    (
-        "profit_lock_trigger_r", "Profit lock trigger (R)",
-        "Peak gain required, in multiples of THIS TRADE's own initial risk "
-        "(entry-to-stop distance), before the profit-lock ratchet arms "
-        "(1.0 = must be up 1x what it's risking first). Scales with each "
-        "trade's stop distance instead of a flat % that meant 0.25R for a "
-        "12%-stop name and 1R for a 3%-stop name. 0 = arm on any green tick "
-        "(too tight in paper — see engine_defaults.py notes).",
-        "spin", (ENGINE.profit_lock_trigger_r or 0.0, 0.0, 3.0, 0.1), None,
-    ),
-    (
-        "breakeven_trigger_pct", "Breakeven trigger (%)",
-        "Once a trade is ahead by this much, its floor is raised to ~entry. "
-        "Aligns with trailing activation so any trade that arms trailing also arms breakeven. "
-        "0 = disabled.",
-        "spin", (ENGINE.breakeven_trigger_pct or 0.0, 0.0, 0.2, 0.001), None,
-    ),
-    (
-        "breakeven_buffer_pct", "Breakeven buffer (%)",
-        "How far above entry (longs) / below entry (shorts) the breakeven floor sits. "
-        "Must cover round-trip costs (US ~0.15%; PH ~0.80%) so a scratch is not a fee-taxed loss.",
-        "spin", (ENGINE.breakeven_buffer_pct, 0.0, 0.05, 0.0005), None,
-    ),
-    (
-        "min_atr_stop_multiple", "Min ATR stop multiple",
-        "Requires trailing distance to be at least N× recent ATR before taking the trade. "
-        "Screens out setups where the stop is ordinary daily noise. 0 = disabled.",
-        "spin", (ENGINE.min_atr_stop_multiple, 0.0, 5.0, 0.1), None,
-    ),
-    (
-        "synthetic_stop_multiple", "Synthetic stop multiple",
-        "Catastrophic gap-protection stop = N × trailing_stop_pct. "
-        "Higher = stop acts as disaster backstop, not routine exit. 0 = disabled.",
-        "spin", (ENGINE.synthetic_stop_multiple, 0.0, 5.0, 0.05), None,
-    ),
-    (
-        "atr_stop_floor_multiple", "ATR stop floor multiple",
-        "Widens (never tightens) a pattern's own stop_loss up to N× recent ATR when "
-        "the pattern's structural stop is tighter than that. 0 = disabled.",
-        "spin", (ENGINE.atr_stop_floor_multiple, 0.0, 5.0, 0.1), None,
-    ),
-    (
-        "hard_stop_percentage", "Hard stop (%)",
-        "Hard absolute-loss cap from entry, applied only when the pattern's own stop "
-        "is looser (or unset). Catastrophic-tail backstop — keep wider than the "
-        "synthetic/ATR-floor stops it backstops or it becomes the everyday stop "
-        "instead of a tail case. 0 = disabled.",
-        "spin", (ENGINE.hard_stop_percentage, 0.0, 0.5, 0.005), None,
-    ),
-    (
-        "min_reward_risk_ratio", "Min reward:risk ratio",
-        "Skips signals whose take_profit/stop_loss ratio is below this. "
-        "Screens out low-quality setups while keeping high-R:R winners. 0 = disabled.",
-        "spin", (ENGINE.min_reward_risk_ratio, 0.0, 10.0, 0.1), None,
-    ),
-    (
-        "max_open_positions", "Max open positions",
-        "Maximum concurrent positions across all symbols. 0 = unlimited.",
-        "spin", (settings.max_open_positions, 0, 50, 1), None,
+        "txn_cost_pct", "Txn cost (per leg)",
+        "0.0 = documented headline numbers; 0.001 matches the .cjs 'cost optional' mode.",
+        "spin", (0.0, 0.0, 0.01, 0.0001), None,
     ),
     (
         "max_workers", "CPU workers",
-        f"Detected {os.cpu_count() or '?'} CPU cores. "
-        f"Suggested: {max(1, (os.cpu_count() or 2) - 1)} "
-        f"(leaves 1 core free for the UI/system). "
-        "0 = use all cores. Higher = faster backtest but heavier load.",
+        f"Detected {os.cpu_count() or '?'} cores. 0 = use all.",
         "spin", (max(1, (os.cpu_count() or 2) - 1), 0, 64, 1), None,
     ),
 ]
+
+def _universe_for_pattern(pattern: Optional[str]) -> str:
+    if not pattern:
+        return "default"
+    for key, uni in {
+        "double_top": "double_top", "upward_channel": "upward_channel",
+        "descending_channel": "upward_channel",
+        "head_and_shoulders": "head_and_shoulders",
+        "rounding_bottom": "rounding_bottom", "rounding_top": "rounding_bottom",
+        "flag": "flag", "pennant": "pennant",
+    }.items():
+        if key in pattern.lower():
+            return uni
+    return "default"
 
 
 class BacktestDialog:
@@ -467,40 +305,22 @@ class BacktestDialog:
             else:
                 v = var.get().strip()
                 p[key] = v if v else None
-        # n_symbols / extra_symbols / market are not Backtester params
-        n_symbols = int(p.pop("n_symbols"))
         extra_symbols = p.pop("extra_symbols", None) or ""
         market = p.pop("market", None) or default_market().id
-        # Convert spinbox floats to ints where Backtester expects int
-        for int_key in ("max_workers", "max_open_positions"):
-            if int_key in p and p[int_key] is not None:
-                p[int_key] = int(p[int_key])
-        # pattern_filter maps to pattern arg, not constructor kwarg
         pattern_filter = p.pop("pattern_filter")
-        # disabled_patterns is a comma-separated string in the form -> list
-        disabled_raw = p.pop("disabled_patterns", None) or ""
-        p["disabled_patterns"] = [
-            name.strip() for name in disabled_raw.split(",") if name.strip()
-        ]
-        # Convert "disable" sentinels: spin values of 0 where None means disabled
-        for opt_key in (
-            "breakeven_trigger_pct", "min_atr_stop_multiple",
-            "min_reward_risk_ratio", "hard_stop_percentage", "atr_stop_floor_multiple",
-            "profit_take_pct", "profit_lock_frac", "profit_lock_trigger_r",
-        ):
-            if opt_key in p and p[opt_key] is not None and p[opt_key] <= 0:
-                p[opt_key] = None
-        if "synthetic_stop_multiple" in p and p["synthetic_stop_multiple"] <= 0:
-            p["synthetic_stop_multiple"] = 0
-        p["market"] = market
-        p["long_only"] = get_market(market).long_only
-        if not p.get("kronos_gate") and not p.get("kronos_rank"):
-            p["kronos_batch"] = False
+        universe = p.pop("universe", None)
+        kwargs = {
+            "barcache_dir": p.get("barcache_dir") or "data/barcache",
+            "market": market,
+            "txn_cost_pct": float(p.get("txn_cost_pct") or 0.0),
+            "max_workers": int(p.get("max_workers") or 0),
+            "disabled_patterns": list(DISABLED_PATTERNS),
+        }
         return {
-            "n_symbols": n_symbols,
             "extra_symbols": extra_symbols,
             "pattern": pattern_filter,
-            "kwargs": p,
+            "universe": universe,
+            "kwargs": kwargs,
             "market": market,
         }
 
@@ -509,7 +329,6 @@ class BacktestDialog:
         if self._busy:
             return
         params = self._collect_params()
-        n_symbols = params["n_symbols"]
         extra_symbols = params.get("extra_symbols") or ""
         pattern = params["pattern"]
         kwargs = params["kwargs"]
@@ -520,7 +339,7 @@ class BacktestDialog:
         self._pct_var.set("0%")
         self._elapsed_var.set("Elapsed: 0s")
         self._eta_var.set("ETA: \u2014")
-        self._status_var.set(f"Running backtest (top {n_symbols} symbols)...")
+        self._status_var.set("Running backtest...")
         self._summary_text.config(state=tk.NORMAL)
         self._summary_text.delete("1.0", tk.END)
         self._summary_text.insert(tk.END, "Running...\n")
@@ -528,51 +347,24 @@ class BacktestDialog:
         self._tree.delete(*self._tree.get_children())
         threading.Thread(
             target=self._run_backtest_thread,
-            args=(n_symbols, extra_symbols, pattern, kwargs),
+            args=(params.get("universe"), extra_symbols, pattern, kwargs),
             daemon=True,
         ).start()
 
-    def _run_volume_ab(self) -> None:
-        """Run the same backtest twice — volume gate OFF then ON — and show deltas."""
-        if self._busy:
-            return
-        params = self._collect_params()
-        n_symbols = params["n_symbols"]
-        extra_symbols = params.get("extra_symbols") or ""
-        pattern = params["pattern"]
-        kwargs = dict(params["kwargs"])
-        # A/B forces both sides; ignore the form checkbox for the pair of runs.
-        kwargs.pop("volume_gate", None)
-        self._busy = True
-        self._run_btn.config(state=tk.DISABLED)
-        self._ab_btn.config(state=tk.DISABLED)
-        self._progress["value"] = 0
-        self._pct_var.set("0%")
-        self._elapsed_var.set("Elapsed: 0s")
-        self._eta_var.set("ETA: \u2014")
-        self._status_var.set(f"Volume A/B compare (top {n_symbols} symbols)...")
-        self._summary_text.config(state=tk.NORMAL)
-        self._summary_text.delete("1.0", tk.END)
-        self._summary_text.insert(tk.END, "Running volume gate OFF then ON...\n")
-        self._summary_text.config(state=tk.DISABLED)
-        self._tree.delete(*self._tree.get_children())
-        threading.Thread(
-            target=self._run_volume_ab_thread,
-            args=(n_symbols, extra_symbols, pattern, kwargs),
-            daemon=True,
-        ).start()
+    _run_volume_ab = _run_backtest  # A/B volume gate retired
 
     def _run_backtest_thread(
-        self, n_symbols: int, extra_symbols: str, pattern: Optional[str], kwargs: dict,
+        self, universe: Optional[str], extra_symbols: str,
+        pattern: Optional[str], kwargs: dict,
     ) -> None:
         try:
-            symbol_rows = TVClient.fetch_universe_cached(
-                n_symbols, kwargs.get("market"), extra_symbols=extra_symbols,
-            )
-            if not symbol_rows:
-                self._top.after(0, lambda: self._finish(None, "No symbols from screener or additional list."))
-                return
-            symbols = [s for s, _ex in symbol_rows]
+            from data.universes import load as _load_universe
+            name = universe or _universe_for_pattern(pattern)
+            symbols = list(_load_universe(name))
+            for extra in extra_symbols.replace(",", " ").split():
+                u = extra.strip().upper()
+                if u and u not in symbols:
+                    symbols.append(u)
             backtester = Backtester(symbols, pattern_filter=pattern, progress_callback=self._on_progress, **kwargs)
             result = asyncio.run(backtester.run())
             self._top.after(0, lambda: self._finish(result, None))
@@ -581,45 +373,8 @@ class BacktestDialog:
             log.error(f"UI Backtest | {err_msg}")
             self._top.after(0, lambda: self._finish(None, err_msg))
 
-    def _run_volume_ab_thread(
-        self, n_symbols: int, extra_symbols: str, pattern: Optional[str], kwargs: dict,
-    ) -> None:
-        try:
-            from analysis.price_volume import ab_metrics_from_result
-
-            symbol_rows = TVClient.fetch_universe_cached(
-                n_symbols, kwargs.get("market"), extra_symbols=extra_symbols,
-            )
-            if not symbol_rows:
-                self._top.after(0, lambda: self._finish(None, "No symbols from screener or additional list."))
-                return
-            symbols = [s for s, _ex in symbol_rows]
-
-            def progress(completed: int, total: int) -> None:
-                # Two full passes — map into a 0–100 overall bar.
-                # First pass reported as 0–50, second as 50–100 via phase flag.
-                self._on_progress(completed, total)
-
-            off_bt = Backtester(
-                symbols, pattern_filter=pattern, volume_gate=False,
-                progress_callback=progress, **kwargs,
-            )
-            result_off = asyncio.run(off_bt.run())
-            on_bt = Backtester(
-                symbols, pattern_filter=pattern, volume_gate=True,
-                progress_callback=progress, **kwargs,
-            )
-            result_on = asyncio.run(on_bt.run())
-            off_m = ab_metrics_from_result(result_off)
-            on_m = ab_metrics_from_result(result_on)
-            self._top.after(
-                0,
-                lambda: self._finish_ab(result_off, result_on, off_m, on_m, None),
-            )
-        except Exception as exc:
-            err_msg = f"Volume A/B failed: {exc}"
-            log.error(f"UI Backtest | {err_msg}")
-            self._top.after(0, lambda: self._finish(None, err_msg))
+    def _run_volume_ab_thread(self, *a, **k) -> None:  # retired
+        return
 
     def _on_progress(self, completed: int, total: int) -> None:
         if self._closed or not self._busy:

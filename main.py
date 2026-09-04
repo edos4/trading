@@ -55,7 +55,7 @@ from pathlib import Path
 from config import settings, DISABLED_PATTERNS
 from core.scanner import MarketScanner
 from core.backtester import Backtester
-from core.engine_defaults import backtest_kwargs
+from core.engine_defaults import ENGINE
 from core.market import format_money, get_market
 from core.paper_trader import PaperAccount, days_held, r_multiple, unrealized_pct
 from data.tv_client import TVClient
@@ -407,153 +407,87 @@ async def run_backtest(
     n_symbols: int,
     pattern: str | None = None,
     *,
-    kronos_gate: bool | None = None,
-    volume_gate: bool | None = None,
-    volume_gate_compare: bool = False,
-    pattern_only: bool = False,
     market: str | None = None,
+    barcache: str | None = "data/barcache",
+    universe: str | None = None,
+    txn_cost: float = 0.0,
+    **_ignored,
 ) -> None:
+    """Offline pattern backtest — flat $10k/trade, `.cjs` methodology.
+
+    Reads daily bars from `barcache` (data/barcache/ by default). `universe` is
+    a name under data/universes/ (default: per-pattern list when --pattern is
+    given, else 'default').
+    """
     os.makedirs("logs", exist_ok=True)
-
     profile = get_market(market)
-    use_volume = (
-        settings.volume_gate_enabled if volume_gate is None else volume_gate
-    )
-    kronos_gate_on = (
-        profile.kronos_gate_default if kronos_gate is None else kronos_gate
-    )
-    if pattern_only:
-        if volume_gate is None:
-            use_volume = False
-        if kronos_gate is None:
-            kronos_gate_on = False
-    title = f"BACKTEST MODE{' — ' + pattern if pattern else ''}"
-    universe_note = (
-        "top by peso volume" if profile.id == "ph" else "top by market cap"
-    )
+
+    from data.universes import available as _universes, load as _load_universe
+    from data.universes._buckets import uc_buckets
+
+    if universe is None:
+        # A single-pattern run defaults to that pattern's own `.cjs` universe.
+        per_pattern = {
+            "double_top": "double_top",
+            "upward_channel": "upward_channel",
+            "descending_channel": "upward_channel",
+            "head_and_shoulders": "head_and_shoulders",
+            "rounding_bottom": "rounding_bottom",
+            "rounding_top": "rounding_bottom",
+            "flag": "flag",
+            "pennant": "pennant",
+        }
+        universe = "default"
+        if pattern:
+            for key, uni in per_pattern.items():
+                if key in pattern.lower():
+                    universe = uni
+                    break
+    if universe not in _universes():
+        log.error(f"Unknown universe {universe!r}; available: {', '.join(_universes())}")
+        raise SystemExit(2)
+    symbols = _load_universe(universe)
+
+    version = f"{pattern or 'all'} / {universe}"
     log.info("=" * 60)
-    log.info(f"  Trading Bot — {title}")
-    log.info(f"  Market:     {profile.label} ({profile.currency})")
-    log.info(f"  Symbols:    {n_symbols} {universe_note}")
-    log.info(f"  Kronos gate:{'ON' if kronos_gate_on else 'OFF'}")
-    log.info(f"  Kronos rank:{'ON' if profile.kronos_rank_default else 'OFF'}")
-    log.info(f"  Long-only:  {'YES' if profile.long_only else 'no'}")
-    log.info(f"  Txn cost:   {profile.txn_cost_pct:.4f} one-way")
-    log.info(f"  Volume gate:{'ON' if use_volume else 'OFF'}"
-             f"{' (A/B compare)' if volume_gate_compare else ''}")
-    log.info(f"  Pattern-only:{'ON' if pattern_only else 'OFF'}")
+    log.info(f"  Trading Bot - OFFLINE PATTERN BACKTEST  ({version})")
+    log.info(f"  Market:    {profile.label}   Symbols: {len(symbols)}   "
+             f"Notional: ${ENGINE.position_notional:,.0f}   Txn cost: {txn_cost}")
+    log.info(f"  Barcache:  {barcache}")
     log.info("=" * 60)
 
-    log.info(f"Fetching {n_symbols} symbols from TradingView (cached, {profile.tv_screener})...")
-    symbol_rows = TVClient.fetch_universe_cached(n_symbols, profile.id)
-    if not symbol_rows:
-        log.error("Failed to fetch symbols from TradingView — aborting")
-        return
-    symbols = [symbol for symbol, _exchange in symbol_rows]
-    log.info(f"Watchlist:  {symbols}")
-
-    # Shared money-path knobs — same dict paper + MarketScanner now honor via
-    # core.engine_defaults.ENGINE. Do not re-hardcode here or paper/backtest
-    # will drift again. Re-tune only against out-of-sample data.
-    bt_kwargs = backtest_kwargs(
+    backtester = Backtester(
+        symbols,
+        barcache_dir=barcache,
         market=profile.id,
+        txn_cost_pct=txn_cost,
         pattern_filter=pattern,
         disabled_patterns=DISABLED_PATTERNS,
-        kronos_gate=kronos_gate_on,
-        kronos_rank=profile.kronos_rank_default,
-        pattern_only=pattern_only,
+        version=version,
     )
-
-    if volume_gate_compare:
-        from analysis.price_volume import ab_metrics_from_result
-
-        log.info("Volume A/B | running gate OFF then ON (same symbols/patterns)...")
-        off_bt = Backtester(symbols, volume_gate=False, **bt_kwargs)
-        result_off = await off_bt.run()
-        on_bt = Backtester(symbols, volume_gate=True, **bt_kwargs)
-        result_on = await on_bt.run()
-
-        off_m = ab_metrics_from_result(result_off)
-        on_m = ab_metrics_from_result(result_on)
-        keys = [
-            "trades", "win_rate", "avg_r", "expectancy_pct",
-            "profit_factor", "max_drawdown_pct", "account_weighted_pnl_pct",
-            "total_signals",
-        ]
-
-        def _fmt(v):
-            if v is None:
-                return "—"
-            if isinstance(v, float):
-                return f"{v:+.4f}" if abs(v) < 10 else f"{v:.4f}"
-            return str(v)
-
-        print()
-        print("=" * 72)
-        print("  VOLUME GATE A/B COMPARE")
-        print("=" * 72)
-        print(f"  {'metric':28s}  {'OFF':>12s}  {'ON':>12s}  {'delta':>12s}")
-        print("-" * 72)
-        for k in keys:
-            a, b = off_m[k], on_m[k]
-            if a is None or b is None:
-                delta = "—"
-            elif isinstance(a, (int, float)) and isinstance(b, (int, float)):
-                delta = _fmt(b - a)
-            else:
-                delta = "—"
-            print(f"  {k:28s}  {_fmt(a):>12s}  {_fmt(b):>12s}  {delta:>12s}")
-        print("=" * 72)
-        print()
-        print("--- Gate OFF summary ---")
-        print(result_off.summary())
-        print()
-        print("--- Gate ON summary ---")
-        print(result_on.summary())
-
-        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        ab_path = f"backtest_volume_ab_{ts}.json"
-        payload = {
-            "n_symbols": n_symbols,
-            "pattern": pattern,
-            "volume_gate_rvol_min": settings.volume_gate_rvol_min,
-            "volume_gate_obv_bars": settings.volume_gate_obv_bars,
-            "off": off_m,
-            "on": on_m,
-            "off_full": result_off.to_dict(),
-            "on_full": result_on.to_dict(),
-        }
-        json.dump(payload, Path(ab_path).open("w", encoding="utf-8"), indent=2)
-        log.info(f"Backtest | Volume A/B JSON saved to {ab_path}")
-        return
-
-    backtester = Backtester(symbols, volume_gate=use_volume, **bt_kwargs)
     result = await backtester.run()
 
+    buckets = uc_buckets(symbols) if (pattern and "channel" in pattern.lower()) else None
     print()
-    print(result.summary())
+    print(result.summary(buckets))
     print()
-
     if result.trades:
-        print(
-            f"{'Date':>10s}  {'Action':5s} {'Symbol':6s} {'TF'} {'Entry':>8s} {'Exit':>8s} {'P&L%':>8s}  Pattern"
-        )
-        print("-" * 85)
-        for t in result.trades:
-            print(
-                f"{t.entry_date.strftime('%Y-%m-%d'):>10s}  "
-                f"{t.action:5s} {t.symbol:6s} {t.timeframe:2s} "
-                f"{t.entry_price:>8.2f} {t.exit_price:>8.2f} "
-                f"{t.pnl_pct:>+7.2f}%  "
-                f"{t.pattern}"
-            )
+        print(f"{'Date':>10s}  {'Act':3s} {'Symbol':6s} {'Entry':>8s} {'Exit':>8s} "
+              f"{'P&L%':>8s} {'P&L$':>9s}  Reason / Pattern")
+        print("-" * 90)
+        for t in sorted(result.trades, key=lambda t: t.entry_date):
+            print(f"{t.entry_date.strftime('%Y-%m-%d'):>10s}  {t.action:3s} {t.symbol:6s} "
+                  f"{t.entry_price:>8.2f} {t.exit_price:>8.2f} {t.pnl_pct:>+7.2f}% "
+                  f"{t.pnl_usd:>+9.0f}  {t.exit_reason} / {t.pattern}")
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    txt_path = f"backtest_results_{ts}.txt"
-    json_path = f"backtest_results_{ts}.json"
-    result.save(txt_path)
-    json.dump(result.to_dict(), Path(json_path).open("w", encoding="utf-8"), indent=2)
+    tag = (pattern or "all").replace("pattern_", "")
+    json_path = f"backtest_{tag}_{ts}.json"
+    result.save(f"backtest_{tag}_{ts}.txt", buckets)
+    json.dump(result.to_dict(buckets), Path(json_path).open("w", encoding="utf-8"), indent=2)
     log.info(f"Backtest | JSON saved to {json_path}")
+    return
+
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -587,10 +521,33 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "E.g.: --backtest --pattern double_top",
     )
     parser.add_argument(
+        "--barcache",
+        type=str,
+        default="data/barcache",
+        metavar="DIR",
+        help="With --backtest, read daily bars from this offline cache "
+        "(default: data/barcache; build with scripts/build_barcache.py).",
+    )
+    parser.add_argument(
+        "--universe",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help="With --backtest, a ticker list under data/universes/ "
+        "(default: the pattern's own .cjs universe, else 'default').",
+    )
+    parser.add_argument(
+        "--txn-cost",
+        type=float,
+        default=0.0,
+        metavar="PCT",
+        help="With --backtest, per-leg transaction cost (0.0 = documented "
+        "headline numbers; 0.001 matches the .cjs 'cost optional' mode).",
+    )
+    parser.add_argument(
         "--kronos-gate",
         action="store_true",
-        help="Enable the Kronos 3d confirm gate for this run "
-        "(overrides the market profile default). Use with --backtest / --paper.",
+        help="(deprecated / no-op) the engine no longer runs the Kronos gate.",
     )
     parser.add_argument(
         "--volume-gate",
@@ -984,11 +941,10 @@ async def main(args: argparse.Namespace | None = None) -> None:
         await run_backtest(
             n_symbols=_resolve_n_symbols(args, args.backtest),
             pattern=args.pattern,
-            kronos_gate=True if args.kronos_gate else None,
-            volume_gate=True if args.volume_gate else None,
-            volume_gate_compare=args.volume_gate_compare,
-            pattern_only=args.pattern_only,
             market=args.market,
+            barcache=args.barcache,
+            universe=args.universe,
+            txn_cost=args.txn_cost,
         )
     else:
         await run_scanner(
