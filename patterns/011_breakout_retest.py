@@ -41,6 +41,10 @@ class BreakoutRetestPattern(BasePattern):
     def name(self) -> str:
         return "pattern_011_breakout_retest"
 
+    # Retired: net-negative over a 76-trade sample (pf 0.75), never
+    # ported to the `.cjs` methodology. Excluded everywhere, incl. --pattern.
+    skipped = True
+
     @property
     def timeframes(self) -> list[str]:
         return ["1d"]

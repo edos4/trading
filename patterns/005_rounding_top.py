@@ -54,11 +54,12 @@ class RoundingTopPattern(BasePattern):
             price=price,
             qty=notional_qty(self.POSITION_NOTIONAL, price),
             stop_loss=stop,
+            stop_loss_on_close=True,
             take_profit=target,
             trailing_stop_pct=0.15,
             trailing_stop_mode="lowest_low",
+            trailing_stop_on_close=True,
             trailing_activation_pct=0.0,
-            protective_exit_on_close=True,
             notes=f"Rounding top start={setup.start} top={setup.center} height={setup.depth:.1%} fit={setup.fit:.1%} RSI={setup.center_rsi:.1f} divergence={setup.divergence}",
             chart_annotations=[
                 ann_hline(setup.neckline, "neckline", ANN_LINE),

@@ -16,22 +16,14 @@ class DiscoverPatternsDisabledTests(unittest.TestCase):
         for name in disabled:
             self.assertNotIn(name, names)
 
-    def test_default_disabled_drops_losing_sleeves(self):
-        from config import DISABLED_PATTERNS
-
-        losers = {
-            "pattern_002_double_top",
-            "pattern_004_rounding_bottom",
-            "pattern_006_upward_channel",
-            "pattern_007_descending_channel",
-            "pattern_008_head_and_shoulders",
-            "pattern_009_flag_pattern",
-            "pattern_011_breakout_retest",
-        }
-        self.assertTrue(losers.issubset(set(DISABLED_PATTERNS)))
+    def test_default_run_covers_ported_patterns_but_not_retired_011(self):
+        # 2026-09 refactor: every ported pattern (002-010) runs by default;
+        # 011 is retired via `skipped = True` on its class.
         names = {p.name for p in discover_patterns()}
-        self.assertTrue(losers.isdisjoint(names))
         self.assertIn("pattern_003_double_bottom", names)
+        self.assertIn("pattern_006_upward_channel", names)
+        self.assertIn("pattern_009_flag_pattern", names)
+        self.assertNotIn("pattern_011_breakout_retest", names)
         self.assertNotIn("pattern_007_descending_channel", names)
 
     def test_explicit_disabled_list_overrides_config(self):
