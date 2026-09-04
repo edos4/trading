@@ -508,7 +508,7 @@ applied automatically if empty. They do **not** use Yahoo/TV for history, and do
 dashboard password. On the VPS set `STOCKS_HISTORY_OWNER=true` and leave
 `STOCKS_HISTORY_URL` empty so `--web` still **writes** local Postgres via
 `--update-db` and **serves** `GET /api/history`. All OHLCV **reads**
-(scanner, explorer, paper stream, Kronos, `--learn`) go through that API
+(scanner, explorer, paper stream, and Kronos) go through that API
 (default `https://33ai.edos.uk`), never local Postgres or CSV.
 
 What both UIs support:

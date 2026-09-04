@@ -63,6 +63,9 @@ def demo():
     assert "pattern_006_upward_channel" in DISABLED_PATTERNS
     # 007 off until first-bar invalidation proves out in paper A/B.
     assert "pattern_007_descending_channel" in DISABLED_PATTERNS
+    # 010 pennant: "previously isolated as weak" — same bucket as 009.
+    # Added 2026-09-02 so the list can't silently drift like 002/004/006/008 did.
+    assert "pattern_010_pennant" in DISABLED_PATTERNS
 
     assert passes_min_confidence(_sig(confidence=0.65))
     assert not passes_min_confidence(_sig(confidence=0.64))
@@ -195,6 +198,32 @@ def demo():
 
 def test_engine_defaults_parity():
     demo()
+
+
+def test_all_short_patterns_regime_required():
+    from core.engine_defaults import REGIME_REQUIRED_PATTERNS
+
+    for pat in (
+        "pattern_002_double_top",
+        "pattern_005_rounding_top",
+        "pattern_006_upward_channel",
+        "pattern_008_head_and_shoulders",
+    ):
+        assert pat in REGIME_REQUIRED_PATTERNS
+
+
+def test_double_bottom_regime_required():
+    """2026-09-02 review: 003 went 0-for-3 Pattern-only (no SMA200 gate)
+    after the same book's documented 57%/2.60pf history for 003 came from
+    a run where the regime gate WAS on. 003 must clear SMA200 even in
+    Pattern-only, same as the other reversal patterns."""
+    from core.engine_defaults import REGIME_REQUIRED_PATTERNS
+
+    assert "pattern_003_double_bottom" in REGIME_REQUIRED_PATTERNS
+
+
+def test_dead_trade_threshold_half_percent():
+    assert ENGINE.dead_trade_mfe_threshold_pct == 0.005
 
 
 if __name__ == "__main__":

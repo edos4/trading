@@ -1157,9 +1157,11 @@ class MarketScanner:
             )
 
         for signal, pattern, candle in selected:
+            rr = signal_reward_risk(signal)
+            rr_txt = f"{rr:.2f}" if rr is not None else "—"
             log.info(
                 f"Collect-first | selected {signal.symbol} {signal.pattern} "
-                f"R:R={signal_reward_risk(signal):.2f}"
+                f"R:R={rr_txt}"
             )
             await self._kronos_then_finish(signal, pattern, candle)
 

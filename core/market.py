@@ -49,7 +49,7 @@ class MarketProfile:
     max_daily_loss: float
     txn_cost_pct: float
     # Engine breakeven is per book: a “scratch” must clear round-trip costs.
-    # US 0.10% RT → 3% trigger / 0.15% buffer. PH ~0.70% RT → 5% / 0.80%.
+    # US 0.10% RT → 6% trigger / 0.15% buffer. PH ~0.70% RT → 5% / 0.80%.
     breakeven_trigger_pct: float | None
     breakeven_buffer_pct: float
     long_only: bool

@@ -63,13 +63,22 @@ class BacktestTrade:
     pnl: float
     pnl_pct: float
     stop_loss: float | None = None
+    stop_loss_on_close: bool = False
     take_profit: float | None = None
     neckline: float | None = None
     neckline_break_direction: Literal["below", "above"] | None = None
     exit_bars_after_neckline_break: int | None = None
+    exit_bars_after_entry: int | None = None
     time_exit_only_unfavorable: bool = False
+    # See TradeSignal.time_exit_min_mfe_pct — give-up floor for a
+    # time_exit_only_unfavorable trade that never worked.
+    time_exit_min_mfe_pct: float | None = None
     trailing_stop_pct: float | None = None
-    trailing_stop_mode: Literal["lowest_close", "highest_close"] | None = None
+    trailing_stop_mode: Literal[
+        "highest_close", "lowest_close", "highest_high", "lowest_low",
+        "highest_low", "lowest_high",
+    ] | None = None
+    trailing_stop_on_close: bool = False
     trailing_activation_pct: float | None = None
     entry_bar_idx: int = -1
     neckline_break_bar_idx: int | None = None
@@ -77,6 +86,8 @@ class BacktestTrade:
     highest_close_since_entry: float | None = None
     lowest_low_since_entry: float | None = None
     highest_high_since_entry: float | None = None
+    highest_low_since_entry: float | None = None
+    lowest_high_since_entry: float | None = None
     exit_reason: str = ""
     confidence: float = 0.0
     qty: float = 0.0
@@ -708,39 +719,44 @@ def _update_trailing_reference(
     position: BacktestTrade, candle: OHLCVCandle,
 ) -> None:
     mode = position.trailing_stop_mode
-    if mode == "lowest_close":
-        base = position.lowest_close_since_entry
-        position.lowest_close_since_entry = (
-            candle.close if base is None else min(base, candle.close)
-        )
-    elif mode == "highest_close":
+    if mode == "highest_close":
         base = position.highest_close_since_entry
         position.highest_close_since_entry = (
             candle.close if base is None else max(base, candle.close)
         )
-    elif mode == "lowest_low":
-        base = position.lowest_low_since_entry
-        position.lowest_low_since_entry = (
-            candle.low if base is None else min(base, candle.low)
+    elif mode == "lowest_close":
+        base = position.lowest_close_since_entry
+        position.lowest_close_since_entry = (
+            candle.close if base is None else min(base, candle.close)
         )
     elif mode == "highest_high":
         base = position.highest_high_since_entry
         position.highest_high_since_entry = (
             candle.high if base is None else max(base, candle.high)
         )
+    elif mode == "lowest_low":
+        base = position.lowest_low_since_entry
+        position.lowest_low_since_entry = (
+            candle.low if base is None else min(base, candle.low)
+        )
+    elif mode == "highest_low":
+        base = position.highest_low_since_entry
+        position.highest_low_since_entry = (
+            candle.close if base is None else max(base, candle.close)
+        )
+    elif mode == "lowest_high":
+        base = position.lowest_high_since_entry
+        position.lowest_high_since_entry = (
+            candle.close if base is None else min(base, candle.close)
+        )
     entry = position.entry_price
     if entry <= 0:
         return
-    if position.action == "SELL":
-        base = position.lowest_close_since_entry
-        ref = candle.close if base is None else min(base, candle.close)
-        position.lowest_close_since_entry = ref
-        pnl = (entry - ref) / entry
-    else:
-        base = position.highest_close_since_entry
-        ref = candle.close if base is None else max(base, candle.close)
-        position.highest_close_since_entry = ref
-        pnl = (ref - entry) / entry
+    pnl = (
+        (entry - candle.close) / entry
+        if position.action == "SELL"
+        else (candle.close - entry) / entry
+    )
     if position._best_pnl_pct is None or pnl > position._best_pnl_pct:
         position._best_pnl_pct = pnl
 
@@ -751,8 +767,11 @@ def _trailing_stop_price(position: BacktestTrade, is_short: bool) -> float | Non
         and not position._trailing_activated
     ):
         if (
-            position._best_pnl_pct is not None
-            and position._best_pnl_pct >= position.trailing_activation_pct
+            position.trailing_activation_pct <= 0
+            or (
+                position._best_pnl_pct is not None
+                and position._best_pnl_pct >= position.trailing_activation_pct
+            )
         ):
             position._trailing_activated = True
         else:
@@ -761,17 +780,27 @@ def _trailing_stop_price(position: BacktestTrade, is_short: bool) -> float | Non
     pct = position.trailing_stop_pct
     if pct is None or mode is None:
         return None
-    if is_short:
-        ref = {
-            "lowest_close": position.lowest_close_since_entry,
-            "lowest_low": position.lowest_low_since_entry,
-        }.get(mode)
-        return None if ref is None else ref * (1 + pct)
-    ref = {
+    references = {
         "highest_close": position.highest_close_since_entry,
+        "lowest_close": position.lowest_close_since_entry,
         "highest_high": position.highest_high_since_entry,
-    }.get(mode)
-    return None if ref is None else ref * (1 - pct)
+        "lowest_low": position.lowest_low_since_entry,
+        "highest_low": position.highest_low_since_entry,
+        "lowest_high": position.lowest_high_since_entry,
+    }
+    ref = references.get(mode)
+    return None if ref is None else ref * (1 - pct if not is_short else 1 + pct)
+
+
+def _trailing_reference(position: BacktestTrade) -> float | None:
+    return {
+        "highest_close": position.highest_close_since_entry,
+        "lowest_close": position.lowest_close_since_entry,
+        "highest_high": position.highest_high_since_entry,
+        "lowest_low": position.lowest_low_since_entry,
+        "highest_low": position.highest_low_since_entry,
+        "lowest_high": position.lowest_high_since_entry,
+    }.get(position.trailing_stop_mode)
 
 
 def _gap_aware_trigger_fill(
@@ -865,10 +894,19 @@ def _time_exit_ready(position: BacktestTrade, candle, bar_idx: int) -> bool:
         return False
     if position.time_exit_only_unfavorable:
         is_short = position.action == "SELL"
-        if is_short:
-            if candle.close <= position.entry_price:
-                return False
-        elif candle.close >= position.entry_price:
+        favorable_now = (
+            candle.close <= position.entry_price if is_short
+            else candle.close >= position.entry_price
+        )
+        if favorable_now:
+            # Currently green. Normally let the winner keep running, but give
+            # up on a "green zombie" that never actually proved itself —
+            # otherwise a trade that peaked at +0.2% and flatlined can sit
+            # green for months instead of hitting its structural target.
+            if position.time_exit_min_mfe_pct is not None:
+                best = position._best_pnl_pct
+                if best is not None and best < position.time_exit_min_mfe_pct:
+                    return True
             return False
     return True
 
@@ -961,15 +999,14 @@ def _check_exit(
     min_hold_bars: int = 0,
     *,
     first_bar_invalidation: bool | None = None,
+    first_bar_invalidation_min_adverse_pct: float | None = None,
+    first_bar_invalidation_min_risk_fraction: float | None = None,
     dead_trade_flatten_bars: int | None = None,
     dead_trade_mfe_threshold_pct: float | None = None,
 ) -> tuple[float | None, str]:
     is_short = position.action == "SELL"
     bars_held = bar_idx - position.entry_bar_idx
-    prior_ref = (
-        position.lowest_close_since_entry if is_short
-        else position.highest_close_since_entry
-    )
+    prior_ref = _trailing_reference(position)
     if prior_ref is None:
         prior_ref = position.entry_price
     # Arm trail/lock/breakeven from this bar's close before the exit check
@@ -978,13 +1015,16 @@ def _check_exit(
     # at the open — see _gap_aware_trigger_fill.
     _update_trailing_reference(position, candle)
     candidates: list[tuple[float, str]] = []
+    close_candidates: list[tuple[float, str]] = []
     if position.stop_loss is not None:
-        candidates.append((position.stop_loss, "stop_loss"))
+        destination = close_candidates if position.stop_loss_on_close else candidates
+        destination.append((position.stop_loss, "stop_loss"))
     trail = None
     if bars_held >= min_hold_bars:
         trail = _trailing_stop_price(position, is_short)
     if trail is not None:
-        candidates.append((trail, "trailing_stop"))
+        destination = close_candidates if position.trailing_stop_on_close else candidates
+        destination.append((trail, "trailing_stop"))
     if (
         bars_held >= min_hold_bars
         and position.breakeven_trigger_pct is not None
@@ -1011,20 +1051,60 @@ def _check_exit(
         if fill is not None:
             position.exit_bar_idx = bar_idx
             return fill, reason
+    triggered_on_close = [
+        (level, reason)
+        for level, reason in close_candidates
+        if (candle.close >= level if is_short else candle.close <= level)
+    ]
+    if triggered_on_close:
+        if is_short:
+            _, reason = min(triggered_on_close, key=lambda item: item[0])
+        else:
+            _, reason = max(triggered_on_close, key=lambda item: item[0])
+        position.exit_bar_idx = bar_idx
+        return candle.close, reason
 
     use_first_bar = (
         ENGINE.first_bar_invalidation_enabled
         if first_bar_invalidation is None
         else first_bar_invalidation
     )
+    min_adverse_pct = (
+        ENGINE.first_bar_invalidation_min_adverse_pct
+        if first_bar_invalidation_min_adverse_pct is None
+        else first_bar_invalidation_min_adverse_pct
+    )
+    min_risk_fraction = (
+        ENGINE.first_bar_invalidation_min_risk_fraction
+        if first_bar_invalidation_min_risk_fraction is None
+        else first_bar_invalidation_min_risk_fraction
+    )
     if use_first_bar and position.entry_bar_idx >= 0 and bars_held == 1:
         against = (
             (is_short and candle.close > position.entry_price)
             or (not is_short and candle.close < position.entry_price)
         )
-        if against:
-            position.exit_bar_idx = bar_idx
-            return candle.close, "first_bar_invalidation"
+        if against and position.entry_price:
+            adverse_pct = (
+                abs(candle.close - position.entry_price) / position.entry_price
+            )
+            # Effective floor scales with the trade's OWN entry-to-stop risk
+            # so a wide structural stop (volatile/swing name) isn't killed
+            # by the same tiny absolute move that would rightly kill a
+            # tight-stop name. See ENGINE.first_bar_invalidation_min_risk_fraction.
+            effective_floor = min_adverse_pct
+            if min_risk_fraction and position.stop_loss and position.entry_price:
+                initial_risk_pct = (
+                    abs(position.entry_price - position.stop_loss)
+                    / position.entry_price
+                )
+                if initial_risk_pct > 0:
+                    effective_floor = max(
+                        min_adverse_pct, min_risk_fraction * initial_risk_pct,
+                    )
+            if adverse_pct >= effective_floor:
+                position.exit_bar_idx = bar_idx
+                return candle.close, "first_bar_invalidation"
 
     flatten_bars = (
         ENGINE.dead_trade_flatten_bars
@@ -1050,6 +1130,13 @@ def _check_exit(
     if fill is not None:
         position.exit_bar_idx = bar_idx
         return fill, reason
+    if (
+        position.exit_bars_after_entry is not None
+        and bars_held >= position.exit_bars_after_entry
+    ):
+        position.exit_bar_idx = bar_idx
+        position.time_exit_bars_elapsed = bars_held
+        return candle.close, "time_exit"
     if _time_exit_ready(position, candle, bar_idx):
         elapsed = bar_idx - position.neckline_break_bar_idx
         position.exit_bar_idx = bar_idx
@@ -1230,13 +1317,17 @@ def _open_trade(
         pnl=0.0,
         pnl_pct=0.0,
         stop_loss=stop_loss,
+        stop_loss_on_close=signal.stop_loss_on_close,
         take_profit=take_profit,
         neckline=signal.neckline,
         neckline_break_direction=signal.neckline_break_direction,
         exit_bars_after_neckline_break=signal.exit_bars_after_neckline_break,
+        exit_bars_after_entry=signal.exit_bars_after_entry,
         time_exit_only_unfavorable=signal.time_exit_only_unfavorable,
+        time_exit_min_mfe_pct=signal.time_exit_min_mfe_pct,
         trailing_stop_pct=signal.trailing_stop_pct,
         trailing_stop_mode=signal.trailing_stop_mode,
+        trailing_stop_on_close=signal.trailing_stop_on_close,
         trailing_activation_pct=signal.trailing_activation_pct,
         entry_bar_idx=bar_idx,
         confidence=signal.confidence,
@@ -1255,6 +1346,12 @@ def _open_trade(
         ),
         highest_high_since_entry=(
             candle.high if signal.trailing_stop_mode == "highest_high" else None
+        ),
+        highest_low_since_entry=(
+            candle.close if signal.trailing_stop_mode == "highest_low" else None
+        ),
+        lowest_high_since_entry=(
+            candle.close if signal.trailing_stop_mode == "lowest_high" else None
         ),
     )
     # The signal is generated on the breakout/confirmation bar, but this
@@ -2326,77 +2423,11 @@ class Backtester:
     def _update_trailing_reference(
         position: BacktestTrade, candle: OHLCVCandle
     ) -> None:
-        mode = position.trailing_stop_mode
-        if mode == "lowest_close":
-            base = position.lowest_close_since_entry
-            position.lowest_close_since_entry = (
-                candle.close if base is None else min(base, candle.close)
-            )
-        elif mode == "highest_close":
-            base = position.highest_close_since_entry
-            position.highest_close_since_entry = (
-                candle.close if base is None else max(base, candle.close)
-            )
-        elif mode == "lowest_low":
-            base = position.lowest_low_since_entry
-            position.lowest_low_since_entry = (
-                candle.low if base is None else min(base, candle.low)
-            )
-        elif mode == "highest_high":
-            base = position.highest_high_since_entry
-            position.highest_high_since_entry = (
-                candle.high if base is None else max(base, candle.high)
-            )
-
-        # Track best unrealized close-to-close P&L for the trailing-activation
-        # and breakeven thresholds. This is tracked unconditionally (not just
-        # for the "*_close" trailing modes) so activation/breakeven behave
-        # consistently regardless of which trailing reference a given pattern
-        # uses for its own stop distance.
-        entry = position.entry_price
-        if entry <= 0:
-            return
-        if position.action == "SELL":
-            base = position.lowest_close_since_entry
-            ref = candle.close if base is None else min(base, candle.close)
-            position.lowest_close_since_entry = ref
-            pnl = (entry - ref) / entry
-        else:
-            base = position.highest_close_since_entry
-            ref = candle.close if base is None else max(base, candle.close)
-            position.highest_close_since_entry = ref
-            pnl = (ref - entry) / entry
-        if position._best_pnl_pct is None or pnl > position._best_pnl_pct:
-            position._best_pnl_pct = pnl
+        _update_trailing_reference(position, candle)
 
     @staticmethod
     def _trailing_stop_price(position: BacktestTrade, is_short: bool) -> float | None:
-        # Check trailing activation threshold.
-        # If no activation threshold is set, trailing stop is active from the start.
-        if position.trailing_activation_pct is not None and not position._trailing_activated:
-            if (
-                position._best_pnl_pct is not None
-                and position._best_pnl_pct >= position.trailing_activation_pct
-            ):
-                position._trailing_activated = True
-            else:
-                return None  # trailing stop not yet active
-
-        mode = position.trailing_stop_mode
-        pct = position.trailing_stop_pct
-        if pct is None or mode is None:
-            return None
-        if is_short:
-            ref = {
-                "lowest_close": position.lowest_close_since_entry,
-                "lowest_low": position.lowest_low_since_entry,
-            }.get(mode)
-            return None if ref is None else ref * (1 + pct)
-        ref = {
-            "highest_close": position.highest_close_since_entry,
-            "highest_high": position.highest_high_since_entry,
-        }.get(mode)
-        return None if ref is None else ref * (1 - pct)
+        return _trailing_stop_price(position, is_short)
 
     @staticmethod
     def _check_exit(
@@ -2454,13 +2485,17 @@ class Backtester:
             pnl=0.0,
             pnl_pct=0.0,
             stop_loss=stop_loss,
+            stop_loss_on_close=signal.stop_loss_on_close,
             take_profit=take_profit,
             neckline=signal.neckline,
             neckline_break_direction=signal.neckline_break_direction,
             exit_bars_after_neckline_break=signal.exit_bars_after_neckline_break,
+            exit_bars_after_entry=signal.exit_bars_after_entry,
             time_exit_only_unfavorable=signal.time_exit_only_unfavorable,
+            time_exit_min_mfe_pct=signal.time_exit_min_mfe_pct,
             trailing_stop_pct=signal.trailing_stop_pct,
             trailing_stop_mode=signal.trailing_stop_mode,
+            trailing_stop_on_close=signal.trailing_stop_on_close,
             trailing_activation_pct=signal.trailing_activation_pct,
             entry_bar_idx=bar_idx,
             confidence=signal.confidence,
@@ -2477,6 +2512,12 @@ class Backtester:
             ),
             highest_high_since_entry=(
                 candle.high if signal.trailing_stop_mode == "highest_high" else None
+            ),
+            highest_low_since_entry=(
+                candle.close if signal.trailing_stop_mode == "highest_low" else None
+            ),
+            lowest_high_since_entry=(
+                candle.close if signal.trailing_stop_mode == "lowest_high" else None
             ),
         )
         # Preserve the breakout event across the deferred next-bar fill.

@@ -79,18 +79,31 @@ class TradeSignal:
     price:       float           # estimated entry price
     qty:         float           # number of shares/contracts
     stop_loss:   float | None = None
+    stop_loss_on_close: bool = False
     take_profit: float | None = None
     trailing_stop_pct: float | None = None
     trailing_stop_mode: Literal[
-        "lowest_close", "highest_close", "lowest_low", "highest_high"
+        "highest_close", "lowest_close", "highest_high", "lowest_low",
+        "highest_low", "lowest_high"
     ] | None = None
+    trailing_stop_on_close: bool = False
     neckline: float | None = None
     neckline_break_direction: Literal["below", "above"] | None = None
     exit_bars_after_neckline_break: int | None = None
+    exit_bars_after_entry: int | None = None
     # When True, the neckline time-stop only fires if the close is still
     # underwater (long: close < entry; short: close > entry). Winners keep
     # running to trail/target instead of being cut at the bar count.
     time_exit_only_unfavorable: bool = False
+    # Give-up floor paired with time_exit_only_unfavorable: when the time
+    # stop is due, still exit (even if currently favorable) unless the
+    # trade has *ever* printed a close-to-close MFE ≥ this fraction. This
+    # kills "green zombies" that never actually worked — e.g. 003 IMXI
+    # oscillating +0.2%→+1.2% for 79 bars instead of hitting its +12%+
+    # target. A trade that reached the floor at any point is a "working"
+    # trade and keeps running to trail/target. 0 / None = keep old behavior
+    # (never give up on a green trade).
+    time_exit_min_mfe_pct: float | None = None
     # Set by the scanner/backtester to the bar on which this signal was
     # detected.  A deferred next-bar fill must retain that event so
     # neckline-based time stops start at the breakout bar, not the fill bar.

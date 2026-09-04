@@ -1,85 +1,56 @@
-"""
-patterns/pattern_003_double_bottom.py — Double Bottom (W pattern) long setup.
-
-Inverse of patterns/pattern_002_double_top.py:
-  Detection: two swing lows (L1, L2) with bullish RSI divergence,
-  peak height, volume weakness on leg 2, and no post-L2 breach before entry.
-  Entry: two consecutive closes above the neckline (peak high), buffered by
-  NECKLINE_BREAK_BUFFER (mirrors pattern_007's dual-close confirmation — a
-  single confirming close was still whipsawing straight to the structural
-  stop; see v10 note below). Day-7-without-break entries are rejected — the
-  2026-08-17 US paper book (79 fills, PF 0.29) was 100% unconfirmed W
-  bounces because TP=neckline×1.07 + 6% hard stop + min R:R 1.5 made
-  confirmed breakouts illegal.
-  Exits: structural stop under L2, take-profit = max(measured move from
-  entry, +12%), 8% trail after +12%, 30-bar time-stop only if still red.
-
-v10: require 2 consecutive closes above the buffered neckline (not just 1)
-  before firing entry — see _neckline_break_idx. Ported from pattern_007's
-  C13 dual-close confirmation after the 2026-08-31 US paper book showed
-  single-close breaks reversing straight through the stop within 1-2 bars.
-
-v9 filter (ported from pattern_007_descending_channel):
-  Skip the trade if any SEC EDGAR 8-K item 2.02 earnings filing date falls
-  within [entry bar, bar + EXIT_BARS_AFTER_NECK_BREAK]. This pattern never
-  had the earnings-blackout guard that 007 got in v9 — the 2026-08-30 US
-  paper book's worst loss (GTX, -13.45%, stop_loss) and a breakeven_stop
-  that gapped to -3.93% (VNT) were both double_bottom trades, consistent
-  with an overnight earnings gap the pattern had no guard against. See
-  data/edgar_client.py.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-import pandas as pd
+import numpy as np
 
-from patterns.base_pattern import (
-    BasePattern, TradeSignal, FORMATION_BARS,
-    ann_marker, ann_hline, ANN_PEAK, ANN_TROUGH, ANN_LINE, ANN_TARGET, ANN_ENTRY,
-    ANN_STOP,
-)
-from data.tv_client import MarketSnapshot
-from data.ohlcv_store import OHLCVStore
-from data.edgar_client import default_client as edgar_client
 from analysis.indicator_engine import IndicatorEngine
-from utils.logger import log
-
-# NOTE: patterns/007_descending_channel.py can't be a static import target
-# (module filename starts with a digit), so its tiny date-coercion helper is
-# duplicated here rather than imported.
-from datetime import date, datetime
-
-
-def _to_date(value) -> date:
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    return datetime.strptime(str(value).split(" ")[0], "%Y-%m-%d").date()
+from data.ohlcv_store import OHLCVStore
+from data.tv_client import MarketSnapshot
+from patterns._rules import extrema, weak_leg_volume
+from patterns.base_pattern import (
+    ANN_ENTRY,
+    ANN_LINE,
+    ANN_PEAK,
+    ANN_TARGET,
+    ANN_TROUGH,
+    BasePattern,
+    TradeSignal,
+    ann_hline,
+    ann_marker,
+)
 
 
 @dataclass(frozen=True)
-class _DoubleBottomSetup:
-    l1_idx: int
-    l2_idx: int
-    peak_idx: int
+class _Setup:
+    l1: int
+    l2: int
+    peak: int
     neckline: float
     l1_low: float
     l2_low: float
-    l1_close: float
-    l2_close: float
     l1_rsi: float
     l2_rsi: float
-    peak_height_pct: float
-    rsi_divergence: float
-    entry_idx: int
+    entry: int
 
 
 class DoubleBottomPattern(BasePattern):
+    RSI_PERIOD = 14
+    L1_RSI_MAX = 30.0
+    L2_RSI_MIN = 39.0
+    L2_RSI_MAX = 50.0
+    RSI_DIVERGENCE_MIN = 3.0
+    PEAK_HEIGHT_MIN = 0.05
+    GAP_MIN = 8
+    GAP_MAX = 90
+    ENTRY_DELAY = 7
+    TARGET_ABOVE_NECKLINE = 0.07
+    EXIT_AFTER_NECKLINE_BREAK = 5
+    TRAILING_STOP_PCT = 0.03
+    SWING_LOOKBACK = 2
+    MIN_BARS = 110
+    SHARES = 25
 
-    # ── Identity ───────────────────────────────────────────────────────────────
     @property
     def name(self) -> str:
         return "pattern_003_double_bottom"
@@ -90,346 +61,93 @@ class DoubleBottomPattern(BasePattern):
 
     @property
     def chart_description(self) -> str:
-        return (
-            "A double bottom (W pattern) on a daily chart: two troughs at similar "
-            "height with a peak between them. L2 low is above L1 low, RSI at L2 "
-            "is higher than at L1 (bullish divergence), and L1 RSI was oversold "
-            "(≤30). The second leg down shows weak volume. Entry is a LONG on "
-            "the first close above the neckline (peak high)."
-        )
+        return "Double bottom with a higher second low, bullish RSI divergence, a five-percent intervening peak, weak selloff volume, and a day-seven-or-neckline-break long entry."
 
-    # ── Parameters (inverse of double_top.py) ─────────────────────────────────
-    RSI_PERIOD           = 14
-    L1_RSI_MAX           = 30.0
-    L2_RSI_MIN           = 39.0
-    L2_RSI_MAX           = 50.0
-    # Raised to the pattern's own confidence-bonus thresholds (see
-    # _score_confidence) — n=81/-22.47% backtest showed marginal setups at
-    # the old 3.0/0.05 floor were the loss driver; require bonus-tier
-    # divergence/height as the hard floor instead of just scoring it.
-    RSI_DIVERGENCE_MIN   = 5.0
-    PEAK_HEIGHT_MIN      = 0.07      # 7% rise from L1 low to peak
-    L1_L2_GAP_MIN        = FORMATION_BARS  # W needs ~1 month to form
-    L1_L2_GAP_MAX        = 90
-    STOP_BELOW_L2        = 0.99      # 1% under L2 low (structure)
-    MIN_TARGET_PCT       = 0.12      # floor so R:R still clears 1.5 after 6% hard cap
-    TRAILING_STOP_PCT    = 0.08      # trail 8% below the peak once armed
-    # Arm the trail only after the +12% target floor. The old 8%/8% put the
-    # trail at entry*1.08*0.92 = entry*0.9936 on activation — below entry — so
-    # it could only ever exit at a loss (2026-08-18 paper: MATV +8.2% → -0.6%).
-    TRAILING_ACTIVATION_PCT = 0.12
-    EXIT_BARS_AFTER_NECK_BREAK = 30
-    V9_EARNINGS_BLACKOUT = True   # v9: skip trade on EDGAR 8-K 2.02 window
-    SWING_LOOKBACK       = 2
-    MIN_BARS             = 120
-    SHARES               = 25
-    # Require close ≥ neckline × (1+buffer). Barely-above breaks were still
-    # failing on the next bar in the 2026-08-18 US paper book (59% stop_loss).
-    NECKLINE_BREAK_BUFFER = 0.01
-
-    # ── Core logic ─────────────────────────────────────────────────────────────
-    def analyze(
-        self,
-        snapshot: MarketSnapshot,
-        store: OHLCVStore,
-    ) -> TradeSignal | None:
-
-        symbol    = snapshot.symbol
-        timeframe = snapshot.timeframe
-        current_idx = -1  # latest bar
-
-        df = store.get_df(symbol, timeframe, min_bars=self.MIN_BARS)
+    def analyze(self, snapshot: MarketSnapshot, store: OHLCVStore) -> TradeSignal | None:
+        df = store.get_df(snapshot.symbol, snapshot.timeframe, min_bars=self.MIN_BARS)
         if df is None:
-            log.debug(f"[{self.name}] {symbol} {timeframe}: not enough history yet")
             return None
-
         ind = IndicatorEngine(df)
         rsi = ind.rsi(self.RSI_PERIOD)
-        if rsi.isna().iloc[current_idx]:
-            return None
-
-        swing_lows = self._find_swing_lows(ind.low)
-        if len(swing_lows) < 2:
-            return None
-
-        n = len(df)
-        cur = n + current_idx  # last bar index
-
-        for l2_idx in reversed(swing_lows):
-            if l2_idx + 2 > cur:
-                continue  # need 2 confirming bars after L2
-
-            l1_candidates = [i for i in swing_lows if i < l2_idx]
-            for l1_idx in reversed(l1_candidates):
-                setup = self._evaluate_pair(
-                    ind, rsi, l1_idx, l2_idx, cur
-                )
-                if setup is None:
+        current = len(df) - 1
+        lows = extrema(ind.low, "low", self.SWING_LOOKBACK)
+        for l2 in reversed(lows):
+            if l2 + 2 > current:
+                continue
+            for l1 in reversed([idx for idx in lows if idx < l2]):
+                setup = self._evaluate(ind, rsi, l1, l2, current)
+                if setup is None or setup.entry != current:
                     continue
-                if setup.entry_idx != cur:
-                    continue
-
-                # v9: earnings blackout over [entry, entry + time-stop window].
-                if self.V9_EARNINGS_BLACKOUT and self._in_earnings_blackout(
-                    df, symbol, setup.entry_idx
-                ):
-                    log.info(
-                        f"[{self.name}] {symbol} {timeframe} | "
-                        f"v9 blackout: 8-K 2.02 in "
-                        f"[{df.index[setup.entry_idx].date()}, "
-                        f"+{self.EXIT_BARS_AFTER_NECK_BREAK}b] — skipping LONG"
-                    )
-                    continue
-
-                confidence = self._score_confidence(setup)
-                close = float(ind.close.iloc[cur])
-                stop, target = self._exit_levels(
-                    close, setup.neckline, setup.l1_low, setup.l2_low,
-                )
-                if stop >= close or target <= close:
-                    continue
-
-                log.info(
-                    f"[{self.name}] {symbol} {timeframe} | "
-                    f"LONG neckline-break | L1@{l1_idx} L2@{l2_idx} "
-                    f"neckline={setup.neckline:.4f} "
-                    f"peak_height={setup.peak_height_pct:.1%} "
-                    f"RSI_div={setup.rsi_divergence:.1f} "
-                    f"stop={stop:.4f} tp={target:.4f} "
-                    f"confidence={confidence:.2f}"
-                )
-
+                price = float(ind.close.iloc[current])
+                target = round(setup.neckline * (1 + self.TARGET_ABOVE_NECKLINE), 4)
                 return TradeSignal(
-                    symbol=symbol,
+                    symbol=snapshot.symbol,
                     action="BUY",
                     pattern=self.name,
-                    timeframe=timeframe,
-                    confidence=confidence,
-                    price=close,
+                    timeframe=snapshot.timeframe,
+                    confidence=1.0,
+                    price=price,
                     qty=self.SHARES,
-                    stop_loss=stop,
                     take_profit=target,
                     trailing_stop_pct=self.TRAILING_STOP_PCT,
                     trailing_stop_mode="highest_close",
-                    trailing_activation_pct=self.TRAILING_ACTIVATION_PCT,
+                    trailing_activation_pct=0.0,
                     neckline=setup.neckline,
                     neckline_break_direction="above",
-                    exit_bars_after_neckline_break=self.EXIT_BARS_AFTER_NECK_BREAK,
-                    time_exit_only_unfavorable=True,
-                    notes=(
-                        f"Double bottom L1→L2 gap={l2_idx - l1_idx}bars | "
-                        f"neckline={setup.neckline:.2f} | "
-                        f"L1_RSI={setup.l1_rsi:.1f} L2_RSI={setup.l2_rsi:.1f} | "
-                        f"peak={setup.peak_height_pct:.1%}"
-                    ),
+                    exit_bars_after_neckline_break=self.EXIT_AFTER_NECKLINE_BREAK,
+                    notes=f"Double bottom L1={l1} L2={l2} neckline={setup.neckline:.2f} RSI={setup.l1_rsi:.1f}->{setup.l2_rsi:.1f}",
                     chart_annotations=[
-                        ann_marker(self.bar_date(df, l1_idx), setup.l1_low, "L1", ANN_TROUGH, "^", "below"),
-                        ann_marker(self.bar_date(df, l2_idx), setup.l2_low, "L2", ANN_TROUGH, "^", "below"),
-                        ann_marker(self.bar_date(df, setup.peak_idx), setup.neckline, "neck", ANN_PEAK, "v", "above"),
+                        ann_marker(self.bar_date(df, l1), setup.l1_low, "L1", ANN_TROUGH, "^", "below"),
+                        ann_marker(self.bar_date(df, setup.peak), setup.neckline, "neckline", ANN_PEAK, "v", "above"),
+                        ann_marker(self.bar_date(df, l2), setup.l2_low, "L2", ANN_TROUGH, "^", "below"),
                         ann_hline(setup.neckline, "neckline", ANN_LINE),
-                        ann_hline(stop, "stop", ANN_STOP),
-                        ann_hline(target, "TP", ANN_TARGET),
-                        ann_marker(self.bar_date(df, cur), close, "entry", ANN_ENTRY, "o", "below"),
+                        ann_hline(target, "target", ANN_TARGET),
+                        ann_marker(self.bar_date(df, current), price, "entry", ANN_ENTRY, "o", "below"),
                     ],
                 )
-
         return None
 
-    # ── Detection helpers ──────────────────────────────────────────────────────
-    def _find_swing_lows(self, low: pd.Series) -> list[int]:
-        lb = self.SWING_LOOKBACK
-        troughs: list[int] = []
-        for i in range(lb, len(low) - lb):
-            left  = low.iloc[i - lb : i]
-            right = low.iloc[i + 1 : i + lb + 1]
-            if low.iloc[i] <= left.min() and low.iloc[i] <= right.min():
-                troughs.append(i)
-        return troughs
-
-    def _evaluate_pair(
-        self,
-        ind: IndicatorEngine,
-        rsi: pd.Series,
-        l1_idx: int,
-        l2_idx: int,
-        cur: int,
-    ) -> _DoubleBottomSetup | None:
-        gap = l2_idx - l1_idx
-        if gap < self.L1_L2_GAP_MIN or gap > self.L1_L2_GAP_MAX:
+    def _evaluate(self, ind: IndicatorEngine, rsi, l1: int, l2: int, current: int) -> _Setup | None:
+        gap = l2 - l1
+        if gap < self.GAP_MIN or gap > self.GAP_MAX:
             return None
-
-        l1_low   = float(ind.low.iloc[l1_idx])
-        l2_low   = float(ind.low.iloc[l2_idx])
-        l1_close = float(ind.close.iloc[l1_idx])
-        l2_close = float(ind.close.iloc[l2_idx])
-        l1_rsi   = float(rsi.iloc[l1_idx])
-        l2_rsi   = float(rsi.iloc[l2_idx])
-
-        if l2_low <= l1_low:
+        l1_low = float(ind.low.iloc[l1])
+        l2_low = float(ind.low.iloc[l2])
+        l1_close = float(ind.close.iloc[l1])
+        l2_close = float(ind.close.iloc[l2])
+        l1_rsi = float(rsi.iloc[l1])
+        l2_rsi = float(rsi.iloc[l2])
+        if not np.isfinite([l1_rsi, l2_rsi]).all():
             return None
-        if l1_rsi > self.L1_RSI_MAX:
+        if l2_low <= l1_low or l2_close <= l1_close:
             return None
-        if l2_rsi < self.L2_RSI_MIN:
+        if l1_rsi > self.L1_RSI_MAX or l2_rsi < self.L2_RSI_MIN or l2_rsi > self.L2_RSI_MAX:
             return None
-        if l2_rsi > self.L2_RSI_MAX:
+        if l2_rsi - l1_rsi <= self.RSI_DIVERGENCE_MIN:
             return None
-        if l2_rsi <= l1_rsi:
+        between_lows = ind.low.iloc[l1 + 1 : l2]
+        if not between_lows.empty and float(between_lows.min()) < l1_low:
             return None
-        rsi_div = l2_rsi - l1_rsi
-        if rsi_div <= self.RSI_DIVERGENCE_MIN:
-            return None
-        if l2_close <= l1_close:
-            return None
-
-        # No bar between L1 and L2 undercuts L1 low.
-        between_low = ind.low.iloc[l1_idx + 1 : l2_idx]
-        if not between_low.empty and between_low.min() < l1_low:
-            return None
-
-        # Peak between troughs.
-        peak_slice = ind.high.iloc[l1_idx + 1 : l2_idx]
+        peak_slice = ind.high.iloc[l1 + 1 : l2]
         if peak_slice.empty:
             return None
-        peak_rel = int(peak_slice.values.argmax())
-        peak_idx = l1_idx + 1 + peak_rel
-        peak_high = float(ind.high.iloc[peak_idx])
-
-        peak_height = (peak_high - l1_low) / l1_low
-        if peak_height < self.PEAK_HEIGHT_MIN:
+        peak = l1 + 1 + int(np.argmax(peak_slice.to_numpy(dtype=float)))
+        neckline = float(ind.high.iloc[peak])
+        if (neckline - l1_low) / l1_low < self.PEAK_HEIGHT_MIN:
             return None
-
-        # Next 2 bars after L2 close higher.
-        if l2_idx + 2 > cur:
+        if float(ind.close.iloc[l2 + 1]) <= l2_close or float(ind.close.iloc[l2 + 2]) <= l2_close:
             return None
-        if float(ind.close.iloc[l2_idx + 1]) <= l2_close:
+        if not weak_leg_volume(ind.open, ind.close, ind.volume, peak, l2, "down"):
             return None
-        if float(ind.close.iloc[l2_idx + 2]) <= l2_close:
-            return None
-
-        # Leg 2 (peak → L2): weak selloff volume.
-        if not self._leg2_volume_weak(ind, peak_idx, l2_idx):
-            return None
-
-        neckline = peak_high
-        neck_break_idx = self._neckline_break_idx(ind.close, l2_idx, cur, neckline)
-        # Confirmed breakout only. Early day-7 entries sat 2–33% below the
-        # neckline and were the entire 2026-08-17 US paper loss.
-        if neck_break_idx is None:
-            return None
-        entry_idx = neck_break_idx
-
-        # Cancel if any bar after L2 undercuts L2 low before the neckline break.
-        post_l2_end = neck_break_idx
-        post_l2 = ind.low.iloc[l2_idx + 1 : post_l2_end]
-        if not post_l2.empty and post_l2.min() < l2_low:
-            return None
-
-        return _DoubleBottomSetup(
-            l1_idx=l1_idx,
-            l2_idx=l2_idx,
-            peak_idx=peak_idx,
-            neckline=neckline,
-            l1_low=l1_low,
-            l2_low=l2_low,
-            l1_close=l1_close,
-            l2_close=l2_close,
-            l1_rsi=l1_rsi,
-            l2_rsi=l2_rsi,
-            peak_height_pct=peak_height,
-            rsi_divergence=rsi_div,
-            entry_idx=entry_idx,
+        break_index = next(
+            (idx for idx in range(l2 + 1, current + 1) if float(ind.close.iloc[idx]) > neckline),
+            None,
         )
-
-    def _leg2_volume_weak(
-        self, ind: IndicatorEngine, peak_idx: int, l2_idx: int
-    ) -> bool:
-        """Avg DOWN-bar volume < avg UP-bar volume on leg 2."""
-        up_vols: list[float] = []
-        down_vols: list[float] = []
-        for i in range(peak_idx, l2_idx + 1):
-            vol = float(ind.volume.iloc[i])
-            if float(ind.close.iloc[i]) > float(ind.open.iloc[i]):
-                up_vols.append(vol)
-            elif float(ind.close.iloc[i]) < float(ind.open.iloc[i]):
-                down_vols.append(vol)
-        if not up_vols or not down_vols:
-            return False
-        return sum(down_vols) / len(down_vols) < sum(up_vols) / len(up_vols)
-
-    def _exit_levels(
-        self,
-        close: float,
-        neckline: float,
-        l1_low: float,
-        l2_low: float,
-    ) -> tuple[float, float]:
-        """Structural stop under L2; TP is measured-move with a +12% floor."""
-        stop = round(l2_low * self.STOP_BELOW_L2, 4)
-        measured = close + (neckline - l1_low)
-        floor = close * (1.0 + self.MIN_TARGET_PCT)
-        target = round(max(measured, floor), 4)
-        return stop, target
-
-    # ── v9 earnings blackout ───────────────────────────────────────────────────
-    def _in_earnings_blackout(
-        self, df: pd.DataFrame, symbol: str, entry_idx: int
-    ) -> bool:
-        end_idx = min(entry_idx + self.EXIT_BARS_AFTER_NECK_BREAK, len(df) - 1)
-        try:
-            start_d = _to_date(df.index[entry_idx])
-            end_d = _to_date(df.index[end_idx])
-        except (AttributeError, ValueError):
-            return False
-        try:
-            return edgar_client().has_earnings_in(symbol, start_d, end_d)
-        except Exception as exc:  # noqa: BLE001
-            log.warning(
-                f"[{self.name}] {symbol}: v9 EDGAR check error ({exc!r}); "
-                f"treating as no-blackout"
-            )
-            return False
-
-    def _neckline_break_idx(
-        self,
-        close: pd.Series,
-        l2_idx: int,
-        cur: int,
-        neckline: float,
-    ) -> int | None:
-        """First bar i where close[i-1] and close[i] both clear the neckline
-        by NECKLINE_BREAK_BUFFER. A single confirming close was still not
-        enough: the 2026-08-31 US paper book's three fastest, full-size
-        stop_loss exits (EBS, CGTL, CLRO — all -10.2%, all within 1-2 bars
-        of entry) were one-bar neckline pokes that reversed immediately.
-        007 already requires two consecutive closes above its break line;
-        align 003 to the same standard rather than trading a single wick-y
-        close.
-        """
-        threshold = neckline * (1.0 + self.NECKLINE_BREAK_BUFFER)
-        consec = 0
-        for i in range(l2_idx + 1, cur + 1):
-            if float(close.iloc[i]) > threshold:
-                consec += 1
-            else:
-                consec = 0
-            if consec >= 2:
-                return i
-        return None
-
-    def _score_confidence(self, setup: _DoubleBottomSetup) -> float:
-        score = 0.55  # all hard filters passed
-
-        if setup.peak_height_pct >= 0.07:
-            score += 0.10
-        if setup.rsi_divergence >= 5.0:
-            score += 0.10
-        if setup.l2_rsi >= 42.0:
-            score += 0.10
-        gap = setup.l2_idx - setup.l1_idx
-        if FORMATION_BARS <= gap <= 60:
-            score += 0.10
-        low_ratio = setup.l2_low / setup.l1_low
-        if low_ratio >= 1.02:
-            score += 0.05
-
-        return min(score, 1.0)
+        entry = min(l2 + self.ENTRY_DELAY, break_index) if break_index is not None else l2 + self.ENTRY_DELAY
+        if entry > current:
+            return None
+        invalidation_stop = break_index if break_index is not None else current + 1
+        post_l2 = ind.low.iloc[l2 + 1 : invalidation_stop]
+        if not post_l2.empty and float(post_l2.min()) < l2_low:
+            return None
+        return _Setup(l1, l2, peak, neckline, l1_low, l2_low, l1_rsi, l2_rsi, entry)

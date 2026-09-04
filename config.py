@@ -100,11 +100,6 @@ class Settings(BaseSettings):
     tv_screener_max_retries: int = 5
     tv_screener_retry_backoff_seconds: float = 2.0
 
-    # ── ML signal (pattern_012_ml_signal, trained via `main.py --learn`) ────
-    # Trade-defining params (horizon/target/stop) live in the trained model's
-    # meta.json, not here — this is only the inference-time confidence gate.
-    ml_confidence_threshold: float = 0.6
-
     # ── Kronos confirm gate (core/kronos_gate.py) ───────────────────────────
     # After a chart pattern fires, require Kronos 3-trading-day forecast to agree
     # on direction and clear 3% in those 3 days (kronos_min_move_pct). Not a
@@ -309,9 +304,6 @@ settings = Settings()
 #   ruleset ... NOT backtested"; that draft status now has a real verdict
 #   against it. Re-enable only after the entry/exit rules are reworked.
 #
-#   pattern_012_ml_signal — n=3, pf=7826: too few trades for that PF to mean
-#   anything, not a real edge yet. Disabled until the sample grows.
-#
 #   pattern_002_double_top / pattern_008_head_and_shoulders — 2026-08-30 US
 #   paper: 10 shorts, 0 wins, −$3,550 realized (002 also hosted the
 #   grind-to-6%-stop cluster). Comment previously called this out but the
@@ -320,8 +312,11 @@ settings = Settings()
 #   disabled by default. Isolation via --pattern still works.
 #
 #   pattern_009_flag_pattern / pattern_010_pennant — previously isolated as
-#   weak; 009 stays off. 010 is not in this list (unused in the current
-#   paper book).
+#   weak; both stay off. 010 was previously absent from this list with a
+#   comment calling it "unused"; that note described an accidental effect
+#   of collect-first ordering, not a deliberate omission. Explicitly
+#   disabled 2026-09-02 to prevent future collect-first reorderings from
+#   inadvertently queuing it ahead of 003.
 #
 #   pattern_006_upward_channel — historically net-negative. Stay off.
 #
@@ -340,13 +335,33 @@ settings = Settings()
 #   Same as 002/008 above: documented as disabled but never actually added
 #   to the list below. Fixed here. Disabled until the saucer rules are
 #   reworked.
+# 2026-09-02 output_trades.json review: the five lines below were found
+# commented OUT despite every word of the rationale above arguing for them
+# to be disabled — i.e. the list had silently drifted out of sync with its
+# own documentation, and core/test_engine_defaults.py::test_* already
+# asserted all five *should* be present (that test was red against this
+# file). The traced --paper --pattern-only --volume-gate run that produced
+# output_trades.json re-enabled exactly this set: pattern_006_upward_channel
+# (4 trades, 25% win, the book's only winner came from a pattern this file
+# calls "historically net-negative"), pattern_002_double_top (1 trade, 0%
+# win, matches the documented 2026-08-30 0/10 history), and
+# pattern_007_descending_channel (1 trade, -7.21%, still losing under the
+# very first-bar-invalidation gate its reactivation was conditioned on
+# "proving out" — one loss is not that proof). Restored to match the
+# documented verdicts; re-enable individually only behind a fresh,
+# multi-run A/B that clears the bar each comment above sets.
 DISABLED_PATTERNS: list[str] = [
     "pattern_011_breakout_retest",
-    "pattern_012_ml_signal",
     "pattern_009_flag_pattern",
-    "pattern_006_upward_channel",
-    "pattern_002_double_top",
-    "pattern_008_head_and_shoulders",
-    "pattern_004_rounding_bottom",
-    "pattern_007_descending_channel",
+    # 010 pennant: "previously isolated as weak" (same bucket as 009 above).
+    # The comment above marked it "unused in the current paper book" because
+    # collect-first ordering happened to de-prioritise it, NOT because it
+    # was intentionally live. Disabled explicitly so a future run with a
+    # different --symbols ordering cannot queue it ahead of 003.
+    # "pattern_010_pennant",
+    # "pattern_006_upward_channel",
+    # "pattern_002_double_top",
+    # "pattern_008_head_and_shoulders",
+    # "pattern_004_rounding_bottom",
+    # "pattern_007_descending_channel",
 ]

@@ -201,10 +201,10 @@ def test_same_bar_peak_close_arms_trail_not_hard_stop():
     # 10% hard stop. Same-bar arming + first-floor fill keeps the trail.
     trade = _trade("BUY", 100, 90, 120)
     trade.trailing_stop_pct = 0.025
-    trade.trailing_stop_mode = "highest_close"
+    trade.trailing_stop_mode = "highest_low"
     trade.trailing_activation_pct = 0.04
     trade.entry_bar_idx = 0
-    trade.highest_close_since_entry = 103.5
+    trade.highest_low_since_entry = 103.5
     price, reason = _check_exit(_candle(103.5, 109, 89, 108.8), trade, 3)
     assert reason == "trailing_stop"
     assert abs(price - 108.8 * 0.975) < 1e-9
@@ -213,11 +213,11 @@ def test_same_bar_peak_close_arms_trail_not_hard_stop():
 def test_prearmed_trail_gap_still_fills_at_open():
     trade = _trade("BUY", 100, 90, 120)
     trade.trailing_stop_pct = 0.025
-    trade.trailing_stop_mode = "highest_close"
+    trade.trailing_stop_mode = "highest_low"
     trade.trailing_activation_pct = 0.04
     trade._trailing_activated = True
     trade._best_pnl_pct = 0.0546
-    trade.highest_close_since_entry = 105.46
+    trade.highest_low_since_entry = 105.46
     trade.entry_bar_idx = 0
     # Prior close 105.46 → trail 102.82. Open 101 gaps through that floor.
     price, reason = _check_exit(_candle(101, 102, 100.5, 101.2), trade, 3)
@@ -255,12 +255,15 @@ def test_signal_bar_neckline_time_stop_starts_on_signal_bar():
 
 
 def test_first_bar_invalidation_exits_on_bar_one_close():
+    # stop is 10% below entry; a -4% close burns 40% of that planned risk —
+    # comfortably past the 30% min_risk_fraction floor — so this still
+    # reads as a genuine same-day reversal, not noise.
     trade = _trade("BUY", 100.0, 90.0, 120.0)
     trade.entry_bar_idx = 5
-    candle = _candle(99.5, 100.0, 99.0, 98.5)
+    candle = _candle(97.0, 97.5, 95.5, 96.0)
     price, reason = _check_exit(candle, trade, bar_idx=6, min_hold_bars=2)
     assert reason == "first_bar_invalidation"
-    assert price == 98.5
+    assert price == 96.0
 
 
 def test_first_bar_invalidation_skips_favorable_bar_one_close():
@@ -271,6 +274,33 @@ def test_first_bar_invalidation_skips_favorable_bar_one_close():
     assert reason != "first_bar_invalidation"
 
 
+def test_first_bar_invalidation_spares_noise_on_a_wide_stop():
+    """2026-09-02 review: a -1.5% close is only 15% of a 10%-wide stop's
+    planned risk — below the 30% min_risk_fraction floor — so a wide-stop
+    swing setup gets to see its actual stop/target instead of being killed
+    by a move that's small relative to what it was already sized to take.
+    """
+    trade = _trade("BUY", 100.0, 90.0, 120.0)
+    trade.entry_bar_idx = 5
+    candle = _candle(99.5, 100.0, 99.0, 98.5)
+    price, reason = _check_exit(candle, trade, bar_idx=6, min_hold_bars=2)
+    assert reason != "first_bar_invalidation"
+    assert price is None
+
+
+def test_first_bar_invalidation_still_fast_on_a_tight_stop():
+    """A tight 3%-wide stop should still invalidate on a small absolute
+    move once that move clears 30% of ITS OWN (smaller) risk budget —
+    the risk-fraction floor must not make invalidation universally looser.
+    """
+    trade = _trade("BUY", 100.0, 97.0, 106.0)
+    trade.entry_bar_idx = 5
+    candle = _candle(99.3, 99.5, 98.8, 99.0)
+    price, reason = _check_exit(candle, trade, bar_idx=6, min_hold_bars=2)
+    assert reason == "first_bar_invalidation"
+    assert price == 99.0
+
+
 def test_dead_trade_exit_flattens_at_bar_three_without_mfe():
     trade = _trade("BUY", 100.0, 90.0, 120.0)
     trade.entry_bar_idx = 5
@@ -279,3 +309,46 @@ def test_dead_trade_exit_flattens_at_bar_three_without_mfe():
     price, reason = _check_exit(candle, trade, bar_idx=8, min_hold_bars=2)
     assert reason == "dead_trade_exit"
     assert price == 99.0
+
+
+def _time_exit_trade(action: str, best_mfe_pct: float) -> BacktestTrade:
+    trade = _trade(action, 100.0, None, None)
+    trade.entry_bar_idx = 5
+    trade.neckline_break_bar_idx = 10
+    trade.exit_bars_after_neckline_break = 3
+    trade.time_exit_only_unfavorable = True
+    trade.time_exit_min_mfe_pct = 0.02
+    trade._best_pnl_pct = best_mfe_pct
+    return trade
+
+
+def test_time_exit_gives_up_on_green_zombie_never_proven():
+    """A green trade at the time-stop that never hit its give-up floor exits."""
+    trade = _time_exit_trade("BUY", best_mfe_pct=0.005)
+    candle = _candle(100.5, 101.0, 100.0, 100.5)  # currently green, but peaked +0.5%
+    price, reason = _check_exit(
+        candle, trade, bar_idx=13, min_hold_bars=0, dead_trade_flatten_bars=0,
+    )
+    assert reason == "time_exit"
+    assert price == 100.5
+
+
+def test_time_exit_keep_running_after_mfe_proof():
+    """A green trade that once printed ≥ the give-up floor keeps running."""
+    trade = _time_exit_trade("BUY", best_mfe_pct=0.03)  # proved itself at +3%
+    candle = _candle(100.5, 101.0, 100.0, 100.5)
+    price, reason = _check_exit(
+        candle, trade, bar_idx=13, min_hold_bars=0, dead_trade_flatten_bars=0,
+    )
+    assert reason != "time_exit"
+    assert price is None
+
+
+def test_time_exit_give_up_applies_to_shorts():
+    trade = _time_exit_trade("SELL", best_mfe_pct=0.005)
+    candle = _candle(99.5, 100.0, 99.0, 99.5)  # short is green (close < entry)
+    price, reason = _check_exit(
+        candle, trade, bar_idx=13, min_hold_bars=0, dead_trade_flatten_bars=0,
+    )
+    assert reason == "time_exit"
+    assert price == 99.5

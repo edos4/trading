@@ -47,7 +47,7 @@ def test_resolve_and_profiles():
     assert PH.long_only and PH.currency == "PHP"
     assert PH.tv_screener == "philippines" and PH.tv_exchange == "PSE"
     assert US.txn_cost_pct == 0.001
-    assert US.breakeven_trigger_pct == 0.03
+    assert US.breakeven_trigger_pct == 0.06
     assert US.breakeven_buffer_pct == 0.0015
     assert abs(PH.txn_cost_pct - 0.0035) < 1e-9
     assert PH.breakeven_trigger_pct == 0.05
