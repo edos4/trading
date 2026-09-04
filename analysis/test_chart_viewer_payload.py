@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pandas as pd
 
@@ -45,3 +45,49 @@ def test_viewer_payload_has_candles_and_levels() -> None:
     assert titles == {"entry", "stop", "target", "last"}
     assert payload["markers"]
     assert payload["markers"][0]["shape"] == "arrowUp"
+
+
+def test_viewer_payload_dedupes_duplicate_session_bars() -> None:
+    """A tape with two bars per session (04:00 UTC + 13:30 UTC) must not
+    produce duplicate/non-monotonic candle times — LightweightCharts rejects
+    them and the chart renders blank."""
+    # July dates = EDT (UTC-4): both UTC stamps land on the same NY date.
+    raw = [
+        ("2024-07-01 04:00", 10.0),
+        ("2024-07-01 13:30", 10.5),
+        ("2024-07-02 04:00", 10.6),
+        ("2024-07-02 13:30", 11.0),
+        ("2024-07-03 13:30", 11.4),
+    ]
+    ts = [datetime.fromisoformat(d).replace(tzinfo=timezone.utc) for d, _ in raw]
+    closes = [c for _, c in raw]
+    df = pd.DataFrame(
+        {
+            "open": closes,
+            "high": [c + 0.2 for c in closes],
+            "low": [c - 0.2 for c in closes],
+            "close": closes,
+            "volume": [1_000_000] * len(closes),
+        },
+        index=pd.DatetimeIndex(ts),
+    )
+
+    payload = build_trade_viewer_payload(
+        df,
+        symbol="ALHC",
+        timeframe="1d",
+        action="SELL",
+        entry=11.0,
+        stop=12.0,
+        target=9.0,
+        current=10.5,
+        session_tz="America/New_York",
+    )
+    times = [c["time"] for c in payload["candles"]]
+    assert times == ["2024-07-01", "2024-07-02", "2024-07-03"]
+    assert len(times) == len(set(times))
+    assert all(a < b for a, b in zip(times, times[1:]))
+    # The kept bar per session is the later 13:30 UTC one.
+    closes_by_time = {c["time"]: c["close"] for c in payload["candles"]}
+    assert closes_by_time["2024-07-01"] == 10.5
+    assert closes_by_time["2024-07-02"] == 11.0

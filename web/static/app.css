@@ -166,6 +166,9 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 #paper-closed tbody tr.gain-row { box-shadow: inset 3px 0 0 var(--ok); }
 #paper-closed tbody tr.loss-row { box-shadow: inset 3px 0 0 var(--danger); }
 #paper-closed td.empty { text-align: center; color: var(--muted); padding: 1.2rem; }
+#replay-closed tbody tr.gain-row { box-shadow: inset 3px 0 0 var(--ok); }
+#replay-closed tbody tr.loss-row { box-shadow: inset 3px 0 0 var(--danger); }
+#replay-closed td.empty { text-align: center; color: var(--muted); padding: 1.2rem; }
 
 .tabs {
   display: flex;
@@ -235,13 +238,17 @@ progress { width: 180px; height: 0.7rem; }
 
 #paper-pos tbody tr,
 #paper-closed tbody tr,
-#paper-logs tbody tr {
+#paper-logs tbody tr,
+#replay-pos tbody tr,
+#replay-closed tbody tr {
   cursor: pointer;
   user-select: none;
 }
 #paper-pos tbody tr:hover,
 #paper-closed tbody tr:hover,
-#paper-logs tbody tr:hover {
+#paper-logs tbody tr:hover,
+#replay-pos tbody tr:hover,
+#replay-closed tbody tr:hover {
   background: #243041;
 }
 
@@ -252,12 +259,21 @@ progress { width: 180px; height: 0.7rem; }
   display: grid;
   place-items: center;
 }
-#paper-chart-modal .modal-backdrop {
+#replay-chart-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+}
+#paper-chart-modal .modal-backdrop,
+#replay-chart-modal .modal-backdrop {
   position: absolute;
   inset: 0;
   background: rgba(8, 12, 18, 0.72);
 }
-#paper-chart-modal .modal-card {
+#paper-chart-modal .modal-card,
+#replay-chart-modal .modal-card {
   position: relative;
   z-index: 1;
   width: min(1200px, calc(100vw - 1.5rem));
@@ -270,7 +286,8 @@ progress { width: 180px; height: 0.7rem; }
   display: flex;
   flex-direction: column;
 }
-#paper-chart-modal header {
+#paper-chart-modal header,
+#replay-chart-modal header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -296,7 +313,8 @@ progress { width: 180px; height: 0.7rem; }
   width: 100%;
   background: #131722;
 }
-#paper-chart-status {
+#paper-chart-status,
+#replay-chart-status {
   margin: 0;
   padding: 0 0.9rem 0.35rem;
 }
@@ -346,6 +364,44 @@ progress { width: 180px; height: 0.7rem; }
 .run-lamp[data-running="true"] { color: var(--ok); }
 .run-lamp[data-running="false"] { color: var(--muted); }
 .session-actions { display: flex; gap: 0.5rem; }
+
+.replay-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.replay-label { display: grid; gap: 0.2rem; }
+.replay-label strong { font-size: 1rem; }
+.replay-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.replay-bar input[type="file"] {
+  color: var(--muted);
+  max-width: 15rem;
+}
+.replay-bar input[type="file"]::file-selector-button {
+  margin-right: 0.5rem;
+  border: 1px solid var(--border);
+  background: #243041;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+}
+.replay-bar.replaying {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
 
 .book-grid {
   display: grid;
@@ -400,6 +456,10 @@ progress { width: 180px; height: 0.7rem; }
 #paper-pos tbody tr.book-ph,
 #paper-closed tbody tr.book-ph,
 #paper-logs tbody tr.book-ph { box-shadow: inset 3px 0 0 var(--ph); }
+#replay-pos tbody tr.book-us,
+#replay-closed tbody tr.book-us { box-shadow: inset 3px 0 0 var(--accent); }
+#replay-pos tbody tr.book-ph,
+#replay-closed tbody tr.book-ph { box-shadow: inset 3px 0 0 var(--ph); }
 .perf-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

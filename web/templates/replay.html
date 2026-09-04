@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}Replay — Trading Bot{% endblock %}
+{% block content %}
+<section class="replay-bar" id="replay-bar">
+  <div class="replay-label">
+    <strong>Replay</strong>
+    <span class="muted small">Upload an exported trades JSON (e.g. output_trades.json) to inspect a past paper run. It is saved on the server and survives restarts. Clear removes it.</span>
+  </div>
+  <div class="replay-controls">
+    <input type="file" id="replay-file" accept="application/json,.json" />
+    <button type="button" class="btn primary" id="replay-load">Load Replay</button>
+    <button type="button" class="btn ghost" id="replay-clear" disabled>Clear</button>
+    <span class="muted small" id="replay-status"></span>
+  </div>
+</section>
+
+<div class="blotter-filter toolbar compact">
+  <span class="muted">Filter</span>
+  <div class="filter-pills" role="group" aria-label="Market filter">
+    <button type="button" class="pill-btn active" data-filter="all">All</button>
+    <button type="button" class="pill-btn" data-filter="us">US</button>
+    <button type="button" class="pill-btn" data-filter="ph">PH</button>
+  </div>
+  <p class="muted small" id="replay-sort-note">P&amp;L sort is per market — pick US or PH.</p>
+</div>
+
+<section class="book-grid">
+  {% for book in book_cards %}
+  <article class="book-card book-{{ book.id }}" data-book="{{ book.id }}">
+    <header class="book-head">
+      <h2>{{ book.label }}</h2>
+      <span class="currency-badge">{{ book.currency_symbol }} {{ book.currency }}</span>
+    </header>
+    <p class="equity" id="replay-{{ book.id }}-equity"></p>
+    <p class="muted" id="replay-{{ book.id }}-exposure"></p>
+    <p class="muted small" id="replay-{{ book.id }}-scan"></p>
+    <p class="status" id="replay-{{ book.id }}-status"></p>
+  </article>
+  {% endfor %}
+</section>
+
+<div class="tabs" role="tablist">
+  <button type="button" class="tab active" data-tab="positions" role="tab" aria-selected="true">Positions</button>
+  <button type="button" class="tab" data-tab="performance" role="tab" aria-selected="false">Performance</button>
+</div>
+
+<section class="tab-panel active" id="replay-tab-positions">
+  <div class="split">
+    <div class="panel grow">
+      <div class="blotter-head">
+        <div>
+          <h2>Open positions</h2>
+          <p class="muted small">Double-click a row to open the chart.</p>
+        </div>
+      </div>
+      <div class="table-wrap open-wrap">
+        <table id="replay-pos">
+          <thead>
+            <tr>
+              <th>Mkt</th><th>Symbol</th><th>Status</th><th>Action</th><th>Qty</th>
+              <th>Entry</th><th>Current</th><th>Unrl%</th><th>MTM</th>
+              <th>R</th><th>Sim Days</th><th>Bars</th><th>Value</th><th>Port %</th><th>Pattern</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="blotter-head">
+        <div>
+          <h2>Latest trades</h2>
+          <p id="replay-closed-stats" class="muted small">No closed trades yet.</p>
+        </div>
+        <p class="muted small">Click a header to sort. Double-click a row for the chart.</p>
+      </div>
+      <div class="toolbar compact" id="replay-closed-filters">
+        <label>Symbol <input type="text" id="replay-closed-symbol" size="8" /></label>
+        <label>Reason
+          <select id="replay-closed-reason">
+            <option value="">All</option>
+            <option value="stop_loss">Stop</option>
+            <option value="take_profit">Target</option>
+            <option value="profit_take">Take</option>
+            <option value="profit_lock">Lock</option>
+            <option value="trailing_stop">Trail</option>
+            <option value="time_exit">Time</option>
+            <option value="breakeven_stop">BE</option>
+          </select>
+        </label>
+        <label>Pattern <input type="text" id="replay-closed-pattern" size="16" /></label>
+        <label>Search <input type="text" id="replay-closed-search" size="16" /></label>
+      </div>
+      <div class="table-wrap closed-wrap" id="replay-closed-wrap">
+        <table id="replay-closed" class="blotter">
+          <thead>
+            <tr>
+              <th data-col="market" class="sortable">Mkt</th>
+              <th data-col="closed" class="sortable">Closed</th>
+              <th data-col="symbol" class="sortable">Symbol</th>
+              <th data-col="action" class="sortable">Side</th>
+              <th data-col="qty" class="sortable num">Qty</th>
+              <th data-col="entry" class="sortable num">Entry</th>
+              <th data-col="exit" class="sortable num">Exit</th>
+              <th data-col="pnl" class="sortable num">P&amp;L</th>
+              <th data-col="pnl_pct" class="sortable num">P&amp;L %</th>
+              <th data-col="r" class="sortable num">R</th>
+              <th data-col="reason" class="sortable">Reason</th>
+              <th data-col="hold" class="sortable num">Hold</th>
+              <th data-col="pattern" class="sortable">Pattern</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="tab-panel" id="replay-tab-performance" hidden>
+  <div class="perf-grid">
+    <div class="panel" data-replay-perf="us">
+      <h2>US performance</h2>
+      <div id="replay-metrics-us" class="summary">No closed trades yet.</div>
+      <pre id="replay-summary-us" class="summary">No closed trades yet.</pre>
+    </div>
+    <div class="panel" data-replay-perf="ph">
+      <h2>PH performance</h2>
+      <div id="replay-metrics-ph" class="summary">No closed trades yet.</div>
+      <pre id="replay-summary-ph" class="summary">No closed trades yet.</pre>
+    </div>
+  </div>
+</section>
+
+<div id="replay-chart-modal" hidden>
+  <div class="modal-backdrop" id="replay-chart-backdrop"></div>
+  <div class="modal-card tv-chart-card">
+    <header class="tv-chart-header">
+      <div>
+        <strong id="replay-chart-title">Chart</strong>
+        <p id="replay-chart-ohlc" class="tv-ohlc"></p>
+      </div>
+      <button type="button" class="btn ghost" id="replay-chart-close">Close</button>
+    </header>
+    <p id="replay-chart-status" class="muted">Loading…</p>
+    <div id="replay-chart-host" class="tv-chart-host"></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+<script src="/static/tv_chart.js?v=3"></script>
+<script>
+  window.TB_PAGE = "replay";
+  window.TB_MARKETS = {{ markets | tojson }};
+</script>
+{% endblock %}

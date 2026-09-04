@@ -55,6 +55,7 @@ def _open_row(row: dict[str, Any]) -> dict[str, Any]:
         "port_pct": _round(row.get("port_pct")),
         "risk": _round(row.get("risk")),
         "opened": row.get("opened"),
+        "sim_opened": row.get("sim_opened"),
         "daily_marks": [_daily_mark(m) for m in (row.get("daily_marks") or [])],
     }
 
@@ -97,6 +98,8 @@ def _closed_row(row: dict[str, Any]) -> dict[str, Any]:
         "time_exit_bars_configured": row.get("time_exit_bars_configured"),
         "opened": row.get("opened"),
         "closed": row.get("closed"),
+        "sim_opened": row.get("sim_opened"),
+        "sim_closed": row.get("sim_closed"),
         "daily_marks": [_daily_mark(m) for m in (row.get("daily_marks") or [])],
     }
 
@@ -189,6 +192,7 @@ def snapshot_from_paper_account(
                 "stop": p.stop_loss,
                 "target": p.take_profit,
                 "opened": p.entry_date.isoformat() if p.entry_date else "",
+                "sim_opened": p.sim_entry_date.isoformat() if p.sim_entry_date else None,
                 "timeframe": p.timeframe,
                 "daily_marks": list(p.position_marks or []),
             }
@@ -218,6 +222,8 @@ def snapshot_from_paper_account(
                 "target": t.take_profit,
                 "opened": t.entry_date.isoformat() if t.entry_date else "",
                 "closed": t.exit_date.isoformat() if t.exit_date else "",
+                "sim_opened": t.sim_entry_date.isoformat() if t.sim_entry_date else None,
+                "sim_closed": t.sim_exit_date.isoformat() if t.sim_exit_date else None,
                 "timeframe": t.timeframe,
                 "daily_marks": list(t.position_marks or []),
             }

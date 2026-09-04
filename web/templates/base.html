@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{% block title %}Trading Bot{% endblock %}</title>
-  <link rel="stylesheet" href="/static/app.css?v=11" />
+  <link rel="stylesheet" href="/static/app.css?v=13" />
 </head>
 <body>
   {% if user %}
@@ -13,6 +13,7 @@
       <a href="/" class="{% if active == 'explorer' %}active{% endif %}">Explorer</a>
       <a href="/backtest" class="{% if active == 'backtest' %}active{% endif %}">Backtest</a>
       <a href="/paper" class="{% if active == 'paper' %}active{% endif %}">Paper</a>
+      <a href="/replay" class="{% if active == 'replay' %}active{% endif %}">Replay</a>
       <a href="/kronos" class="{% if active == 'kronos' %}active{% endif %}">Kronos</a>
     </nav>
     <div class="topbar-right">
@@ -30,7 +31,7 @@
   <main class="{% block main_class %}{% endblock %}">
     {% block content %}{% endblock %}
   </main>
-  <script src="/static/app.js?v=15"></script>
+  <script src="/static/app.js?v=18"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>
