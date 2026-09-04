@@ -696,19 +696,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Wipe the saved paper-trading account and start fresh (use with --paper).",
     )
     parser.add_argument(
-        "--learn",
-        action="store_true",
-        help="Train the pattern_012_ml_signal model from GET /api/history "
-        "for paper/live trading.",
-    )
-    parser.add_argument(
-        "--learn-max-tickers",
-        type=int,
-        default=None,
-        metavar="N",
-        help="Limit --learn to the first N tickers (smoke test before a full run).",
-    )
-    parser.add_argument(
         "--kronos-test",
         nargs="?",
         const=20,
@@ -950,12 +937,6 @@ async def main(args: argparse.Namespace | None = None) -> None:
         from data.pse_ingest import import_ph
 
         import_ph(Path(args.import_pse))
-        return
-
-    if args.learn:
-        from learn.train import run_learn
-
-        run_learn(max_tickers=args.learn_max_tickers)
         return
 
     if args.stream is not None and args.paper is None:

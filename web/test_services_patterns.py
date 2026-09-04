@@ -10,7 +10,7 @@ from web.services import discover_patterns
 
 class DiscoverPatternsDisabledTests(unittest.TestCase):
     def test_excludes_disabled_pattern_names(self):
-        disabled = ["pattern_012_ml_signal", "pattern_011_breakout_retest"]
+        disabled = ["pattern_009_flag_pattern", "pattern_011_breakout_retest"]
         with patch("web.services.DISABLED_PATTERNS", disabled):
             names = {p.name for p in discover_patterns()}
         for name in disabled:
@@ -27,7 +27,6 @@ class DiscoverPatternsDisabledTests(unittest.TestCase):
             "pattern_008_head_and_shoulders",
             "pattern_009_flag_pattern",
             "pattern_011_breakout_retest",
-            "pattern_012_ml_signal",
         }
         self.assertTrue(losers.issubset(set(DISABLED_PATTERNS)))
         names = {p.name for p in discover_patterns()}

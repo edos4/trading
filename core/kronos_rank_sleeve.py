@@ -90,7 +90,7 @@ def _signal_from_row(row: ForecastRow, action: str, rank: int, n_pool: int) -> T
         stop_loss=round(stop_loss, 4),
         take_profit=round(take_profit, 4),
         trailing_stop_pct=stop_pct,
-        trailing_stop_mode="lowest_close" if action == "BUY" else "highest_close",
+        trailing_stop_mode="highest_low" if action == "BUY" else "lowest_high",
         trailing_activation_pct=abs(pred) * 0.5,
         notes=note,
     )

@@ -105,10 +105,53 @@ class EngineDefaults:
     # take-profits while dumping ICLR-style gap losers before the 10% stop.
     # Legal on bar 1 (min_hold_bars does not apply).
     first_bar_invalidation_enabled: bool = True
+    # v2 (2026-09-02, output_trades.json review): the check above had no
+    # magnitude floor — ANY close against entry on bar 1, even a
+    # statistical-noise flicker, triggered a full realized loss. In the
+    # 2026-09-01 patterns-only US paper book (output_trades.json), 5 of 7
+    # closed trades (71%) exited via first_bar_invalidation, and 2 of those
+    # 5 were flat/noise closes (PLMR entry 126.3932 -> close 126.3268,
+    # -0.05%; OUST entry 34.8774 -> close 34.8426, -0.10%) that locked in a
+    # loss on setups carrying 12%+ measured-move targets and stops several
+    # times wider than the move that triggered the exit. The other 3 were
+    # genuine reversals (NNI -1.21%, NSC +1.46%, IPAR +1.99% raw price
+    # move against entry). Require the adverse close to clear this floor
+    # before invalidating — set below the smallest genuine reversal
+    # observed (1.21%) and above the largest noise flicker (0.10%), so
+    # real day-1 reversals still exit immediately while flat first bars
+    # get to see their actual stop/target/trail instead of being killed
+    # by tick-level noise. 0 restores the old any-adverse-tick behavior.
+    first_bar_invalidation_min_adverse_pct: float = 0.005
+    # v3 (2026-09-02, output_trades.json review): the v2 floor above is a
+    # flat percent-of-price move, unrelated to how wide the trade's own
+    # stop is — so it fires just as fast on a name risked at 12% as one
+    # risked at 5%. In the 2026-09-01 patterns-only US paper book (11
+    # closed trades), 6 exited via first_bar_invalidation and the adverse
+    # move consumed wildly different shares of each trade's own planned
+    # risk (entry-to-stop distance): BLCO's -0.93% close ate only 18.6% of
+    # its 5.0%-wide stop and IOT's -2.83% close only 23.6% of its 12.0%-wide
+    # stop — both look like ordinary chop relative to what the trade was
+    # already sized to tolerate — while GSHD's -7.02% close burned 58.5% of
+    # its stop and is a much more credible same-day reversal. A flat pct
+    # floor cannot tell these apart. Require the adverse close to also
+    # clear this fraction of the position's OWN entry-to-stop risk before
+    # invalidating; the effective floor used is
+    # max(first_bar_invalidation_min_adverse_pct, this fraction × initial
+    # risk %). 0.30 keeps tight-stop names (where 30% of risk is still a
+    # small absolute move) invalidating quickly while sparing wide-stop
+    # swing setups from being killed by noise that hasn't actually used up
+    # a meaningful fraction of the room the stop already gave them. 0 /
+    # None restores the old flat-pct-only behavior.
+    first_bar_invalidation_min_risk_fraction: float | None = 0.30
     # Backstop: 49 trades never printed MFE > 0.15% through bar 3 (WR 8%,
     # −$14,687). Flatten at bar-3 close saves ~$3,500 vs the 8-bar time stop.
+    # 2026-09-01 patterns-only paper (15 US trades): IMXI held 79 bars and
+    # round-tripped to −1R because a +0.20% bar-1 flicker sat just above the
+    # old 0.15% threshold, so the dead-trade check never fired. Raised to 0.5%
+    # so a flicker that is barely green on bar 1 still counts as dead unless
+    # the trade has made a real move by bar 3.
     dead_trade_flatten_bars: int = 3
-    dead_trade_mfe_threshold_pct: float = 0.0015
+    dead_trade_mfe_threshold_pct: float = 0.005
     # Empty on purpose. 006/007 used to skip SMA200 (shorts of strength /
     # longs of weakness) and then dominated the losing paper book. They are
     # disabled by default; --pattern isolation still gets the regime filter.
@@ -140,9 +183,45 @@ ENGINE = EngineDefaults()
 # versus 57% win / 2.60 pf for 003 in the same run. The regime filter is
 # therefore mandatory for these patterns even when Pattern-only is set;
 # Pattern-only still isolates confidence/long-only for them as before.
+#
+# The four short-side reversal patterns (002 double top, 005 rounding top,
+# 008 head & shoulders) are included for the same reason. The 2026-09-01
+# patterns-only paper book (15 US trades) made shorts a net −24.1% pnl at
+# 0.007 profit factor (sole "win" was +0.05R — noise) while longs were
+# +16.5% / 1.65 pf. Shorting counter-trend structures into an uptrend was
+# the single largest loss bucket, so shorts must clear the below-SMA200
+# regime gate even in Pattern-only runs, matching 006/007. This blocks
+# counter-trend shorts without collapsing the short count to zero; if the
+# next run still shows shorts bleeding on the correct side of SMA200, the
+# operator should go long-only for Pattern-only entirely.
+#
+# 003 double_bottom added 2026-09-02 (second output_trades.json review,
+# post pattern-disable fix): the comment above already records that 003
+# posted 57% win / 2.60 pf in the run this file benchmarks against — but
+# that run was NOT Pattern-only, so 003 had the SMA200 gate on. With
+# 002/004/006/007/008 now correctly disabled, 003 became the only long
+# pattern left trading Pattern-only, and it went 0-for-3 (RGTI −5.42%,
+# KURA −12.23% stop_loss, IOT −7.14% dead_trade_exit; the same 3 trades
+# reappeared unchanged across both reviewed exports since 003 wasn't
+# touched by the first patch). A double bottom found while price is still
+# under its own 200-day average is a bet that a stock already in a
+# downtrend reverses on this signal alone — a materially different, lower
+# quality-bar trade than a double bottom confirmed inside an established
+# uptrend, which is what the 57%/2.60pf history was measuring. Gating 003
+# on SMA200 even under Pattern-only aligns its regime exposure with the
+# run that actually earned it a spot in "historically +EV" quote.
+# CAVEAT: this is 3 trades from one simulation window, not a fresh
+# out-of-sample sample — re-run against a different --stream date once
+# this ships to confirm trade count doesn't collapse to zero and that the
+# win rate actually recovers, rather than trusting the mechanism-level
+# argument alone.
 REGIME_REQUIRED_PATTERNS: tuple[str, ...] = (
+    "pattern_002_double_top",
+    "pattern_003_double_bottom",
+    "pattern_005_rounding_top",
     "pattern_006_upward_channel",
     "pattern_007_descending_channel",
+    "pattern_008_head_and_shoulders",
 )
 
 

@@ -1,8 +1,23 @@
 """
-data/edgar_client.py — SEC EDGAR 8-K item 2.02 (Results of Operations) lookup.
+data/edgar_client.py — SEC EDGAR 8-K item 2.02 (Results of Operations) and
+6-K (foreign private issuer) filing-date lookup.
 
 Used by the v9 earnings-blackout filter: a pattern must skip a trade when an
-earnings 8-K (item 2.02) filing date falls inside the trade's holding window.
+earnings-related filing date falls inside the trade's holding window.
+
+v2 (2026-09-02, output_trades.json review): originally 8-K item 2.02 only.
+A foreign private issuer (FPI) does not file domestic Form 8-K at all — it
+furnishes Form 6-K for material events, including earnings/results releases,
+and 6-K carries no "item 2.02" style code to filter on. The blackout guard
+therefore always returned zero dates for every FPI name, regardless of
+whether one had just reported. pattern_002_double_top's AIOS short in the
+2026-09-02 US patterns-only paper book gapped +13.4% overnight and blew
+through its stop for a full -1.0R / -12.27% loss (the largest "genuine"
+stop-loss in that book); AIOS Tech Inc. is Hong Kong-based and its recent
+EDGAR filing history is 6-K / F-3 / SCHEDULE 13D — no 8-Ks at all, confirming
+this is exactly that blind spot, not a one-off. 6-K filings are now also
+collected (no item-code filter available for them, so any 6-K counts as a
+blackout trigger).
 
 Source: SEC EDGAR submissions API
   https://data.sec.gov/submissions/CIK{XXXXXXXX}.json
@@ -58,7 +73,10 @@ class EdgarClient:
 
     # ── Public API ────────────────────────────────────────────────────────────
     def earnings_dates(self, symbol: str) -> list[date]:
-        """All 8-K item 2.02 filing dates known for `symbol` (sorted ascending).
+        """All blackout-trigger filing dates for `symbol` (sorted ascending).
+
+        8-K item 2.02 for domestic issuers, any 6-K for foreign private
+        issuers (see module docstring).
 
         Returns an empty list if the symbol is unknown or the request fails;
         failures are logged once and not retried on every call.
@@ -88,7 +106,7 @@ class EdgarClient:
     def has_earnings_in(
         self, symbol: str, start: date, end: date
     ) -> bool:
-        """True if any 8-K item 2.02 filing date falls in [start, end]."""
+        """True if any blackout-trigger filing date falls in [start, end]."""
         if skip_edgar_enabled():
             return False
         filings = self.earnings_dates(symbol)
@@ -115,6 +133,10 @@ class EdgarClient:
         return out
 
     def _fetch_earnings_8k_dates(self, cik: int) -> list[date]:
+        """Blackout-trigger filing dates: domestic 8-K item 2.02, or any FPI 6-K.
+
+        See the v2 module-note above for why 6-K is included unconditionally.
+        """
         payload = self._get_json(_SUBMISSIONS_URL.format(cik=cik))
         recent = (payload.get("filings") or {}).get("recent") or {}
         forms = recent.get("form") or []
@@ -122,15 +144,26 @@ class EdgarClient:
         items = recent.get("items") or []
         out: list[date] = []
         for i, form in enumerate(forms):
-            if form != "8-K":
-                continue
-            # `items[i]` is a single comma-separated string for this filing
-            # (e.g. "2.02,9.01"), not a list of item codes. Iterating it
-            # directly (as before) walks individual characters, so the
-            # "2.02" substring check would essentially never match and the
-            # earnings-blackout filter would never fire. Split it first.
-            row_items = (items[i] if i < len(items) else "") or ""
-            if not any("2.02" in it for it in row_items.split(",")):
+            if form == "8-K":
+                # `items[i]` is a single comma-separated string for this
+                # filing (e.g. "2.02,9.01"), not a list of item codes.
+                # Iterating it directly (as before) walks individual
+                # characters, so the "2.02" substring check would
+                # essentially never match and the earnings-blackout filter
+                # would never fire. Split it first.
+                row_items = (items[i] if i < len(items) else "") or ""
+                if not any("2.02" in it for it in row_items.split(",")):
+                    continue
+            elif form == "6-K":
+                # Foreign private issuers (e.g. AIOS, Hong Kong-based) don't
+                # file 8-Ks and 6-K has no structured item-2.02 code to
+                # check, so any 6-K counts as a blackout trigger. This is
+                # coarser than the 8-K path (a 6-K can also be routine —
+                # proxy materials, an annual report, etc.) but the
+                # alternative is the status quo: zero coverage for every FPI
+                # name and unguarded overnight gap risk exactly like AIOS.
+                pass
+            else:
                 continue
             ds = dates[i] if i < len(dates) else None
             if not ds:
