@@ -4,6 +4,7 @@ from analysis.indicator_engine import IndicatorEngine
 from data.ohlcv_store import OHLCVStore
 from data.tv_client import MarketSnapshot
 from patterns._channels import find_channel
+from patterns import _dedup
 from patterns._rules import earnings_blackout, notional_qty
 from patterns.base_pattern import (
     ANN_ENTRY,
@@ -22,7 +23,7 @@ from patterns.base_pattern import (
 
 
 class DescendingChannelPattern(BasePattern):
-    MIN_BARS = 210
+    MIN_BARS = 40
     POSITION_NOTIONAL = 10_000.0
 
     @property
@@ -42,7 +43,7 @@ class DescendingChannelPattern(BasePattern):
         if df is None:
             return None
         ind = IndicatorEngine(df)
-        setup = find_channel(ind, ind.rsi_wilder(14), len(df) - 1, "down")
+        setup = find_channel(ind, ind.rsi_wilder(14), _dedup.current_bar(len(df) - 1), "down")
         if setup is None:
             return None
         if earnings_blackout(df, snapshot.symbol, setup.entry, 15):

@@ -4,6 +4,7 @@ from analysis.indicator_engine import IndicatorEngine
 from data.ohlcv_store import OHLCVStore
 from data.tv_client import MarketSnapshot
 from patterns._channels import find_channel
+from patterns import _dedup
 from patterns._rules import earnings_blackout
 from patterns.base_pattern import (
     ANN_ENTRY,
@@ -33,8 +34,9 @@ EARNINGS_WINDOW_BARS = 15  # v9 earnings blackout window
 
 
 class UpwardChannelPattern(BasePattern):
-    MIN_BARS = 210
+    MIN_BARS = 40
     POSITION_NOTIONAL = 10_000.0
+    HORIZON_BARS = TIME_STOP_BARS + 1  # `.cjs` guarantees a full 15-bar exit sim
 
     @property
     def name(self) -> str:
@@ -48,7 +50,7 @@ class UpwardChannelPattern(BasePattern):
     def chart_description(self) -> str:
         return "Rising parallel channel with two higher swing highs, bearish RSI divergence, and two closes below the lower channel line."
 
-    def _stub(self, snapshot: MarketSnapshot, price: float, **flags) -> TradeSignal:
+    def _stub(self, snapshot: MarketSnapshot, price: float, setup, **flags) -> TradeSignal:
         return TradeSignal(
             symbol=snapshot.symbol,
             action="SELL",
@@ -57,6 +59,7 @@ class UpwardChannelPattern(BasePattern):
             confidence=1.0,
             price=price,
             qty=0.0,
+            setup_key=(setup.first, setup.second),
             **flags,
         )
 
@@ -66,7 +69,7 @@ class UpwardChannelPattern(BasePattern):
             return None
         ind = IndicatorEngine(df)
         rsi = ind.rsi_wilder(14)
-        setup = find_channel(ind, rsi, len(df) - 1, "up")
+        setup = find_channel(ind, rsi, _dedup.current_bar(len(df) - 1), "up")
         if setup is None:
             return None
         price = float(ind.close.iloc[setup.entry])
@@ -74,16 +77,16 @@ class UpwardChannelPattern(BasePattern):
         # C22 freshness — skip if the break is a slow drift far past SH2.
         days_to_break = setup.entry - setup.second
         if days_to_break > MAX_DAYS_TO_BREAK:
-            return self._stub(snapshot, price,
+            return self._stub(snapshot, price, setup,
                               filtered_reason=f"C22 stale ({days_to_break}d)")
         # C23 don't-chase — skip if price already slid >15% from SH2.
         drop = (setup.second_price - price) / setup.second_price if setup.second_price else 0.0
         if drop > MAX_DROP_FROM_SH2:
-            return self._stub(snapshot, price,
+            return self._stub(snapshot, price, setup,
                               filtered_reason=f"C23 chasing ({drop * 100:.1f}%)")
         # v9 earnings blackout.
         if earnings_blackout(df, snapshot.symbol, setup.entry, EARNINGS_WINDOW_BARS):
-            return self._stub(snapshot, price, blocked_reason="earnings")
+            return self._stub(snapshot, price, setup, blocked_reason="earnings")
 
         stop = round(setup.second_price * STOP_MULT, 4)
         target = round(max(price - setup.width, price * (1 - FIXED_TARGET_PCT)), 4)
@@ -104,6 +107,8 @@ class UpwardChannelPattern(BasePattern):
             trailing_stop_mode="lowest_close",
             trailing_stop_on_close=True,       # C20 close-based
             trailing_activation_pct=TRAIL_TRIGGER,
+            exit_fill_at_close=True,           # `.cjs` UC: every exit fills at close
+            setup_key=(setup.first, setup.second),
             reclaim_exit=True,                 # C21
             reclaim_lower_rail=(setup.entry_line, setup.slope),
             exit_bars_after_entry=TIME_STOP_BARS,

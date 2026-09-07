@@ -7,6 +7,7 @@ import pandas as pd
 from analysis.indicator_engine import IndicatorEngine
 from data.ohlcv_store import OHLCVStore
 from data.tv_client import MarketSnapshot
+from patterns import _dedup
 from patterns._rules import extrema, notional_qty
 from patterns.base_pattern import (
     ANN_ENTRY,
@@ -60,7 +61,7 @@ class FlagPattern(BasePattern):
         if df is None:
             return None
         ind = IndicatorEngine(df)
-        current = len(df) - 1
+        current = _dedup.current_bar(len(df) - 1)
         setup = self._find_setup(ind, current)
         if setup is None:
             return None

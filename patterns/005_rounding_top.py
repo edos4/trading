@@ -4,6 +4,7 @@ from analysis.indicator_engine import IndicatorEngine
 from data.ohlcv_store import OHLCVStore
 from data.tv_client import MarketSnapshot
 from patterns._rounding import find_rounding_setup
+from patterns import _dedup
 from patterns._rules import notional_qty
 from patterns.base_pattern import (
     ANN_ENTRY,
@@ -39,8 +40,8 @@ class RoundingTopPattern(BasePattern):
         if df is None:
             return None
         ind = IndicatorEngine(df)
-        setup = find_rounding_setup(ind, ind.rsi_wilder(14), len(df) - 1, "top")
-        if setup is None or setup.entry != len(df) - 1:
+        setup = find_rounding_setup(ind, ind.rsi_wilder(14), _dedup.current_bar(len(df) - 1), "top")
+        if setup is None or setup.entry != _dedup.current_bar(len(df) - 1):
             return None
         price = float(ind.close.iloc[setup.entry])
         stop = round(price * 1.05, 4)

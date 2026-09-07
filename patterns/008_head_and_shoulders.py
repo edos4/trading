@@ -7,6 +7,7 @@ import numpy as np
 from analysis.indicator_engine import IndicatorEngine
 from data.ohlcv_store import OHLCVStore
 from data.tv_client import MarketSnapshot
+from patterns import _dedup
 from patterns._rules import extrema
 from patterns.base_pattern import (
     ANN_ENTRY,
@@ -35,7 +36,8 @@ class _Setup:
 
 
 class HeadAndShouldersPattern(BasePattern):
-    MIN_BARS = 130
+    MIN_BARS = 80
+    HORIZON_BARS = 11
     POSITION_NOTIONAL = 10_000.0
 
     @property
@@ -56,7 +58,7 @@ class HeadAndShouldersPattern(BasePattern):
             return None
         ind = IndicatorEngine(df)
         rsi = ind.rsi_wilder(14)
-        current = len(df) - 1
+        current = _dedup.current_bar(len(df) - 1)
         for head in reversed(extrema(ind.close, "high", 4, strict=True)):
             setup = self._evaluate(ind, rsi, head, current)
             if setup is None or setup.entry != current:
@@ -75,6 +77,7 @@ class HeadAndShouldersPattern(BasePattern):
                 # invalidates the short.
                 stop_loss=round(rs_close, 4),
                 stop_loss_on_close=True,
+                setup_key=(setup.head, setup.right_shoulder),
                 take_profit=round(setup.target, 4),
                 trailing_stop_pct=0.03,
                 trailing_stop_mode="lowest_close",

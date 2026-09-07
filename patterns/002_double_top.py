@@ -7,6 +7,7 @@ import numpy as np
 from analysis.indicator_engine import IndicatorEngine
 from data.ohlcv_store import OHLCVStore
 from data.tv_client import MarketSnapshot
+from patterns import _dedup
 from patterns._rules import extrema, weak_leg_volume
 from patterns.base_pattern import (
     ANN_ENTRY,
@@ -48,7 +49,8 @@ class DoubleTopPattern(BasePattern):
     EXIT_AFTER_NECKLINE_BREAK = 5
     TRAILING_STOP_PCT = 0.03
     SWING_LOOKBACK = 2
-    MIN_BARS = 110
+    MIN_BARS = 30
+    HORIZON_BARS = 31
     SHARES = 25
 
     @property
@@ -69,7 +71,7 @@ class DoubleTopPattern(BasePattern):
             return None
         ind = IndicatorEngine(df)
         rsi = ind.rsi_wilder(self.RSI_PERIOD)
-        current = len(df) - 1
+        current = _dedup.current_bar(len(df) - 1)
         highs = extrema(ind.high, "high", self.SWING_LOOKBACK)
         for h2 in reversed(highs):
             if h2 + 2 > current:
@@ -92,6 +94,7 @@ class DoubleTopPattern(BasePattern):
                     trailing_stop_pct=self.TRAILING_STOP_PCT,
                     trailing_stop_mode="lowest_close",
                     trailing_activation_pct=0.0,
+                    setup_key=(h1, h2),
                     neckline=setup.neckline,
                     neckline_break_direction="below",
                     exit_bars_after_neckline_break=self.EXIT_AFTER_NECKLINE_BREAK,

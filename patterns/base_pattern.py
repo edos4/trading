@@ -98,6 +98,16 @@ class TradeSignal:
     # (rail price at the entry bar, slope per bar) so the engine can
     # extrapolate the rail forward: rail(k) = rail0 + slope*(k - entry_bar).
     reclaim_lower_rail: tuple[float, float] | None = None
+    # When True every triggered exit (hard/dual stop, target, trailing stop)
+    # fills at the bar's *close* rather than at the trigger level. The `.cjs`
+    # upward-channel backtest evaluates every exit against the close and fills
+    # there; every other `.cjs` script fills stop/target at the level.
+    exit_fill_at_close: bool = False
+    # Pivot bar indices this setup is anchored on (e.g. (SH1, SH2) for a
+    # channel, (H1, H2) for a double top). The engine keeps a per-symbol set of
+    # consumed pivots and refuses a later signal that reuses any of them —
+    # the walk-forward equivalent of the `.cjs` usedSH1/usedSH2 dedup.
+    setup_key: tuple[int, ...] | None = None
     # Set by a pattern's own analyze() to record a setup it refused to trade
     # (pattern_006: earnings blackout -> blocked_reason; C22/C23 -> filtered_
     # reason). The engine logs these into BacktestResult.blocked / .filtered
