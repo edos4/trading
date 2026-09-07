@@ -7,6 +7,8 @@ symbol, against the locked `.cjs` scripts on the same bars:
 
 * double-top  → `backtest_doubletop.cjs` + `backtest_14b.cjs`
 * head&shoulders → `backtest_hs_200.cjs`
+* rounding-bottom → no `.cjs` golden (two-stage curated list); the case only
+  guards the `setup_key` dedup — without it the drain loop opens each anchor 8×.
 
 The fixture universes deliberately include the near-misses (INTU/V/XOM/COP/GILD/
 CVX for double-top) so a regression that re-introduces a false positive fails
@@ -66,6 +68,15 @@ HEAD_SHOULDERS_TRADES = {
     "QCOM": (+6.61, "data_end"),
 }
 
+# rounding-bottom has no `.cjs` golden (its `.cjs` is a two-stage curated-list
+# backtest), so this case exists only to lock the `setup_key` dedup: without it
+# the multi-position drain loop opens the same anchor 8x.
+ROUNDING_BOTTOM_UNIVERSE = ["ON", "ADBE"]
+ROUNDING_BOTTOM_TRADES = {
+    "ON": (+23.42, "take_profit"),
+    "ADBE": (-5.00, "stop_loss"),
+}
+
 
 def _run(pattern_name: str, symbols: list[str]):
     pattern = next(c() for _, c in _iter_pattern_classes() if c().name == pattern_name)
@@ -92,6 +103,7 @@ def _run(pattern_name: str, symbols: list[str]):
     [
         ("pattern_002_double_top", DOUBLE_TOP_UNIVERSE, DOUBLE_TOP_TRADES),
         ("pattern_008_head_and_shoulders", HEAD_SHOULDERS_UNIVERSE, HEAD_SHOULDERS_TRADES),
+        ("pattern_004_rounding_bottom", ROUNDING_BOTTOM_UNIVERSE, ROUNDING_BOTTOM_TRADES),
     ],
 )
 def test_golden_trade_list(pattern_name, universe, expected):
