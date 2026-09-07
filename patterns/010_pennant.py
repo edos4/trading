@@ -58,7 +58,7 @@ class _Setup:
 
 class PennantPattern(BasePattern):
     MIN_BARS = 50
-    HORIZON_BARS = MAX_HOLD + 1
+    HORIZON_BARS = 25  # `.cjs` MIN_TRAILING_BARS (a trade can time out early)
     MAX_OPEN_PER_SYMBOL = 1
     POSITION_NOTIONAL = 10_000.0
 

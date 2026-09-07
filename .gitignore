@@ -14,3 +14,7 @@ patterns_detected.md
 # offline research bar-cache snapshots (rebuild with scripts/build_barcache.py)
 data/barcache/
 data/barcache_flag/
+
+# offline backtest run artifacts
+backtest_*_[0-9]*.json
+backtest_*_[0-9]*.txt

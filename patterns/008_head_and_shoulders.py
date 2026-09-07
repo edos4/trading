@@ -37,7 +37,7 @@ class _Setup:
 
 class HeadAndShouldersPattern(BasePattern):
     MIN_BARS = 80
-    HORIZON_BARS = 11
+    HORIZON_BARS = 3  # `.cjs` backtest_hs_200: no min-trailing-bars requirement
     POSITION_NOTIONAL = 10_000.0
 
     @property
@@ -84,6 +84,7 @@ class HeadAndShouldersPattern(BasePattern):
                 stop_loss=round(rs_close, 4),
                 stop_loss_on_close=True,
                 setup_key=(setup.head, setup.right_shoulder),
+                exit_order="trail_first",
                 take_profit=round(setup.target, 4),
                 trailing_stop_pct=0.03,
                 trailing_stop_mode="lowest_close",

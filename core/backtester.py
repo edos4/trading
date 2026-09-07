@@ -86,6 +86,7 @@ class BacktestTrade:
     # Every triggered exit fills at the bar close (`.cjs` upward-channel).
     exit_fill_at_close: bool = False
     trailing_ref_after_check: bool = False
+    exit_order: str = "stop_first"
     entry_bar_idx: int = -1
     neckline_break_bar_idx: int | None = None
     prev_high: float | None = None
@@ -550,9 +551,6 @@ def _check_exit(
     """Fixed per-pattern exit ladder — see module docstring. No engine overlays."""
     is_short = position.action == "SELL"
     at_close = position.exit_fill_at_close
-    prior_ref = _trailing_reference(position)
-    if prior_ref is None:
-        prior_ref = position.entry_price
     _update_best_pnl(position, candle)
     # `.cjs` flag updates the trailing extreme AFTER the stop check (so a new
     # high-close bar isn't stopped out by its own wide range); every other
@@ -560,59 +558,61 @@ def _check_exit(
     if not position.trailing_ref_after_check:
         _update_trailing_reference(position, candle)
 
-    # 1. hard stop (dual: structural vs fixed % cap)
-    stop = _effective_stop(position)
-    if stop is not None:
+    def _chk_stop() -> tuple[float, str] | None:
+        # hard / dual stop. `.cjs` never models a gap-through fill.
+        s = _effective_stop(position)
+        if s is None:
+            return None
         if position.stop_loss_on_close or at_close:
-            hit = candle.close > stop if is_short else candle.close < stop
-            if hit:
-                position.exit_bar_idx = bar_idx
-                return (candle.close if at_close else stop), "stop_loss"
-        else:
-            fill = _gap_aware_trigger_fill(
-                candle, stop, is_short=is_short, favorable=False, prior_ref=prior_ref,
-            )
-            if fill is not None:
-                position.exit_bar_idx = bar_idx
-                return fill, "stop_loss"
+            if (candle.close > s) if is_short else (candle.close < s):
+                return (candle.close if at_close else s), "stop_loss"
+        elif (candle.high >= s) if is_short else (candle.low <= s):
+            return s, "stop_loss"
+        return None
 
-    # 2. target (close-based; fill at the target level, or at the close for `.cjs` UC)
-    if position.take_profit is not None:
+    def _chk_target() -> tuple[float, str] | None:
         tp = position.take_profit
-        hit = candle.close <= tp if is_short else candle.close >= tp
-        if hit:
-            position.exit_bar_idx = bar_idx
+        if tp is None:
+            return None
+        if (candle.close <= tp) if is_short else (candle.close >= tp):
             return (candle.close if at_close else tp), "take_profit"
+        return None
 
-    # 3. channel reclaim (close back above the rising lower rail + HH/HL)
-    if position.reclaim_exit and position.prev_high is not None:
+    def _chk_reclaim() -> tuple[float, str] | None:
+        if not position.reclaim_exit or position.prev_high is None:
+            return None
         rail = _reclaim_rail_at(position, bar_idx)
-        if (
-            rail is not None
-            and candle.close > rail
-            and candle.high > position.prev_high
-            and candle.low > (position.prev_low if position.prev_low is not None else candle.low)
-        ):
-            position.exit_bar_idx = bar_idx
+        pl = position.prev_low if position.prev_low is not None else candle.low
+        if (rail is not None and candle.close > rail
+                and candle.high > position.prev_high and candle.low > pl):
             return candle.close, "reclaim"
+        return None
 
-    # 4. trailing stop
-    trail = _trailing_stop_price(position, is_short)
-    if trail is not None:
+    def _chk_trail() -> tuple[float, str] | None:
+        t = _trailing_stop_price(position, is_short)
+        if t is None:
+            return None
         if position.trailing_stop_on_close or at_close:
-            hit = candle.close > trail if is_short else candle.close < trail
-            if hit:
-                position.exit_bar_idx = bar_idx
-                return (candle.close if at_close else trail), "trailing_stop"
-        else:
-            fill = _gap_aware_trigger_fill(
-                candle, trail, is_short=is_short, favorable=False, prior_ref=prior_ref,
-            )
-            if fill is not None:
-                position.exit_bar_idx = bar_idx
-                return fill, "trailing_stop"
+            if (candle.close > t) if is_short else (candle.close < t):
+                return (candle.close if at_close else t), "trailing_stop"
+        elif (candle.high >= t) if is_short else (candle.low <= t):
+            return t, "trailing_stop"
+        return None
 
-    # 5. time stop
+    checks = {"stop": _chk_stop, "target": _chk_target,
+              "reclaim": _chk_reclaim, "trail": _chk_trail}
+    # `.cjs` simExit for H&S / double-top checks the trailing stop first; the
+    # upward-channel checks the hard stop first (default).
+    order = (["trail", "target", "stop", "reclaim"]
+             if position.exit_order == "trail_first"
+             else ["stop", "target", "reclaim", "trail"])
+    for name in order:
+        res = checks[name]()
+        if res is not None:
+            position.exit_bar_idx = bar_idx
+            return res
+
+    # time stop
     bars_held = bar_idx - position.entry_bar_idx
     if (
         position.exit_bars_after_entry is not None
@@ -710,6 +710,7 @@ def _open_trade(
         reclaim_lower_rail=signal.reclaim_lower_rail,
         exit_fill_at_close=signal.exit_fill_at_close,
         trailing_ref_after_check=signal.trailing_ref_after_check,
+        exit_order=signal.exit_order,
         entry_bar_idx=bar_idx,
         confidence=signal.confidence,
         qty=signal.qty,
@@ -830,12 +831,15 @@ def _core_backtest_symbol(
     # tell patterns the true walk bar via _dedup.set_current — they must use
     # _dedup.current_bar(len(df)-1), not len(df)-1 directly.
     store.replace_all(symbol, timeframe, candles)
-    # `.cjs` scripts never anchor a pattern whose full exit horizon can't be
-    # simulated. Walk-forward equivalent: don't open within `horizon` of data end.
+    # Each pattern declares HORIZON_BARS = the minimum trailing bars its `.cjs`
+    # counterpart needs after an anchor (the `.cjs` scans clamp the exit sim at
+    # data end, so this is small — H&S/double-top can enter within a few bars of
+    # the last candle and just time out early). The pattern's own horizon is the
+    # authority; the legacy `end_margin` no longer widens it.
     horizon = max(
         (getattr(p, "HORIZON_BARS", 5) for p in patterns), default=5,
     )
-    open_cutoff = len(candles) - max(config.get("end_margin", 5), horizon)
+    open_cutoff = len(candles) - max(1, horizon)
 
     def _bar_date(idx: int) -> str:
         ts = candles[idx].timestamp or datetime.now(timezone.utc)
