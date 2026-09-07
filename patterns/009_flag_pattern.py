@@ -8,7 +8,7 @@ from analysis.indicator_engine import IndicatorEngine
 from data.ohlcv_store import OHLCVStore
 from data.tv_client import MarketSnapshot
 from patterns import _dedup
-from patterns._rules import extrema, notional_qty
+from patterns._rules import notional_qty
 from patterns.base_pattern import (
     ANN_ENTRY,
     ANN_LINE,
@@ -96,75 +96,75 @@ class FlagPattern(BasePattern):
         )
 
     def _find_setup(self, ind: IndicatorEngine, current: int) -> _Setup | None:
+        """`.cjs` backtest_flag_final.cjs findFlags + F7 breakout. The current
+        bar is the breakout: for each candidate (pole, flag) whose flag ends in
+        the last 20 bars, require this bar to be the FIRST close above the flag
+        high on volume >= the flag average."""
         sma = ind.sma(50)
-        for pole_end in reversed(extrema(ind.high, "high", 2)):
-            distance = current - pole_end
-            if distance < 5 or distance > 35:
-                continue
-            pole = self._find_pole(ind, sma, pole_end)
-            if pole is None:
-                continue
-            pole_start, pole_gain, pole_volume_ratio, pole_average = pole
-            pole_high = float(ind.high.iloc[pole_end])
-            flag_start = pole_end + 1
-            for flag_length in range(4, 16):
-                flag_end = flag_start + flag_length - 1
-                if flag_end >= current or current - flag_end > 20:
-                    continue
-                flag_high = float(ind.high.iloc[flag_start : flag_end + 1].max())
-                flag_low = float(ind.low.iloc[flag_start : flag_end + 1].min())
-                depth = (pole_high - flag_low) / pole_high
-                if depth < 0.10 or depth > 0.34:
-                    continue
-                start_close = float(ind.close.iloc[flag_start])
-                drift = (float(ind.close.iloc[flag_end]) - start_close) / start_close
-                if drift > 0.06:
-                    continue
-                flag_average = float(ind.volume.iloc[flag_start : flag_end + 1].mean())
-                flag_volume_ratio = flag_average / pole_average
-                if flag_volume_ratio > 0.85:
-                    continue
-                if any(float(ind.close.iloc[idx]) > flag_high for idx in range(flag_end + 1, current)):
-                    continue
-                if float(ind.close.iloc[current]) <= flag_high or float(ind.volume.iloc[current]) < flag_average:
-                    continue
-                return _Setup(
-                    pole_start,
-                    pole_end,
-                    flag_start,
-                    flag_end,
-                    pole_high,
-                    flag_high,
-                    flag_low,
-                    pole_gain,
-                    pole_volume_ratio,
-                    depth,
-                    drift,
-                    flag_volume_ratio,
-                )
-        return None
+        o = ind.open.to_numpy(dtype=float)
+        c = ind.close.to_numpy(dtype=float)
+        h = ind.high.to_numpy(dtype=float)
+        low = ind.low.to_numpy(dtype=float)
+        vol = ind.volume.to_numpy(dtype=float)
+        b_close, b_vol = c[current], vol[current]
 
-    def _find_pole(self, ind: IndicatorEngine, sma: pd.Series, pole_end: int) -> tuple[int, float, float, float] | None:
-        best: tuple[int, float, float, float] | None = None
-        for length in range(3, 41):
-            start = pole_end - length + 1
-            baseline_start = start - 20
-            if baseline_start < 0:
-                continue
-            start_open = float(ind.open.iloc[start])
-            gain = (float(ind.close.iloc[pole_end]) - start_open) / start_open
-            if gain < 0.25:
-                continue
-            baseline = float(ind.volume.iloc[baseline_start:start].mean())
-            pole_average = float(ind.volume.iloc[start : pole_end + 1].mean())
-            if baseline <= 0 or pole_average < baseline * 1.15:
-                continue
-            previous_sma = start - 5
-            if previous_sma < 0 or pd.isna(sma.iloc[start]) or pd.isna(sma.iloc[previous_sma]):
-                continue
-            if float(ind.close.iloc[start]) < float(sma.iloc[start]) or float(sma.iloc[start]) <= float(sma.iloc[previous_sma]):
-                continue
-            candidate = (start, gain, pole_average / baseline, pole_average)
-            if best is None or gain > best[1]:
-                best = candidate
+        best: _Setup | None = None
+        best_pole_len = 999
+        for flag_end in range(max(current - 20, 1), current):
+            for flag_len in range(4, 16):
+                flag_start = flag_end - flag_len + 1
+                pole_end = flag_start - 1
+                if pole_end < 24:  # need 20-bar baseline before the pole
+                    continue
+                flag_high = h[flag_start:flag_end + 1].max()
+                flag_low = low[flag_start:flag_end + 1].min()
+                # F7: this bar is the first breakout on volume
+                if b_close <= flag_high or b_vol < vol[flag_start:flag_end + 1].mean():
+                    continue
+                if (c[flag_end + 1:current] > flag_high).any():
+                    continue
+                flag_avg = vol[flag_start:flag_end + 1].mean()
+
+                for pole_len in range(3, 41):
+                    if pole_len >= best_pole_len:
+                        break
+                    pole_start = pole_end - pole_len + 1
+                    if pole_start - 20 < 0:
+                        continue
+                    pole_start_px = o[pole_start]
+                    pole_end_px = c[pole_end]
+                    if pole_start_px <= 0:
+                        continue
+                    move = (pole_end_px - pole_start_px) / pole_start_px
+                    if move < 0.25:                       # F1 + C17
+                        continue
+                    pole_avg = vol[pole_start:pole_end + 1].mean()
+                    pre_avg = vol[pole_start - 20:pole_start].mean()
+                    if pre_avg <= 0 or pole_avg / pre_avg < 1.15:   # F2
+                        continue
+                    # C13: pre-existing uptrend
+                    s0, s5 = float(sma.iloc[pole_start]), float(sma.iloc[pole_start - 5])
+                    if not (s0 == s0) or not (s5 == s5):  # NaN guard
+                        continue
+                    if c[pole_start] < s0 or s0 < s5:
+                        continue
+                    # C17: flag low 10-34% below the pole end (close)
+                    retrace = (pole_end_px - flag_low) / pole_end_px
+                    if retrace < 0.10 or retrace > 0.34:
+                        continue
+                    drift = (c[flag_end] - o[flag_start]) / o[flag_start]   # F5
+                    if drift > 0.06:
+                        continue
+                    if flag_avg / pole_avg > 0.85:        # F6
+                        continue
+                    best = _Setup(
+                        pole_start, pole_end, flag_start, flag_end,
+                        float(pole_end_px), float(flag_high), float(flag_low),
+                        round(move, 4), round(pole_avg / pre_avg, 2),
+                        round(retrace, 4), round(drift, 4),
+                        round(flag_avg / pole_avg, 4),
+                    )
+                    best_pole_len = pole_len
+                    break
         return best
+

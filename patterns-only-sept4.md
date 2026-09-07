@@ -440,8 +440,8 @@ exits.
 | **006 upward_channel** | backtest_uc_v14.cjs: 127 trades / 55.9% WR / +$23,717 / worst −$774; NAS60 $6,153; blocked 33 | **126 / 57.1% / +$25,066 / −$774; NAS60 $6,153; blocked 33** | ✅ **matched** (NAS60 bucket + blocked count exact) |
 | 002 double_top | backtest_14b.cjs (7 confirmed patterns, 60-NASDAQ) | 11 / 54.5% / +$1,540 (200-name universe) | ported to the `.cjs` C1-C15 ruleset; count/WR off partly because the `.cjs` locked run used ~60 NASDAQ names, not the 200 in `double_top.txt` |
 | 008 head_and_shoulders | backtest_hs_200.cjs: 19 / 63% / +$3,876 (~440 names) | 7 / 42.9% / −$1,111 (218 names) | rewritten to the flat neckline `(LN+RN)/2`, fixed RN window, highest-close RS, firstBreak-required entry; universe is ~half |
-| 009 flag | backtest_flag_final.cjs: 108 / 43.5% / +1.99%/trade / PF 2.44 (60 names) | 64 / 31.2% / PF 0.77 / best +$2,064 | `trailing_ref_after_check` (the `.cjs` flag ratchets its extreme *after* the stop check) restored the big winners; entry/pole conditions still need reconciliation |
-| 010 pennant | backtest_pennant_200.cjs: 41 / 61.0% / +$23,494 (253 names) | (running) | `_find_setup` rewritten to `pennant_find_historical.cjs` (linreg convergence, range contraction, retrace, breakout > coil high) |
+| 009 flag | backtest_flag_final.cjs: 108 / 43.5% / +1.99%/trade / PF 2.44 (60 names) | **101 / 39.6% / +$10,701 / PF 1.54** | `_find_setup` rewritten to `findFlags` (retrace off the pole-end *close*, no swing-high anchoring, C13 SMA50 trend, F5/F6 vol) + `trailing_ref_after_check`; trade count matches, net winner, PF still below `.cjs` (winners not running as far) |
+| 010 pennant | backtest_pennant_200.cjs: 41 / 61.0% / +$23,494 (253 names) | **19 / 57.9% / +$7,481 / PF 3.22** | `_find_setup` rewritten to `pennant_find_historical.cjs`; WR within tolerance, ~half the trade count (retrace/convergence still tighter than `.cjs`) |
 | 004 rounding_bottom | backtest_rb_v3.cjs: 2 / 100% / +$8,943 (20 hand-picked necklines) | not re-run | `.cjs` is a two-stage candidate-list backtest; low priority |
 | 003 / 005 / 007 | none | run clean | mirror patterns of 002/004/006 — no golden number to hit |
 
