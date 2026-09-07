@@ -422,3 +422,43 @@ pivot pair each side picks, RSI seeding at the gate thresholds, and exit-fill co
 - `tests/test_backtest_paper_parity.py`.
 - Rework `web/` PARAMS schema JSON + templates for the slim form (functional, not polished).
 - Optional `patterns/012_ascending_channel_long.py` from `backtest_channel_long_v1.cjs`.
+
+---
+
+## Per-pattern parity progress (2026-09-07)
+
+The engine is now `.cjs`-faithful: multi-position walk (a symbol carries every
+pattern anchor as an independent flat-$10k trade), full-history pivot scan with
+per-symbol consumed-pivot dedup (`patterns/_dedup.py` = the `.cjs` usedSH1/
+usedSH2), per-pattern exit ladders driven purely by the signal's own fields, and
+`.cjs`-style summary/JSON output. Look-ahead is confined to pivot-structure
+selection (which pair the `.cjs` one-pass scan would commit to) — never prices or
+exits.
+
+| Pattern | `.cjs` reference | Python now | Status |
+|---|---|---|---|
+| **006 upward_channel** | backtest_uc_v14.cjs: 127 trades / 55.9% WR / +$23,717 / worst −$774; NAS60 $6,153; blocked 33 | **126 / 57.1% / +$25,066 / −$774; NAS60 $6,153; blocked 33** | ✅ **matched** (NAS60 bucket + blocked count exact) |
+| 002 double_top | backtest_14b.cjs (7 confirmed patterns, 60-NASDAQ) | 11 / 54.5% / +$1,540 (200-name universe) | ported to the `.cjs` C1-C15 ruleset; count/WR off partly because the `.cjs` locked run used ~60 NASDAQ names, not the 200 in `double_top.txt` |
+| 008 head_and_shoulders | backtest_hs_200.cjs: 19 / 63% / +$3,876 (~440 names) | 7 / 42.9% / −$1,111 (218 names) | rewritten to the flat neckline `(LN+RN)/2`, fixed RN window, highest-close RS, firstBreak-required entry; universe is ~half |
+| 009 flag | backtest_flag_final.cjs: 108 / 43.5% / +1.99%/trade / PF 2.44 (60 names) | 64 / 31.2% / PF 0.77 / best +$2,064 | `trailing_ref_after_check` (the `.cjs` flag ratchets its extreme *after* the stop check) restored the big winners; entry/pole conditions still need reconciliation |
+| 010 pennant | backtest_pennant_200.cjs: 41 / 61.0% / +$23,494 (253 names) | (running) | `_find_setup` rewritten to `pennant_find_historical.cjs` (linreg convergence, range contraction, retrace, breakout > coil high) |
+| 004 rounding_bottom | backtest_rb_v3.cjs: 2 / 100% / +$8,943 (20 hand-picked necklines) | not re-run | `.cjs` is a two-stage candidate-list backtest; low priority |
+| 003 / 005 / 007 | none | run clean | mirror patterns of 002/004/006 — no golden number to hit |
+
+### New engine knobs (all on `TradeSignal` / `BacktestTrade`)
+- `exit_fill_at_close` — every triggered exit fills at the bar close (`.cjs` UC).
+- `trailing_ref_after_check` — ratchet the trailing extreme *after* the bar's
+  stop check (`.cjs` flag only; every other script updates before).
+- `stop_loss_pct_cap` — dual stop, nearer-to-entry of structural and `entry*(1±cap)`.
+- `reclaim_exit` / `reclaim_lower_rail` — the `.cjs` UC C21 channel reclaim.
+- `setup_key` — pivot indices for the dedup.
+- Pattern class attrs: `HORIZON_BARS` (open-cutoff margin), `MAX_OPEN_PER_SYMBOL`
+  (`.cjs` flag/pennant F10 — one open trade per symbol).
+
+### Still open
+- 002/008/009/010 detection reconciliation to close the count/WR gaps.
+- `tests/test_golden_numbers.py` with a pinned `tests/fixtures/barcache/`.
+- Paper trader still one-position-per-symbol (the multi-position walk is
+  backtest-only); revisit once per-pattern numbers settle.
+- Perf: the full-history store makes a single-pattern sweep ~4-5 min; an
+  `IndicatorEngine.of()` cache was added but patterns don't use it yet.

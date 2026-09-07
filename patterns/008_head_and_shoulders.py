@@ -59,9 +59,15 @@ class HeadAndShouldersPattern(BasePattern):
         ind = IndicatorEngine(df)
         rsi = ind.rsi_wilder(14)
         current = _dedup.current_bar(len(df) - 1)
-        for head in reversed(extrema(ind.close, "high", 4, strict=True)):
+        n = len(df)
+        head_max = n - 3 - self.SWING_LB - 10  # `.cjs` hdIdx < n - MIN_RS - LB - 10
+        for head in extrema(ind.close, "high", self.SWING_LB, strict=True):
+            if head > head_max or _dedup.used(head):
+                continue
             setup = self._evaluate(ind, rsi, head, current)
             if setup is None or setup.entry != current:
+                continue
+            if _dedup.used(setup.right_shoulder):
                 continue
             price = float(ind.close.iloc[current])
             rs_close = float(ind.close.iloc[setup.right_shoulder])
@@ -98,80 +104,120 @@ class HeadAndShouldersPattern(BasePattern):
             )
         return None
 
+    SWING_LB = 4
+    MIN_LS = 10
+    MAX_LS = 80
+    RN_WINDOW = 60
+    RS_AFTER_RN_MIN = 3
+    RS_AFTER_RN_MAX = 50
+    OUTCOME_WINDOW = 40
+
     def _evaluate(self, ind: IndicatorEngine, rsi, head: int, current: int) -> _Setup | None:
+        n = len(ind.close)
+        maxima = extrema(ind.close, "high", self.SWING_LB, strict=True)
         head_close = float(ind.close.iloc[head])
+        head_rsi = float(rsi.iloc[head])
+        if not np.isfinite(head_rsi):
+            return None
+
+        # left shoulder: highest local-max close in [head-80, head-10] below the head
         ls_candidates = [
-            idx
-            for idx in extrema(ind.close, "high", 4, strict=True)
-            if max(4, head - 80) <= idx <= head - 10 and float(ind.close.iloc[idx]) < head_close
+            i for i in maxima
+            if max(0, head - self.MAX_LS) <= i <= head - self.MIN_LS
+            and float(ind.close.iloc[i]) < head_close
         ]
         if not ls_candidates:
             return None
-        left_shoulder = max(ls_candidates, key=lambda idx: float(ind.close.iloc[idx]))
+        left_shoulder = max(ls_candidates, key=lambda i: float(ind.close.iloc[i]))
         ls_close = float(ind.close.iloc[left_shoulder])
-        left_slice = ind.close.iloc[left_shoulder + 1 : head]
-        if left_slice.empty:
+        ls_rsi = float(rsi.iloc[left_shoulder])
+        if not np.isfinite(ls_rsi) or ls_rsi - head_rsi < 2.0:
             return None
-        left_neck = left_shoulder + 1 + int(np.argmin(left_slice.to_numpy(dtype=float)))
+
+        left_slice = ind.close.iloc[left_shoulder + 1 : head].to_numpy(dtype=float)
+        if not left_slice.size:
+            return None
+        left_neck = left_shoulder + 1 + int(np.argmin(left_slice))
         ln_close = float(ind.close.iloc[left_neck])
         if (ls_close - ln_close) / ls_close < 0.05:
             return None
-        ls_rsi = float(rsi.iloc[left_shoulder])
-        head_rsi = float(rsi.iloc[head])
-        if not np.isfinite([ls_rsi, head_rsi]).all() or ls_rsi - head_rsi < 2.0:
+
+        # right neck: deepest close in a fixed [head+1, head+60] window
+        rn_end = min(head + self.RN_WINDOW, n - self.SWING_LB - 8)
+        if rn_end <= head + 1:
             return None
-        max_rs = min(current - 2, left_shoulder + 120, head + int(2.5 * (head - left_shoulder)))
-        for right_shoulder in range(head + 4, max_rs + 1):
-            rs_close = float(ind.close.iloc[right_shoulder])
-            if rs_close >= ls_close:
-                continue
-            if float(ind.close.iloc[right_shoulder + 1]) >= rs_close or float(ind.close.iloc[right_shoulder + 2]) >= rs_close:
-                continue
-            right_slice = ind.close.iloc[head + 1 : right_shoulder]
-            if right_slice.empty:
-                continue
-            right_neck = head + 1 + int(np.argmin(right_slice.to_numpy(dtype=float)))
-            if right_shoulder - right_neck < 3 or right_shoulder - right_neck > 50:
-                continue
-            rn_close = float(ind.close.iloc[right_neck])
-            if (head_close - rn_close) / head_close < 0.05:
-                continue
-            skew = (rn_close - ln_close) / ln_close
-            if skew > 0.10 or abs(skew) > 0.30:
-                continue
-            slope = (rn_close - ln_close) / (right_neck - left_neck)
-            neckline_at = lambda idx: ln_close + slope * (idx - left_neck)
-            head_neckline = neckline_at(head)
-            if head_neckline <= 0 or (head_close - head_neckline) / head_neckline < 0.10:
-                continue
-            rs_neckline = neckline_at(right_shoulder)
-            if rs_neckline <= 0 or (rs_close - rs_neckline) / rs_neckline < 0.05:
-                continue
-            rs_rsi = float(rsi.iloc[right_shoulder])
-            if not np.isfinite(rs_rsi) or rs_rsi >= head_rsi or rs_rsi > 60.0:
-                continue
-            if right_shoulder - left_shoulder < 20 or right_shoulder - left_shoulder > 120:
-                continue
-            break_index: int | None = None
-            consecutive = 0
-            invalid = False
-            for idx in range(right_shoulder + 1, current + 1):
-                if float(ind.close.iloc[idx]) > head_close:
-                    invalid = True
+        rn_slice = ind.close.iloc[head + 1 : rn_end + 1].to_numpy(dtype=float)
+        right_neck = head + 1 + int(np.argmin(rn_slice))
+        rn_close = float(ind.close.iloc[right_neck])
+        if (head_close - rn_close) / head_close < 0.05:
+            return None
+
+        # flat neckline = average of the two neck closes
+        neckline = (ln_close + rn_close) / 2.0
+        if neckline <= 0:
+            return None
+        skew = (rn_close - ln_close) / neckline
+        if skew > 0.10 or abs(skew) > 0.30:
+            return None
+        if (head_close - neckline) / neckline < 0.10:
+            return None
+
+        # right shoulder: highest local-max close in [rn+3, rn+50] above the
+        # neckline (by >= 5%) and below the head
+        rs_lo = right_neck + self.RS_AFTER_RN_MIN
+        rs_hi = min(right_neck + self.RS_AFTER_RN_MAX, n - self.SWING_LB - 3)
+        rs_cands = [
+            i for i in maxima
+            if rs_lo <= i <= rs_hi
+            and float(ind.close.iloc[i]) < head_close
+            and float(ind.close.iloc[i]) > neckline
+            and (float(ind.close.iloc[i]) - neckline) / neckline >= 0.05
+        ]
+        if not rs_cands:
+            return None
+        right_shoulder = max(rs_cands, key=lambda i: float(ind.close.iloc[i]))
+        rs_close = float(ind.close.iloc[right_shoulder])
+        rs_rsi = float(rsi.iloc[right_shoulder])
+        if not np.isfinite(rs_rsi):
+            return None
+        if rs_close >= ls_close or rs_rsi >= head_rsi or rs_rsi > 60.0:
+            return None
+
+        p_bars = right_shoulder - left_shoulder
+        if p_bars < 20 or p_bars > 120:
+            return None
+        if right_shoulder - head > (head - left_shoulder) * 2.5:
+            return None
+        if right_shoulder + 2 >= n:
+            return None
+        if (float(ind.close.iloc[right_shoulder + 1]) >= rs_close
+                or float(ind.close.iloc[right_shoulder + 2]) >= rs_close):
+            return None
+
+        # C14: 2nd-consecutive-close below neckline (else day-7, only if there
+        # was at least one break). Scan is capped at RS + OUTCOME_WINDOW.
+        scan_end = min(right_shoulder + self.OUTCOME_WINDOW, n - 1)
+        first_break = consec_break = None
+        for k in range(right_shoulder + 1, scan_end + 1):
+            if float(ind.close.iloc[k]) > head_close:
+                break
+            if float(ind.close.iloc[k]) < neckline:
+                if first_break is None:
+                    first_break = k
+                if k + 1 < n and float(ind.close.iloc[k + 1]) < neckline:
+                    consec_break = k + 1
                     break
-                consecutive = consecutive + 1 if float(ind.close.iloc[idx]) < neckline_at(idx) else 0
-                if consecutive == 2:
-                    break_index = idx
-                    break
-            if invalid:
-                continue
-            day_seven = right_shoulder + 7
-            entry = min(day_seven, break_index) if break_index is not None else day_seven
-            if entry != current:
-                continue
-            neckline = neckline_at(entry)
-            target = neckline - (head_close - neckline)
-            if target <= 0:
-                continue
-            return _Setup(left_shoulder, left_neck, head, right_neck, right_shoulder, entry, neckline, target)
-        return None
+        day7 = right_shoulder + 7
+        if consec_break is not None:
+            entry = min(day7, consec_break)
+        elif first_break is not None and day7 < n:
+            entry = day7
+        else:
+            return None
+        if entry != current:
+            return None
+        target = neckline - (head_close - neckline)
+        if target <= 0:
+            return None
+        return _Setup(left_shoulder, left_neck, head, right_neck, right_shoulder,
+                      entry, neckline, target)

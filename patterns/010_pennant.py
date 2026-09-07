@@ -9,7 +9,6 @@ from analysis.indicator_engine import IndicatorEngine
 from data.ohlcv_store import OHLCVStore
 from data.tv_client import MarketSnapshot
 from patterns import _dedup
-from patterns._rules import notional_qty
 from patterns.base_pattern import (
     ANN_ENTRY,
     ANN_LINE,
@@ -22,26 +21,45 @@ from patterns.base_pattern import (
     ann_segment,
 )
 
+# `.cjs` pennant_find_historical.cjs (LOCKED 2026-07-03) + backtest_pennant_200.cjs
+FLAG_MIN_LEN, FLAG_MAX_LEN = 3, 10
+FLAG_MIN_RET = 0.10
+FLAG_MIN_VOLX = 1.3
+CONSOL_MIN_LEN, CONSOL_MAX_LEN = 5, 10
+CONSOL_MAX_RETRACE = 0.30
+CONSOL_MAX_VOLX = 0.7
+BREAKOUT_MIN_VOLX = 1.5
+TRAIL_PCT = 0.05
+MAX_HOLD = 60
+
+
+def _linreg_slope(ys: np.ndarray) -> float:
+    n = len(ys)
+    if n < 2:
+        return 0.0
+    xs = np.arange(n, dtype=float)
+    xm, ym = xs.mean(), ys.mean()
+    den = float(((xs - xm) ** 2).sum())
+    return 0.0 if den == 0 else float(((xs - xm) * (ys - ym)).sum() / den)
+
 
 @dataclass(frozen=True)
 class _Setup:
-    direction: Literal["bull", "bear"]
+    direction: str
     pole_start: int
     pole_end: int
-    consolidation_start: int
-    consolidation_end: int
-    pole_move: float
-    pole_volume_ratio: float
+    consol_start: int
+    consol_end: int
+    pole_ret: float
     retrace: float
-    consolidation_volume_ratio: float
-    breakout_volume_ratio: float
-    upper_at_breakout: float
-    lower_at_breakout: float
+    consol_volx: float
+    breakout_volx: float
 
 
 class PennantPattern(BasePattern):
     MIN_BARS = 50
-    HORIZON_BARS = 61
+    HORIZON_BARS = MAX_HOLD + 1
+    MAX_OPEN_PER_SYMBOL = 1
     POSITION_NOTIONAL = 10_000.0
 
     @property
@@ -54,7 +72,7 @@ class PennantPattern(BasePattern):
 
     @property
     def chart_description(self) -> str:
-        return "Bullish or bearish continuation pennant with a ten-percent high-volume impulse, a five-to-ten-day converging low-volume coil, and a volume-confirmed continuation breakout."
+        return "Continuation pennant: a >=10% high-volume impulse, a 5-10 day converging low-volume coil, and a volume-confirmed breakout in the impulse direction."
 
     def analyze(self, snapshot: MarketSnapshot, store: OHLCVStore) -> TradeSignal | None:
         df = store.get_df(snapshot.symbol, snapshot.timeframe, min_bars=self.MIN_BARS)
@@ -62,158 +80,97 @@ class PennantPattern(BasePattern):
             return None
         ind = IndicatorEngine(df)
         current = _dedup.current_bar(len(df) - 1)
-        setup = self._find_setup(ind, current)
-        if setup is None:
+        if _dedup.used(current):  # `.cjs` ±3-bar breakout cluster dedup
             return None
-        price = float(ind.close.iloc[current])
-        bullish = setup.direction == "bull"
-        action: Literal["BUY", "SELL"] = "BUY" if bullish else "SELL"
-        start_price = float(ind.low.iloc[setup.pole_start] if bullish else ind.high.iloc[setup.pole_start])
-        extreme_price = float(ind.high.iloc[setup.pole_end] if bullish else ind.low.iloc[setup.pole_end])
-        breakout_line = setup.upper_at_breakout if bullish else setup.lower_at_breakout
+        close = ind.close.to_numpy(dtype=float)
+        high = ind.high.to_numpy(dtype=float)
+        low = ind.low.to_numpy(dtype=float)
+        vol = ind.volume.to_numpy(dtype=float)
+
+        # breakout bar is the current bar; the coil ends the bar before.
+        consol_end = current - 1
+        best: _Setup | None = None
+        for consol_len in range(CONSOL_MIN_LEN, CONSOL_MAX_LEN + 1):
+            consol_start = consol_end - consol_len + 1
+            for flag_len in range(FLAG_MIN_LEN, FLAG_MAX_LEN + 1):
+                end_idx = consol_start - 1
+                start_idx = end_idx - flag_len + 1
+                if start_idx - 21 < 0:
+                    continue
+                pre, post = close[start_idx - 1], close[end_idx]
+                if pre <= 0:
+                    continue
+                ret = (post - pre) / pre
+                if abs(ret) < FLAG_MIN_RET:
+                    continue
+                direction = "bull" if ret > 0 else "bear"
+
+                flag_vol = vol[start_idx:end_idx + 1].mean()
+                prior_vol = vol[start_idx - 21:start_idx - 1].mean()
+                if prior_vol <= 0 or flag_vol < FLAG_MIN_VOLX * prior_vol:
+                    continue
+                flag_range = high[start_idx:end_idx + 1].max() - low[start_idx:end_idx + 1].min()
+                if flag_range <= 0:
+                    continue
+
+                ch = high[consol_start:consol_end + 1]
+                cl = low[consol_start:consol_end + 1]
+                cv = vol[consol_start:consol_end + 1]
+                slope_h = _linreg_slope(ch) / post
+                slope_l = _linreg_slope(cl) / post
+                contraction = (ch[-1] - cl[-1]) < (ch[0] - cl[0]) * 0.7
+                convergence = (slope_h - slope_l) < -0.0005
+                if direction == "bull":
+                    retrace = (post - cl.min()) / flag_range
+                else:
+                    retrace = (ch.max() - post) / flag_range
+                consol_vol = cv.mean()
+                vol_contraction = flag_vol > 0 and consol_vol <= CONSOL_MAX_VOLX * flag_vol
+                if not (contraction and convergence and retrace <= CONSOL_MAX_RETRACE
+                        and vol_contraction):
+                    continue
+
+                b_close = close[current]
+                if direction == "bull" and not b_close > ch.max():
+                    continue
+                if direction == "bear" and not b_close < cl.min():
+                    continue
+                b_volx = vol[current] / consol_vol if consol_vol > 0 else 0.0
+                if b_volx < BREAKOUT_MIN_VOLX:
+                    continue
+
+                cand = _Setup(direction, start_idx, end_idx, consol_start, consol_end,
+                              round(ret * 100, 2), round(retrace * 100, 1),
+                              round(consol_vol / flag_vol, 2), round(b_volx, 2))
+                # `.cjs` keeps the tightest coil (lowest consolVolX) in a cluster
+                if best is None or cand.consol_volx < best.consol_volx:
+                    best = cand
+
+        if best is None:
+            return None
+        price = float(close[current])
+        bull = best.direction == "bull"
         return TradeSignal(
             symbol=snapshot.symbol,
-            action=action,
+            action="BUY" if bull else "SELL",
             pattern=self.name,
             timeframe=snapshot.timeframe,
             confidence=1.0,
             price=price,
-            qty=notional_qty(self.POSITION_NOTIONAL, price),
-            trailing_stop_pct=0.05,
-            trailing_stop_mode="highest_close" if bullish else "lowest_close",
+            qty=self.POSITION_NOTIONAL / price if price > 0 else 0.0,
+            setup_key=tuple(range(current - 3, current + 4)),  # `.cjs` ±3-bar cluster
+            trailing_stop_pct=TRAIL_PCT,
+            trailing_stop_mode="highest_close" if bull else "lowest_close",
             trailing_activation_pct=0.0,
             trailing_stop_on_close=True,
-            exit_bars_after_entry=60,   # .cjs backtest_pennant_200: MAX_HOLD_BARS
-            notes=f"{setup.direction} pennant pole={setup.pole_start}->{setup.pole_end} move={setup.pole_move:.1%} pole_volume={setup.pole_volume_ratio:.2f}x consolidation={setup.consolidation_start}->{setup.consolidation_end} retrace={setup.retrace:.1%} breakout_volume={setup.breakout_volume_ratio:.2f}x",
+            exit_bars_after_entry=MAX_HOLD,
+            notes=(f"{best.direction} pennant pole={best.pole_start}->{best.pole_end} "
+                   f"ret={best.pole_ret}% coil={best.consol_start}->{best.consol_end} "
+                   f"retrace={best.retrace}% coilVolX={best.consol_volx} bVolX={best.breakout_volx}"),
             chart_annotations=[
-                ann_marker(self.bar_date(df, setup.pole_start), start_price, "pole start", ANN_REF, "o", "below" if bullish else "above"),
-                ann_marker(self.bar_date(df, setup.pole_end), extreme_price, "pole", ANN_PEAK if bullish else ANN_TROUGH, "v" if bullish else "^", "above" if bullish else "below"),
-                ann_segment(self.bar_date(df, setup.pole_start), self.bar_date(df, setup.pole_end), start_price, extreme_price, ANN_LINE),
-                ann_marker(self.bar_date(df, current), breakout_line, "breakout line", ANN_LINE, "o", "above" if bullish else "below"),
-                ann_marker(self.bar_date(df, current), price, "entry", ANN_ENTRY, "o", "below" if bullish else "above"),
+                ann_marker(self.bar_date(df, best.pole_start), float(low[best.pole_start] if bull else high[best.pole_start]), "pole start", ANN_REF, "o", "below" if bull else "above"),
+                ann_marker(self.bar_date(df, best.pole_end), float(high[best.pole_end] if bull else low[best.pole_end]), "pole", ANN_PEAK if bull else ANN_TROUGH, "v" if bull else "^", "above" if bull else "below"),
+                ann_segment(self.bar_date(df, best.pole_start), self.bar_date(df, best.pole_end), float(close[best.pole_start]), float(close[best.pole_end]), ANN_LINE),
+                ann_marker(self.bar_date(df, current), price, "entry", ANN_ENTRY, "o", "below" if bull else "above"),
             ],
-        )
-
-    def _find_setup(self, ind: IndicatorEngine, current: int) -> _Setup | None:
-        consolidation_end = current - 1
-        for direction in ("bull", "bear"):
-            for length in range(5, 11):
-                consolidation_start = consolidation_end - length + 1
-                for offset in (1, 2):
-                    pole_end = consolidation_start - offset
-                    pole = self._find_pole(ind, pole_end, direction)
-                    if pole is None:
-                        continue
-                    pole_start, move, pole_range, pole_volume_ratio, pole_average = pole
-                    setup = self._check_consolidation(
-                        ind,
-                        current,
-                        direction,
-                        pole_start,
-                        pole_end,
-                        consolidation_start,
-                        consolidation_end,
-                        move,
-                        pole_range,
-                        pole_volume_ratio,
-                        pole_average,
-                    )
-                    if setup is not None:
-                        return setup
-        return None
-
-    def _find_pole(self, ind: IndicatorEngine, pole_end: int, direction: str) -> tuple[int, float, float, float, float] | None:
-        best: tuple[int, float, float, float, float] | None = None
-        for length in range(1, 11):
-            start = pole_end - length + 1
-            baseline_start = start - 20
-            if baseline_start < 0:
-                continue
-            if direction == "bull":
-                start_price = float(ind.low.iloc[start])
-                extreme = float(ind.high.iloc[pole_end])
-                if extreme != float(ind.high.iloc[start : pole_end + 1].max()):
-                    continue
-                pole_range = extreme - start_price
-            else:
-                start_price = float(ind.high.iloc[start])
-                extreme = float(ind.low.iloc[pole_end])
-                if extreme != float(ind.low.iloc[start : pole_end + 1].min()):
-                    continue
-                pole_range = start_price - extreme
-            if start_price <= 0 or pole_range / start_price < 0.10:
-                continue
-            baseline = float(ind.volume.iloc[baseline_start:start].mean())
-            pole_average = float(ind.volume.iloc[start : pole_end + 1].mean())
-            if baseline <= 0 or pole_average < baseline * 1.30:
-                continue
-            candidate = (start, pole_range / start_price, pole_range, pole_average / baseline, pole_average)
-            if best is None or candidate[1] > best[1]:
-                best = candidate
-        return best
-
-    def _check_consolidation(
-        self,
-        ind: IndicatorEngine,
-        current: int,
-        direction: str,
-        pole_start: int,
-        pole_end: int,
-        start: int,
-        end: int,
-        move: float,
-        pole_range: float,
-        pole_volume_ratio: float,
-        pole_average: float,
-    ) -> _Setup | None:
-        x = np.arange(end - start + 1, dtype=float)
-        highs = ind.high.iloc[start : end + 1].to_numpy(dtype=float)
-        lows = ind.low.iloc[start : end + 1].to_numpy(dtype=float)
-        try:
-            upper_slope, upper_intercept = np.polyfit(x, highs, 1)
-            lower_slope, lower_intercept = np.polyfit(x, lows, 1)
-        except (np.linalg.LinAlgError, ValueError):
-            return None
-        if upper_slope >= 0 or lower_slope <= 0:
-            return None
-        upper = lambda value: upper_slope * value + upper_intercept
-        lower = lambda value: lower_slope * value + lower_intercept
-        if upper(0) <= lower(0) or upper(x[-1]) <= lower(x[-1]):
-            return None
-        closes = ind.close.iloc[start : end + 1].to_numpy(dtype=float)
-        if any(close > upper(idx) or close < lower(idx) for idx, close in enumerate(closes)):
-            return None
-        if direction == "bull":
-            retrace = (float(ind.high.iloc[pole_end]) - float(ind.low.iloc[start : end + 1].min())) / pole_range
-        else:
-            retrace = (float(ind.high.iloc[start : end + 1].max()) - float(ind.low.iloc[pole_end])) / pole_range
-        if retrace < 0 or retrace > 0.30:
-            return None
-        consolidation_average = float(ind.volume.iloc[start : end + 1].mean())
-        if consolidation_average <= 0 or consolidation_average > pole_average * 0.70:
-            return None
-        breakout_x = float(len(x))
-        upper_breakout = float(upper(breakout_x))
-        lower_breakout = float(lower(breakout_x))
-        breakout_close = float(ind.close.iloc[current])
-        if direction == "bull" and breakout_close <= upper_breakout:
-            return None
-        if direction == "bear" and breakout_close >= lower_breakout:
-            return None
-        breakout_volume_ratio = float(ind.volume.iloc[current]) / consolidation_average
-        if breakout_volume_ratio < 1.50:
-            return None
-        return _Setup(
-            direction,
-            pole_start,
-            pole_end,
-            start,
-            end,
-            move,
-            pole_volume_ratio,
-            retrace,
-            consolidation_average / pole_average,
-            breakout_volume_ratio,
-            upper_breakout,
-            lower_breakout,
         )

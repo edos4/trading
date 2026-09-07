@@ -8,7 +8,7 @@ from analysis.indicator_engine import IndicatorEngine
 from data.ohlcv_store import OHLCVStore
 from data.tv_client import MarketSnapshot
 from patterns import _dedup
-from patterns._rules import extrema, weak_leg_volume
+from patterns._rules import extrema
 from patterns.base_pattern import (
     ANN_ENTRY,
     ANN_LINE,
@@ -33,25 +33,35 @@ class _Setup:
     h1_rsi: float
     h2_rsi: float
     entry: int
+    neckline_break_bar: int
 
 
 class DoubleTopPattern(BasePattern):
+    """`.cjs` backtest_doubletop.cjs (C1-C13 detection) + backtest_14b.cjs
+    (C14 entry / C15 exit). Two swing highs, lower + weaker second peak,
+    5% valley, weak recovery volume, neckline break within 30 bars; short on
+    day-7 or the break (whichever first); exit on the 3% intraday trailing
+    stop, the 10%-below-neckline target, or 5 bars after the break."""
+
     RSI_PERIOD = 14
-    H1_RSI_MIN = 70.0
-    H2_RSI_MIN = 50.0
-    H2_RSI_MAX = 61.0
-    RSI_DIVERGENCE_MIN = 3.0
-    VALLEY_DEPTH_MIN = 0.05
-    GAP_MIN = 8
-    GAP_MAX = 90
-    ENTRY_DELAY = 7
-    TARGET_BELOW_NECKLINE = 0.07
-    EXIT_AFTER_NECKLINE_BREAK = 5
-    TRAILING_STOP_PCT = 0.03
-    SWING_LOOKBACK = 2
+    LB = 3                     # `.cjs` isSwingHigh lb
+    H1_RSI_MIN = 70.0          # C5
+    H2_RSI_MIN = 50.0          # C6
+    H2_RSI_MAX = 61.0          # C11
+    RSI_DIV_MIN = 3.0          # C8 (strict >)
+    VALLEY_DEPTH_MIN = 0.05    # C1
+    GAP_MIN = 8               # C3
+    GAP_MAX = 90              # C3
+    VALLEY_WINDOW = 65        # `.cjs` deepest low in [H1+1, H1+65]
+    OUTCOME_WINDOW = 30      # neckline must break within 30 bars of H2
+    ENTRY_DELAY = 7          # C14
+    TARGET_BELOW_NECKLINE = 0.10   # C14/C15 target = neckline x 0.90
+    EXIT_AFTER_NECKLINE_BREAK = 5  # C14
+    TRAIL_PCT = 0.03              # C15 (intraday high vs lowest-close x 1.03)
+    SCAN_END_BARS = 30           # `.cjs` scanEnd = entry + 30 -> timeout
     MIN_BARS = 30
     HORIZON_BARS = 31
-    SHARES = 25
+    POSITION_NOTIONAL = 10_000.0
 
     @property
     def name(self) -> str:
@@ -63,7 +73,7 @@ class DoubleTopPattern(BasePattern):
 
     @property
     def chart_description(self) -> str:
-        return "Double top with a lower second high, bearish RSI divergence, a five-percent valley, weak recovery volume, and a day-seven-or-neckline-break short entry."
+        return "Double top with a lower, weaker second high, bearish RSI divergence, a five-percent valley, weak recovery volume, and a day-seven-or-neckline-break short entry."
 
     def analyze(self, snapshot: MarketSnapshot, store: OHLCVStore) -> TradeSignal | None:
         df = store.get_df(snapshot.symbol, snapshot.timeframe, min_bars=self.MIN_BARS)
@@ -72,16 +82,39 @@ class DoubleTopPattern(BasePattern):
         ind = IndicatorEngine(df)
         rsi = ind.rsi_wilder(self.RSI_PERIOD)
         current = _dedup.current_bar(len(df) - 1)
-        highs = extrema(ind.high, "high", self.SWING_LOOKBACK)
-        for h2 in reversed(highs):
-            if h2 + 2 > current:
+        n = len(df)
+        highs = extrema(ind.high, "high", self.LB, strict=True)
+
+        for h1 in highs:
+            if _dedup.used(h1) or h1 + self.GAP_MIN + self.OUTCOME_WINDOW + 3 >= n:
                 continue
-            for h1 in reversed([idx for idx in highs if idx < h2]):
-                setup = self._evaluate(ind, rsi, h1, h2, current)
+            h1_rsi = float(rsi.iloc[h1])
+            if not np.isfinite(h1_rsi) or h1_rsi < self.H1_RSI_MIN:
+                continue
+            h1_high = float(ind.high.iloc[h1])
+            # C1: deepest valley in the H1+1 .. H1+65 window
+            v_end = min(h1 + self.VALLEY_WINDOW, n - self.OUTCOME_WINDOW - 3)
+            if v_end <= h1 + 1:
+                continue
+            vslice = ind.low.iloc[h1 + 1 : v_end + 1].to_numpy(dtype=float)
+            valley = h1 + 1 + int(np.argmin(vslice))
+            neckline = float(ind.low.iloc[valley])
+            if (h1_high - neckline) / h1_high < self.VALLEY_DEPTH_MIN:
+                continue
+
+            for h2 in highs:
+                if h2 < valley + 3 or _dedup.used(h2):
+                    continue
+                if h2 - h1 < self.GAP_MIN or h2 - h1 > self.GAP_MAX:
+                    if h2 - h1 > self.GAP_MAX:
+                        break
+                    continue
+                setup = self._evaluate(ind, rsi, h1, h2, valley, neckline, h1_high,
+                                       h1_rsi, current, n)
                 if setup is None or setup.entry != current:
                     continue
                 price = float(ind.close.iloc[current])
-                target = round(setup.neckline * (1 - self.TARGET_BELOW_NECKLINE), 4)
+                target = round(neckline * (1 - self.TARGET_BELOW_NECKLINE), 4)
                 return TradeSignal(
                     symbol=snapshot.symbol,
                     action="SELL",
@@ -89,68 +122,72 @@ class DoubleTopPattern(BasePattern):
                     timeframe=snapshot.timeframe,
                     confidence=1.0,
                     price=price,
-                    qty=self.SHARES,
+                    qty=self.POSITION_NOTIONAL / price if price > 0 else 0.0,
+                    setup_key=(h1, h2),
                     take_profit=target,
-                    trailing_stop_pct=self.TRAILING_STOP_PCT,
+                    trailing_stop_pct=self.TRAIL_PCT,
                     trailing_stop_mode="lowest_close",
                     trailing_activation_pct=0.0,
-                    setup_key=(h1, h2),
-                    neckline=setup.neckline,
+                    neckline=neckline,
                     neckline_break_direction="below",
                     exit_bars_after_neckline_break=self.EXIT_AFTER_NECKLINE_BREAK,
-                    notes=f"Double top H1={h1} H2={h2} neckline={setup.neckline:.2f} RSI={setup.h1_rsi:.1f}->{setup.h2_rsi:.1f}",
+                    exit_bars_after_entry=self.SCAN_END_BARS,
+                    notes=f"Double top H1={h1} H2={h2} neckline={neckline:.2f} "
+                          f"RSI={setup.h1_rsi:.1f}->{setup.h2_rsi:.1f} "
+                          f"break@{setup.neckline_break_bar}",
                     chart_annotations=[
-                        ann_marker(self.bar_date(df, h1), setup.h1_high, "H1", ANN_PEAK, "v", "above"),
-                        ann_marker(self.bar_date(df, setup.valley), setup.neckline, "neckline", ANN_TROUGH, "^", "below"),
+                        ann_marker(self.bar_date(df, h1), h1_high, "H1", ANN_PEAK, "v", "above"),
+                        ann_marker(self.bar_date(df, valley), neckline, "valley", ANN_TROUGH, "^", "below"),
                         ann_marker(self.bar_date(df, h2), setup.h2_high, "H2", ANN_PEAK, "v", "above"),
-                        ann_hline(setup.neckline, "neckline", ANN_LINE),
+                        ann_hline(neckline, "neckline", ANN_LINE),
                         ann_hline(target, "target", ANN_TARGET),
                         ann_marker(self.bar_date(df, current), price, "entry", ANN_ENTRY, "o", "above"),
                     ],
                 )
         return None
 
-    def _evaluate(self, ind: IndicatorEngine, rsi, h1: int, h2: int, current: int) -> _Setup | None:
-        gap = h2 - h1
-        if gap < self.GAP_MIN or gap > self.GAP_MAX:
-            return None
-        h1_high = float(ind.high.iloc[h1])
+    def _evaluate(self, ind, rsi, h1, h2, valley, neckline, h1_high, h1_rsi,
+                  current, n) -> _Setup | None:
         h2_high = float(ind.high.iloc[h2])
-        h1_close = float(ind.close.iloc[h1])
         h2_close = float(ind.close.iloc[h2])
-        h1_rsi = float(rsi.iloc[h1])
+        h1_close = float(ind.close.iloc[h1])
         h2_rsi = float(rsi.iloc[h2])
-        if not np.isfinite([h1_rsi, h2_rsi]).all():
+        if not np.isfinite(h2_rsi):
             return None
-        if h2_high >= h1_high or h2_close >= h1_close:
+        if h2_high >= h1_high:                       # C4
             return None
-        if h1_rsi < self.H1_RSI_MIN or h2_rsi < self.H2_RSI_MIN or h2_rsi > self.H2_RSI_MAX:
+        if h2_close >= h1_close:                     # C12
             return None
-        if h1_rsi - h2_rsi <= self.RSI_DIVERGENCE_MIN:
+        if h2_rsi >= h1_rsi:                         # C2
             return None
-        between_highs = ind.high.iloc[h1 + 1 : h2]
-        if not between_highs.empty and float(between_highs.max()) > h1_high:
+        if h2_rsi < self.H2_RSI_MIN or h2_rsi > self.H2_RSI_MAX:   # C6 / C11
             return None
-        valley_slice = ind.low.iloc[h1 + 1 : h2]
-        if valley_slice.empty:
+        if h1_rsi - h2_rsi <= self.RSI_DIV_MIN:      # C8
             return None
-        valley = h1 + 1 + int(np.argmin(valley_slice.to_numpy(dtype=float)))
-        neckline = float(ind.low.iloc[valley])
-        if (h1_high - neckline) / h1_high < self.VALLEY_DEPTH_MIN:
+        # C7: pattern intact between H1 and H2
+        between = ind.high.iloc[h1 + 1 : h2].to_numpy(dtype=float)
+        if between.size and float(between.max()) > h1_high:
             return None
-        if float(ind.close.iloc[h2 + 1]) >= h2_close or float(ind.close.iloc[h2 + 2]) >= h2_close:
+        # C10: leg-2 recovery volume weak (avg up-bar vol < avg down-bar vol)
+        o = ind.open.iloc[valley + 1 : h2 + 1].to_numpy(dtype=float)
+        c = ind.close.iloc[valley + 1 : h2 + 1].to_numpy(dtype=float)
+        v = ind.volume.iloc[valley + 1 : h2 + 1].to_numpy(dtype=float)
+        up = v[c >= o]
+        down = v[c < o]
+        if up.size and down.size and up.mean() >= down.mean():
             return None
-        if not weak_leg_volume(ind.open, ind.close, ind.volume, valley, h2, "up"):
+        # C13 + outcome: neckline must break within 30 bars of H2, and no bar
+        # may exceed H2's high before that.
+        days_to_cross = None
+        scan_end = min(h2 + self.OUTCOME_WINDOW, n - 1)
+        for k in range(h2 + 1, scan_end + 1):
+            if float(ind.close.iloc[k]) < neckline:
+                days_to_cross = k - h2
+                break
+            if float(ind.high.iloc[k]) > h2_high:
+                return None  # C13 cancelled
+        if days_to_cross is None:
             return None
-        break_index = next(
-            (idx for idx in range(h2 + 1, current + 1) if float(ind.close.iloc[idx]) < neckline),
-            None,
-        )
-        entry = min(h2 + self.ENTRY_DELAY, break_index) if break_index is not None else h2 + self.ENTRY_DELAY
-        if entry > current:
-            return None
-        invalidation_stop = break_index if break_index is not None else current + 1
-        post_h2 = ind.high.iloc[h2 + 1 : invalidation_stop]
-        if not post_h2.empty and float(post_h2.max()) > h2_high:
-            return None
-        return _Setup(h1, h2, valley, neckline, h1_high, h2_high, h1_rsi, h2_rsi, entry)
+        entry = h2 + min(self.ENTRY_DELAY, days_to_cross)
+        return _Setup(h1, h2, valley, neckline, h1_high, h2_high, h1_rsi, h2_rsi,
+                      entry, h2 + days_to_cross)

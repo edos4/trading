@@ -17,6 +17,9 @@ import numpy as np
 import pandas as pd
 
 
+_ENGINE_CACHE: "dict[int, IndicatorEngine]" = {}
+
+
 class IndicatorEngine:
     def __init__(self, df: pd.DataFrame):
         """
@@ -29,6 +32,23 @@ class IndicatorEngine:
         self.low    = self._df["low"]
         self.open   = self._df["open"]
         self.volume = self._df["volume"]
+        self._memo: dict = {}
+
+    @classmethod
+    def of(cls, df: pd.DataFrame) -> "IndicatorEngine":
+        """Cached constructor — the backtest walk hands the same (stable,
+        cached) DataFrame to a pattern's analyze() on every bar, so rebuilding
+        the engine + recomputing RSI each call is pure waste. Keyed by df
+        identity + length; the cache holds only the last few frames seen."""
+        key = (id(df), len(df))
+        hit = _ENGINE_CACHE.get(key)
+        if hit is not None:
+            return hit
+        eng = cls(df)
+        if len(_ENGINE_CACHE) > 8:
+            _ENGINE_CACHE.clear()
+        _ENGINE_CACHE[key] = eng
+        return eng
 
     # ── Moving averages ────────────────────────────────────────────────────────
     def sma(self, period: int) -> pd.Series:
