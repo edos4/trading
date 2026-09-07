@@ -54,6 +54,7 @@ class RoundingTopPattern(BasePattern):
             confidence=1.0,
             price=price,
             qty=notional_qty(self.POSITION_NOTIONAL, price),
+            setup_key=(setup.start, setup.center),
             stop_loss=stop,
             stop_loss_on_close=True,
             take_profit=target,

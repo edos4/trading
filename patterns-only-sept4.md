@@ -448,8 +448,10 @@ present in the barcache), so same-data is the real acceptance test.
 | **008 head_and_shoulders** | backtest_hs_200.cjs, 171 names: 13 raw (11 distinct — QRVO & MPWR each double-count one trade) / 54.5% distinct | **11 / 54.5% / +$685 / PF 1.52** — all 11 distinct `.cjs` trades incl. QCOM | ✅ **matched** (distinct-trade basis) |
 | **009 flag** | backtest_flag_final.cjs, 60 names: 108 / 43.5% / +1.99%/trade / PF 2.44 | **100 / 39.0% / +$15,032 / PF 1.86** | ✅ within tolerance — count −7 %, WR −4.5 pt; net winner, PF strong; documented drift ("winners not running as far") |
 | **010 pennant** | pennant_find_historical.cjs, 189 names: 22 / 59.09% / +$10,749 | **22 / 59.1% / +$10,752 / PF 3.77** | ✅ **matched to the dollar** |
-| 004 rounding_bottom | backtest_rb_v3.cjs: 2 / 100% / +$8,943 (20 hand-picked necklines) | not re-run | `.cjs` is a two-stage candidate-list backtest; low priority |
-| 003 / 005 / 007 | none | run clean | mirror patterns of 002/004/006 — no golden number to hit |
+| 004 rounding_bottom | backtest_rb_v3.cjs: 2 / 100% / +$8,943 (20 hand-picked necklines — no runnable stage-1 scanner) | **2 / 50.0% / +$1,842** (ON +23.4% target, ADBE −5% stop) | exit sim + GATE-2 (`entry + 0.80·(neck−entry)`, ≥23% upside) match rb_v3; the trade *set* can't match — `.cjs` starts from a curated list, Python scans. `setup_key` bug fixed (was opening each anchor 8×) |
+| 003 double_bottom | none | runs clean | mirror of 002, no golden |
+| 005 rounding_top | none | 0 trades on the barcache, runs clean | mirror of 004; `setup_key` added |
+| 007 descending_channel | none | 59 / 52.5% / **−$6,313** — runs clean | speculative long mirror of 006, **no `.cjs` thesis and net-negative — candidate for retirement** (`skipped=True`); `setup_key` added |
 
 **002 fix** — `.cjs scanDoubleTop` commits to the *first structurally valid H2*
 for an H1: if that H2's outcome window never breaks the neckline the H1 is still
@@ -476,8 +478,7 @@ last candle — so the cutoff is now `len − horizon` (the pattern's own
   (`.cjs` flag/pennant F10 — one open trade per symbol).
 
 ### Still open
-- 004 rounding_bottom reconciliation (two-stage `.cjs` candidate list).
-- `tests/test_golden_numbers.py` with a pinned `tests/fixtures/barcache/`.
+- Decide 007 descending_channel: retire (`skipped=True`) or find a thesis.
 - Paper trader still one-position-per-symbol (the multi-position walk is
   backtest-only); revisit once per-pattern numbers settle.
 - Perf: the full-history store makes a single-pattern sweep ~4-5 min; an
