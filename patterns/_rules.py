@@ -126,8 +126,10 @@ def _earnings_cache() -> dict[str, list[int]]:
 def earnings_blackout(df: pd.DataFrame, symbol: str, entry: int, bars: int) -> bool:
     """True if an earnings date falls inside [entry, entry+bars+1 day].
 
-    Prefers the offline earnings cache (deterministic backtests); falls back to
-    a live SEC EDGAR lookup only when the symbol isn't in the cache.
+    When the offline earnings cache is present (deterministic backtests) it is
+    the sole source of truth — a symbol absent from it has no known earnings
+    and is not blocked, exactly like the `.cjs` `earnMap[tk] || []`. Only when
+    there is no cache at all does this fall back to a live SEC EDGAR lookup.
     """
     try:
         start = as_date(df.index[entry])
@@ -139,11 +141,10 @@ def earnings_blackout(df: pd.DataFrame, symbol: str, entry: int, bars: int) -> b
         return False
 
     cache = _earnings_cache()
-    stamps = cache.get(symbol.upper())
-    if stamps is not None:
+    if cache:
         lo = int(pd.Timestamp(start).tz_localize("UTC").timestamp())
         hi = int(pd.Timestamp(end).tz_localize("UTC").timestamp()) + 86400
-        return any(lo <= s <= hi for s in stamps)
+        return any(lo <= s <= hi for s in cache.get(symbol.upper(), ()))
 
     try:
         return edgar_client().has_earnings_in(symbol, start, end)

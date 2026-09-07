@@ -83,6 +83,8 @@ class BacktestTrade:
     # rising lower rail with a higher-high + higher-low vs the prior bar.
     reclaim_exit: bool = False
     reclaim_lower_rail: tuple[float, float] | None = None  # (rail@entry, slope/bar)
+    # Every triggered exit fills at the bar close (`.cjs` upward-channel).
+    exit_fill_at_close: bool = False
     entry_bar_idx: int = -1
     neckline_break_bar_idx: int | None = None
     prev_high: float | None = None
@@ -380,7 +382,10 @@ class BacktestResult:
 
 # ── Snapshot / pattern-input plumbing ───────────────────────────────────────
 def _min_required_bars(timeframe: str) -> int:
-    return 65 if timeframe == "1W" else 120
+    # Just enough indicator warm-up (Wilder RSI-14). Each pattern gates its
+    # own real minimum via store.get_df(min_bars=...); the `.cjs` scans start
+    # at bar LB, so the walk must too or early patterns are never seen.
+    return 40 if timeframe == "1W" else 30
 
 
 def _make_snapshot(symbol: str, timeframe: str, candle: OHLCVCandle) -> MarketSnapshot:
@@ -531,6 +536,7 @@ def _check_exit(
 ) -> tuple[float | None, str]:
     """Fixed per-pattern exit ladder — see module docstring. No engine overlays."""
     is_short = position.action == "SELL"
+    at_close = position.exit_fill_at_close
     prior_ref = _trailing_reference(position)
     if prior_ref is None:
         prior_ref = position.entry_price
@@ -539,11 +545,11 @@ def _check_exit(
     # 1. hard stop (dual: structural vs fixed % cap)
     stop = _effective_stop(position)
     if stop is not None:
-        if position.stop_loss_on_close:
-            hit = candle.close >= stop if is_short else candle.close <= stop
+        if position.stop_loss_on_close or at_close:
+            hit = candle.close > stop if is_short else candle.close < stop
             if hit:
                 position.exit_bar_idx = bar_idx
-                return stop, "stop_loss"
+                return (candle.close if at_close else stop), "stop_loss"
         else:
             fill = _gap_aware_trigger_fill(
                 candle, stop, is_short=is_short, favorable=False, prior_ref=prior_ref,
@@ -552,13 +558,13 @@ def _check_exit(
                 position.exit_bar_idx = bar_idx
                 return fill, "stop_loss"
 
-    # 2. target (close-based, fill at the target price)
+    # 2. target (close-based; fill at the target level, or at the close for `.cjs` UC)
     if position.take_profit is not None:
         tp = position.take_profit
         hit = candle.close <= tp if is_short else candle.close >= tp
         if hit:
             position.exit_bar_idx = bar_idx
-            return tp, "take_profit"
+            return (candle.close if at_close else tp), "take_profit"
 
     # 3. channel reclaim (close back above the rising lower rail + HH/HL)
     if position.reclaim_exit and position.prev_high is not None:
@@ -575,11 +581,11 @@ def _check_exit(
     # 4. trailing stop
     trail = _trailing_stop_price(position, is_short)
     if trail is not None:
-        if position.trailing_stop_on_close:
-            hit = candle.close >= trail if is_short else candle.close <= trail
+        if position.trailing_stop_on_close or at_close:
+            hit = candle.close > trail if is_short else candle.close < trail
             if hit:
                 position.exit_bar_idx = bar_idx
-                return trail, "trailing_stop"
+                return (candle.close if at_close else trail), "trailing_stop"
         else:
             fill = _gap_aware_trigger_fill(
                 candle, trail, is_short=is_short, favorable=False, prior_ref=prior_ref,
@@ -680,6 +686,7 @@ def _open_trade(
         trailing_activation_pct=signal.trailing_activation_pct,
         reclaim_exit=signal.reclaim_exit,
         reclaim_lower_rail=signal.reclaim_lower_rail,
+        exit_fill_at_close=signal.exit_fill_at_close,
         entry_bar_idx=bar_idx,
         confidence=signal.confidence,
         qty=signal.qty,
@@ -780,88 +787,104 @@ def _core_backtest_symbol(
     blocked: list[dict] = []
     filtered: list[dict] = []
     signals_count = 0
-    open_position: BacktestTrade | None = None
+    # `.cjs` simulates every pattern anchor as an independent trade, so a
+    # symbol can carry several overlapping positions at once (flat notional,
+    # no portfolio constraint). The walk mirrors that.
+    open_positions: list[BacktestTrade] = []
     notional = config.get("position_notional", ENGINE.position_notional)
     txn_cost = config.get("txn_cost_pct", 0.0)
     lot_round = config.get("lot_round", False)
+    # Per-symbol consumed pivot bars (the `.cjs` usedSH1/usedSH2 dedup): a
+    # signal that reuses any of them is skipped so one anchor -> one trade.
+    from patterns import _dedup
+    _dedup.reset()
 
     min_bars = _min_required_bars(timeframe)
     start = max(min_bars, 1)
     i = start
-    store.replace_all(symbol, timeframe, candles[: i + 1])
+    # The `.cjs` scans see all history at once (their pivot/break windows look
+    # 30 bars past a candidate SH2). Seed the store with the full series and
+    # tell patterns the true walk bar via _dedup.set_current — they must use
+    # _dedup.current_bar(len(df)-1), not len(df)-1 directly.
+    store.replace_all(symbol, timeframe, candles)
     # `.cjs` scripts never anchor a pattern whose full exit horizon can't be
-    # simulated (loop bounds subtract confirm+maxHold+lb). Walk-forward
-    # equivalent: don't open a fresh position in the last few bars, where an
-    # instant `data_end` at ~0% would just be noise.
-    open_cutoff = len(candles) - config.get("end_margin", 5)
+    # simulated. Walk-forward equivalent: don't open within `horizon` of data end.
+    horizon = max(
+        (getattr(p, "HORIZON_BARS", 5) for p in patterns), default=5,
+    )
+    open_cutoff = len(candles) - max(config.get("end_margin", 5), horizon)
+
+    def _bar_date(idx: int) -> str:
+        ts = candles[idx].timestamp or datetime.now(timezone.utc)
+        return ts.date().isoformat()
 
     while i < len(candles):
-        if i > start:
-            store.append_candle(symbol, timeframe, candles[i])
+        _dedup.set_current(i)
 
-        if open_position is not None:
-            _update_neckline_state(open_position, candles[i], i)
-            exit_price, exit_reason = _check_exit(candles[i], open_position, i)
-            if exit_price is not None:
-                _close_trade(open_position, exit_price, exit_reason, candles[i], txn_cost)
-                trades.append(open_position)
-                open_position = None
-            else:
-                _update_prev_hl(open_position, candles[i])
-            i += 1
-            continue
+        # 1. manage every open position against this bar
+        if open_positions:
+            still_open: list[BacktestTrade] = []
+            for pos in open_positions:
+                _update_neckline_state(pos, candles[i], i)
+                exit_price, exit_reason = _check_exit(candles[i], pos, i)
+                if exit_price is not None:
+                    _close_trade(pos, exit_price, exit_reason, candles[i], txn_cost)
+                    trades.append(pos)
+                else:
+                    _update_prev_hl(pos, candles[i])
+                    still_open.append(pos)
+            open_positions = still_open
 
-        if i >= open_cutoff:
-            i += 1
-            continue
+        # 2. drain every fresh signal on this bar (one per non-consumed anchor)
+        if i < open_cutoff:
+            snapshot = _make_snapshot(symbol, timeframe, candles[i])
+            for pattern in patterns:
+                if timeframe not in pattern.timeframes:
+                    continue
+                for _ in range(8):  # safety bound on anchors per bar
+                    signal = pattern.analyze(snapshot, store)
+                    if signal is None:
+                        break
+                    key = signal.setup_key or ()
+                    if _dedup.any_used(key):
+                        break
+                    signals_count += 1
 
-        snapshot = _make_snapshot(symbol, timeframe, candles[i])
-        for pattern in patterns:
-            if timeframe not in pattern.timeframes:
-                continue
-            signal = pattern.analyze(snapshot, store)
-            if signal is None:
-                continue
-            signals_count += 1
+                    if getattr(signal, "blocked_reason", None):
+                        _dedup.mark(*key)
+                        blocked.append({"sym": symbol, "entryDate": _bar_date(i),
+                                        "blockReason": signal.blocked_reason})
+                        continue
+                    if getattr(signal, "filtered_reason", None):
+                        _dedup.mark(*key)
+                        filtered.append({"sym": symbol, "entryDate": _bar_date(i),
+                                         "reason": signal.filtered_reason})
+                        continue
 
-            # pattern-level diagnostics (pattern_006 tags its own rejects here)
-            if getattr(signal, "blocked_reason", None):
-                blocked.append({
-                    "sym": symbol,
-                    "entryDate": (candles[i].timestamp or datetime.now(timezone.utc)).date().isoformat(),
-                    "blockReason": signal.blocked_reason,
-                })
-                break
-            if getattr(signal, "filtered_reason", None):
-                filtered.append({
-                    "sym": symbol,
-                    "entryDate": (candles[i].timestamp or datetime.now(timezone.utc)).date().isoformat(),
-                    "reason": signal.filtered_reason,
-                })
-                break
+                    _apply_notional_sizing(
+                        signal, notional, fractional=is_fractional_qty(signal.pattern),
+                    )
+                    if signal.qty <= 0 or (
+                        signal.qty < 1 and not is_fractional_qty(signal.pattern)
+                    ):
+                        _dedup.mark(*key)
+                        continue
+                    signal.signal_bar_idx = i
+                    signal.signal_bar_timestamp = candles[i].timestamp
+                    if lot_round:
+                        signal.price = signal.price or candles[i].close
+                        if not apply_lot_rounding(signal):
+                            _dedup.mark(*key)
+                            continue
 
-            _apply_notional_sizing(
-                signal, notional, fractional=is_fractional_qty(signal.pattern),
-            )
-            if signal.qty < 1 and not is_fractional_qty(signal.pattern):
-                break
-            if signal.qty <= 0:
-                break
-            signal.signal_bar_idx = i
-            signal.signal_bar_timestamp = candles[i].timestamp
-            if lot_round:
-                signal.price = signal.price or candles[i].close
-                if not apply_lot_rounding(signal):
-                    break
-
-            open_position = _open_trade(signal, candles[i], i)
-            break
+                    open_positions.append(_open_trade(signal, candles[i], i))
+                    _dedup.mark(*key)
 
         i += 1
 
-    if open_position is not None:
-        _close_trade(open_position, candles[-1].close, "data_end", candles[-1], txn_cost)
-        trades.append(open_position)
+    for pos in open_positions:
+        _close_trade(pos, candles[-1].close, "data_end", candles[-1], txn_cost)
+        trades.append(pos)
 
     return trades, signals_count, blocked, filtered
 
