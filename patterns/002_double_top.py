@@ -60,7 +60,7 @@ class DoubleTopPattern(BasePattern):
     TRAIL_PCT = 0.03              # C15 (intraday high vs lowest-close x 1.03)
     SCAN_END_BARS = 30           # `.cjs` scanEnd = entry + 30 -> timeout
     MIN_BARS = 30
-    HORIZON_BARS = 31
+    HORIZON_BARS = 3  # `.cjs` backtest_14b: a trade can time out with few trailing bars
     POSITION_NOTIONAL = 10_000.0
 
     @property
@@ -102,17 +102,31 @@ class DoubleTopPattern(BasePattern):
             if (h1_high - neckline) / h1_high < self.VALLEY_DEPTH_MIN:
                 continue
 
+            # `.cjs` scanDoubleTop caps the H2 search at n - OUTCOME_WINDOW - 3
+            # and *commits to the first structurally valid H2*: if that H2's
+            # outcome window shows no neckline break it is still consumed (the
+            # `usedH1` + `break`), so a later, deeper H2 is never considered.
+            # Only a C13 cancellation ("continue") lets the search move on.
+            h2_cap = n - self.OUTCOME_WINDOW - 3
             for h2 in highs:
-                if h2 < valley + 3 or _dedup.used(h2):
+                if h2 < valley + 3:
                     continue
-                if h2 - h1 < self.GAP_MIN or h2 - h1 > self.GAP_MAX:
-                    if h2 - h1 > self.GAP_MAX:
-                        break
+                if h2 - h1 < self.GAP_MIN:
                     continue
-                setup = self._evaluate(ind, rsi, h1, h2, valley, neckline, h1_high,
-                                       h1_rsi, current, n)
-                if setup is None or setup.entry != current:
+                if h2 - h1 > self.GAP_MAX or h2 > h2_cap:
+                    break
+                verdict = self._evaluate(ind, rsi, h1, h2, valley, neckline,
+                                         h1_high, h1_rsi, n)
+                if verdict is None:                 # structural gate failed
                     continue
+                if verdict == "cancelled":          # C13 — keep searching
+                    continue
+                if verdict == "pending":            # committed, no break -> no trade
+                    _dedup.mark(h1)
+                    break
+                setup = verdict
+                if setup.entry != current:
+                    break                           # committed; fires on its own bar
                 price = float(ind.close.iloc[current])
                 target = round(neckline * (1 - self.TARGET_BELOW_NECKLINE), 4)
                 return TradeSignal(
@@ -124,6 +138,7 @@ class DoubleTopPattern(BasePattern):
                     price=price,
                     qty=self.POSITION_NOTIONAL / price if price > 0 else 0.0,
                     setup_key=(h1, h2),
+                    exit_order="trail_first",
                     take_profit=target,
                     trailing_stop_pct=self.TRAIL_PCT,
                     trailing_stop_mode="lowest_close",
@@ -147,7 +162,14 @@ class DoubleTopPattern(BasePattern):
         return None
 
     def _evaluate(self, ind, rsi, h1, h2, valley, neckline, h1_high, h1_rsi,
-                  current, n) -> _Setup | None:
+                  n) -> _Setup | str | None:
+        """`.cjs` scanDoubleTop verdict for one (H1, H2) pair:
+        ``None`` — a structural gate (C2/C4/C6-C12) failed, try the next H2;
+        ``"cancelled"`` — C13: a post-H2 bar exceeded H2 before any neckline
+        break, try the next H2;
+        ``"pending"`` — structure holds but the neckline never broke in the
+        outcome window: `.cjs` still consumes H1 here, so no trade;
+        ``_Setup`` — confirmed break, carries the entry bar."""
         h2_high = float(ind.high.iloc[h2])
         h2_close = float(ind.close.iloc[h2])
         h1_close = float(ind.close.iloc[h1])
@@ -185,9 +207,9 @@ class DoubleTopPattern(BasePattern):
                 days_to_cross = k - h2
                 break
             if float(ind.high.iloc[k]) > h2_high:
-                return None  # C13 cancelled
+                return "cancelled"  # C13
         if days_to_cross is None:
-            return None
+            return "pending"
         entry = h2 + min(self.ENTRY_DELAY, days_to_cross)
         return _Setup(h1, h2, valley, neckline, h1_high, h2_high, h1_rsi, h2_rsi,
                       entry, h2 + days_to_cross)

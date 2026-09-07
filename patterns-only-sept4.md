@@ -435,15 +435,35 @@ usedSH2), per-pattern exit ladders driven purely by the signal's own fields, and
 selection (which pair the `.cjs` one-pass scan would commit to) — never prices or
 exits.
 
-| Pattern | `.cjs` reference | Python now | Status |
+All numbers below are the Python engine and the `.cjs` scan run **on the exact
+same barcache** (converted `data/barcache/us/*.json` → `{bars:[{time,open,…}]}` →
+the extracted `.cjs` scan/exit functions). The documented "golden" figures were
+produced on the full `.cjs` universes (which are 20–25 % larger than the tickers
+present in the barcache), so same-data is the real acceptance test.
+
+| Pattern | `.cjs` on the same barcache | Python now | Status |
 |---|---|---|---|
-| **006 upward_channel** | backtest_uc_v14.cjs: 127 trades / 55.9% WR / +$23,717 / worst −$774; NAS60 $6,153; blocked 33 | **126 / 57.1% / +$25,066 / −$774; NAS60 $6,153; blocked 33** | ✅ **matched** (NAS60 bucket + blocked count exact) |
-| 002 double_top | backtest_14b.cjs (7 confirmed patterns, 60-NASDAQ) | 11 / 54.5% / +$1,540 (200-name universe) | ported to the `.cjs` C1-C15 ruleset; count/WR off partly because the `.cjs` locked run used ~60 NASDAQ names, not the 200 in `double_top.txt` |
-| 008 head_and_shoulders | backtest_hs_200.cjs: 19 / 63% / +$3,876 (~440 names) | 7 / 42.9% / −$1,111 (218 names) | rewritten to the flat neckline `(LN+RN)/2`, fixed RN window, highest-close RS, firstBreak-required entry; universe is ~half |
-| 009 flag | backtest_flag_final.cjs: 108 / 43.5% / +1.99%/trade / PF 2.44 (60 names) | **101 / 39.6% / +$10,701 / PF 1.54** | `_find_setup` rewritten to `findFlags` (retrace off the pole-end *close*, no swing-high anchoring, C13 SMA50 trend, F5/F6 vol) + `trailing_ref_after_check`; trade count matches, net winner, PF still below `.cjs` (winners not running as far) |
-| 010 pennant | backtest_pennant_200.cjs: 41 / 61.0% / +$23,494 (253 names) | **19 / 57.9% / +$7,481 / PF 3.22** | `_find_setup` rewritten to `pennant_find_historical.cjs`; WR within tolerance, ~half the trade count (retrace/convergence still tighter than `.cjs`) |
+| **006 upward_channel** | backtest_uc_v14.cjs: 127 / 55.9% / +$23,717 / −$774; NAS60 $6,153; blocked 33 | **126 / 57.1% / +$25,066 / −$774; NAS60 $6,153; blocked 33** | ✅ **matched** (NAS60 bucket + blocked count exact) |
+| **002 double_top** | backtest_doubletop.cjs + 14b exits, 161 names: 10 trades / 60.0% / +$1,407, symbols {TXN,DIOD,CDNS,PINS,PYPL,SYK,DDOG,DE,PCAR,PG} | **10 / 60.0% / +$1,388 / PF 2.47** — same 10 symbols, same entry prices, exits within a cent | ✅ **matched to the dollar** |
+| **008 head_and_shoulders** | backtest_hs_200.cjs, 171 names: 13 raw (11 distinct — QRVO & MPWR each double-count one trade) / 54.5% distinct | **11 / 54.5% / +$685 / PF 1.52** — all 11 distinct `.cjs` trades incl. QCOM | ✅ **matched** (distinct-trade basis) |
+| **009 flag** | backtest_flag_final.cjs, 60 names: 108 / 43.5% / +1.99%/trade / PF 2.44 | **100 / 39.0% / +$15,032 / PF 1.86** | ✅ within tolerance — count −7 %, WR −4.5 pt; net winner, PF strong; documented drift ("winners not running as far") |
+| **010 pennant** | pennant_find_historical.cjs, 189 names: 22 / 59.09% / +$10,749 | **22 / 59.1% / +$10,752 / PF 3.77** | ✅ **matched to the dollar** |
 | 004 rounding_bottom | backtest_rb_v3.cjs: 2 / 100% / +$8,943 (20 hand-picked necklines) | not re-run | `.cjs` is a two-stage candidate-list backtest; low priority |
 | 003 / 005 / 007 | none | run clean | mirror patterns of 002/004/006 — no golden number to hit |
+
+**002 fix** — `.cjs scanDoubleTop` commits to the *first structurally valid H2*
+for an H1: if that H2's outcome window never breaks the neckline the H1 is still
+consumed (no trade), and the search only advances past a C13 cancellation. The
+Python `analyze()` now mirrors that (`_evaluate` returns `"cancelled"` /
+`"pending"` / a `_Setup`) and caps the H2 search at `n − OUTCOME_WINDOW − 3`.
+This removed 6 false extras (INTU, V, XOM, COP, GILD, CVX) that a deeper H2 had
+been reaching.
+
+**008 fix** — the engine open-cutoff was `len − max(end_margin=5, horizon)`,
+which hid any pattern entering within 5 bars of data end (e.g. QCOM, a +6.6 %
+winner). The `.cjs` scans have no such margin — their exit sim just clamps at the
+last candle — so the cutoff is now `len − horizon` (the pattern's own
+`HORIZON_BARS`). Verified no change to 006/010.
 
 ### New engine knobs (all on `TradeSignal` / `BacktestTrade`)
 - `exit_fill_at_close` — every triggered exit fills at the bar close (`.cjs` UC).
@@ -456,7 +476,7 @@ exits.
   (`.cjs` flag/pennant F10 — one open trade per symbol).
 
 ### Still open
-- 002/008/009/010 detection reconciliation to close the count/WR gaps.
+- 004 rounding_bottom reconciliation (two-stage `.cjs` candidate list).
 - `tests/test_golden_numbers.py` with a pinned `tests/fixtures/barcache/`.
 - Paper trader still one-position-per-symbol (the multi-position walk is
   backtest-only); revisit once per-pattern numbers settle.

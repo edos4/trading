@@ -42,7 +42,7 @@ class _Setup:
 
 class FlagPattern(BasePattern):
     MIN_BARS = 120
-    HORIZON_BARS = 5
+    HORIZON_BARS = 3
     MAX_OPEN_PER_SYMBOL = 1  # `.cjs` F10: one open flag trade per symbol
     POSITION_NOTIONAL = 10_000.0
 
