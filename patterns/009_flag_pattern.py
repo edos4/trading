@@ -42,6 +42,8 @@ class _Setup:
 
 class FlagPattern(BasePattern):
     MIN_BARS = 120
+    HORIZON_BARS = 5
+    MAX_OPEN_PER_SYMBOL = 1  # `.cjs` F10: one open flag trade per symbol
     POSITION_NOTIONAL = 10_000.0
 
     @property
@@ -75,10 +77,12 @@ class FlagPattern(BasePattern):
             confidence=1.0,
             price=price,
             qty=notional_qty(self.POSITION_NOTIONAL, price),
+            setup_key=(setup.pole_start, setup.pole_end, setup.flag_end),
             stop_loss=stop,
             trailing_stop_pct=0.03,
             trailing_stop_mode="highest_close",
             trailing_activation_pct=0.0,
+            trailing_ref_after_check=True,  # `.cjs` flag ratchets extreme after the stop check
             notes=f"Bull flag pole={setup.pole_start}->{setup.pole_end} gain={setup.pole_gain:.1%} volume={setup.pole_volume_ratio:.2f}x flag={setup.flag_start}->{setup.flag_end} depth={setup.flag_depth:.1%} volume={setup.flag_volume_ratio:.2f}x",
             chart_annotations=[
                 ann_marker(self.bar_date(df, setup.pole_start), float(ind.open.iloc[setup.pole_start]), "pole start", ANN_REF, "^", "below"),

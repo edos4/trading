@@ -103,6 +103,7 @@ class TradeSignal:
     # upward-channel backtest evaluates every exit against the close and fills
     # there; every other `.cjs` script fills stop/target at the level.
     exit_fill_at_close: bool = False
+    trailing_ref_after_check: bool = False
     # Pivot bar indices this setup is anchored on (e.g. (SH1, SH2) for a
     # channel, (H1, H2) for a double top). The engine keeps a per-symbol set of
     # consumed pivots and refuses a later signal that reuses any of them —

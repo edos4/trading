@@ -85,6 +85,7 @@ class BacktestTrade:
     reclaim_lower_rail: tuple[float, float] | None = None  # (rail@entry, slope/bar)
     # Every triggered exit fills at the bar close (`.cjs` upward-channel).
     exit_fill_at_close: bool = False
+    trailing_ref_after_check: bool = False
     entry_bar_idx: int = -1
     neckline_break_bar_idx: int | None = None
     prev_high: float | None = None
@@ -421,6 +422,18 @@ def _update_prev_hl(position: BacktestTrade, candle: OHLCVCandle) -> None:
     position.prev_low = candle.low
 
 
+def _update_best_pnl(position: BacktestTrade, candle: OHLCVCandle) -> None:
+    entry = position.entry_price
+    if entry <= 0:
+        return
+    pnl = (
+        (entry - candle.close) / entry if position.action == "SELL"
+        else (candle.close - entry) / entry
+    )
+    if position._best_pnl_pct is None or pnl > position._best_pnl_pct:
+        position._best_pnl_pct = pnl
+
+
 def _update_trailing_reference(position: BacktestTrade, candle: OHLCVCandle) -> None:
     mode = position.trailing_stop_mode
     if mode == "highest_close":
@@ -540,7 +553,12 @@ def _check_exit(
     prior_ref = _trailing_reference(position)
     if prior_ref is None:
         prior_ref = position.entry_price
-    _update_trailing_reference(position, candle)
+    _update_best_pnl(position, candle)
+    # `.cjs` flag updates the trailing extreme AFTER the stop check (so a new
+    # high-close bar isn't stopped out by its own wide range); every other
+    # `.cjs` script updates before.
+    if not position.trailing_ref_after_check:
+        _update_trailing_reference(position, candle)
 
     # 1. hard stop (dual: structural vs fixed % cap)
     stop = _effective_stop(position)
@@ -613,6 +631,10 @@ def _check_exit(
             position.time_exit_bars_elapsed = elapsed
             return candle.close, "time_exit"
 
+    # deferred trailing-extreme update (`.cjs` flag): the trade survived this
+    # bar's stop check; ratchet the extreme now for the NEXT bar's check.
+    if position.trailing_ref_after_check:
+        _update_trailing_reference(position, candle)
     return None, ""
 
 
@@ -687,6 +709,7 @@ def _open_trade(
         reclaim_exit=signal.reclaim_exit,
         reclaim_lower_rail=signal.reclaim_lower_rail,
         exit_fill_at_close=signal.exit_fill_at_close,
+        trailing_ref_after_check=signal.trailing_ref_after_check,
         entry_bar_idx=bar_idx,
         confidence=signal.confidence,
         qty=signal.qty,
@@ -840,6 +863,13 @@ def _core_backtest_symbol(
             snapshot = _make_snapshot(symbol, timeframe, candles[i])
             for pattern in patterns:
                 if timeframe not in pattern.timeframes:
+                    continue
+                # `.cjs` flag/pennant keep one open trade per symbol at a time
+                # (F10); the reversal patterns simulate every anchor at once.
+                max_open = getattr(pattern, "MAX_OPEN_PER_SYMBOL", None)
+                if max_open is not None and sum(
+                    1 for p in open_positions if p.pattern == pattern.name
+                ) >= max_open:
                     continue
                 for _ in range(8):  # safety bound on anchors per bar
                     signal = pattern.analyze(snapshot, store)
