@@ -45,6 +45,33 @@ from utils.logger import log
 
 DEFAULT_ACCOUNT_PATH = Path("data/cache/paper_account.json")
 
+# pattern-name -> MAX_OPEN_PER_SYMBOL (None = unlimited). The backtester reads
+# this straight off the pattern instance; the paper account only has the signal,
+# so it resolves the cap by name. `.cjs` flag/pennant (F10) allow one open trade
+# per symbol; every reversal pattern lets a symbol carry every anchor at once.
+_MAX_OPEN_BY_PATTERN: dict[str, int | None] | None = None
+
+
+def _max_open_per_symbol(pattern_name: str) -> int | None:
+    global _MAX_OPEN_BY_PATTERN
+    if _MAX_OPEN_BY_PATTERN is None:
+        from core.backtester import _iter_pattern_classes
+
+        _MAX_OPEN_BY_PATTERN = {}
+        for _mod, cls in _iter_pattern_classes():
+            try:
+                _MAX_OPEN_BY_PATTERN[cls().name] = getattr(
+                    cls, "MAX_OPEN_PER_SYMBOL", None,
+                )
+            except Exception:  # pragma: no cover - defensive
+                continue
+    return _MAX_OPEN_BY_PATTERN.get(pattern_name)
+
+
+def _setup_key(signal_or_trade) -> tuple:
+    raw = getattr(signal_or_trade, "setup_key", None)
+    return tuple(raw) if raw else ()
+
 # Re-exported under paper-trading-friendly names — same math as the
 # backtester uses (a "current price" works whether the trade is still open
 # or already closed), so live and backtested reports stay comparable.
@@ -125,6 +152,8 @@ def _trade_from_dict(d: dict) -> BacktestTrade:
         d["position_marks"] = []
     if isinstance(d.get("reclaim_lower_rail"), list):
         d["reclaim_lower_rail"] = tuple(d["reclaim_lower_rail"])
+    if isinstance(d.get("setup_key"), list):
+        d["setup_key"] = tuple(d["setup_key"])
     # Tolerate ledgers saved under the old (pre-refactor) BacktestTrade schema.
     known = {f.name for f in dataclasses.fields(BacktestTrade)}
     return BacktestTrade(**{k: v for k, v in d.items() if k in known})
@@ -160,9 +189,14 @@ def _position_mark_row(
 
 
 class PaperAccount:
-    """Virtual cash + positions ledger, keyed by symbol (one open trade per
-    symbol at a time — same constraint the backtester and live scanner
-    already assume)."""
+    """Virtual cash + positions ledger.
+
+    Mirrors the backtester's multi-position walk: a symbol carries every pattern
+    anchor as an independent flat-$10k trade at once, deduped by `setup_key`
+    (the `.cjs` usedSH1/usedSH2 registry) and capped per pattern by
+    `MAX_OPEN_PER_SYMBOL` (flag/pennant = 1). `positions` maps a symbol to the
+    list of its open trades.
+    """
 
     def __init__(
         self,
@@ -189,7 +223,7 @@ class PaperAccount:
         self.slippage_pct = slippage_pct if slippage_pct is not None else 0.0
         # Vestigial — no daily-loss limit is enforced anymore.
         self.max_daily_loss = float("inf") if max_daily_loss is None else max_daily_loss
-        self.positions: dict[str, BacktestTrade] = {}
+        self.positions: dict[str, list[BacktestTrade]] = {}
         self.closed: list[BacktestTrade] = []
         self.equity_curve: list[tuple[str, float]] = []
         self._last_price: dict[str, float] = {}
@@ -272,6 +306,26 @@ class PaperAccount:
     def last_price(self, symbol: str, default: float) -> float:
         return self._last_price.get(symbol, default)
 
+    def _all_open(self):
+        """Yield (symbol, position) for every open trade across all symbols."""
+        for sym, lst in self.positions.items():
+            for pos in lst:
+                yield sym, pos
+
+    def open_count(self) -> int:
+        with self._lock:
+            return sum(len(lst) for lst in self.positions.values())
+
+    def open_for(self, symbol: str) -> list[BacktestTrade]:
+        with self._lock:
+            return list(self.positions.get(symbol, ()))
+
+    def latest_position(self, symbol: str) -> BacktestTrade | None:
+        """The most recently opened trade for a symbol (UI single-symbol views)."""
+        with self._lock:
+            lst = self.positions.get(symbol) or self.positions.get(str(symbol).upper())
+            return lst[-1] if lst else None
+
     def bar_count(self, symbol: str, timeframe: str | None = None) -> int:
         """New-bar count for a symbol/timeframe.
 
@@ -315,7 +369,7 @@ class PaperAccount:
             # proceeds, the two cancel at entry and only P&L moves equity.
             open_value = sum(
                 self._last_price.get(sym, p.entry_price) * p.qty * (1 if p.action == "BUY" else -1)
-                for sym, p in self.positions.items()
+                for sym, p in self._all_open()
             )
             return self.cash + open_value
 
@@ -327,11 +381,11 @@ class PaperAccount:
             equity = self.equity()
             long_value = sum(
                 self._last_price.get(sym, p.entry_price) * p.qty
-                for sym, p in self.positions.items() if p.action == "BUY"
+                for sym, p in self._all_open() if p.action == "BUY"
             )
             short_value = sum(
                 self._last_price.get(sym, p.entry_price) * p.qty
-                for sym, p in self.positions.items() if p.action == "SELL"
+                for sym, p in self._all_open() if p.action == "SELL"
             )
             if equity <= 0:
                 return {
@@ -369,7 +423,7 @@ class PaperAccount:
         with self._lock:
             cash = self.cash
             initial_capital = self.initial_capital
-            positions = dict(self.positions)
+            positions = [(sym, p) for sym, p in self._all_open()]
             last_price = dict(self._last_price)
             closed = list(self.closed)
 
@@ -377,7 +431,7 @@ class PaperAccount:
         short_value = 0.0
         unrealized = 0.0
         rows: list[tuple[str, BacktestTrade, float, float]] = []
-        for sym, p in positions.items():
+        for sym, p in positions:
             current = last_price.get(sym, p.entry_price)
             if p.action == "BUY":
                 mtm = (current - p.entry_price) * p.qty
@@ -422,9 +476,11 @@ class PaperAccount:
 
     def positions_snapshot(self) -> list[tuple[str, BacktestTrade]]:
         """Thread-safe copy for callers (the UI) that iterate positions from
-        a different thread than the one mutating them."""
+        a different thread than the one mutating them. One (symbol, trade) pair
+        per open trade — a symbol with several open anchors appears more than
+        once."""
         with self._lock:
-            return list(self.positions.items())
+            return [(sym, p) for sym, p in self._all_open()]
 
     def closed_snapshot(self) -> list[BacktestTrade]:
         with self._lock:
@@ -465,10 +521,26 @@ class PaperAccount:
     def _open_position_locked(
         self, signal: TradeSignal, candle: OHLCVCandle, store: OHLCVStore,
     ) -> tuple[bool, str]:
-        if signal.symbol in self.positions:
+        sym = signal.symbol
+        open_list = self.positions.get(sym, [])
+        key = _setup_key(signal)
+        # A pattern's analyze() only returns a signal on the anchor's breakout
+        # bar, so each anchor fires once; this guards the residual case of a
+        # bar being re-processed (restart / replay) before it advances.
+        if key and any(
+            _setup_key(p) == key and p.pattern == signal.pattern for p in open_list
+        ):
             return False, (
-                f"Already flat-blocked: an open position exists in {signal.symbol}, "
-                f"so a second concurrent entry was skipped."
+                f"Duplicate anchor: a position on {sym} is already open on the "
+                f"same {signal.pattern} pivots {key}."
+            )
+        cap = _max_open_per_symbol(signal.pattern)
+        if cap is not None and sum(
+            1 for p in open_list if p.pattern == signal.pattern
+        ) >= cap:
+            return False, (
+                f"MAX_OPEN_PER_SYMBOL={cap} for {signal.pattern}: {sym} already "
+                f"carries the maximum concurrent {signal.pattern} trades."
             )
         profile = get_market(self.market)
         # PH is long-only (retail shorts need SBL); every other constraint the
@@ -529,7 +601,7 @@ class PaperAccount:
         else:
             self.cash += notional  # short: receive proceeds up front
 
-        self.positions[signal.symbol] = position
+        self.positions.setdefault(sym, []).append(position)
         self._last_price[signal.symbol] = position.entry_price
         mark_ts = position.sim_entry_date or fill_candle.timestamp or datetime.now(timezone.utc)
         self._record_position_mark(
@@ -555,14 +627,16 @@ class PaperAccount:
         candle: OHLCVCandle,
         timeframe: str | None = None,
         is_new_bar: bool = True,
-    ) -> BacktestTrade | None:
-        """Update marks / exits. Returns the closed trade if this bar exited."""
+    ) -> list[BacktestTrade]:
+        """Update marks / exits for every open trade in `symbol`. Returns the
+        trades that exited on this bar (possibly several — one symbol can carry
+        many independent anchors)."""
         with self._lock:
             return self._on_bar_locked(symbol, candle, timeframe, is_new_bar)
 
     def _on_bar_locked(
         self, symbol: str, candle: OHLCVCandle, timeframe: str | None, is_new_bar: bool,
-    ) -> BacktestTrade | None:
+    ) -> list[BacktestTrade]:
         self._last_price[symbol] = candle.close
         if candle.timestamp is not None:
             if self._sim_now is None or candle.timestamp > self._sim_now:
@@ -572,23 +646,34 @@ class PaperAccount:
             if previous_tf is None or candle.timestamp > previous_tf:
                 self._sim_now_by_timeframe[tf_key] = candle.timestamp
         if not is_new_bar:
-            return None
+            return []
 
         tf = timeframe or "1d"
         counter_key = f"{symbol}|{tf}"
         self._bar_count[counter_key] = self._bar_count.get(counter_key, 0) + 1
-        position = self.positions.get(symbol)
-        if position is None:
-            return None
-        # A symbol can be scanned on several timeframes per cycle (different
-        # patterns watching different intervals). Only the candle matching
-        # the position's own timeframe is valid for exit checks — e.g. a
-        # weekly candle's high/low would spuriously trip a stop set from a
-        # daily entry.
-        if timeframe is not None and timeframe != position.timeframe:
-            return None
+        open_list = self.positions.get(symbol)
+        if not open_list:
+            return []
         now = candle.timestamp or datetime.now(timezone.utc)
         self._reset_daily_if_needed(now)
+
+        closed_now: list[BacktestTrade] = []
+        for position in list(open_list):
+            # A symbol can be scanned on several timeframes per cycle (different
+            # patterns watching different intervals). Only the candle matching
+            # the position's own timeframe is valid for exit checks — e.g. a
+            # weekly candle's high/low would spuriously trip a stop set from a
+            # daily entry.
+            if timeframe is not None and timeframe != position.timeframe:
+                continue
+            done = self._manage_position(symbol, position, candle, now)
+            if done is not None:
+                closed_now.append(done)
+        return closed_now
+
+    def _manage_position(
+        self, symbol: str, position: BacktestTrade, candle: OHLCVCandle, now: datetime,
+    ) -> BacktestTrade | None:
         bar_idx = self.bar_count(symbol, position.timeframe)
 
         # bar_idx is per real new bar (see _bar_count), not per scan cycle, so
@@ -648,7 +733,14 @@ class PaperAccount:
             self.cash -= notional_out + cost  # buy back the short, plus commission
 
         self._daily_pnl += position.pnl * position.qty
-        del self.positions[symbol]
+        lst = self.positions.get(symbol)
+        if lst is not None:
+            try:
+                lst.remove(position)
+            except ValueError:
+                pass
+            if not lst:
+                del self.positions[symbol]
         self.closed.append(position)
         self.mark_to_market(now)
         log.info(
@@ -695,15 +787,16 @@ class PaperAccount:
                     if p.action == "BUY"
                     else p.entry_price - self._last_price.get(sym, p.entry_price)
                 ) * p.qty
-                for sym, p in self.positions.items()
+                for sym, p in self._all_open()
             )
 
     # ── Reporting ─────────────────────────────────────────────────────────
     def to_result(self) -> BacktestResult:
         with self._lock:
+            open_n = sum(len(lst) for lst in self.positions.values())
             return BacktestResult(
                 trades=list(self.closed),
-                total_signals=len(self.closed) + len(self.positions),
+                total_signals=len(self.closed) + open_n,
                 position_notional=ENGINE.position_notional,
                 version=f"paper/{self.market}",
             )
@@ -728,7 +821,8 @@ class PaperAccount:
                 "sim_now": self._sim_now.isoformat() if self._sim_now else None,
                 "last_price": dict(self._last_price),
                 "positions": {
-                    sym: _trade_to_dict(t) for sym, t in self.positions.items()
+                    sym: [_trade_to_dict(t) for t in lst]
+                    for sym, lst in self.positions.items()
                 },
                 "closed": [_trade_to_dict(t) for t in self.closed],
                 "equity_curve": list(self.equity_curve),
@@ -787,9 +881,14 @@ class PaperAccount:
                 acct._sim_now = datetime.fromisoformat(data["sim_now"])
             except (TypeError, ValueError):
                 acct._sim_now = None
-        acct.positions = {
-            sym: _trade_from_dict(d) for sym, d in data.get("positions", {}).items()
-        }
+        raw_positions = data.get("positions", {}) or {}
+        acct.positions = {}
+        for sym, val in raw_positions.items():
+            # Tolerate the old one-trade-per-symbol schema (a dict, not a list).
+            rows = val if isinstance(val, list) else [val]
+            trades = [_trade_from_dict(d) for d in rows]
+            if trades:
+                acct.positions[sym] = trades
         acct.closed = [_trade_from_dict(d) for d in data.get("closed", [])]
         raw_curve = [tuple(x) for x in data.get("equity_curve", [])]
         # Migrate older files that stored one mark per scan. Keep the latest
@@ -822,7 +921,7 @@ class PaperAccount:
         # never stored last_price.
         saved_marks = data.get("last_price") or {}
         acct._last_price = {
-            sym: float(saved_marks.get(sym, t.entry_price))
-            for sym, t in acct.positions.items()
+            sym: float(saved_marks.get(sym, lst[0].entry_price))
+            for sym, lst in acct.positions.items() if lst
         }
         return acct

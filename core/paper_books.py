@@ -284,7 +284,7 @@ class PaperBook:
         if side == "open":
             if not symbol:
                 return {"error": "symbol is required for open charts"}
-            trade = account.positions.get(symbol.upper()) or account.positions.get(symbol)
+            trade = account.latest_position(symbol)
             if trade is None:
                 return {"error": f"no open position in {symbol}"}
             current = account.last_price(trade.symbol, trade.entry_price)
@@ -296,7 +296,7 @@ class PaperBook:
         elif side == "log":
             if not symbol:
                 return {"error": "symbol is required for log charts"}
-            trade = account.positions.get(symbol.upper()) or account.positions.get(symbol)
+            trade = account.latest_position(symbol)
             if trade is not None:
                 current = account.last_price(trade.symbol, trade.entry_price)
                 view_side = "open"

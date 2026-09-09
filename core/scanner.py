@@ -819,10 +819,9 @@ class MarketScanner:
                 new_closed_daily = True
 
         if self._paper is not None:
-            closed = self._paper.on_bar(
+            for closed in self._paper.on_bar(
                 symbol, snapshot.candle, timeframe, is_new_bar,
-            )
-            if closed is not None:
+            ):
                 bar_idx = self._paper.bar_count(
                     closed.symbol, closed.timeframe,
                 )
