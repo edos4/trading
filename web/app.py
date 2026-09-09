@@ -101,6 +101,7 @@ class ReplayChartRequest(BaseModel):
     exit: Optional[float] = None
     exit_reason: Optional[str] = None
     current: Optional[float] = None
+    chart_annotations: list[dict] | None = None
     entry_time: Optional[str] = None
     exit_time: Optional[str] = None
 
@@ -608,6 +609,7 @@ def create_app() -> FastAPI:
                 df,
                 symbol=symbol,
                 timeframe=body.timeframe or "1d",
+                annotations=body.chart_annotations,
                 pattern=body.pattern,
                 action=body.action,
                 session_tz=get_market(market).session_tz,

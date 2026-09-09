@@ -97,6 +97,15 @@ window.TVChart = (function () {
       candleSeries.setMarkers(data.markers);
     }
 
+    for (const segment of data.segments || []) {
+      const line = chart.addLineSeries({
+        color: segment.color, lineWidth: Math.max(1, Math.min(4, Math.round(segment.width || 2))),
+        lineStyle: segment.style === "--" ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid,
+        priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+      });
+      line.setData(segment.data);
+    }
+
     let predSeries = null;
     if ((data.pred_candles || []).length) {
       predSeries = chart.addCandlestickSeries({

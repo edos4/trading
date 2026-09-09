@@ -1280,11 +1280,12 @@ function initReplay() {
 
   function toStatusBook(book) {
     const positions = (book.open_positions || []).map((p) => ({
-      market: p.market,
+      market: p.market || book.market,
       symbol: p.symbol,
       status: p.status,
       action: p.action,
       pattern: p.pattern,
+      chart_annotations: p.chart_annotations || [],
       timeframe: p.timeframe,
       qty: p.qty,
       entry: p.entry,
@@ -1304,10 +1305,11 @@ function initReplay() {
       daily_marks: p.daily_marks || [],
     }));
     const closed = (book.closed_trades || []).map((t) => ({
-      market: t.market,
+      market: t.market || book.market,
       symbol: t.symbol,
       action: t.action,
       pattern: t.pattern,
+      chart_annotations: t.chart_annotations || [],
       timeframe: t.timeframe,
       qty: t.qty,
       entry: t.entry,
@@ -1680,6 +1682,7 @@ function initReplay() {
       side,
       action: trade.action,
       pattern: trade.pattern,
+      chart_annotations: trade.chart_annotations,
       timeframe: trade.timeframe || "1d",
       entry: trade.entry,
       stop: trade.stop,

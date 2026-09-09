@@ -586,6 +586,36 @@ def _nearest_viewer_time(index: pd.Index, when) -> str | None:
     return _viewer_bar_time(index[loc])
 
 
+def _recover_trade_annotations(df, symbol, timeframe, pattern, action, entry_time, session_tz):
+    """Best-effort reconstruction for ledgers predating saved annotations."""
+    from core.backtester import _iter_pattern_classes
+    from patterns.chart_scan import _snapshot
+    from data.ohlcv_store import OHLCVStore
+    from data.tv_client import OHLCVCandle
+
+    try:
+        entry_day = pd.Timestamp(entry_time).tz_localize(None).normalize()
+        dates = pd.to_datetime(df.index, utc=True).tz_convert(None).normalize()
+        matches = [i for i, day in enumerate(dates) if day == entry_day]
+        if not matches:
+            return []
+        end = matches[-1]
+        for _, cls in _iter_pattern_classes():
+            detector = cls()
+            if detector.name != pattern:
+                continue
+            store = OHLCVStore(window=len(df) + 1, session_tz=session_tz)
+            candles = [OHLCVCandle(open=float(r.Open), high=float(r.High), low=float(r.Low), close=float(r.Close), volume=float(r.Volume), timestamp=t.to_pydatetime()) for t, r in df.iloc[:end + 1].iterrows()]
+            store.replace_all(symbol, timeframe, candles)
+            signal = detector.analyze(_snapshot(symbol, timeframe, candles[-1]), store)
+            if signal and signal.action == action:
+                return signal.chart_annotations
+            return []
+    except Exception:
+        log.exception("Trade chart | historical pattern reconstruction failed")
+    return []
+
+
 def build_trade_viewer_payload(
     ohlcv_df: pd.DataFrame,
     *,
@@ -602,11 +632,28 @@ def build_trade_viewer_payload(
     current: float | None = None,
     entry_time=None,
     exit_time=None,
+    annotations: list[dict] | None = None,
 ) -> dict:
     """OHLCV + levels for an interactive TradingView-style viewer (no PNG)."""
     renderer = ChartRenderer(save_to_disk=False, session_tz=session_tz)
     df = renderer._prepare_df(ohlcv_df, timeframe)
-    df = renderer._trim_to_visible(df, timeframe)
+    # Recover old ledger geometry only at the entry event, never from a newer setup.
+    if not annotations and pattern and entry_time:
+        annotations = _recover_trade_annotations(df, symbol, timeframe, pattern, action, entry_time, session_tz)
+    annotations = annotations or []
+    anchor_dates = [a.get(k) for a in annotations for k in ("date", "start_date", "end_date") if a.get(k)]
+    if entry_time:
+        anchor_dates.append(entry_time)
+    if anchor_dates:
+        dates = pd.DatetimeIndex([pd.Timestamp(value).tz_localize(None).normalize() for value in anchor_dates]).normalize()
+        idx = pd.to_datetime(df.index, utc=True).tz_convert(None).normalize()
+        start = max(0, min(len(df) - VISIBLE_BARS.get(timeframe, 252), int(idx.searchsorted(min(dates))) - 20))
+        end = len(df)
+        if exit_time:
+            end = min(end, int(idx.searchsorted(pd.Timestamp(exit_time).tz_localize(None).normalize(), side="right")) + 20)
+        df = df.iloc[start:end]
+    else:
+        df = renderer._trim_to_visible(df, timeframe)
 
     candles = []
     volume = []
@@ -678,6 +725,24 @@ def build_trade_viewer_payload(
             "text": exit_reason or "exit",
         })
 
+    segments = []
+    for ann in annotations:
+        color = ann.get("color") or "#ff9800"
+        if ann.get("type") == "hline":
+            price = _viewer_finite(ann.get("price"))
+            if price is not None and not any(level["price"] == price and level["title"] == ann.get("label") for level in levels):
+                levels.append({"price": price, "title": ann.get("label", ""), "color": color})
+        elif ann.get("type") == "segment":
+            t0 = _nearest_viewer_time(df.index, ann.get("start_date"))
+            t1 = _nearest_viewer_time(df.index, ann.get("end_date"))
+            p0, p1 = _viewer_finite(ann.get("start_price")), _viewer_finite(ann.get("end_price"))
+            if t0 and t1 and t0 < t1 and p0 is not None and p1 is not None:
+                segments.append({"data": [{"time": t0, "value": p0}, {"time": t1, "value": p1}], "color": color, "style": ann.get("style", "-"), "width": ann.get("width", 2)})
+        elif ann.get("type") == "marker":
+            time = _nearest_viewer_time(df.index, ann.get("date"))
+            if time:
+                markers.append({"time": time, "position": "belowBar" if ann.get("label_pos") == "below" else "aboveBar", "color": color, "shape": {"^": "arrowUp", "v": "arrowDown"}.get(ann.get("marker"), "circle"), "text": ann.get("label", "")})
+    markers.sort(key=lambda marker: marker["time"])
     title = f"{symbol} {renderer._tv_timeframe_label(timeframe)}"
     if pattern:
         title = f"{title} · {pattern}"
@@ -703,6 +768,7 @@ def build_trade_viewer_payload(
         "rsi14": rsi14,
         "levels": levels,
         "markers": markers,
+        "segments": segments,
     }
 
 

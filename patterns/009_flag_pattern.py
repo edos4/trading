@@ -49,6 +49,7 @@ class FlagPattern(BasePattern):
     @property
     def name(self) -> str:
         return "pattern_009_flag_pattern"
+    skipped = True
 
     @property
     def timeframes(self) -> list[str]:
