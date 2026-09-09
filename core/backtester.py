@@ -116,6 +116,7 @@ class BacktestTrade:
 
     # One mark per market session while open (paper trading).
     position_marks: list[dict] = field(default_factory=list)
+    chart_annotations: list[dict] = field(default_factory=list)
 
     _trailing_activated: bool = False
     _best_pnl_pct: float | None = None
@@ -687,6 +688,7 @@ def _open_trade(
 
     ts = candle.timestamp or datetime.now(timezone.utc)
     position = BacktestTrade(
+        chart_annotations=[dict(a) for a in signal.chart_annotations],
         symbol=signal.symbol,
         timeframe=signal.timeframe,
         pattern=signal.pattern,

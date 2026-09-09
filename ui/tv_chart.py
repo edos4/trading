@@ -39,7 +39,7 @@ class TradingViewChart(tk.Frame):
         self._volume: dict[str, dict] = {}
         self._rsi: dict[str, float] = {}
         self._levels: list[dict] = []
-        self._markers: dict[str, dict] = {}
+        self._markers: dict[str, list[dict]] = {}
         self._forecast: dict[str, float] = {}
         self._forecast_color = TV_KRONOS
         self._start = 0
@@ -102,7 +102,9 @@ class TradingViewChart(tk.Frame):
         self._volume = {row["time"]: row for row in payload.get("volume") or []}
         self._rsi = {row["time"]: row["value"] for row in payload.get("rsi14") or []}
         self._levels = list(payload.get("levels") or [])
-        self._markers = {row["time"]: row for row in payload.get("markers") or []}
+        self._markers = {}
+        for row in payload.get("markers") or []:
+            self._markers.setdefault(row["time"], []).append(row)
         self._forecast = {
             row["time"]: row["value"] for row in payload.get("forecast") or []
             if row.get("time") is not None and row.get("value") is not None
@@ -111,6 +113,8 @@ class TradingViewChart(tk.Frame):
         n = len(self._candles)
         extra = len(payload.get("pred_candles") or [])
         self._visible = min(max(n, 2), max(180, extra + 80))
+        if payload.get("segments"):
+            self._visible = max(n, 2)
         self._start = max(0, n - self._visible)
         title = payload.get("title") or payload.get("symbol") or "Chart"
         self._title_var.set(title)
@@ -196,7 +200,8 @@ class TradingViewChart(tk.Frame):
         self._vol_hi = max(vols) * 1.15 if vols else 1.0
         self._draw_grid(visible)
         self._draw_candles(visible)
-        self._draw_forecast(visible)
+        self._polyline(visible, self._forecast, self._forecast_color, width=2)
+        self._draw_pattern_segments(visible)
         self._draw_volume(visible)
         self._draw_rsi(visible)
         self._draw_levels()
@@ -326,10 +331,6 @@ class TradingViewChart(tk.Frame):
                 x1 + 36, y, text=f"{last:.1f}",
                 fill="#ffffff", font=("Trebuchet MS", 8, "bold"),
             )
-        if not self._forecast:
-            return
-        self._polyline(visible, self._forecast, self._forecast_color, width=2)
-
     def _polyline(
         self, visible: list[dict], series: dict[str, float], color: str, width: int = 1,
     ) -> None:
@@ -341,6 +342,25 @@ class TradingViewChart(tk.Frame):
             pts.extend([self._x_for(i), self._y_price(val)])
         if len(pts) >= 4:
             self._canvas.create_line(*pts, fill=color, width=width, smooth=False)
+
+    def _draw_pattern_segments(self, visible: list[dict]) -> None:
+        indices = {row["time"]: i for i, row in enumerate(self._candles)}
+        for segment in self._payload.get("segments") or []:
+            a, b = segment["data"]
+            i, j = indices.get(a["time"]), indices.get(b["time"])
+            if i is None or j is None or j <= i:
+                continue
+            left, right = max(i, self._start), min(j, self._start + len(visible) - 1)
+            if right <= left:
+                continue
+            def price(k):
+                return a["value"] + (b["value"] - a["value"]) * (k - i) / (j - i)
+            self._canvas.create_line(
+                self._x_for(left - self._start), self._y_price(price(left)),
+                self._x_for(right - self._start), self._y_price(price(right)),
+                fill=segment["color"], width=segment.get("width", 2),
+                dash=(6, 4) if segment.get("style") == "--" else (),
+            )
 
     def _draw_levels(self) -> None:
         x0, _, x1, _ = self._plot
@@ -370,25 +390,25 @@ class TradingViewChart(tk.Frame):
 
     def _draw_markers(self, visible: list[dict]) -> None:
         for i, row in enumerate(visible):
-            marker = self._markers.get(row["time"])
-            if not marker:
-                continue
-            x = self._x_for(i)
-            buy = marker.get("shape") == "arrowUp"
-            y = self._y_price(row["low"] if buy else row["high"])
-            color = marker.get("color") or TV_TEXT
-            if buy:
-                self._canvas.create_polygon(
-                    x, y + 14, x - 6, y + 2, x + 6, y + 2, fill=color, outline=color,
+            for marker in self._markers.get(row["time"], []):
+                x = self._x_for(i)
+                buy = marker.get("position") == "belowBar"
+                y = self._y_price(row["low"] if buy else row["high"])
+                color = marker.get("color") or TV_TEXT
+                if marker.get("shape") == "circle":
+                    self._canvas.create_oval(x - 4, y - 4, x + 4, y + 4, fill=color, outline=color)
+                elif buy:
+                    self._canvas.create_polygon(
+                        x, y + 14, x - 6, y + 2, x + 6, y + 2, fill=color, outline=color,
+                    )
+                else:
+                    self._canvas.create_polygon(
+                        x, y - 14, x - 6, y - 2, x + 6, y - 2, fill=color, outline=color,
+                    )
+                self._canvas.create_text(
+                    x, y + (22 if buy else -22), text=marker.get("text") or "",
+                    fill=color, font=("Trebuchet MS", 8, "bold"),
                 )
-            else:
-                self._canvas.create_polygon(
-                    x, y - 14, x - 6, y - 2, x + 6, y - 2, fill=color, outline=color,
-                )
-            self._canvas.create_text(
-                x, y + (22 if buy else -22), text=marker.get("text") or "",
-                fill=color, font=("Trebuchet MS", 8, "bold"),
-            )
 
     def _draw_crosshair(self, i: int) -> None:
         if i < 0 or i >= self._visible:

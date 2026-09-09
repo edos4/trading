@@ -245,3 +245,18 @@ def test_export_from_paper_account():
     assert book["open_positions"][0]["symbol"] == "MSFT"
     assert book["open_positions"][0]["current"] == 55.0
     assert book["scan_stats"]["trades_opened"] == 2
+
+
+def test_export_preserves_pattern_geometry_for_replay():
+    import json
+    envelope = _envelope()
+    annotations = [{"type": "segment", "start_date": "2026-01-01", "end_date": "2026-01-02", "start_price": 9.12345678, "end_price": 10, "color": "#ff9800"}]
+    book = envelope['books']['us']
+    for key in ('positions', 'closed'):
+        book[key][0]['chart_annotations'] = annotations
+    exported = build_paper_trade_export(envelope, market='us')
+    loaded = json.loads(json.dumps(exported))['books'][0]
+    assert loaded['open_positions'][0]['chart_annotations'] == annotations
+    assert loaded['closed_trades'][0]['chart_annotations'] == annotations
+    annotations[0]['start_price'] = 999
+    assert exported['books'][0]['closed_trades'][0]['chart_annotations'][0]['start_price'] == 9.12345678

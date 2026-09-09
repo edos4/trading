@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from copy import deepcopy
 from typing import Any
 
 from core.market import MARKET_PH, MARKET_US, clock_payload, get_market
@@ -40,6 +41,7 @@ def _open_row(row: dict[str, Any]) -> dict[str, Any]:
         "status": row.get("status"),
         "action": row.get("action"),
         "pattern": row.get("pattern"),
+        "chart_annotations": deepcopy(row.get("chart_annotations") or []),
         "timeframe": row.get("timeframe"),
         "qty": _round(row.get("qty")),
         "entry": _round(row.get("entry")),
@@ -82,6 +84,7 @@ def _closed_row(row: dict[str, Any]) -> dict[str, Any]:
         "symbol": row.get("symbol"),
         "action": row.get("action"),
         "pattern": row.get("pattern"),
+        "chart_annotations": deepcopy(row.get("chart_annotations") or []),
         "timeframe": row.get("timeframe"),
         "qty": _round(row.get("qty")),
         "entry": _round(row.get("entry")),
@@ -178,6 +181,7 @@ def snapshot_from_paper_account(
                 "status": position_status(p),
                 "action": p.action,
                 "pattern": p.pattern,
+                "chart_annotations": deepcopy(p.chart_annotations or []),
                 "qty": p.qty,
                 "entry": p.entry_price,
                 "current": current,
@@ -207,6 +211,7 @@ def snapshot_from_paper_account(
                 "symbol": t.symbol,
                 "action": t.action,
                 "pattern": t.pattern,
+                "chart_annotations": deepcopy(t.chart_annotations or []),
                 "qty": t.qty,
                 "entry": t.entry_price,
                 "exit": t.exit_price,
