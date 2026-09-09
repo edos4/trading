@@ -402,25 +402,18 @@ Branch `refactor/cjs-backtest-methodology`.
   server, which isn't installed here — those suites could not even *collect* before this
   branch; `analysis/test_chart_viewer_payload` failed on `main` too).
 
-### Not done — per-pattern numerical parity (the bulk of remaining work)
-The engine runs, but the ported pattern *detection* does not yet reproduce the documented
-`.cjs` trade counts / win rates. First measured run:
-
-| Pattern | `.cjs` (verified live) | Python now |
-|---|---|---|
-| 006 upward_channel | 127 trades / 55.9% WR / +$23,717 / worst −$774 | 62 / 33.9% / −$6,038 / −$498 |
-
-Needs symbol-by-symbol reconciliation of `patterns/_channels.py` / `_rounding.py` / the
-double-top / H&S / flag / pennant geometry against the `.cjs` scan — comparing which
-pivot pair each side picks, RSI seeding at the gate thresholds, and exit-fill conventions
-(`.cjs` UC exits stop/target at the *close*, HS/DT/RB at the *level*). `end_margin`
-(currently 5) also needs tuning against the `.cjs` loop-bound (~48 bars reserved on SH1).
+### Per-pattern numerical parity — done (see the 2026-09-07/09 scorecard below)
+The first measured run had 006 at 62 / 33.9 % / −$6,038 vs the `.cjs` 127 / 55.9 %.
+Symbol-by-symbol reconciliation (pivot-pair selection, RSI seeding, exit-fill
+conventions, the `.cjs` loop bounds, walk-forward vs one-pass dedup) closed the
+gap: **006/010/002 match `.cjs` on the same barcache** (002 & 010 to the dollar),
+**008 matches on distinct trades**, **009 is within tolerance**. `end_margin` was
+replaced by each pattern's own `HORIZON_BARS`.
 
 ### Follow-ups
-- `tests/test_golden_numbers.py` + pinned `tests/fixtures/barcache/` once a pattern hits
-  tolerance.
-- `tests/test_backtest_paper_parity.py`.
-- Rework `web/` PARAMS schema JSON + templates for the slim form (functional, not polished).
+- `web/` PARAMS schema JSON + templates for the slim form (functional, not
+  polished) — the `web/test_paper_api.py` suite can't even collect on Windows
+  (`signal.SIGALRM`), so this is untested here.
 - Optional `patterns/012_ascending_channel_long.py` from `backtest_channel_long_v1.cjs`.
 
 ---
@@ -451,7 +444,7 @@ present in the barcache), so same-data is the real acceptance test.
 | 004 rounding_bottom | backtest_rb_v3.cjs: 2 / 100% / +$8,943 (20 hand-picked necklines — no runnable stage-1 scanner) | **2 / 50.0% / +$1,842** (ON +23.4% target, ADBE −5% stop) | exit sim + GATE-2 (`entry + 0.80·(neck−entry)`, ≥23% upside) match rb_v3; the trade *set* can't match — `.cjs` starts from a curated list, Python scans. `setup_key` bug fixed (was opening each anchor 8×) |
 | 003 double_bottom | none | runs clean | mirror of 002, no golden |
 | 005 rounding_top | none | 0 trades on the barcache, runs clean | mirror of 004; `setup_key` added |
-| 007 descending_channel | none | 59 / 52.5% / **−$6,313** — runs clean | speculative long mirror of 006, **no `.cjs` thesis and net-negative — candidate for retirement** (`skipped=True`); `setup_key` added |
+| 007 descending_channel | none | −$6,313, no `.cjs` thesis | **retired** — `skipped = True` (honors the earlier "kill 007 until a first-bar gate exists" decision; `web/test_services_patterns.py` asserts it) |
 
 **002 fix** — `.cjs scanDoubleTop` commits to the *first structurally valid H2*
 for an H1: if that H2's outcome window never breaks the neckline the H1 is still
@@ -486,7 +479,22 @@ entry and enforces each pattern's `MAX_OPEN_PER_SYMBOL` (flag/pennant = 1);
 `BacktestTrade` gained a `setup_key` field so the account can match anchors.
 Persistence tolerates the old one-trade-per-symbol JSON schema.
 
+### Tests (all in `tests/`, project root `conftest.py` registers the `slow` marker)
+- `test_golden_numbers.py` (`slow`) — exact per-symbol trade lists for 002 / 008
+  / 004 over the pinned `tests/fixtures/barcache/` (27 symbols incl. the
+  double-top near-misses).
+- `test_backtest_paper_parity.py` (`slow`) — the walk and a `PaperAccount` fed
+  the same bars fill identically (002/008/004, trailing-stop / time-exit /
+  take-profit). `data_end` trades are excluded — paper never force-closes.
+- `test_rsi_matches_cjs.py` — `rsi_wilder` == the `.cjs` `calcRSI14` bar for bar.
+- `core/test_paper_trader.py` — 3 new cases: multi-anchor per symbol, the
+  `MAX_OPEN_PER_SYMBOL` cap, multi-close on one bar.
+
+Run the fast suite with `pytest -m "not slow"` (≈ 8 s, 78 pass); the `slow`
+golden + parity suites add ≈ 4 min.
+
 ### Still open
-- Decide 007 descending_channel: retire (`skipped=True`) or find a thesis.
 - Perf: the full-history store makes a single-pattern sweep ~4-5 min; an
   `IndicatorEngine.of()` cache was added but patterns don't use it yet.
+- `patterns/012_ascending_channel_long.py` from `backtest_channel_long_v1.cjs`
+  (out of scope for this pass).

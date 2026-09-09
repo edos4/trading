@@ -30,6 +30,12 @@ class DescendingChannelPattern(BasePattern):
     def name(self) -> str:
         return "pattern_007_descending_channel"
 
+    # Retired (see commit "kill 007 until a first-bar gate exists"): a
+    # speculative long mirror of 006 with no `.cjs` counterpart to validate
+    # against — net −$6,313 over the barcache. Kept on disk; excluded from every
+    # run until a real entry filter is designed. Re-enable by deleting this line.
+    skipped = True
+
     @property
     def timeframes(self) -> list[str]:
         return ["1d"]
