@@ -103,21 +103,21 @@ def _demo_body():
     assert "TEST" in paper.positions, (
         "signal on bar 1 must fill on bar 1 (signal-bar execution)"
     )
-    assert paper.positions["TEST"].entry_price == 100.0, (
-        f"expected fill at bar 1's close (100.0), got {paper.positions['TEST'].entry_price}"
+    assert paper.latest_position("TEST").entry_price == 100.0, (
+        f"expected fill at bar 1's close (100.0), got {paper.latest_position('TEST').entry_price}"
     )
     assert scanner._last_bar_ts.get(("TEST", "1d")) == date(2024, 1, 2)
 
     feed.bar = 1
     asyncio.run(scanner._scan_all())
-    assert paper.positions["TEST"].entry_price == 100.0, (
+    assert paper.latest_position("TEST").entry_price == 100.0, (
         "bar 2 must not re-fill or change the entry price"
     )
 
     # Same session date, later last-print time is not a new daily bar.
     feed.candles[1] = _candle(112.0, datetime(2024, 1, 3, 18, 0, tzinfo=ZoneInfo("America/New_York")))
     asyncio.run(scanner._scan_all())
-    assert paper.positions["TEST"].entry_price == 100.0
+    assert paper.latest_position("TEST").entry_price == 100.0
 
     print("signal-bar entry fill: all checks passed")
 

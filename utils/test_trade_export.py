@@ -229,7 +229,7 @@ def test_export_from_paper_account():
         stop_loss=45.0,
         take_profit=60.0,
     )
-    acct.positions["MSFT"] = open_t
+    acct.positions["MSFT"] = [open_t]
     acct._last_price["MSFT"] = 55.0
 
     payload = build_paper_account_export(

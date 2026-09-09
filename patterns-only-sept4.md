@@ -477,9 +477,16 @@ last candle — so the cutoff is now `len − horizon` (the pattern's own
 - Pattern class attrs: `HORIZON_BARS` (open-cutoff margin), `MAX_OPEN_PER_SYMBOL`
   (`.cjs` flag/pennant F10 — one open trade per symbol).
 
+### Paper trader — multi-position (done)
+`PaperAccount.positions` is now `dict[str, list[BacktestTrade]]`: a symbol
+carries every pattern anchor as an independent flat-$10k trade, exactly like the
+backtester's walk. `open_position` dedups a concurrent same-`(pattern, setup_key)`
+entry and enforces each pattern's `MAX_OPEN_PER_SYMBOL` (flag/pennant = 1);
+`on_bar` checks every open trade in the symbol and returns the list that exited.
+`BacktestTrade` gained a `setup_key` field so the account can match anchors.
+Persistence tolerates the old one-trade-per-symbol JSON schema.
+
 ### Still open
 - Decide 007 descending_channel: retire (`skipped=True`) or find a thesis.
-- Paper trader still one-position-per-symbol (the multi-position walk is
-  backtest-only); revisit once per-pattern numbers settle.
 - Perf: the full-history store makes a single-pattern sweep ~4-5 min; an
   `IndicatorEngine.of()` cache was added but patterns don't use it yet.

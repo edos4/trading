@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 
 from core.backtester import BacktestTrade, _check_exit
 from core.paper_trader import PaperAccount
+from data.tv_client import OHLCVCandle
+from patterns.base_pattern import TradeSignal
 
 
 def _short(qty: float = 10, entry: float = 100.0) -> BacktestTrade:
@@ -18,7 +20,7 @@ def _short(qty: float = 10, entry: float = 100.0) -> BacktestTrade:
 def test_short_open_keeps_equity_flat():
     acct = PaperAccount(initial_capital=100_000.0, market="us", slippage_pct=0.0)
     t = _short()
-    acct.positions["TEST"] = t
+    acct.positions["TEST"] = [t]
     acct._last_price["TEST"] = t.entry_price
     # Mirror _open_position_locked: a short receives its sale proceeds up
     # front, but the short liability must offset those proceeds in equity.
@@ -29,7 +31,7 @@ def test_short_open_keeps_equity_flat():
 def test_short_mark_to_market():
     acct = PaperAccount(initial_capital=100_000.0, market="us", slippage_pct=0.0)
     t = _short()
-    acct.positions["TEST"] = t
+    acct.positions["TEST"] = [t]
     acct._last_price["TEST"] = t.entry_price
     acct.cash += t.entry_price * t.qty
 
@@ -135,6 +137,79 @@ class _EmptyStore:
         return None
 
 
+def _bar(px: float, day: int = 5, high=None, low=None) -> OHLCVCandle:
+    return OHLCVCandle(
+        open=px, high=high if high is not None else px,
+        low=low if low is not None else px, close=px, volume=1_000,
+        timestamp=datetime(2026, 3, day, tzinfo=timezone.utc),
+    )
+
+
+def _sig(pattern: str, action: str, px: float, key, **kw) -> TradeSignal:
+    base = dict(
+        symbol="NVDA", action=action, pattern=pattern, timeframe="1d",
+        confidence=1.0, price=px, qty=0.0, setup_key=tuple(key),
+    )
+    base.update(kw)
+    return TradeSignal(**base)
+
+
+def test_paper_carries_multiple_independent_anchors_per_symbol():
+    acct = PaperAccount(initial_capital=100_000.0, market="us", slippage_pct=0.0)
+    acct.assume_session_open = True
+    store = _EmptyStore()
+    c = _bar(100.0)
+
+    ok, _ = acct.open_position(_sig("pattern_002_double_top", "SELL", 100.0, (10, 40)), c, store)
+    assert ok
+    ok, _ = acct.open_position(_sig("pattern_008_head_and_shoulders", "SELL", 100.0, (12, 55)), c, store)
+    assert ok
+    ok, _ = acct.open_position(_sig("pattern_006_upward_channel", "SELL", 100.0, (5, 33)), c, store)
+    assert ok
+    assert acct.open_count() == 3
+    assert len(acct.open_for("NVDA")) == 3
+
+    # same (pattern, setup_key) again -> rejected as a duplicate anchor
+    ok, msg = acct.open_position(_sig("pattern_002_double_top", "SELL", 100.0, (10, 40)), c, store)
+    assert not ok and "Duplicate anchor" in msg
+    assert acct.open_count() == 3
+
+
+def test_paper_respects_max_open_per_symbol():
+    acct = PaperAccount(initial_capital=100_000.0, market="us", slippage_pct=0.0)
+    acct.assume_session_open = True
+    store = _EmptyStore()
+    c = _bar(50.0)
+
+    ok, _ = acct.open_position(_sig("pattern_009_flag_pattern", "BUY", 50.0, (1, 2, 3)), c, store)
+    assert ok
+    ok, msg = acct.open_position(_sig("pattern_009_flag_pattern", "BUY", 50.0, (4, 5, 6)), c, store)
+    assert not ok and "MAX_OPEN_PER_SYMBOL" in msg
+    assert acct.open_count() == 1
+
+
+def test_paper_on_bar_closes_every_exiting_anchor_on_one_bar():
+    acct = PaperAccount(initial_capital=100_000.0, market="us", slippage_pct=0.0)
+    acct.assume_session_open = True
+    store = _EmptyStore()
+    acct.open_position(
+        _sig("pattern_002_double_top", "SELL", 100.0, (10, 40),
+             stop_loss=105.0, stop_loss_on_close=True), _bar(100.0), store)
+    acct.open_position(
+        _sig("pattern_008_head_and_shoulders", "SELL", 100.0, (12, 55),
+             stop_loss=106.0, stop_loss_on_close=True), _bar(100.0), store)
+    assert acct.open_count() == 2
+
+    # a gap-up close above both invalidation stops exits both on the same bar
+    closed = acct.on_bar("NVDA", _bar(110.0, day=6), "1d", True)
+    assert len(closed) == 2
+    assert {t.pattern for t in closed} == {
+        "pattern_002_double_top", "pattern_008_head_and_shoulders",
+    }
+    assert acct.open_count() == 0
+    assert len(acct.closed) == 2
+
+
 def test_position_marks_record_entry_and_each_session_bar():
     from data.tv_client import OHLCVCandle
 
@@ -147,7 +222,7 @@ def test_position_marks_record_entry_and_each_session_bar():
         stop_loss=94.0, take_profit=120.0, entry_bar_idx=0,
         sim_entry_date=datetime(2026, 8, 18, 20, 0, tzinfo=timezone.utc),
     )
-    acct.positions["AAPL"] = t
+    acct.positions["AAPL"] = [t]
     acct._last_price["AAPL"] = 100.0
     acct.cash -= 1_000.0
     acct._record_position_mark(
@@ -196,7 +271,7 @@ def test_position_marks_record_exit_fill_not_bar_close():
         stop_loss=90.0, take_profit=120.0, entry_bar_idx=0,
         sim_entry_date=datetime(2026, 8, 18, 20, 0, tzinfo=timezone.utc),
     )
-    acct.positions["AAPL"] = t
+    acct.positions["AAPL"] = [t]
     acct._last_price["AAPL"] = 100.0
     acct.cash -= 1_000.0
     acct._record_position_mark(
@@ -209,8 +284,8 @@ def test_position_marks_record_exit_fill_not_bar_close():
         timestamp=datetime(2026, 8, 19, 20, 0, tzinfo=timezone.utc),
     )
     closed = acct.on_bar("AAPL", dump, "1d", True)
-    assert closed is not None
-    assert closed.exit_reason == "stop_loss"
+    assert len(closed) == 1
+    assert closed[0].exit_reason == "stop_loss"
     assert t.position_marks[-1]["close"] == 90.0
     assert t.position_marks[-1]["status"] == "stop_loss"
     assert t.position_marks[-1]["unrl_pct"] == -10.0

@@ -87,6 +87,9 @@ class BacktestTrade:
     exit_fill_at_close: bool = False
     trailing_ref_after_check: bool = False
     exit_order: str = "stop_first"
+    # Pivot bars this trade is anchored on (the signal's setup_key) — the paper
+    # account dedups concurrent same-anchor entries by it.
+    setup_key: tuple[int, ...] | None = None
     entry_bar_idx: int = -1
     neckline_break_bar_idx: int | None = None
     prev_high: float | None = None
@@ -711,6 +714,7 @@ def _open_trade(
         exit_fill_at_close=signal.exit_fill_at_close,
         trailing_ref_after_check=signal.trailing_ref_after_check,
         exit_order=signal.exit_order,
+        setup_key=tuple(signal.setup_key) if signal.setup_key else None,
         entry_bar_idx=bar_idx,
         confidence=signal.confidence,
         qty=signal.qty,

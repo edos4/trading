@@ -162,8 +162,8 @@ def test_snapshot_reads_and_resets_signal_log_file():
 def test_ticker_collision_chart_uses_market():
     with patch("core.paper_books.PaperAccount.save"):
         mgr = PaperBookManager()
-        mgr.books["us"].account.positions["SM"] = _open_trade("SM", 10.0)
-        mgr.books["ph"].account.positions["SM"] = _open_trade("SM", 100.0)
+        mgr.books["us"].account.positions["SM"] = [_open_trade("SM", 10.0)]
+        mgr.books["ph"].account.positions["SM"] = [_open_trade("SM", 100.0)]
         snap = mgr.snapshot_all()
         us_sm = next(p for p in snap["books"]["us"]["positions"] if p["symbol"] == "SM")
         ph_sm = next(p for p in snap["books"]["ph"]["positions"] if p["symbol"] == "SM")
@@ -223,7 +223,7 @@ def test_log_chart_uses_open_then_closed_then_symbol():
                 "analysis.chart_renderer.build_trade_viewer_payload",
                 side_effect=_payload,
             ):
-                mgr.books["us"].account.positions["AAPL"] = _open_trade("AAPL", 10.0)
+                mgr.books["us"].account.positions["AAPL"] = [_open_trade("AAPL", 10.0)]
                 open_chart = mgr.chart("us", side="log", symbol="AAPL")
                 assert open_chart["entry"] == 10.0
                 assert open_chart["exit_price"] is None

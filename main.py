@@ -367,14 +367,15 @@ async def run_paper(
                 )
         print()
         print(account.to_result().summary())
-        print(f"  Open positions:    {len(account.positions)}")
+        open_rows = account.positions_snapshot()
+        print(f"  Open positions:    {len(open_rows)}")
         print(f"  Equity:            {format_money(account.equity(), profile.id)}")
         print()
 
-        if account.positions:
+        if open_rows:
             print("  OPEN POSITIONS")
             print("-" * 85)
-            for sym, p in account.positions.items():
+            for sym, p in open_rows:
                 current = account.last_price(sym, p.entry_price)
                 r = r_multiple(p, current)
                 r_str = f"{r:+.2f}" if r is not None else "-"
