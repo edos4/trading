@@ -89,8 +89,10 @@ class FlagPattern(BasePattern):
                 ann_marker(self.bar_date(df, setup.pole_start), float(ind.open.iloc[setup.pole_start]), "pole start", ANN_REF, "^", "below"),
                 ann_marker(self.bar_date(df, setup.pole_end), setup.pole_high, "pole high", ANN_PEAK, "v", "above"),
                 ann_segment(self.bar_date(df, setup.pole_start), self.bar_date(df, setup.pole_end), float(ind.open.iloc[setup.pole_start]), setup.pole_high, ANN_LINE),
-                ann_marker(self.bar_date(df, setup.flag_end), setup.flag_low, "flag low", ANN_TROUGH, "^", "below"),
-                ann_hline(setup.flag_high, "flag high", ANN_LINE),
+                ann_marker(self.bar_date(df, setup.flag_start + int(ind.low.iloc[setup.flag_start:setup.flag_end + 1].to_numpy().argmin())), setup.flag_low, "flag low", ANN_TROUGH, "^", "below"),
+                ann_segment(self.bar_date(df, setup.flag_start), self.bar_date(df, setup.flag_end), setup.flag_high, setup.flag_high, ANN_LINE, label="Flag resistance"),
+                ann_segment(self.bar_date(df, setup.flag_start), self.bar_date(df, setup.flag_end), setup.flag_low, setup.flag_low, ANN_LINE, label="Flag support"),
+                ann_segment(self.bar_date(df, setup.flag_end), self.bar_date(df, current), setup.flag_high, price, ANN_LINE, label="Breakout"),
                 ann_hline(stop, "stop", ANN_STOP),
                 ann_marker(self.bar_date(df, current), price, "entry", ANN_ENTRY, "o", "below"),
             ],
@@ -168,4 +170,3 @@ class FlagPattern(BasePattern):
                     best_pole_len = pole_len
                     break
         return best
-

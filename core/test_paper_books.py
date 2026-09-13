@@ -196,6 +196,27 @@ def test_ticker_collision_chart_uses_market():
         assert ph_chart["entry"] == 100.0
 
 
+def test_selected_log_chart_preserves_its_own_detection():
+    rows = [
+        {"symbol": "AAPL", "ts": "2024-01-02T00:00:00", "sim_bar": "2024-01-02", "price": 10,
+         "pattern": "old_pattern", "action": "BUY", "chart_annotations": [{"type": "hline", "price": 9, "label": "neckline"}]},
+        {"symbol": "AAPL", "ts": "2024-02-02T00:00:00", "price": 20, "pattern": "new_pattern"},
+    ]
+    with patch("core.paper_books.PaperAccount.save"), patch("core.paper_books.load_signal_log", return_value=rows):
+        mgr = PaperBookManager()
+        mgr.books["us"].account.positions["AAPL"] = [_open_trade("AAPL", 30)]
+        with patch("data.history.load_daily_ohlcv_df", return_value=pd.DataFrame({"close": [10, 11]})), patch(
+            "analysis.chart_renderer.build_trade_viewer_payload", return_value={"ok": True},
+        ) as builder:
+            result = mgr.chart("us", side="log", symbol="AAPL", log_time=rows[0]["ts"])
+            assert result == {"ok": True}
+            assert builder.call_args.kwargs["entry"] == 10
+            assert builder.call_args.kwargs["pattern"] == "old_pattern"
+            assert builder.call_args.kwargs["entry_time"] == "2024-01-02"
+            assert builder.call_args.kwargs["annotations"] == rows[0]["chart_annotations"]
+        assert "error" in mgr.chart("us", side="log", symbol="AAPL", log_time="missing")
+
+
 def test_log_chart_uses_open_then_closed_then_symbol():
     df = pd.DataFrame(
         {

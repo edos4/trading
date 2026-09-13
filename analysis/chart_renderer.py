@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
 from utils.logger import log
+from patterns._annotations import pattern_annotations
 
 CHARTS_DIR = Path("charts")
 
@@ -125,6 +126,9 @@ class ChartRenderer:
         self._draw_last_price_line(axes[0], df)
         if annotations:
             self._draw_annotations(axes[0], df, annotations)
+            lo, hi = axes[0].get_ylim()
+            padding = (hi - lo) * 0.10
+            axes[0].set_ylim(lo - padding, hi + padding)
 
         if axes[0].get_legend() is not None:
             axes[0].get_legend().remove()
@@ -451,7 +455,7 @@ class ChartRenderer:
         self, price_axis, df: pd.DataFrame, annotations: list[dict]
     ) -> None:
         """Overlay pattern markers, horizontal lines, and trend segments."""
-        for ann in annotations:
+        for ann in pattern_annotations(annotations):
             kind = ann.get("type")
             if kind == "marker":
                 self._draw_marker(price_axis, df, ann)
@@ -459,6 +463,12 @@ class ChartRenderer:
                 self._draw_hline(price_axis, ann)
             elif kind == "segment":
                 self._draw_segment(price_axis, df, ann)
+            elif kind == "path":
+                points = [(self._date_to_x(df, p["date"]), p["price"]) for p in ann.get("points", [])]
+                points = [(x, y) for x, y in points if x is not None]
+                if len(points) > 1:
+                    price_axis.plot(*zip(*points), color=ann["color"], linewidth=ann.get("width", 2), zorder=4)
+                    self._draw_geometry_label(price_axis, points, ann)
 
     def _draw_marker(
         self, price_axis, df: pd.DataFrame, ann: dict
@@ -486,6 +496,7 @@ class ChartRenderer:
             textcoords="offset points",
             ha="center", va=va,
             fontsize=8, fontweight="bold", color=color,
+            bbox=dict(facecolor=TV_BG, edgecolor="none", pad=1.5, alpha=0.9),
             clip_on=True,
         )
 
@@ -506,7 +517,7 @@ class ChartRenderer:
             xytext=(-2, 0),
             textcoords="offset points",
             ha="right", va="center",
-            fontsize=7.5, color="#ffffff",
+            fontsize=7.5, color=TV_BG if color == "#ffeb3b" else "#ffffff",
             bbox=dict(facecolor=color, edgecolor=color, pad=1.5, boxstyle="square,pad=0.2"),
             clip_on=False,
         )
@@ -527,6 +538,18 @@ class ChartRenderer:
             [x0, x1], [y0, y1],
             color=color, linestyle=style, linewidth=width, alpha=0.9, zorder=4,
         )
+        self._draw_geometry_label(price_axis, [((x0 + x1) / 2, (y0 + y1) / 2)], ann)
+
+    @staticmethod
+    def _draw_geometry_label(price_axis, points, ann):
+        if ann.get("label"):
+            below = "lower" in ann["label"].lower() or "support" in ann["label"].lower()
+            price_axis.annotate(
+                ann["label"], xy=points[len(points) // 2], xytext=(0, -12 if below else 12),
+                textcoords="offset points", ha="center", va="top" if below else "bottom",
+                fontsize=8, color=ann["color"], clip_on=True,
+                bbox=dict(facecolor=TV_BG, edgecolor="none", pad=2, alpha=0.9),
+            )
 
     @staticmethod
     def _format_volume(value: float) -> str:
@@ -640,8 +663,9 @@ def build_trade_viewer_payload(
     # Recover old ledger geometry only at the entry event, never from a newer setup.
     if not annotations and pattern and entry_time:
         annotations = _recover_trade_annotations(df, symbol, timeframe, pattern, action, entry_time, session_tz)
-    annotations = annotations or []
+    annotations = pattern_annotations(annotations or [], df, pattern)
     anchor_dates = [a.get(k) for a in annotations for k in ("date", "start_date", "end_date") if a.get(k)]
+    anchor_dates.extend(p["date"] for a in annotations for p in a.get("points", []) if p.get("date"))
     if entry_time:
         anchor_dates.append(entry_time)
     if anchor_dates:
@@ -651,6 +675,7 @@ def build_trade_viewer_payload(
         end = len(df)
         if exit_time:
             end = min(end, int(idx.searchsorted(pd.Timestamp(exit_time).tz_localize(None).normalize(), side="right")) + 20)
+            end = min(len(df), max(end, int(idx.searchsorted(max(dates), side="right")) + 5))
         df = df.iloc[start:end]
     else:
         df = renderer._trim_to_visible(df, timeframe)
@@ -726,22 +751,47 @@ def build_trade_viewer_payload(
         })
 
     segments = []
+    candle_times = {row["time"] for row in candles}
+
+    def annotation_time(value):
+        # A missing historical pivot must not be moved to a different candle.
+        try:
+            time = pd.Timestamp(value).strftime("%Y-%m-%d") if value else None
+        except (TypeError, ValueError):
+            return None
+        return time if time in candle_times else None
+
     for ann in annotations:
-        color = ann.get("color") or "#ff9800"
+        color = ann.get("color") or "#ffeb3b"
         if ann.get("type") == "hline":
             price = _viewer_finite(ann.get("price"))
             if price is not None and not any(level["price"] == price and level["title"] == ann.get("label") for level in levels):
                 levels.append({"price": price, "title": ann.get("label", ""), "color": color})
-        elif ann.get("type") == "segment":
-            t0 = _nearest_viewer_time(df.index, ann.get("start_date"))
-            t1 = _nearest_viewer_time(df.index, ann.get("end_date"))
-            p0, p1 = _viewer_finite(ann.get("start_price")), _viewer_finite(ann.get("end_price"))
-            if t0 and t1 and t0 < t1 and p0 is not None and p1 is not None:
-                segments.append({"data": [{"time": t0, "value": p0}, {"time": t1, "value": p1}], "color": color, "style": ann.get("style", "-"), "width": ann.get("width", 2)})
+        elif ann.get("type") in {"segment", "path"}:
+            points = ann.get("points", []) if ann["type"] == "path" else [
+                {"date": ann.get("start_date"), "price": ann.get("start_price")},
+                {"date": ann.get("end_date"), "price": ann.get("end_price")},
+            ]
+            values = {}
+            for point in points:
+                time, price = annotation_time(point.get("date")), _viewer_finite(point.get("price"))
+                if time and price is not None:
+                    values[time] = price
+            if len(values) > 1 and len(values) == len(points):
+                if len(values) == 2 and ann.get("label"):
+                    (t0, p0), (t1, p1) = sorted(values.items())
+                    between = [row["time"] for row in candles if t0 <= row["time"] <= t1]
+                    if len(between) > 2:
+                        middle = len(between) // 2
+                        values[between[middle]] = p0 + (p1 - p0) * middle / (len(between) - 1)
+                segments.append({"data": [{"time": t, "value": p} for t, p in sorted(values.items())], "color": color, "style": ann.get("style", "-"), "width": ann.get("width", 2), "label": ann.get("label", "")})
         elif ann.get("type") == "marker":
-            time = _nearest_viewer_time(df.index, ann.get("date"))
-            if time:
-                markers.append({"time": time, "position": "belowBar" if ann.get("label_pos") == "below" else "aboveBar", "color": color, "shape": {"^": "arrowUp", "v": "arrowDown"}.get(ann.get("marker"), "circle"), "text": ann.get("label", "")})
+            time = annotation_time(ann.get("date"))
+            price = _viewer_finite(ann.get("price"))
+            if time and price is not None:
+                if ann.get("label") == "Entry" and time == entry_bar and action:
+                    continue
+                markers.append({"time": time, "price": price, "position": "belowBar" if ann.get("label_pos") == "below" else "aboveBar", "color": color, "shape": {"^": "arrowUp", "v": "arrowDown"}.get(ann.get("marker"), "circle"), "text": ann.get("label", "")})
     markers.sort(key=lambda marker: marker["time"])
     title = f"{symbol} {renderer._tv_timeframe_label(timeframe)}"
     if pattern:
@@ -769,6 +819,10 @@ def build_trade_viewer_payload(
         "levels": levels,
         "markers": markers,
         "segments": segments,
+        "pattern_note": (
+            "Yellow: detected pattern" if segments else
+            "Pattern geometry unavailable for this saved detection." if pattern else ""
+        ),
     }
 
 

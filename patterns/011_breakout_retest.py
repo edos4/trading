@@ -19,6 +19,7 @@ from patterns.base_pattern import (
     TradeSignal,
     ann_hline,
     ann_marker,
+    ann_segment,
 )
 
 
@@ -81,8 +82,8 @@ class BreakoutRetestPattern(BasePattern):
             trailing_activation_pct=0.04,
             notes=f"Breakout retest range={setup.range_start}->{setup.breakout} resistance={setup.resistance:.2f} support={setup.support:.2f} retest={setup.retest} touches={setup.resistance_touches}/{setup.support_touches}",
             chart_annotations=[
-                ann_hline(setup.resistance, "resistance", ANN_LINE),
-                ann_hline(setup.support, "support", ANN_LINE),
+                ann_segment(self.bar_date(df, setup.range_start), self.bar_date(df, current), setup.resistance, setup.resistance, ANN_LINE, label="Resistance / retest support"),
+                ann_segment(self.bar_date(df, setup.range_start), self.bar_date(df, setup.breakout), setup.support, setup.support, ANN_LINE, label="Range support"),
                 ann_marker(self.bar_date(df, setup.breakout), float(ind.close.iloc[setup.breakout]), "breakout", ANN_PEAK, "^", "above"),
                 ann_marker(self.bar_date(df, setup.retest), retest_low, "retest", ANN_TROUGH, "^", "below"),
                 ann_hline(stop, "stop", ANN_STOP),

@@ -804,7 +804,7 @@ function initPaper() {
         `<td class="${stCls}">${esc(row.status)}</td>` +
         `<td title="${esc(row.reason)}">${esc(row.reason)}</td>`;
       if (row.symbol) {
-        tr.addEventListener("dblclick", () => openTradeChart("log", row.market, row.symbol));
+        tr.addEventListener("dblclick", () => openTradeChart("log", row.market, row.symbol, null, row.ts));
       }
       logsBody.appendChild(tr);
     }
@@ -911,7 +911,7 @@ function initPaper() {
     if (chartOhlc) chartOhlc.textContent = "";
   }
 
-  async function openTradeChart(side, market, symbol, index) {
+  async function openTradeChart(side, market, symbol, index, logTime) {
     if (!chartModal) return;
     chartModal.hidden = false;
     if (chartTitle) chartTitle.textContent = `${(market || "").toUpperCase()} ${symbol || "Chart"}`;
@@ -923,6 +923,7 @@ function initPaper() {
     const params = new URLSearchParams({ side, market: market || "" });
     if (symbol) params.set("symbol", symbol);
     if (index != null) params.set("index", String(index));
+    if (logTime) params.set("log_time", logTime);
     try {
       const data = await api(`/api/paper/chart?${params.toString()}`);
       if (chartTitle) chartTitle.textContent = data.title || symbol || "Chart";
@@ -956,8 +957,8 @@ function initPaper() {
         });
       }
       if (chartStatus) {
-        chartStatus.textContent = "";
-        chartStatus.hidden = true;
+        chartStatus.textContent = data.pattern_note || "";
+        chartStatus.hidden = !data.pattern_note;
       }
     } catch (e) {
       if (chartStatus) {
@@ -1656,8 +1657,8 @@ function initReplay() {
       });
     }
     if (chartStatus) {
-      chartStatus.textContent = "";
-      chartStatus.hidden = true;
+      chartStatus.textContent = data.pattern_note || "";
+      chartStatus.hidden = !data.pattern_note;
     }
   }
   // Exported `opened`/`closed` are wall-clock fill times when the replay ran,
@@ -1839,4 +1840,3 @@ document.addEventListener("DOMContentLoaded", () => {
   if (window.TB_PAGE === "replay") initReplay();
   if (window.TB_PAGE === "kronos") initKronos();
 });
-

@@ -150,6 +150,15 @@ class PennantPattern(BasePattern):
             return None
         price = float(close[current])
         bull = best.direction == "bull"
+        rails = []
+        for values, label in ((high, "Upper pennant fit"), (low, "Lower pennant fit")):
+            coil = values[best.consol_start:best.consol_end + 1]
+            slope = _linreg_slope(coil)
+            intercept = float(coil.mean() - slope * (len(coil) - 1) / 2)
+            rails.append(ann_segment(
+                self.bar_date(df, best.consol_start), self.bar_date(df, best.consol_end),
+                intercept, intercept + slope * (len(coil) - 1), ANN_LINE, label=label,
+            ))
         return TradeSignal(
             symbol=snapshot.symbol,
             action="BUY" if bull else "SELL",
@@ -168,8 +177,9 @@ class PennantPattern(BasePattern):
                    f"ret={best.pole_ret}% coil={best.consol_start}->{best.consol_end} "
                    f"retrace={best.retrace}% coilVolX={best.consol_volx} bVolX={best.breakout_volx}"),
             chart_annotations=[
-                ann_marker(self.bar_date(df, best.pole_start), float(low[best.pole_start] if bull else high[best.pole_start]), "pole start", ANN_REF, "o", "below" if bull else "above"),
-                ann_marker(self.bar_date(df, best.pole_end), float(high[best.pole_end] if bull else low[best.pole_end]), "pole", ANN_PEAK if bull else ANN_TROUGH, "v" if bull else "^", "above" if bull else "below"),
+                *rails,
+                ann_marker(self.bar_date(df, best.pole_start), float(close[best.pole_start]), "pole start", ANN_REF, "o", "below" if bull else "above"),
+                ann_marker(self.bar_date(df, best.pole_end), float(close[best.pole_end]), "pole", ANN_PEAK if bull else ANN_TROUGH, "v" if bull else "^", "above" if bull else "below"),
                 ann_segment(self.bar_date(df, best.pole_start), self.bar_date(df, best.pole_end), float(close[best.pole_start]), float(close[best.pole_end]), ANN_LINE),
                 ann_marker(self.bar_date(df, current), price, "entry", ANN_ENTRY, "o", "below" if bull else "above"),
             ],

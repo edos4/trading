@@ -17,8 +17,8 @@ const row = {symbol:'TEST', action:'BUY', pattern:'test', entry:12, current:13, 
 const exported = {books:[{market:'ph', open_positions:[row], closed_trades:[row]}]};
 let saved = null;
 const requests = [], lines = [];
-const series = () => ({setData(data){this.data=data;}, priceScale(){return {applyOptions(){}};}, createPriceLine(){}, setMarkers(){}});
-const chart = {addCandlestickSeries:series, addHistogramSeries:series, addLineSeries(){const s=series();lines.push(s);return s;}, subscribeCrosshairMove(){}, timeScale(){return {fitContent(){}};}, remove(){}};
+const series = () => ({setData(data){this.data=data;}, priceScale(){return {applyOptions(){}};}, createPriceLine(){}, setMarkers(markers){this.markers=markers;}});
+const chart = {addCandlestickSeries:series, addHistogramSeries:series, addLineSeries(options){const s=series();s.options=options;lines.push(s);return s;}, subscribeCrosshairMove(){}, timeScale(){return {fitContent(){}};}, remove(){}};
 const window = {TB_PAGE:'replay'};
 const context = vm.createContext({window, document, console, FormData, LightweightCharts:{createChart:()=>chart,CrosshairMode:{Normal:0},LineStyle:{Dashed:2,Solid:0}}, fetch: async (url, opts) => {
   let data = {};
@@ -29,7 +29,7 @@ const context = vm.createContext({window, document, console, FormData, Lightweig
     assert.deepEqual(body.chart_annotations,[annotation]);
     assert.equal(body.market,'ph');
     assert.equal(body.entry_time,row.sim_opened);
-    data={candles:[{time:'2024-01-02',open:10,high:11,low:9,close:10},{time:'2024-01-12',open:11,high:13,low:10,close:12}],segments:[{data:[{time:'2024-01-02',value:10},{time:'2024-01-12',value:12}],color:'#ff9800'}]};
+    data={candles:[{time:'2024-01-02',open:10,high:11,low:9,close:10},{time:'2024-01-08',open:10,high:11,low:9,close:10},{time:'2024-01-12',open:11,high:13,low:10,close:12}],markers:[{time:'2024-01-08',price:9.5,position:'belowBar',shape:'circle',color:'#ffeb3b',text:'Bottom'}],segments:[{data:[{time:'2024-01-02',value:10},{time:'2024-01-08',value:9.5},{time:'2024-01-12',value:12}],color:'#ffeb3b',label:'Rounding bottom fit'}]};
   }
   return {status:200,ok:true,headers:{get:()=> 'application/json'},json:async()=>data};
 }});
@@ -46,7 +46,12 @@ vm.runInContext(fs.readFileSync('web/static/app.js','utf8'),context);
     assert.equal(get('replay-chart-modal').hidden,false);
     assert.equal(get('replay-chart-status').hidden,true);
     assert.equal(requests.at(-1).side,side);
-    assert.equal(lines.at(-1).data.length,2);
+    assert.equal(lines.at(-1).data.length,3);
+    assert.equal(lines.at(-1).options.color,'#ffeb3b');
+    assert.equal(lines.at(-1).markers[0].text,'Rounding bottom fit');
+    assert.equal(lines.at(-1).markers[0].time,'2024-01-08');
+    assert.equal(lines.at(-2).data[0].value,9.5);
+    assert.equal(lines.at(-2).markers[0].text,'Bottom');
     get('replay-chart-close').events.click();
     assert.equal(get('replay-chart-modal').hidden,true);
   }

@@ -153,7 +153,16 @@ class WebPaperApiTests(unittest.TestCase):
         with patch("web.app.paper_books.chart", return_value={"title": "TSLA"}) as chart:
             r = self.client.get("/api/paper/chart?side=log&market=us&symbol=TSLA")
             self.assertEqual(r.status_code, 200)
-            chart.assert_called_once_with("us", side="log", symbol="TSLA", index=None)
+            chart.assert_called_once_with("us", side="log", symbol="TSLA", index=None, log_time=None)
+
+    def test_chart_passes_selected_log_time(self) -> None:
+        self._login()
+        with patch("web.app.paper_books.chart", return_value={"title": "TSLA"}) as chart:
+            r = self.client.get("/api/paper/chart", params={
+                "side": "log", "market": "us", "symbol": "TSLA", "log_time": "2024-01-02T00:00:00+00:00",
+            })
+            self.assertEqual(r.status_code, 200)
+            self.assertEqual(chart.call_args.kwargs["log_time"], "2024-01-02T00:00:00+00:00")
 
     def test_replay_chart_bad_market(self) -> None:
         self._login()

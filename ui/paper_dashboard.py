@@ -292,7 +292,7 @@ class PaperDashboard:
         self._book_filter = tk.StringVar(value="All")
         self._pos_rows: dict[str, tuple[str, str]] = {}
         self._closed_rows: dict[str, tuple[str, int]] = {}
-        self._log_rows: dict[str, tuple[str, str]] = {}
+        self._log_rows: dict[str, tuple[str, str, str | None]] = {}
         self._envelope: dict = {"clocks": {}, "books": {}}
 
         strip = ttk.Frame(self._top, padding=(8, 6))
@@ -511,9 +511,9 @@ class PaperDashboard:
         self._log_sort = (col, not desc if col == cur else True)
         self._refresh_logs()
 
-    def _open_chart(self, market: str, side: str, symbol: str | None, index: int | None) -> None:
+    def _open_chart(self, market: str, side: str, symbol: str | None, index: int | None, log_time: str | None = None) -> None:
         from ui.tv_chart import open_trade_viewer
-        payload = paper_books.chart(market, side=side, symbol=symbol, index=index)
+        payload = paper_books.chart(market, side=side, symbol=symbol, index=index, log_time=log_time)
         if payload.get("error"):
             messagebox.showinfo("Chart", payload["error"], parent=self._top)
             return
@@ -552,10 +552,10 @@ class PaperDashboard:
         entry = self._log_rows.get(sel[0])
         if entry is None:
             return
-        market, symbol = entry
+        market, symbol, log_time = entry
         if not symbol:
             return
-        self._open_chart(market, "log", symbol, None)
+        self._open_chart(market, "log", symbol, None, log_time)
 
     def _poll(self) -> None:
         if self._closed:
@@ -744,7 +744,7 @@ class PaperDashboard:
                 ),
                 tags=(status, f"book-{mkt}"),
             )
-            self._log_rows[item_id] = (mkt, row.get("symbol") or "")
+            self._log_rows[item_id] = (mkt, row.get("symbol") or "", row.get("ts"))
         self._log_tree.set_sort(*self._log_sort)
 
     def _refresh_performance(self) -> None:
