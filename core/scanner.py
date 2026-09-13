@@ -29,6 +29,7 @@ import importlib
 import pkgutil
 import threading
 import time
+from copy import deepcopy
 from collections import deque
 from contextlib import asynccontextmanager, AsyncExitStack
 from datetime import datetime, timezone
@@ -306,6 +307,7 @@ class MarketScanner:
                 if signal.signal_bar_timestamp is not None else None
             ),
             "sim_bar_idx": signal.signal_bar_idx,
+            "chart_annotations": deepcopy(signal.chart_annotations),
         }
         with self._signal_log_lock:
             self._signal_log.append(entry)

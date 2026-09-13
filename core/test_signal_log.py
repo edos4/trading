@@ -79,6 +79,14 @@ class SignalLogTests(unittest.TestCase):
         self.assertEqual(sls.load_signal_log("us"), [])
         self.assertEqual(sls.signal_log_path("us").read_text(), "")
 
+    def test_saved_geometry_survives_signal_changes(self) -> None:
+        scanner = self._scanner()
+        signal = _sig(chart_annotations=[{"type": "marker", "date": "2024-01-02", "price": 90, "label": "L1"}])
+        scanner._append_signal_log(signal, status="rejected", reason="confidence")
+        signal.chart_annotations[0]["price"] = 999
+        self.assertEqual(scanner.signal_log_snapshot()[0]["chart_annotations"][0]["price"], 90)
+        self.assertEqual(sls.load_signal_log("us")[0]["chart_annotations"][0]["price"], 90)
+
     def test_us_and_ph_are_separate_files(self) -> None:
         sls.append_signal_log("us", {"symbol": "AAPL", "status": "accepted"})
         sls.append_signal_log("ph", {"symbol": "BDO", "status": "rejected"})

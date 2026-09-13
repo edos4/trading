@@ -533,6 +533,7 @@ def create_app() -> FastAPI:
                 return JSONResponse({"detail": "index must be an integer"}, status_code=400)
         result = paper_books.chart(
             market, side=side, symbol=symbol, index=index,
+            log_time=request.query_params.get("log_time") or None,
         )
         if result.get("error"):
             return JSONResponse({"detail": result["error"]}, status_code=404)

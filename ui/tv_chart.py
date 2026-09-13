@@ -124,6 +124,10 @@ class TradingViewChart(tk.Frame):
             )
         else:
             self._legend_var.set(self._default_legend)
+        if payload.get("segments"):
+            self._legend_var.set("Yellow: detected pattern    " + self._legend_var.get())
+        elif payload.get("pattern_note"):
+            self._legend_var.set(payload["pattern_note"] + "    " + self._legend_var.get())
         self._set_ohlc_label(self._candles[-1] if self._candles else None, from_last=True)
         self._redraw()
 
@@ -188,9 +192,12 @@ class TradingViewChart(tk.Frame):
             if val is not None:
                 lows.append(val)
                 highs.append(val)
+        for _, points in self._visible_pattern_segments(visible):
+            lows.extend(price for _, price in points)
+            highs.extend(price for _, price in points)
         self._price_lo = min(lows)
         self._price_hi = max(highs)
-        pad = (self._price_hi - self._price_lo) * 0.04 or 0.01
+        pad = (self._price_hi - self._price_lo) * 0.12 or 0.01
         self._price_lo -= pad
         self._price_hi += pad
         vols = [
@@ -343,24 +350,50 @@ class TradingViewChart(tk.Frame):
         if len(pts) >= 4:
             self._canvas.create_line(*pts, fill=color, width=width, smooth=False)
 
-    def _draw_pattern_segments(self, visible: list[dict]) -> None:
+    def _visible_pattern_segments(self, visible: list[dict]):
         indices = {row["time"]: i for i, row in enumerate(self._candles)}
         for segment in self._payload.get("segments") or []:
-            a, b = segment["data"]
-            i, j = indices.get(a["time"]), indices.get(b["time"])
-            if i is None or j is None or j <= i:
-                continue
-            left, right = max(i, self._start), min(j, self._start + len(visible) - 1)
-            if right <= left:
-                continue
-            def price(k):
-                return a["value"] + (b["value"] - a["value"]) * (k - i) / (j - i)
+            points = []
+            data = segment.get("data") or []
+            for a, b in zip(data, data[1:]):
+                i, j = indices.get(a["time"]), indices.get(b["time"])
+                if i is None or j is None or j <= i:
+                    continue
+                left, right = max(i, self._start), min(j, self._start + len(visible) - 1)
+                if right <= left:
+                    continue
+                for k in (left, right):
+                    price = a["value"] + (b["value"] - a["value"]) * (k - i) / (j - i)
+                    point = (k - self._start, price)
+                    if not points or points[-1] != point:
+                        points.append(point)
+            if len(points) > 1:
+                yield segment, points
+
+    def _draw_pattern_segments(self, visible: list[dict]) -> None:
+        for segment, points in self._visible_pattern_segments(visible):
+            coords = [coord for i, price in points for coord in (self._x_for(i), self._y_price(price))]
             self._canvas.create_line(
-                self._x_for(left - self._start), self._y_price(price(left)),
-                self._x_for(right - self._start), self._y_price(price(right)),
+                *coords,
                 fill=segment["color"], width=segment.get("width", 2),
                 dash=(6, 4) if segment.get("style") == "--" else (),
             )
+            if segment.get("label"):
+                a, b = points[0], points[-1]
+                mid = points[len(points) // 2] if len(points) > 2 else ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+                below = any(word in segment["label"].lower() for word in ("lower", "support"))
+                self._pattern_label(self._x_for(mid[0]), self._y_price(mid[1]) + (16 if below else -16), segment["label"], segment["color"])
+
+    def _pattern_label(self, x, y, text, color):
+        label = self._canvas.create_text(x, y, text=text, fill=color, font=("Trebuchet MS", 9, "bold"))
+        bounds = self._canvas.bbox(label)
+        if bounds:
+            x0, y0, x1, y1 = bounds
+            dx = max(self._plot[0] - x0, 0) - max(x1 - self._plot[2], 0)
+            dy = max(self._plot[1] - y0, 0) - max(y1 - self._plot[3], 0)
+            self._canvas.move(label, dx, dy)
+            bg = self._canvas.create_rectangle(x0 + dx - 2, y0 + dy - 2, x1 + dx + 2, y1 + dy + 2, fill=TV_BG, outline="")
+            self._canvas.tag_lower(bg, label)
 
     def _draw_levels(self) -> None:
         x0, _, x1, _ = self._plot
@@ -390,10 +423,11 @@ class TradingViewChart(tk.Frame):
 
     def _draw_markers(self, visible: list[dict]) -> None:
         for i, row in enumerate(visible):
+            offsets = {True: 0, False: 0}
             for marker in self._markers.get(row["time"], []):
                 x = self._x_for(i)
                 buy = marker.get("position") == "belowBar"
-                y = self._y_price(row["low"] if buy else row["high"])
+                y = self._y_price(marker.get("price", row["low"] if buy else row["high"]))
                 color = marker.get("color") or TV_TEXT
                 if marker.get("shape") == "circle":
                     self._canvas.create_oval(x - 4, y - 4, x + 4, y + 4, fill=color, outline=color)
@@ -405,10 +439,8 @@ class TradingViewChart(tk.Frame):
                     self._canvas.create_polygon(
                         x, y - 14, x - 6, y - 2, x + 6, y - 2, fill=color, outline=color,
                     )
-                self._canvas.create_text(
-                    x, y + (22 if buy else -22), text=marker.get("text") or "",
-                    fill=color, font=("Trebuchet MS", 8, "bold"),
-                )
+                self._pattern_label(x, y + (1 if buy else -1) * (22 + offsets[buy]), marker.get("text") or "", color)
+                offsets[buy] += 20
 
     def _draw_crosshair(self, i: int) -> None:
         if i < 0 or i >= self._visible:

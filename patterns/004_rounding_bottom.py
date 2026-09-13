@@ -4,6 +4,7 @@ from analysis.indicator_engine import IndicatorEngine
 from data.ohlcv_store import OHLCVStore
 from data.tv_client import MarketSnapshot
 from patterns._rounding import find_rounding_setup
+from patterns._annotations import rounding_annotations
 from patterns import _dedup
 from patterns._rules import notional_qty
 from patterns.base_pattern import (
@@ -64,6 +65,7 @@ class RoundingBottomPattern(BasePattern):
             trailing_activation_pct=0.0,
             notes=f"Rounding bottom start={setup.start} bottom={setup.center} depth={setup.depth:.1%} fit={setup.fit:.1%} RSI={setup.center_rsi:.1f} divergence={setup.divergence}",
             chart_annotations=[
+                *rounding_annotations(df, setup, "bottom"),
                 ann_hline(setup.neckline, "neckline", ANN_LINE),
                 ann_marker(self.bar_date(df, setup.center), setup.center_close, "bottom", ANN_TROUGH, "^", "below"),
                 ann_hline(stop, "stop", ANN_STOP),

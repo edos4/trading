@@ -53,13 +53,13 @@ window.TVChart = (function () {
       },
       rightPriceScale: {
         borderColor: GRID,
-        scaleMargins: { top: 0.08, bottom: 0.22 },
+        scaleMargins: { top: 0.16, bottom: 0.28 },
       },
       timeScale: {
         borderColor: GRID,
         rightOffset: 4,
         barSpacing: 8,
-        minBarSpacing: 3,
+        minBarSpacing: 0.5,
       },
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true },
       handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
@@ -94,16 +94,33 @@ window.TVChart = (function () {
       });
     }
     if ((data.markers || []).length) {
-      candleSeries.setMarkers(data.markers);
+      candleSeries.setMarkers(data.markers.filter(marker => marker.price == null));
+      for (const marker of data.markers.filter(marker => marker.price != null)) {
+        const pivot = chart.addLineSeries({
+          color: marker.color, lineVisible: false,
+          priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+        });
+        pivot.setData([{ time: marker.time, value: marker.price }]);
+        pivot.setMarkers([marker]);
+      }
     }
 
     for (const segment of data.segments || []) {
+      if (!segment.data || segment.data.length < 2) continue;
       const line = chart.addLineSeries({
         color: segment.color, lineWidth: Math.max(1, Math.min(4, Math.round(segment.width || 2))),
         lineStyle: segment.style === "--" ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid,
         priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
       });
       line.setData(segment.data);
+      if (segment.label) {
+        const point = segment.data[Math.floor((segment.data.length - 1) / 2)];
+        line.setMarkers([{
+          time: point.time,
+          position: /lower|support/i.test(segment.label) ? "belowBar" : "aboveBar",
+          shape: "circle", size: 0, color: segment.color, text: segment.label,
+        }]);
+      }
     }
 
     let predSeries = null;

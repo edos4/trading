@@ -273,6 +273,7 @@ class PaperBook:
         side: str,
         symbol: str | None = None,
         index: int | None = None,
+        log_time: str | None = None,
     ) -> dict[str, Any]:
         from analysis.chart_renderer import build_trade_viewer_payload
 
@@ -298,6 +299,8 @@ class PaperBook:
         elif side == "log":
             if not symbol:
                 return {"error": "symbol is required for log charts"}
+            if log_time:
+                return self._chart_from_log_symbol(account, scanner, symbol, log_time=log_time)
             trade = account.latest_position(symbol)
             if trade is not None:
                 current = account.last_price(trade.symbol, trade.entry_price)
@@ -357,15 +360,18 @@ class PaperBook:
         account: PaperAccount,
         scanner: Optional[MarketScanner],
         symbol: str,
+        log_time: str | None = None,
     ) -> dict[str, Any]:
         from analysis.chart_renderer import build_trade_viewer_payload
 
         needle = symbol.upper()
         log_row: dict[str, Any] = {}
         for row in reversed(load_signal_log(account.market)):
-            if str(row.get("symbol") or "").upper() == needle:
+            if str(row.get("symbol") or "").upper() == needle and (not log_time or row.get("ts") == log_time):
                 log_row = row
                 break
+        if log_time and not log_row:
+            return {"error": "This signal is no longer in the log. Refresh the table."}
         ticker = str(log_row.get("symbol") or symbol)
         timeframe = str(log_row.get("timeframe") or "1d")
         df = None
@@ -390,6 +396,7 @@ class PaperBook:
                 symbol=ticker,
                 timeframe=timeframe,
                 pattern=log_row.get("pattern"),
+                annotations=log_row.get("chart_annotations"),
                 action=log_row.get("action"),
                 session_tz=session_tz,
                 entry=entry,
@@ -790,9 +797,10 @@ class PaperBookManager:
         side: str,
         symbol: str | None = None,
         index: int | None = None,
+        log_time: str | None = None,
     ) -> dict[str, Any]:
         return self._book(market).render_trade_chart(
-            side=side, symbol=symbol, index=index,
+            side=side, symbol=symbol, index=index, log_time=log_time,
         )
 
     def export_trades(self, market: str | None = None) -> dict[str, Any]:

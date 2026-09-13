@@ -42,13 +42,14 @@ def skip_pattern_module(name: str) -> bool:
 
 
 # ── Chart annotation colors (shared so every pattern draws consistently) ──────
-ANN_PEAK   = "#ef5350"   # swing high / short-side structure
-ANN_TROUGH = "#26a69a"   # swing low  / long-side  structure
+ANN_PATTERN = "#ffeb3b"  # detected geometry and its labels
+ANN_PEAK   = ANN_PATTERN
+ANN_TROUGH = ANN_PATTERN
 ANN_ENTRY  = "#ffeb3b"   # entry marker
-ANN_LINE   = "#ff9800"   # neckline / channel lines
+ANN_LINE   = ANN_PATTERN  # neckline / channel lines
 ANN_STOP   = "#ef5350"   # stop-loss horizontal
 ANN_TARGET = "#26a69a"   # take-profit horizontal
-ANN_REF    = "#2962ff"   # reference points (channel start, etc.)
+ANN_REF    = ANN_PATTERN  # reference points (channel start, etc.)
 
 
 @dataclass
@@ -68,7 +69,10 @@ class TradeSignal:
        "color": hex, "style": "--"|"-."|":"}
       {"type": "segment", "start_date": ..., "end_date": ...,
        "start_price": float, "end_price": float,
-       "color": hex, "style": "-"|"--", "width": float}
+       "color": hex, "style": "-"|"--", "width": float, "label": str}
+      {"type": "path", "points": [{"date": ..., "price": float}, ...],
+       "color": hex, "width": float, "label": str}
+    Paths connect detected pivots or sample the detector's fitted curve.
     Dates must match the OHLCVStore DataFrame index (normalized session dates).
     """
     symbol:      str
@@ -248,10 +252,17 @@ def ann_hline(price: float, label: str, color: str, style: str = "--") -> dict:
 
 def ann_segment(
     d0: str, d1: str, p0: float, p1: float, color: str,
-    style: str = "-", width: float = 1.4,
+    style: str = "-", width: float = 2.0, label: str = "",
 ) -> dict:
     return {
         "type": "segment", "start_date": d0, "end_date": d1,
         "start_price": p0, "end_price": p1,
-        "color": color, "style": style, "width": width,
+        "color": color, "style": style, "width": width, "label": label,
+    }
+
+
+def ann_path(points: list[tuple[str, float]], label: str = "", *, style: str = "-") -> dict:
+    return {
+        "type": "path", "points": [{"date": date, "price": float(price)} for date, price in points],
+        "color": ANN_PATTERN, "style": style, "width": 2.0, "label": label,
     }

@@ -111,8 +111,8 @@ def test_pattern_geometry_keeps_old_trade_in_view():
     ]
     assert payload["candles"][0]["time"] <= str(idx[10].date())
     assert payload["candles"][-1]["time"] == str(idx[80].date())
-    assert any(m["text"] == "L1" for m in payload["markers"])
-    assert any(l["title"] == "neckline" for l in payload["levels"])
+    assert any(m["text"] == "First bottom (L1)" for m in payload["markers"])
+    assert any(l["title"] == "Neckline" for l in payload["levels"])
 
 
 def test_trade_preserves_annotations_through_ledger_roundtrip():
