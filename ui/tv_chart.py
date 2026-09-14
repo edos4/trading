@@ -25,8 +25,14 @@ def open_trade_viewer(parent: tk.Misc, payload: dict[str, Any]) -> tk.Toplevel:
     win.minsize(720, 460)
     win.configure(bg=TV_BG)
     chart = TradingViewChart(win)
-    chart.pack(fill=tk.BOTH, expand=True)
+    chart.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     chart.set_payload(payload)
+    if payload.get("edit_context"):
+        from ui.pattern_edit_panel import PatternEditPanel
+        panel = PatternEditPanel(win, chart, payload)
+        panel.pack(side=tk.RIGHT, fill=tk.BOTH)
+        chart.on_edit = panel.select
+        win.geometry("1480x800")
     win.focus_set()
     return win
 
@@ -34,6 +40,9 @@ def open_trade_viewer(parent: tk.Misc, payload: dict[str, Any]) -> tk.Toplevel:
 class TradingViewChart(tk.Frame):
     def __init__(self, master: tk.Misc, **kwargs):
         super().__init__(master, bg=TV_BG, **kwargs)
+        self.on_edit = None
+        self._edit_selected = None
+        self._edit_drag_role = None
         self._payload: dict[str, Any] = {}
         self._candles: list[dict] = []
         self._volume: dict[str, dict] = {}
@@ -77,6 +86,8 @@ class TradingViewChart(tk.Frame):
         self._canvas = tk.Canvas(self, bg=TV_BG, highlightthickness=0, cursor="crosshair")
         self._canvas.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
+        self._canvas.bind("<Button-3>", self._on_edit_menu)
+        self._canvas.bind("<Control-Button-1>", self._on_edit_menu)
         self._canvas.bind("<Configure>", lambda _e: self._redraw())
         self._canvas.bind("<Motion>", self._on_motion)
         self._canvas.bind("<Leave>", self._on_leave)
@@ -214,6 +225,12 @@ class TradingViewChart(tk.Frame):
         self._draw_levels()
         self._draw_axis(visible)
         self._draw_markers(visible)
+        if self._edit_selected:
+            for i,row in enumerate(visible):
+                if row['time'] == self._edit_selected:
+                    x=self._x_for(i)
+                    self._canvas.create_rectangle(x-5,self._plot[1],x+5,self._plot[3],outline="#42a5f5",width=2)
+
         if self._hover is not None:
             self._draw_crosshair(self._hover)
 
@@ -486,11 +503,25 @@ class TradingViewChart(tk.Frame):
         self._redraw()
 
     def _on_press(self, event) -> None:
+        self._edit_drag_role = None
+        row = self._editable_candle(event)
+        if self.on_edit and row:
+            for marker in self._markers.get(row['time'],[]):
+                if marker.get('price') is not None and abs(event.y-self._y_price(marker['price']))<16:
+                    self._edit_drag_role = marker.get('text') or 'anchor'
+                    self._drag_x = None
+                    return
         self._canvas.focus_set()
         self._drag_x = event.x
         self._drag_start = self._start
 
     def _on_drag(self, event) -> None:
+        if self._edit_drag_role:
+            row = self._editable_candle(event)
+            if row:
+                self._edit_selected = row['time']
+                self._redraw()
+            return
         if self._drag_x is None:
             return
         bar_px = max((self._plot[2] - self._plot[0]) / max(self._visible, 1), 1.0)
@@ -500,7 +531,27 @@ class TradingViewChart(tk.Frame):
         self._redraw()
 
     def _on_release(self, _event) -> None:
+        if self._edit_drag_role and self.on_edit:
+            row=self._editable_candle(_event)
+            if row:self.on_edit(row,self._edit_drag_role)
+        self._edit_drag_role=None
         self._drag_x = None
+
+    def _editable_candle(self, event):
+        if not self._plot[1] <= event.y <= self._plot[3]:
+            return None
+        index=self._index_at(event.x)
+        if index is None:return None
+        row=self._candles[self._start+index]
+        return None if row.get('predicted') else row
+
+    def _on_edit_menu(self, event):
+        row=self._editable_candle(event)
+        if self.on_edit and row:
+            menu=tk.Menu(self,tearoff=False)
+            menu.add_command(label='Edit Pattern',command=lambda:self.on_edit(row))
+            menu.tk_popup(event.x_root,event.y_root)
+
 
     def _on_wheel(self, event) -> None:
         factor = 0.85 if event.delta > 0 else 1.18

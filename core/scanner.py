@@ -25,8 +25,6 @@ scan progress on the CLI.
 
 from __future__ import annotations
 import asyncio
-import importlib
-import pkgutil
 import threading
 import time
 from copy import deepcopy
@@ -38,8 +36,7 @@ from pathlib import Path
 
 import pandas as pd
 
-import patterns as patterns_pkg
-from patterns.base_pattern import BasePattern, skip_pattern_module, TradeSignal
+from patterns.base_pattern import BasePattern, TradeSignal
 
 from data.tv_client import TVClient, MarketSnapshot
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
@@ -308,6 +305,7 @@ class MarketScanner:
             ),
             "sim_bar_idx": signal.signal_bar_idx,
             "chart_annotations": deepcopy(signal.chart_annotations),
+            **__import__("core.pattern_provenance", fromlist=["payload"]).payload(signal),
         }
         with self._signal_log_lock:
             self._signal_log.append(entry)
@@ -383,6 +381,8 @@ class MarketScanner:
         )
 
     def stop(self) -> None:
+        from core.pattern_loader import acknowledge_worker
+        acknowledge_worker(self, stopped=True)
         self._running = False
         self._close_analyze_pool()
         for p in self._patterns:
@@ -583,6 +583,13 @@ class MarketScanner:
 
     # ── Scan cycle ─────────────────────────────────────────────────────────────
     async def _scan_all(self, feed_sessions: list | None = None) -> None:
+        from core.pattern_loader import active_versions
+        if active_versions() != getattr(self, "_version_set", {}):
+            self._close_analyze_pool()
+            self._discover_patterns()
+            self._open_analyze_pool()
+        from core.pattern_loader import acknowledge_worker
+        acknowledge_worker(self)
         """Run one full scan across all symbols x timeframes x patterns.
 
         Symbols are processed concurrently with a progress bar. Each worker
@@ -1371,22 +1378,7 @@ class MarketScanner:
             f.write(row)
 
     def _discover_patterns(self) -> None:
-        for module_info in pkgutil.iter_modules(patterns_pkg.__path__):
-            if skip_pattern_module(module_info.name):
-                continue
-            module = importlib.import_module(f"patterns.{module_info.name}")
-            for attr_name in dir(module):
-                attr = getattr(module, attr_name)
-                if (
-                    isinstance(attr, type)
-                    and issubclass(attr, BasePattern)
-                    and attr is not BasePattern
-                ):
-                    instance = attr()
-                    if instance.skipped or instance.name in self._disabled_patterns:
-                        continue
-                    self._patterns.append(instance)
-                    self._pattern_files[instance.name] = (
-                        f"patterns/{module_info.name}.py"
-                    )
-                    log.info(f"Scanner | Registered pattern: {instance}")
+        from core.pattern_loader import discover, active_versions
+        self._version_set = active_versions()
+        self._patterns = discover(self._disabled_patterns, self._version_set)
+        self._pattern_files = {p.name: "patterns/" + p.name.removeprefix("pattern_") + ".py" for p in self._patterns}

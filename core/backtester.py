@@ -106,6 +106,15 @@ class BacktestTrade:
     notes: str = ""
     rvol: float | None = None
     obv_slope: float | None = None
+    trade_id: str = field(default_factory=lambda: __import__("uuid").uuid4().hex)
+    signal_id: str | None = None
+    pattern_version_id: str | None = None
+    provenance: str = "legacy_unknown"
+    requested_rules: dict | None = None
+    resolved_rules: dict | None = None
+    time_exit_only_unfavorable: bool = False
+    time_exit_min_mfe_pct: float | None = None
+
 
     # Paper trading overwrites entry_date/exit_date with the real wall-clock
     # fill time; these keep the bar's own timestamp for simulated hold time.
@@ -353,6 +362,7 @@ class BacktestResult:
                     "entryPrice": round(t.entry_price, 4),
                     "shares": round(t.qty, 4),
                     "exitDate": t.exit_date.isoformat(),
+                    **__import__("core.pattern_provenance", fromlist=["payload"]).payload(t),
                     "exitPrice": round(t.exit_price, 4),
                     "exitReason": t.exit_reason,
                     "daysHeld": round(t.days_held, 1),
@@ -549,10 +559,35 @@ def _reclaim_rail_at(position: BacktestTrade, bar_idx: int) -> float | None:
     return rail0 + slope * (bar_idx - position.entry_bar_idx)
 
 
+def _time_exit_allowed(position: BacktestTrade, candle: OHLCVCandle) -> bool:
+    """Honor `time_exit_only_unfavorable` / `time_exit_min_mfe_pct` (Q001/P2.4).
+
+    With the flag set, a due time stop is suppressed while the close is still
+    favorable, unless the trade never printed a close-to-close MFE at or above
+    the give-up floor. A zero/None floor never cuts a green trade by timer.
+    """
+    if not position.time_exit_only_unfavorable:
+        return True
+    entry = position.entry_price
+    if entry <= 0:
+        return True
+    favorable = candle.close < entry if position.action == "SELL" else candle.close > entry
+    if not favorable:
+        return True
+    floor = position.time_exit_min_mfe_pct
+    if not floor or floor <= 0:
+        return False
+    return not (position._best_pnl_pct is not None and position._best_pnl_pct >= floor)
+
+
 def _check_exit(
     candle: OHLCVCandle, position: BacktestTrade, bar_idx: int
 ) -> tuple[float | None, str]:
     """Fixed per-pattern exit ladder — see module docstring. No engine overlays."""
+    from core.pattern_provenance import engine_hash
+    if position.pattern_version_id and position.resolved_rules:
+        if position.resolved_rules.get("engine_sha256") != engine_hash():
+            raise RuntimeError("Position exit runtime changed; restore its compatible engine before management")
     is_short = position.action == "SELL"
     at_close = position.exit_fill_at_close
     _update_best_pnl(position, candle)
@@ -621,6 +656,7 @@ def _check_exit(
     if (
         position.exit_bars_after_entry is not None
         and bars_held >= position.exit_bars_after_entry
+        and _time_exit_allowed(position, candle)
     ):
         position.exit_bar_idx = bar_idx
         position.time_exit_bars_elapsed = bars_held
@@ -630,7 +666,7 @@ def _check_exit(
         and position.exit_bars_after_neckline_break is not None
     ):
         elapsed = bar_idx - position.neckline_break_bar_idx
-        if elapsed >= position.exit_bars_after_neckline_break:
+        if elapsed >= position.exit_bars_after_neckline_break and _time_exit_allowed(position, candle):
             position.exit_bar_idx = bar_idx
             position.time_exit_bars_elapsed = elapsed
             return candle.close, "time_exit"
@@ -740,6 +776,15 @@ def _open_trade(
             position.neckline_break_bar_idx = bar_idx
         elif position.neckline_break_direction == "above" and candle.close > position.neckline:
             position.neckline_break_bar_idx = bar_idx
+    from copy import deepcopy
+    from core.pattern_provenance import rules
+    position.pattern_version_id = signal.pattern_version_id
+    position.signal_id = signal.signal_id
+    position.provenance = signal.provenance
+    position.requested_rules = deepcopy(signal.requested_rules) if signal.requested_rules else rules(signal)
+    position.time_exit_only_unfavorable = signal.time_exit_only_unfavorable
+    position.time_exit_min_mfe_pct = signal.time_exit_min_mfe_pct
+    position.resolved_rules = rules(position, "fill")
     return position
 
 
@@ -769,6 +814,10 @@ def _close_trade(
 def _load_patterns(pattern_specs: list[tuple[str, str]]) -> list[BasePattern]:
     out: list[BasePattern] = []
     for module_name, class_name in pattern_specs:
+        if module_name.startswith("version:"):
+            from core.pattern_loader import VersionPattern
+            out.append(VersionPattern(module_name.split(":",1)[1]))
+            continue
         module = importlib.import_module(module_name)
         out.append(getattr(module, class_name)())
     return out
@@ -1051,20 +1100,13 @@ class Backtester:
         self._max_workers = max_workers if max_workers > 0 else (os.cpu_count() or 4)
 
     def _discover_patterns(self) -> None:
-        for module_name, cls in _iter_pattern_classes():
-            instance = cls()
-            if instance.skipped:
-                continue
-            if self._pattern_filter is None and instance.name in self._disabled_patterns:
-                continue
-            if (
-                self._pattern_filter is not None
-                and self._pattern_filter.lower() not in instance.name.lower()
-            ):
+        from core.pattern_loader import discover
+        disabled = self._disabled_patterns if self._pattern_filter is None else ()
+        for instance in discover(disabled):
+            if self._pattern_filter is not None and self._pattern_filter.lower() not in instance.name.lower():
                 continue
             self._patterns.append(instance)
-            self._pattern_files[instance.name] = f"patterns/{module_name}.py"
-            log.info(f"Backtester | registered {instance}")
+            self._pattern_files[instance.name] = "patterns/" + instance.name.removeprefix("pattern_") + ".py"
 
     def _config(self) -> dict:
         profile = get_market(self._market)
@@ -1127,9 +1169,8 @@ class Backtester:
 
         await asyncio.gather(*[_fetch_one(s) for s in self._symbols])
 
-        pattern_specs = [
-            (type(p).__module__, type(p).__qualname__) for p in self._patterns
-        ]
+        from core.pattern_loader import worker_spec
+        pattern_specs = [worker_spec(p) for p in self._patterns]
         config = self._config()
         max_workers = max(1, self._max_workers)
         total = len(tasks)

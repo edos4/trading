@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import base64
-import importlib
 import io
-import pkgutil
 from typing import Any, Optional
 
-import patterns as patterns_pkg
 from analysis.chart_renderer import ChartRenderer
 from analysis.price_volume import volume_confirm_gate
 from config import PATTERN_SCAN_HISTORY_BARS, settings, DISABLED_PATTERNS
@@ -18,46 +15,15 @@ from core.market import get_market
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
 from data.tv_client import TVClient
 from data.history import fetch_ohlcv_candles
-from patterns.base_pattern import BasePattern, TradeSignal, skip_pattern_module
+from patterns.base_pattern import TradeSignal
 from patterns.chart_scan import latest_signals_over_lookback
-from utils.logger import log
 
 TIMEFRAMES = ["1d", "1W"]
 
 
-def discover_patterns(
-    disabled_patterns: list[str] | None = None,
-) -> list[BasePattern]:
-    """Instantiate patterns for the explorer — same skip rules as MarketScanner.
-
-    Skips ``instance.skipped`` and names in ``disabled_patterns`` (defaults to
-    ``DISABLED_PATTERNS`` from config).
-    """
-    disabled = set(disabled_patterns if disabled_patterns is not None else DISABLED_PATTERNS)
-    found: list[BasePattern] = []
-    for module_info in pkgutil.iter_modules(patterns_pkg.__path__):
-        if skip_pattern_module(module_info.name):
-            continue
-        try:
-            module = importlib.import_module(f"patterns.{module_info.name}")
-        except Exception as exc:
-            log.warning(f"Web | Failed to import pattern {module_info.name}: {exc}")
-            continue
-        for attr_name in dir(module):
-            attr = getattr(module, attr_name)
-            if (
-                isinstance(attr, type)
-                and issubclass(attr, BasePattern)
-                and attr is not BasePattern
-            ):
-                try:
-                    instance = attr()
-                    if instance.skipped or instance.name in disabled:
-                        continue
-                    found.append(instance)
-                except Exception as exc:
-                    log.warning(f"Web | Failed to instantiate {attr_name}: {exc}")
-    return found
+def discover_patterns(disabled_patterns=None):
+    from core.pattern_loader import discover
+    return discover(DISABLED_PATTERNS if disabled_patterns is None else disabled_patterns)
 
 
 class ExplorerService:

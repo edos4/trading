@@ -142,6 +142,12 @@ def _trade_from_dict(d: dict) -> BacktestTrade:
     import dataclasses
 
     d = dict(d)
+    if not d.get("trade_id"):
+        # Stable across processes before the first post-migration save. Include
+        # original record bytes; duplicate indistinguishable rows need reconciliation.
+        import hashlib
+        d["trade_id"] = "legacy-" + hashlib.sha256(json.dumps(d,sort_keys=True,default=str).encode()).hexdigest()[:32]
+    d.setdefault("provenance", "legacy_unknown")
     d["entry_date"] = datetime.fromisoformat(d["entry_date"])
     d["exit_date"] = datetime.fromisoformat(d["exit_date"])
     if d.get("sim_entry_date"):
@@ -534,7 +540,7 @@ class PaperAccount:
                 f"Duplicate anchor: a position on {sym} is already open on the "
                 f"same {signal.pattern} pivots {key}."
             )
-        cap = _max_open_per_symbol(signal.pattern)
+        cap = (signal.requested_rules.get("max_open_per_symbol") if signal.pattern_version_id and signal.requested_rules else _max_open_per_symbol(signal.pattern))
         if cap is not None and sum(
             1 for p in open_list if p.pattern == signal.pattern
         ) >= cap:
@@ -829,7 +835,8 @@ class PaperAccount:
             }
         p = Path(path) if path is not None else get_market(self.market).paper_account_path
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        from core.pattern_edit_store import atomic_write
+        atomic_write(p, json.dumps(payload, indent=2).encode())
 
     @classmethod
     def load(cls, path: str | Path | None = None, *, market: str | None = None) -> "PaperAccount":

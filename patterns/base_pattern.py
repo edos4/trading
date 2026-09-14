@@ -149,6 +149,12 @@ class TradeSignal:
     # runs, or when the backtester tags accepted trades for A/B analysis).
     rvol: float | None = None
     obv_slope: float | None = None
+    pattern_version_id: str | None = None
+    signal_id: str | None = None
+    provenance: str = "legacy_unknown"
+    requested_rules: dict | None = None
+    resolved_rules: dict | None = None
+
 
 
 class BasePattern(ABC):
