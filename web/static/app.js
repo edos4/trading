@@ -718,7 +718,7 @@ function initPaper() {
         `<td><span class="pill ${reasonClass(t.reason)}">${esc(fmtReason(t))}</span></td>` +
         `<td class="num">${esc(fmtHold(t.days, t.bars))}</td>` +
         `<td class="muted" title="${esc(t.pattern)}">${esc(fmtPattern(t.pattern))}</td>`;
-      tr.addEventListener("dblclick", () => openTradeChart("closed", t.market, t.symbol, idx));
+      tr.addEventListener("dblclick", () => openTradeChart("closed", t.market, t.symbol, idx, null, t.trade_id));
       closedBody.appendChild(tr);
     });
   }
@@ -759,7 +759,7 @@ function initPaper() {
         `<td>${fmtMoney(p.value, { symbol: p._sym })}</td>` +
         `<td>${p.port_pct == null ? "—" : `${Number(p.port_pct).toFixed(1)}%`}</td>` +
         `<td>${esc(p.pattern)}</td>`;
-      tr.addEventListener("dblclick", () => openTradeChart("open", p.market, p.symbol));
+      tr.addEventListener("dblclick", () => openTradeChart("open", p.market, p.symbol, null, null, p.trade_id));
       posBody.appendChild(tr);
     }
   }
@@ -907,11 +907,12 @@ function initPaper() {
   function closeTradeChart() {
     if (!chartModal) return;
     chartModal.hidden = true;
+    if (window.PatternEditor) window.PatternEditor.close();
     if (window.TVChart) window.TVChart.unmount();
     if (chartOhlc) chartOhlc.textContent = "";
   }
 
-  async function openTradeChart(side, market, symbol, index, logTime) {
+  async function openTradeChart(side, market, symbol, index, logTime, tradeId) {
     if (!chartModal) return;
     chartModal.hidden = false;
     if (chartTitle) chartTitle.textContent = `${(market || "").toUpperCase()} ${symbol || "Chart"}`;
@@ -924,6 +925,7 @@ function initPaper() {
     if (symbol) params.set("symbol", symbol);
     if (index != null) params.set("index", String(index));
     if (logTime) params.set("log_time", logTime);
+    if (tradeId) params.set("trade_id", tradeId);
     try {
       const data = await api(`/api/paper/chart?${params.toString()}`);
       if (chartTitle) chartTitle.textContent = data.title || symbol || "Chart";
@@ -932,8 +934,10 @@ function initPaper() {
         chartOhlc.classList.toggle("gain", Number(data.ohlc && data.ohlc.change) >= 0);
         chartOhlc.classList.toggle("loss", Number(data.ohlc && data.ohlc.change) < 0);
       }
+      if (window.PatternEditor) window.PatternEditor.open(data);
       if (window.TVChart && chartHost) {
         window.TVChart.mount(chartHost, data, {
+          onEdit: data.edit_context ? (bar, role) => window.PatternEditor.select(bar, role) : null,
           onCandle(bar) {
             if (!chartOhlc) return;
             if (!bar) {

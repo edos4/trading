@@ -12,17 +12,14 @@ guard must stay — it already does).
 
 from __future__ import annotations
 
-import importlib
 import multiprocessing
 import os
-import pkgutil
 from concurrent.futures import ProcessPoolExecutor
 
-import patterns as patterns_pkg
 from config import PATTERN_SCAN_HISTORY_BARS, settings
 from data.ohlcv_store import DEFAULT_WINDOW, OHLCVStore
 from data.tv_client import MarketSnapshot, OHLCVCandle
-from patterns.base_pattern import BasePattern, skip_pattern_module, TradeSignal
+from patterns.base_pattern import BasePattern, TradeSignal
 from utils.logger import log
 
 _worker_patterns: list[BasePattern] = []
@@ -41,26 +38,9 @@ def analyze_worker_count(configured: int | None = None) -> int:
     return max(2, min(8, cpu))
 
 
-def load_patterns(disabled: set[str] | list[str]) -> list[BasePattern]:
-    """Same discovery as MarketScanner, without scanner-side logging."""
-    blocked = set(disabled)
-    found: list[BasePattern] = []
-    for module_info in pkgutil.iter_modules(patterns_pkg.__path__):
-        if skip_pattern_module(module_info.name):
-            continue
-        module = importlib.import_module(f"patterns.{module_info.name}")
-        for attr_name in dir(module):
-            attr = getattr(module, attr_name)
-            if (
-                isinstance(attr, type)
-                and issubclass(attr, BasePattern)
-                and attr is not BasePattern
-            ):
-                instance = attr()
-                if instance.skipped or instance.name in blocked:
-                    continue
-                found.append(instance)
-    return found
+def load_patterns(disabled, version_set=None):
+    from core.pattern_loader import discover
+    return discover(disabled, version_set)
 
 
 def init_analyze_worker(
@@ -68,6 +48,7 @@ def init_analyze_worker(
     session_tz: str,
     skip_edgar: bool,
     window: int = DEFAULT_WINDOW,
+    version_set: dict | None = None,
 ) -> None:
     """ProcessPoolExecutor initializer — runs once per spawned worker."""
     global _worker_patterns, _worker_store, _worker_skip_edgar
@@ -79,7 +60,7 @@ def init_analyze_worker(
         window=max(int(window), DEFAULT_WINDOW),
         session_tz=session_tz or "America/New_York",
     )
-    _worker_patterns = load_patterns(disabled)
+    _worker_patterns = load_patterns(disabled, version_set)
     log.debug(
         f"analyze worker pid={os.getpid()} patterns={len(_worker_patterns)}"
     )
@@ -95,12 +76,13 @@ def make_analyze_pool(
 ) -> ProcessPoolExecutor | None:
     if workers <= 1:
         return None
+    from core.pattern_loader import active_versions
     ctx = multiprocessing.get_context("spawn")
     return ProcessPoolExecutor(
         max_workers=workers,
         mp_context=ctx,
         initializer=init_analyze_worker,
-        initargs=(list(disabled), session_tz, bool(skip_edgar), int(window)),
+        initargs=(list(disabled), session_tz, bool(skip_edgar), int(window), active_versions()),
     )
 
 

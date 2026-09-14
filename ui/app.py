@@ -15,9 +15,7 @@ Run:
 
 from __future__ import annotations
 
-import importlib
 import io
-import pkgutil
 import queue
 import threading
 import tkinter as tk
@@ -25,7 +23,6 @@ from tkinter import filedialog, messagebox, ttk
 from typing import Callable, Optional
 
 import matplotlib
-import patterns as patterns_pkg
 from PIL import Image, ImageTk
 
 matplotlib.use("Agg", force=True)
@@ -39,7 +36,7 @@ from analysis.price_volume import volume_confirm_gate
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
 from data.history import fetch_ohlcv_candles
 from data.tv_client import TVClient
-from patterns.base_pattern import BasePattern, TradeSignal, skip_pattern_module
+from patterns.base_pattern import TradeSignal
 from patterns.chart_scan import latest_signals_over_lookback
 from ui.backtest_dialog import BacktestDialog
 from utils.logger import log
@@ -48,31 +45,9 @@ TIMEFRAMES = ["1d", "1W"]
 DEFAULT_SYMBOL_COUNT = 50
 
 
-def discover_patterns() -> list[BasePattern]:
-    """Mirror core.scanner._discover_patterns - instantiate every pattern class."""
-    found: list[BasePattern] = []
-    for module_info in pkgutil.iter_modules(patterns_pkg.__path__):
-        if skip_pattern_module(module_info.name):
-            continue
-        try:
-            module = importlib.import_module(f"patterns.{module_info.name}")
-        except Exception as exc:
-            log.warning(f"UI | Failed to import pattern {module_info.name}: {exc}")
-            continue
-        for attr_name in dir(module):
-            attr = getattr(module, attr_name)
-            if (
-                isinstance(attr, type)
-                and issubclass(attr, BasePattern)
-                and attr is not BasePattern
-            ):
-                try:
-                    instance = attr()
-                    if not instance.skipped:
-                        found.append(instance)
-                except Exception as exc:
-                    log.warning(f"UI | Failed to instantiate {attr_name}: {exc}")
-    return found
+def discover_patterns():
+    from core.pattern_loader import discover
+    return discover()
 
 
 class TradingBotUI:

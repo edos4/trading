@@ -107,6 +107,7 @@ class PaperBook:
                     "status": position_status(p),
                     "action": p.action,
                     "pattern": p.pattern,
+                    **__import__("core.pattern_provenance", fromlist=["payload"]).payload(p),
                     "chart_annotations": p.chart_annotations,
                     "qty": p.qty,
                     "entry": p.entry_price,
@@ -137,6 +138,7 @@ class PaperBook:
                     "symbol": t.symbol,
                     "action": t.action,
                     "pattern": t.pattern,
+                    **__import__("core.pattern_provenance", fromlist=["payload"]).payload(t),
                     "chart_annotations": t.chart_annotations,
                     "qty": t.qty,
                     "entry": t.entry_price,
@@ -274,6 +276,7 @@ class PaperBook:
         symbol: str | None = None,
         index: int | None = None,
         log_time: str | None = None,
+        trade_id: str | None = None,
     ) -> dict[str, Any]:
         from analysis.chart_renderer import build_trade_viewer_payload
 
@@ -284,7 +287,15 @@ class PaperBook:
         trade = None
         current = None
         view_side = side
-        if side == "open":
+        if trade_id:
+            candidates = [t for _,t in account.positions_snapshot()] + account.closed_snapshot()
+            matches = [t for t in candidates if t.trade_id == trade_id]
+            if len(matches) != 1:
+                return {"error": "Trade identity is missing or ambiguous; refresh the table"}
+            trade = matches[0]
+            view_side = "closed" if trade in account.closed_snapshot() else "open"
+            current = account.last_price(trade.symbol, trade.entry_price) if view_side == "open" else None
+        elif side == "open":
             if not symbol:
                 return {"error": "symbol is required for open charts"}
             trade = account.latest_position(symbol)
@@ -331,7 +342,7 @@ class PaperBook:
             return {"error": f"no OHLCV for {trade.symbol} {timeframe}"}
 
         try:
-            return build_trade_viewer_payload(
+            payload = build_trade_viewer_payload(
                 df,
                 symbol=trade.symbol,
                 timeframe=timeframe,
@@ -351,6 +362,14 @@ class PaperBook:
                     else (trade.sim_exit_date or trade.exit_date)
                 ),
             )
+            from core.pattern_edit_validation import candle_rows
+            from core.pattern_provenance import payload as provenance_payload
+            dataset = {"symbol":trade.symbol,"market":account.market,"timeframe":timeframe,
+                       "session_timezone":session_tz,"candles":candle_rows(df,session_tz),
+                       "scan_semantics":"causal_prefix_v1"}
+            payload["edit_context"] = {**provenance_payload(trade),"pattern_id":trade.pattern,
+                                       "market":account.market,"dataset":dataset}
+            return payload
         except Exception as exc:
             log.exception("PaperBook | trade chart payload failed")
             return {"error": f"chart data failed: {exc}"}
@@ -798,9 +817,10 @@ class PaperBookManager:
         symbol: str | None = None,
         index: int | None = None,
         log_time: str | None = None,
+        trade_id: str | None = None,
     ) -> dict[str, Any]:
         return self._book(market).render_trade_chart(
-            side=side, symbol=symbol, index=index, log_time=log_time,
+            side=side, symbol=symbol, index=index, log_time=log_time, trade_id=trade_id,
         )
 
     def export_trades(self, market: str | None = None) -> dict[str, Any]:

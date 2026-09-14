@@ -511,9 +511,9 @@ class PaperDashboard:
         self._log_sort = (col, not desc if col == cur else True)
         self._refresh_logs()
 
-    def _open_chart(self, market: str, side: str, symbol: str | None, index: int | None, log_time: str | None = None) -> None:
+    def _open_chart(self, market: str, side: str, symbol: str | None, index: int | None, log_time: str | None = None, trade_id: str | None = None) -> None:
         from ui.tv_chart import open_trade_viewer
-        payload = paper_books.chart(market, side=side, symbol=symbol, index=index, log_time=log_time)
+        payload = paper_books.chart(market, side=side, symbol=symbol, index=index, log_time=log_time, trade_id=trade_id)
         if payload.get("error"):
             messagebox.showinfo("Chart", payload["error"], parent=self._top)
             return
@@ -528,8 +528,8 @@ class PaperDashboard:
         entry = self._pos_rows.get(sel[0])
         if entry is None:
             return
-        market, symbol = entry
-        self._open_chart(market, "open", symbol, None)
+        market, symbol, trade_id = entry
+        self._open_chart(market, "open", symbol, None, trade_id=trade_id)
 
     def _on_closed_double_click(self, event) -> None:
         if self._closed_tree.identify_region(event.x, event.y) != "cell":
@@ -540,8 +540,8 @@ class PaperDashboard:
         entry = self._closed_rows.get(sel[0])
         if entry is None:
             return
-        market, index = entry
-        self._open_chart(market, "closed", None, index)
+        market, index, trade_id = entry
+        self._open_chart(market, "closed", None, index, trade_id=trade_id)
 
     def _on_log_double_click(self, event) -> None:
         if self._log_tree.identify_region(event.x, event.y) != "cell":
@@ -640,7 +640,7 @@ class PaperDashboard:
                 ),
                 tags=(_pnl_tag(float(row.get("unrl_pct") or 0)), f"book-{mkt}"),
             )
-            self._pos_rows[item_id] = (mkt, row.get("symbol") or "")
+            self._pos_rows[item_id] = (mkt, row.get("symbol") or "", row.get("trade_id"))
         self._pos_tree.set_sort(*self._pos_sort)
 
     def _refresh_closed(self) -> None:
@@ -696,7 +696,7 @@ class PaperDashboard:
                 ),
                 tags=(_pnl_tag(dollars), f"book-{mkt}"),
             )
-            self._closed_rows[item_id] = (mkt, int(t.get("_idx") or 0))
+            self._closed_rows[item_id] = (mkt, int(t.get("_idx") or 0), t.get("trade_id"))
         self._closed_tree.set_sort(*self._closed_sort)
 
     def _refresh_logs(self) -> None:

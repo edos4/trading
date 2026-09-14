@@ -135,6 +135,9 @@ def create_app() -> FastAPI:
             request, name, ctx(request, **extra), status_code=status_code,
         )
 
+    from web.pattern_edit_api import install_pattern_edit_routes
+    install_pattern_edit_routes(app)
+
     # ── Auth ──────────────────────────────────────────────────────────────
     @app.get("/login", response_class=HTMLResponse)
     async def login_page(request: Request, next: str = "/", error: str = ""):
@@ -534,6 +537,7 @@ def create_app() -> FastAPI:
         result = paper_books.chart(
             market, side=side, symbol=symbol, index=index,
             log_time=request.query_params.get("log_time") or None,
+            **({"trade_id":request.query_params["trade_id"]} if request.query_params.get("trade_id") else {}),
         )
         if result.get("error"):
             return JSONResponse({"detail": result["error"]}, status_code=404)
