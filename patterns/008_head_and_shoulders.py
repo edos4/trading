@@ -43,6 +43,7 @@ class HeadAndShouldersPattern(BasePattern):
     @property
     def name(self) -> str:
         return "pattern_008_head_and_shoulders"
+    skipped = True
 
     @property
     def timeframes(self) -> list[str]:
