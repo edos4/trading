@@ -211,17 +211,14 @@
       <button type="button" class="btn ghost" id="paper-chart-close">Close</button>
     </header>
     <p id="paper-chart-status" class="muted">Loading…</p>
-    <div style="display:flex;gap:12px;align-items:stretch;max-height:80vh;overflow:auto">
-      <div id="paper-chart-host" class="tv-chart-host" style="flex:1;min-width:400px"></div>
-      <aside id="pattern-editor" style="width:370px;flex-shrink:0" hidden></aside>
-    </div>
+    <div id="paper-chart-host" class="tv-chart-host"></div>
   </div>
 </div>
 {% endblock %}
 {% block scripts %}
 <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
-<script src="/static/tv_chart.js?v=6"></script>
-<script src="/static/pattern_editor.js"></script>
+<script src="/static/tv_chart.js?v=9"></script>
+<script src="/static/pattern_notes.js?v=2"></script>
 <script>
   window.TB_PAGE = "paper";
   window.TB_MARKETS = {{ markets | tojson }};

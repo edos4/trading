@@ -907,7 +907,6 @@ function initPaper() {
   function closeTradeChart() {
     if (!chartModal) return;
     chartModal.hidden = true;
-    if (window.PatternEditor) window.PatternEditor.close();
     if (window.TVChart) window.TVChart.unmount();
     if (chartOhlc) chartOhlc.textContent = "";
   }
@@ -934,10 +933,8 @@ function initPaper() {
         chartOhlc.classList.toggle("gain", Number(data.ohlc && data.ohlc.change) >= 0);
         chartOhlc.classList.toggle("loss", Number(data.ohlc && data.ohlc.change) < 0);
       }
-      if (window.PatternEditor) window.PatternEditor.open(data);
       if (window.TVChart && chartHost) {
         window.TVChart.mount(chartHost, data, {
-          onEdit: data.edit_context ? (bar, role) => window.PatternEditor.select(bar, role) : null,
           onCandle(bar) {
             if (!chartOhlc) return;
             if (!bar) {

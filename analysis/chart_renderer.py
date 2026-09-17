@@ -8,6 +8,7 @@ Uses mplfinance for candlestick rendering.
 from __future__ import annotations
 import io
 import json
+import textwrap
 from pathlib import Path
 from datetime import datetime
 
@@ -40,6 +41,15 @@ TV_RSI = "#7e57c2"
 RSI_PERIOD = 14
 RSI_OVERBOUGHT = 70.0
 RSI_OVERSOLD = 30.0
+
+# Points of clearance between a part label and the reason printed under it.
+NOTE_LINE_PT = 13
+NOTE_WRAP = 44
+
+
+def _wrap_reason(reason: str, width: int = NOTE_WRAP) -> str:
+    """Wrap a part's reason so it stays a narrow caption under its label."""
+    return "\n".join(textwrap.wrap(reason, width)) if reason else ""
 
 
 class ChartRenderer:
@@ -452,10 +462,10 @@ class ChartRenderer:
         return int(positions[0]) if len(positions) else None
 
     def _draw_annotations(
-        self, price_axis, df: pd.DataFrame, annotations: list[dict]
+        self, price_axis, df: pd.DataFrame, annotations: list[dict], pattern: str | None = None
     ) -> None:
         """Overlay pattern markers, horizontal lines, and trend segments."""
-        for ann in pattern_annotations(annotations):
+        for ann in pattern_annotations(annotations, df, pattern):
             kind = ann.get("type")
             if kind == "marker":
                 self._draw_marker(price_axis, df, ann)
@@ -480,6 +490,7 @@ class ChartRenderer:
         color = ann.get("color", TV_TEXT)
         marker = ann.get("marker", "o")
         label = ann.get("label", "")
+        reason = ann.get("reason", "")
         price_axis.scatter(
             [x], [price], marker=marker, s=70,
             color=color, edgecolors="#ffffff", linewidths=0.6, zorder=5,
@@ -489,22 +500,37 @@ class ChartRenderer:
         pos = ann.get("label_pos", "above")
         offset = 8 if pos == "above" else -8
         va = "bottom" if pos == "above" else "top"
+        # The reason sits on the marker side of the label so it always reads
+        # directly under it: label further out, note next to the anchor.
+        label_offset = offset + (NOTE_LINE_PT if reason else 0)
         price_axis.annotate(
             label,
             xy=(x, price),
-            xytext=(0, offset),
+            xytext=(0, label_offset),
             textcoords="offset points",
             ha="center", va=va,
             fontsize=8, fontweight="bold", color=color,
             bbox=dict(facecolor=TV_BG, edgecolor="none", pad=1.5, alpha=0.9),
             clip_on=True,
         )
+        if reason:
+            price_axis.annotate(
+                _wrap_reason(reason),
+                xy=(x, price),
+                xytext=(0, offset),
+                textcoords="offset points",
+                ha="center", va=va,
+                fontsize=6.4, color=TV_TEXT_DIM,
+                bbox=dict(facecolor=TV_BG, edgecolor="none", pad=1.2, alpha=0.85),
+                clip_on=True,
+            )
 
     def _draw_hline(self, price_axis, ann: dict) -> None:
         price = float(ann["price"])
         color = ann.get("color", TV_TEXT_DIM)
         style = ann.get("style", "--")
         label = ann.get("label", "")
+        reason = ann.get("reason", "")
         price_axis.axhline(
             price, color=color, linestyle=style, linewidth=1.0, alpha=0.85, zorder=3,
         )
@@ -521,6 +547,18 @@ class ChartRenderer:
             bbox=dict(facecolor=color, edgecolor=color, pad=1.5, boxstyle="square,pad=0.2"),
             clip_on=False,
         )
+        if reason:
+            price_axis.annotate(
+                _wrap_reason(reason),
+                xy=(1.0, price),
+                xycoords=("axes fraction", "data"),
+                xytext=(-2, -10),
+                textcoords="offset points",
+                ha="right", va="top",
+                fontsize=6.4, color=color,
+                bbox=dict(facecolor=TV_BG, edgecolor="none", pad=1.2, alpha=0.85),
+                clip_on=False,
+            )
 
     def _draw_segment(
         self, price_axis, df: pd.DataFrame, ann: dict
@@ -543,13 +581,25 @@ class ChartRenderer:
     @staticmethod
     def _draw_geometry_label(price_axis, points, ann):
         if ann.get("label"):
-            below = "lower" in ann["label"].lower() or "support" in ann["label"].lower()
+            label = ann["label"]
+            reason = ann.get("reason", "")
+            below = "lower" in label.lower() or "support" in label.lower()
+            offset = -12 if below else 12
             price_axis.annotate(
-                ann["label"], xy=points[len(points) // 2], xytext=(0, -12 if below else 12),
+                label, xy=points[len(points) // 2],
+                xytext=(0, offset + (NOTE_LINE_PT if reason else 0)),
                 textcoords="offset points", ha="center", va="top" if below else "bottom",
                 fontsize=8, color=ann["color"], clip_on=True,
                 bbox=dict(facecolor=TV_BG, edgecolor="none", pad=2, alpha=0.9),
             )
+            if reason:
+                price_axis.annotate(
+                    _wrap_reason(reason), xy=points[len(points) // 2],
+                    xytext=(0, offset),
+                    textcoords="offset points", ha="center", va="top" if below else "bottom",
+                    fontsize=6.4, color=TV_TEXT_DIM, clip_on=True,
+                    bbox=dict(facecolor=TV_BG, edgecolor="none", pad=1.6, alpha=0.85),
+                )
 
     @staticmethod
     def _format_volume(value: float) -> str:
@@ -767,7 +817,8 @@ def build_trade_viewer_payload(
         if ann.get("type") == "hline":
             price = _viewer_finite(ann.get("price"))
             if price is not None and not any(level["price"] == price and level["title"] == ann.get("label") for level in levels):
-                levels.append({"price": price, "title": ann.get("label", ""), "color": color})
+                levels.append({"price": price, "title": ann.get("label", ""), "color": color,
+                               "reason": ann.get("reason", "")})
         elif ann.get("type") in {"segment", "path"}:
             points = ann.get("points", []) if ann["type"] == "path" else [
                 {"date": ann.get("start_date"), "price": ann.get("start_price")},
@@ -785,14 +836,14 @@ def build_trade_viewer_payload(
                     if len(between) > 2:
                         middle = len(between) // 2
                         values[between[middle]] = p0 + (p1 - p0) * middle / (len(between) - 1)
-                segments.append({"data": [{"time": t, "value": p} for t, p in sorted(values.items())], "color": color, "style": ann.get("style", "-"), "width": ann.get("width", 2), "label": ann.get("label", "")})
+                segments.append({"data": [{"time": t, "value": p} for t, p in sorted(values.items())], "color": color, "style": ann.get("style", "-"), "width": ann.get("width", 2), "label": ann.get("label", ""), "reason": ann.get("reason", "")})
         elif ann.get("type") == "marker":
             time = annotation_time(ann.get("date"))
             price = _viewer_finite(ann.get("price"))
             if time and price is not None:
                 if ann.get("label") == "Entry" and time == entry_bar and action:
                     continue
-                markers.append({"time": time, "price": price, "position": "belowBar" if ann.get("label_pos") == "below" else "aboveBar", "color": color, "shape": {"^": "arrowUp", "v": "arrowDown"}.get(ann.get("marker"), "circle"), "text": ann.get("label", "")})
+                markers.append({"time": time, "price": price, "position": "belowBar" if ann.get("label_pos") == "below" else "aboveBar", "color": color, "shape": {"^": "arrowUp", "v": "arrowDown"}.get(ann.get("marker"), "circle"), "text": ann.get("label", ""), "reason": ann.get("reason", "")})
     markers.sort(key=lambda marker: marker["time"])
     title = f"{symbol} {renderer._tv_timeframe_label(timeframe)}"
     if pattern:

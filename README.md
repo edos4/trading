@@ -518,7 +518,10 @@ What both UIs support:
   TradingView-style candlestick chart.
 - Run all registered pattern modules for the selected symbol/timeframe.
   If a pattern is detected, its chart annotations are plotted on the graph
-  and the signal appears in the detected-patterns table.
+  and the signal appears in the detected-patterns table. Every labeled part
+  (first bottom, neckline, second bottom, entry, channel rails, …) prints the
+  conditions that part satisfied directly under its label — thresholds are read
+  from the detector itself, so the note always matches the live rules.
 - **Kronos 3d gate** checkbox (toolbar): when checked, explorer detections
   must also clear the same 3% in 3 days Kronos confirm gate used by the scanner.
 - **Volume gate** checkbox (toolbar): when checked, detections must also

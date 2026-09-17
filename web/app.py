@@ -135,9 +135,6 @@ def create_app() -> FastAPI:
             request, name, ctx(request, **extra), status_code=status_code,
         )
 
-    from web.pattern_edit_api import install_pattern_edit_routes
-    install_pattern_edit_routes(app)
-
     # ── Auth ──────────────────────────────────────────────────────────────
     @app.get("/login", response_class=HTMLResponse)
     async def login_page(request: Request, next: str = "/", error: str = ""):

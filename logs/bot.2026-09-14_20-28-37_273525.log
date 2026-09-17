@@ -1,0 +1,226 @@
+2026-09-14 20:28:37.272 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | CRBP: asof mismatch: CRBP has no bar on 2026-09-07
+2026-09-14 20:28:37.273 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | BLIV: asof mismatch: BLIV has no bar on 2026-09-07
+2026-09-14 20:28:37.273 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | RDZN: asof mismatch: RDZN has no bar on 2026-09-07
+2026-09-14 20:28:37.273 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | RTAC: asof mismatch: RTAC has no bar on 2026-09-07
+2026-09-14 20:28:37.273 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | MTNE: asof mismatch: MTNE has no bar on 2026-09-07
+2026-09-14 20:28:37.273 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | MNKD: asof mismatch: MNKD has no bar on 2026-09-07
+2026-09-14 20:28:37.273 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | JACS: asof mismatch: JACS has no bar on 2026-09-07
+2026-09-14 20:28:37.274 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | BNL: asof mismatch: BNL has no bar on 2026-09-07
+2026-09-14 20:28:37.275 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | VTR: asof mismatch: VTR has no bar on 2026-09-07
+2026-09-14 20:28:37.275 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | ATCH: asof mismatch: ATCH has no bar on 2026-09-07
+2026-09-14 20:28:37.275 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | FCF: asof mismatch: FCF has no bar on 2026-09-07
+2026-09-14 20:28:37.275 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | ELOX: asof mismatch: ELOX has no bar on 2026-09-07
+2026-09-14 20:28:37.275 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | MBAK: asof mismatch: MBAK has no bar on 2026-09-07
+2026-09-14 20:28:37.276 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | SLNG: asof mismatch: SLNG has no bar on 2026-09-07
+2026-09-14 20:28:37.276 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | GMM: asof mismatch: GMM has no bar on 2026-09-07
+2026-09-14 20:28:37.276 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | CLNE: asof mismatch: CLNE has no bar on 2026-09-07
+2026-09-14 20:28:37.276 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | IBRX: asof mismatch: IBRX has no bar on 2026-09-07
+2026-09-14 20:28:37.277 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | SRRK: asof mismatch: SRRK has no bar on 2026-09-07
+2026-09-14 20:28:37.277 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | FRSH: asof mismatch: FRSH has no bar on 2026-09-07
+2026-09-14 20:28:37.277 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | AUID: asof mismatch: AUID has no bar on 2026-09-07
+2026-09-14 20:28:37.277 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | WTW: asof mismatch: WTW has no bar on 2026-09-07
+2026-09-14 20:28:37.307 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | FORR: asof mismatch: FORR has no bar on 2026-09-07
+2026-09-14 20:28:37.307 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | AMR: asof mismatch: AMR has no bar on 2026-09-07
+2026-09-14 20:28:37.307 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | BDCC: asof mismatch: BDCC has no bar on 2026-09-07
+2026-09-14 20:28:37.307 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | ANNA: asof mismatch: ANNA has no bar on 2026-09-07
+2026-09-14 20:28:37.307 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | NODK: asof mismatch: NODK has no bar on 2026-09-07
+2026-09-14 20:28:37.307 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | LIMX: asof mismatch: LIMX has no bar on 2026-09-07
+2026-09-14 20:28:37.307 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | ATOM: asof mismatch: ATOM has no bar on 2026-09-07
+2026-09-14 20:28:37.307 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | CTKB: asof mismatch: CTKB has no bar on 2026-09-07
+2026-09-14 20:28:37.307 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | DIN: asof mismatch: DIN has no bar on 2026-09-07
+2026-09-14 20:28:37.307 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | QFIN: asof mismatch: QFIN has no bar on 2026-09-07
+2026-09-14 20:28:37.307 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | TRSO: asof mismatch: TRSO has no bar on 2026-09-07
+2026-09-14 20:28:37.307 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | HUBC: asof mismatch: HUBC has no bar on 2026-09-07
+2026-09-14 20:28:37.307 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | YOU: asof mismatch: YOU has no bar on 2026-09-07
+2026-09-14 20:28:37.307 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | INNV: asof mismatch: INNV has no bar on 2026-09-07
+2026-09-14 20:28:37.307 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | RYES: asof mismatch: RYES has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | LKQ: asof mismatch: LKQ has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | ORC: asof mismatch: ORC has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | HUMA: asof mismatch: HUMA has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | SAGT: asof mismatch: SAGT has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | EGG: asof mismatch: EGG has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | APWL: asof mismatch: APWL has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | SHPWQ: asof mismatch: SHPWQ has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | NPWR: asof mismatch: NPWR has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | DUK: asof mismatch: DUK has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | ATLO: asof mismatch: ATLO has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | CYCU: asof mismatch: CYCU has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | ROAD: asof mismatch: ROAD has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | MCBS: asof mismatch: MCBS has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | PBNC: asof mismatch: PBNC has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | MFI: asof mismatch: MFI has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | HOLO: asof mismatch: HOLO has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | CVEO: asof mismatch: CVEO has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | EDBL: asof mismatch: EDBL has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | FNLC: asof mismatch: FNLC has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | ERAS: asof mismatch: ERAS has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | STEK: asof mismatch: STEK has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | JUNS: asof mismatch: JUNS has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | KMI: asof mismatch: KMI has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | BSIN: asof mismatch: BSIN has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | ASPN: asof mismatch: ASPN has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | SKYE: asof mismatch: SKYE has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | RGNT: asof mismatch: RGNT has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | GJT: asof mismatch: GJT has no bar on 2026-09-07
+2026-09-14 20:28:37.308 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | CNX: asof mismatch: CNX has no bar on 2026-09-07
+2026-09-14 20:28:37.309 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | MLGO: asof mismatch: MLGO has no bar on 2026-09-07
+2026-09-14 20:28:37.309 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | LUD: asof mismatch: LUD has no bar on 2026-09-07
+2026-09-14 20:28:37.309 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | PYPL: asof mismatch: PYPL has no bar on 2026-09-07
+2026-09-14 20:28:37.309 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | RRC: asof mismatch: RRC has no bar on 2026-09-07
+2026-09-14 20:28:37.309 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | HESM: asof mismatch: HESM has no bar on 2026-09-07
+2026-09-14 20:28:37.309 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | SNDX: asof mismatch: SNDX has no bar on 2026-09-07
+2026-09-14 20:28:37.353 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | MOV: asof mismatch: MOV has no bar on 2026-09-07
+2026-09-14 20:28:37.353 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | AVY: asof mismatch: AVY has no bar on 2026-09-07
+2026-09-14 20:28:37.353 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | HURN: asof mismatch: HURN has no bar on 2026-09-07
+2026-09-14 20:28:37.353 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | ITG: asof mismatch: ITG has no bar on 2026-09-07
+2026-09-14 20:28:37.353 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | AER: asof mismatch: AER has no bar on 2026-09-07
+2026-09-14 20:28:37.353 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | WAT: asof mismatch: WAT has no bar on 2026-09-07
+2026-09-14 20:28:37.353 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | CRVL: asof mismatch: CRVL has no bar on 2026-09-07
+2026-09-14 20:28:37.353 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | PGY: asof mismatch: PGY has no bar on 2026-09-07
+2026-09-14 20:28:37.353 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | OPTX: asof mismatch: OPTX has no bar on 2026-09-07
+2026-09-14 20:28:37.353 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | AUNA: asof mismatch: AUNA has no bar on 2026-09-07
+2026-09-14 20:28:37.353 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | RYDE: asof mismatch: RYDE has no bar on 2026-09-07
+2026-09-14 20:28:37.353 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | ASMB: asof mismatch: ASMB has no bar on 2026-09-07
+2026-09-14 20:28:37.353 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | LOPE: asof mismatch: LOPE has no bar on 2026-09-07
+2026-09-14 20:28:37.353 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | BUSE: asof mismatch: BUSE has no bar on 2026-09-07
+2026-09-14 20:28:37.353 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | LOCO: asof mismatch: LOCO has no bar on 2026-09-07
+2026-09-14 20:28:37.353 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | NCMI: asof mismatch: NCMI has no bar on 2026-09-07
+2026-09-14 20:28:37.353 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | EJH: asof mismatch: EJH has no bar on 2026-09-07
+2026-09-14 20:28:37.353 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | APAC: asof mismatch: APAC has no bar on 2026-09-07
+2026-09-14 20:28:37.353 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | EE: asof mismatch: EE has no bar on 2026-09-07
+2026-09-14 20:28:37.354 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | CANL: asof mismatch: CANL has no bar on 2026-09-07
+2026-09-14 20:28:37.354 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | CCO: asof mismatch: CCO has no bar on 2026-09-07
+2026-09-14 20:28:37.354 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | HAWK: asof mismatch: HAWK has no bar on 2026-09-07
+2026-09-14 20:28:37.354 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | CVSA: asof mismatch: CVSA has no bar on 2026-09-07
+2026-09-14 20:28:37.354 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | SONO: asof mismatch: SONO has no bar on 2026-09-07
+2026-09-14 20:28:37.354 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | WHLT: asof mismatch: WHLT has no bar on 2026-09-07
+2026-09-14 20:28:37.355 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | SVBT: asof mismatch: SVBT has no bar on 2026-09-07
+2026-09-14 20:28:37.355 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | SFLM: asof mismatch: SFLM has no bar on 2026-09-07
+2026-09-14 20:28:37.355 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | OMH: asof mismatch: OMH has no bar on 2026-09-07
+2026-09-14 20:28:37.355 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | BNC: asof mismatch: BNC has no bar on 2026-09-07
+2026-09-14 20:28:37.355 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | IZM: asof mismatch: IZM has no bar on 2026-09-07
+2026-09-14 20:28:37.355 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | FTFT: asof mismatch: FTFT has no bar on 2026-09-07
+2026-09-14 20:28:37.355 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | CQP: asof mismatch: CQP has no bar on 2026-09-07
+2026-09-14 20:28:37.355 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | HEPS: asof mismatch: HEPS has no bar on 2026-09-07
+2026-09-14 20:28:37.355 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | ANGI: asof mismatch: ANGI has no bar on 2026-09-07
+2026-09-14 20:28:37.355 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | CIZN: asof mismatch: CIZN has no bar on 2026-09-07
+2026-09-14 20:28:37.355 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | TONR: asof mismatch: TONR has no bar on 2026-09-07
+2026-09-14 20:28:37.355 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | LX: asof mismatch: LX has no bar on 2026-09-07
+2026-09-14 20:28:37.355 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | VPG: asof mismatch: VPG has no bar on 2026-09-07
+2026-09-14 20:28:37.355 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | XYZ: asof mismatch: XYZ has no bar on 2026-09-07
+2026-09-14 20:28:37.355 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | LNTH: asof mismatch: LNTH has no bar on 2026-09-07
+2026-09-14 20:28:37.356 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | EMAT: asof mismatch: EMAT has no bar on 2026-09-07
+2026-09-14 20:28:37.356 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | OGE: asof mismatch: OGE has no bar on 2026-09-07
+2026-09-14 20:28:37.356 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | MS: asof mismatch: MS has no bar on 2026-09-07
+2026-09-14 20:28:37.356 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | ALNT: asof mismatch: ALNT has no bar on 2026-09-07
+2026-09-14 20:28:37.356 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | KNTK: asof mismatch: KNTK has no bar on 2026-09-07
+2026-09-14 20:28:37.356 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | VSME: asof mismatch: VSME has no bar on 2026-09-07
+2026-09-14 20:28:37.356 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | FBPA: asof mismatch: FBPA has no bar on 2026-09-07
+2026-09-14 20:28:37.376 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | SIG: asof mismatch: SIG has no bar on 2026-09-07
+2026-09-14 20:28:37.376 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | SJM: asof mismatch: SJM has no bar on 2026-09-07
+2026-09-14 20:28:37.376 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | OGN: asof mismatch: OGN has no bar on 2026-09-07
+2026-09-14 20:28:37.376 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | SOPH: asof mismatch: SOPH has no bar on 2026-09-07
+2026-09-14 20:28:37.376 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | SPHL: asof mismatch: SPHL has no bar on 2026-09-07
+2026-09-14 20:28:37.376 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | RYZ: asof mismatch: RYZ has no bar on 2026-09-07
+2026-09-14 20:28:37.376 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | LTC: asof mismatch: LTC has no bar on 2026-09-07
+2026-09-14 20:28:37.376 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | YELP: asof mismatch: YELP has no bar on 2026-09-07
+2026-09-14 20:28:37.376 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | MSS: asof mismatch: MSS has no bar on 2026-09-07
+2026-09-14 20:28:37.376 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | SMP: asof mismatch: SMP has no bar on 2026-09-07
+2026-09-14 20:28:37.376 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | TVGN: asof mismatch: TVGN has no bar on 2026-09-07
+2026-09-14 20:28:37.377 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | ZEPP: asof mismatch: ZEPP has no bar on 2026-09-07
+2026-09-14 20:28:37.377 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | CGBD: asof mismatch: CGBD has no bar on 2026-09-07
+2026-09-14 20:28:37.377 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | GXO: asof mismatch: GXO has no bar on 2026-09-07
+2026-09-14 20:28:37.377 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | SNAL: asof mismatch: SNAL has no bar on 2026-09-07
+2026-09-14 20:28:37.377 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | EVER: asof mismatch: EVER has no bar on 2026-09-07
+2026-09-14 20:28:37.377 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | TDS: asof mismatch: TDS has no bar on 2026-09-07
+2026-09-14 20:28:37.377 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | MGRC: asof mismatch: MGRC has no bar on 2026-09-07
+2026-09-14 20:28:37.377 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | NRP: asof mismatch: NRP has no bar on 2026-09-07
+2026-09-14 20:28:37.377 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | TENX: asof mismatch: TENX has no bar on 2026-09-07
+2026-09-14 20:28:37.377 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | CMCT: asof mismatch: CMCT has no bar on 2026-09-07
+2026-09-14 20:28:37.377 | DEBUG    | data.stream_client:_snapshot_from_reply:85 - StreamClient | CNM: asof mismatch: CNM has no bar on 2026-09-07
+2026-09-14 20:28:38.477 | INFO     | core.scanner:_scan_all:781 - Scan complete
+2026-09-14 20:28:38.482 | INFO     | core.scanner:_scan_all:608 - Scan | 500 symbols x 1 timeframes (['1d']) x 6 patterns | concurrency=15 batch=50 analyze_pool=8
+2026-09-14 20:28:38.483 | INFO     | core.scanner:_pin_replay_asof:531 - Scan | replay asof pinned to 2026-09-08 via SNDK
+2026-09-14 20:28:38.744 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK BLSH 2026-09-08 close=35.4000 unrl=-2.26% mtm=-$226.39 r=— status=TRAILING bars=2 value=$9,773.61
+2026-09-14 20:28:38.745 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK LOGC 2026-09-08 close=12.6900 unrl=+0.08% mtm=+$7.89 r=— status=TRAILING bars=8 value=$10,007.89
+2026-09-14 20:28:38.925 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK SOHOB 2026-09-08 close=3.3000 unrl=+17.86% mtm=+$1,785.71 r=— status=TRAILING bars=9 value=$11,785.71
+2026-09-14 20:28:38.925 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK GTLB 2026-09-08 close=47.5850 unrl=+2.25% mtm=+$224.54 r=— status=TRAILING bars=5 value=$10,224.54
+2026-09-14 20:28:39.089 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK JMIA 2026-09-08 close=7.2600 unrl=+2.69% mtm=+$268.74 r=— status=TRAILING bars=7 value=$10,268.74
+2026-09-14 20:28:39.370 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK TARA 2026-09-08 close=3.8509 unrl=-2.26% mtm=-$226.14 r=— status=trailing_stop bars=3 value=$9,773.58
+2026-09-14 20:28:39.371 | INFO     | core.backtester:_close_trade:762 - Backtest | EXIT TARA 1d reason=trailing_stop pnl=-2.46%
+2026-09-14 20:28:39.371 | INFO     | core.paper_trader:_manage_position:746 - Paper | CLOSE TARA reason=trailing_stop pnl=-2.46%
+2026-09-14 20:28:39.483 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK HUHU 2026-09-08 close=4.2500 unrl=+5.97% mtm=+$597.35 r=— status=TRAILING bars=9 value=$9,402.65
+2026-09-14 20:28:39.835 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK SNAL 2026-09-08 close=2.5350 unrl=-0.20% mtm=-$19.76 r=— status=TRAILING bars=1 value=$10,019.76
+2026-09-14 20:28:41.072 | INFO     | core.scanner:_process_signal:985 - Signal | PLMR 1d | BUY | pattern=pattern_003_double_bottom | confidence=1.00
+2026-09-14 20:28:41.072 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK PLMR 2026-09-08 close=134.2200 unrl=+0.00% mtm=+$0.00 r=— status=OPEN bars=0 value=$9,932.28
+2026-09-14 20:28:41.076 | INFO     | core.paper_trader:_open_position_locked:614 - Paper | OPEN BUY 74.0 PLMR @ 134.22 (pattern=pattern_003_double_bottom)
+2026-09-14 20:28:43.114 | INFO     | core.scanner:_scan_all:781 - Scan complete
+2026-09-14 20:28:43.120 | INFO     | core.scanner:_scan_all:608 - Scan | 500 symbols x 1 timeframes (['1d']) x 6 patterns | concurrency=15 batch=50 analyze_pool=8
+2026-09-14 20:28:43.121 | INFO     | core.scanner:_pin_replay_asof:531 - Scan | replay asof pinned to 2026-09-09 via SNDK
+2026-09-14 20:28:43.359 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK BLSH 2026-09-09 close=34.4090 unrl=-5.00% mtm=-$500.00 r=— status=trailing_stop bars=3 value=$9,500.00
+2026-09-14 20:28:43.359 | INFO     | core.backtester:_close_trade:762 - Backtest | EXIT BLSH 1d reason=trailing_stop pnl=-5.20%
+2026-09-14 20:28:43.359 | INFO     | core.paper_trader:_manage_position:746 - Paper | CLOSE BLSH reason=trailing_stop pnl=-5.20%
+2026-09-14 20:28:43.360 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK LOGC 2026-09-09 close=13.7500 unrl=+8.44% mtm=+$843.85 r=— status=TRAILING bars=9 value=$10,843.85
+2026-09-14 20:28:43.490 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK SOHOB 2026-09-09 close=3.3000 unrl=+17.86% mtm=+$1,785.71 r=— status=TRAILING bars=10 value=$11,785.71
+2026-09-14 20:28:43.490 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK GTLB 2026-09-09 close=47.3385 unrl=+1.72% mtm=+$171.57 r=— status=trailing_stop bars=6 value=$10,171.57
+2026-09-14 20:28:43.490 | INFO     | core.backtester:_close_trade:762 - Backtest | EXIT GTLB 1d reason=trailing_stop pnl=+1.51%
+2026-09-14 20:28:43.490 | INFO     | core.paper_trader:_manage_position:746 - Paper | CLOSE GTLB reason=trailing_stop pnl=+1.51%
+2026-09-14 20:28:43.599 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK JMIA 2026-09-09 close=7.5200 unrl=+6.36% mtm=+$636.49 r=— status=TRAILING bars=8 value=$10,636.49
+2026-09-14 20:28:43.761 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK PLMR 2026-09-09 close=130.1934 unrl=-3.00% mtm=-$297.97 r=— status=trailing_stop bars=1 value=$9,634.31
+2026-09-14 20:28:43.767 | INFO     | core.backtester:_close_trade:762 - Backtest | EXIT PLMR 1d reason=trailing_stop pnl=-3.20%
+2026-09-14 20:28:43.767 | INFO     | core.paper_trader:_manage_position:746 - Paper | CLOSE PLMR reason=trailing_stop pnl=-3.20%
+2026-09-14 20:28:43.893 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK HUHU 2026-09-09 close=4.1600 unrl=+7.96% mtm=+$796.46 r=— status=TRAILING bars=10 value=$9,203.54
+2026-09-14 20:28:44.182 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK SNAL 2026-09-09 close=2.6400 unrl=-4.35% mtm=-$434.78 r=— status=TRAILING bars=2 value=$10,434.78
+2026-09-14 20:28:44.210 | INFO     | core.scanner:_process_signal:985 - Signal | SNTI 1d | SELL | pattern=pattern_010_pennant | confidence=1.00
+2026-09-14 20:28:44.211 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK SNTI 2026-09-09 close=0.2990 unrl=+0.00% mtm=+$0.00 r=— status=OPEN bars=0 value=$10,000.00
+2026-09-14 20:28:44.211 | INFO     | core.paper_trader:_open_position_locked:614 - Paper | OPEN SELL 33444.81661354909 SNTI @ 0.30 (pattern=pattern_010_pennant)
+2026-09-14 20:28:45.253 | INFO     | core.scanner:_process_signal:985 - Signal | DRIO 1d | BUY | pattern=pattern_003_double_bottom | confidence=1.00
+2026-09-14 20:28:45.253 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK DRIO 2026-09-09 close=6.8200 unrl=+0.00% mtm=+$0.00 r=— status=OPEN bars=0 value=$9,998.12
+2026-09-14 20:28:45.254 | INFO     | core.paper_trader:_open_position_locked:614 - Paper | OPEN BUY 1466.0 DRIO @ 6.82 (pattern=pattern_003_double_bottom)
+2026-09-14 20:28:45.823 | INFO     | core.scanner:_process_signal:985 - Signal | GRAN 1d | SELL | pattern=pattern_010_pennant | confidence=1.00
+2026-09-14 20:28:45.823 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK GRAN 2026-09-09 close=1.0000 unrl=+0.00% mtm=+$0.00 r=— status=OPEN bars=0 value=$10,000.00
+2026-09-14 20:28:45.824 | INFO     | core.paper_trader:_open_position_locked:614 - Paper | OPEN SELL 10000.0 GRAN @ 1.00 (pattern=pattern_010_pennant)
+2026-09-14 20:28:46.198 | INFO     | core.scanner:_process_signal:985 - Signal | BIRK 1d | SELL | pattern=pattern_010_pennant | confidence=1.00
+2026-09-14 20:28:46.281 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK BIRK 2026-09-09 close=31.5600 unrl=+0.00% mtm=+$0.00 r=— status=OPEN bars=0 value=$10,000.00
+2026-09-14 20:28:46.287 | INFO     | core.paper_trader:_open_position_locked:614 - Paper | OPEN SELL 316.8567860969512 BIRK @ 31.56 (pattern=pattern_010_pennant)
+2026-09-14 20:28:46.989 | INFO     | core.scanner:_process_signal:985 - Signal | MSS 1d | BUY | pattern=pattern_010_pennant | confidence=1.00
+2026-09-14 20:28:46.989 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK MSS 2026-09-09 close=1.7300 unrl=+0.00% mtm=+$0.00 r=— status=OPEN bars=0 value=$10,000.00
+2026-09-14 20:28:46.989 | INFO     | core.paper_trader:_open_position_locked:614 - Paper | OPEN BUY 5780.346757080136 MSS @ 1.73 (pattern=pattern_010_pennant)
+2026-09-14 20:28:47.763 | INFO     | core.scanner:_scan_all:781 - Scan complete
+2026-09-14 20:28:47.770 | INFO     | core.scanner:_scan_all:608 - Scan | 500 symbols x 1 timeframes (['1d']) x 6 patterns | concurrency=15 batch=50 analyze_pool=8
+2026-09-14 20:28:47.771 | INFO     | core.scanner:_pin_replay_asof:531 - Scan | replay asof pinned to 2026-09-10 via SNDK
+2026-09-14 20:28:47.917 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK SNTI 2026-09-10 close=0.3002 unrl=-0.40% mtm=-$40.13 r=— status=TRAILING bars=1 value=$10,040.13
+2026-09-14 20:28:48.047 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK LOGC 2026-09-10 close=14.0100 unrl=+10.49% mtm=+$1,048.90 r=— status=TRAILING bars=10 value=$11,048.90
+2026-09-14 20:28:48.153 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK DRIO 2026-09-10 close=6.6154 unrl=-3.00% mtm=-$299.94 r=— status=trailing_stop bars=1 value=$9,698.18
+2026-09-14 20:28:48.153 | INFO     | core.backtester:_close_trade:762 - Backtest | EXIT DRIO 1d reason=trailing_stop pnl=-3.20%
+2026-09-14 20:28:48.153 | INFO     | core.paper_trader:_manage_position:746 - Paper | CLOSE DRIO reason=trailing_stop pnl=-3.20%
+2026-09-14 20:28:48.154 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK SOHOB 2026-09-10 close=3.3000 unrl=+17.86% mtm=+$1,785.71 r=— status=TRAILING bars=11 value=$11,785.71
+2026-09-14 20:28:48.277 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK JMIA 2026-09-10 close=7.2800 unrl=+2.97% mtm=+$297.03 r=— status=TRAILING bars=9 value=$10,297.03
+2026-09-14 20:28:48.363 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK GRAN 2026-09-10 close=1.0500 unrl=-5.00% mtm=-$500.00 r=— status=trailing_stop bars=1 value=$10,500.00
+2026-09-14 20:28:48.363 | INFO     | core.backtester:_close_trade:762 - Backtest | EXIT GRAN 1d reason=trailing_stop pnl=-5.21%
+2026-09-14 20:28:48.363 | INFO     | core.paper_trader:_manage_position:746 - Paper | CLOSE GRAN reason=trailing_stop pnl=-5.21%
+2026-09-14 20:28:48.468 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK HUHU 2026-09-10 close=4.0700 unrl=+9.96% mtm=+$995.57 r=— status=TRAILING bars=11 value=$9,004.43
+2026-09-14 20:28:48.469 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK BIRK 2026-09-10 close=30.6900 unrl=+2.76% mtm=+$275.67 r=— status=TRAILING bars=1 value=$9,724.33
+2026-09-14 20:28:48.749 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK MSS 2026-09-10 close=1.6900 unrl=-2.31% mtm=-$231.21 r=— status=TRAILING bars=1 value=$9,768.79
+2026-09-14 20:28:48.749 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK SNAL 2026-09-10 close=2.5600 unrl=-1.19% mtm=-$118.58 r=— status=TRAILING bars=3 value=$10,118.58
+2026-09-14 20:28:51.380 | INFO     | core.scanner:_process_signal:985 - Signal | BIRK 1d | SELL | pattern=pattern_010_pennant | confidence=1.00
+2026-09-14 20:28:52.593 | INFO     | core.scanner:_scan_all:781 - Scan complete
+2026-09-14 20:28:52.600 | INFO     | core.scanner:_scan_all:608 - Scan | 500 symbols x 1 timeframes (['1d']) x 6 patterns | concurrency=15 batch=50 analyze_pool=8
+2026-09-14 20:28:52.600 | INFO     | core.scanner:_pin_replay_asof:531 - Scan | replay asof pinned to 2026-09-11 via SNDK
+2026-09-14 20:28:52.751 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK SNTI 2026-09-11 close=0.3060 unrl=-2.34% mtm=-$234.11 r=— status=TRAILING bars=2 value=$10,234.11
+2026-09-14 20:28:52.869 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK LOGC 2026-09-11 close=14.4500 unrl=+13.96% mtm=+$1,395.90 r=— status=TRAILING bars=11 value=$11,395.90
+2026-09-14 20:28:52.994 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK SOHOB 2026-09-11 close=3.3000 unrl=+17.86% mtm=+$1,785.71 r=— status=TRAILING bars=12 value=$11,785.71
+2026-09-14 20:28:53.140 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK JMIA 2026-09-11 close=7.4500 unrl=+5.37% mtm=+$537.48 r=— status=TRAILING bars=10 value=$10,537.48
+2026-09-14 20:28:53.363 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK HUHU 2026-09-11 close=4.0500 unrl=+10.40% mtm=+$1,039.82 r=— status=TRAILING bars=12 value=$8,960.18
+2026-09-14 20:28:53.363 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK BIRK 2026-09-11 close=31.1300 unrl=+1.36% mtm=+$136.25 r=— status=TRAILING bars=2 value=$9,863.75
+2026-09-14 20:28:53.607 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK MSS 2026-09-11 close=1.8000 unrl=+4.05% mtm=+$404.62 r=— status=TRAILING bars=2 value=$10,404.62
+2026-09-14 20:28:53.615 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK SNAL 2026-09-11 close=2.5800 unrl=-1.98% mtm=-$197.63 r=— status=TRAILING bars=4 value=$10,197.63
+2026-09-14 20:28:54.983 | INFO     | core.scanner:_process_signal:985 - Signal | MTRN 1d | BUY | pattern=pattern_003_double_bottom | confidence=1.00
+2026-09-14 20:28:54.983 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK MTRN 2026-09-11 close=257.5100 unrl=+0.00% mtm=+$0.00 r=— status=OPEN bars=0 value=$9,785.38
+2026-09-14 20:28:54.984 | INFO     | core.paper_trader:_open_position_locked:614 - Paper | OPEN BUY 38.0 MTRN @ 257.51 (pattern=pattern_003_double_bottom)
+2026-09-14 20:28:55.771 | INFO     | core.scanner:_process_signal:985 - Signal | DPLS 1d | SELL | pattern=pattern_010_pennant | confidence=1.00
+2026-09-14 20:28:55.771 | INFO     | core.paper_trader:_record_position_mark:297 - Paper | MARK DPLS 2026-09-11 close=0.0055 unrl=+0.00% mtm=+$0.00 r=— status=OPEN bars=0 value=$10,000.00
+2026-09-14 20:28:55.772 | INFO     | core.paper_trader:_open_position_locked:614 - Paper | OPEN SELL 1818181.8280338256 DPLS @ 0.01 (pattern=pattern_010_pennant)
+2026-09-14 20:28:57.363 | INFO     | core.scanner:_scan_all:751 - Scanner | paper replay reached end of tape — stopping after 22 session(s)
+2026-09-14 20:28:57.363 | INFO     | core.scanner:_scan_all:781 - Scan complete
+2026-09-14 20:28:57.372 | INFO     | core.scanner:stop:391 - Scanner stopped

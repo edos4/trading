@@ -309,7 +309,9 @@ progress { width: 180px; height: 0.7rem; }
 }
 .tv-chart-host {
   flex: 1;
-  min-height: 0;
+  /* Never collapse to nothing: if a host loses its flex context the chart would
+   * otherwise render into a zero-height box and the card would look empty. */
+  min-height: 320px;
   width: 100%;
   background: #131722;
 }
