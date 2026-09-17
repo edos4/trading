@@ -362,13 +362,6 @@ class PaperBook:
                     else (trade.sim_exit_date or trade.exit_date)
                 ),
             )
-            from core.pattern_edit_validation import candle_rows
-            from core.pattern_provenance import payload as provenance_payload
-            dataset = {"symbol":trade.symbol,"market":account.market,"timeframe":timeframe,
-                       "session_timezone":session_tz,"candles":candle_rows(df,session_tz),
-                       "scan_semantics":"causal_prefix_v1"}
-            payload["edit_context"] = {**provenance_payload(trade),"pattern_id":trade.pattern,
-                                       "market":account.market,"dataset":dataset}
             return payload
         except Exception as exc:
             log.exception("PaperBook | trade chart payload failed")

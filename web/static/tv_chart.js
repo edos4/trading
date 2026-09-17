@@ -75,38 +75,7 @@ window.TVChart = (function () {
       borderVisible: false,
     });
     candleSeries.setData(candles);
-    if (hooks && hooks.onEdit) {
-      let dragging = null;
-      let selected = null;
-      const at = event => {
-        const bounds = el.getBoundingClientRect();
-        const x = event.clientX - bounds.left, y = event.clientY - bounds.top;
-        if (x < 0 || x > bounds.width - 60 || y < 0 || y > bounds.height * .72) return null;
-        const time = chart.timeScale().coordinateToTime(x);
-        const key = typeof time === "object" && time ? `${time.year}-${String(time.month).padStart(2,"0")}-${String(time.day).padStart(2,"0")}` : time;
-        const bar = candles.find(c => c.time === key);
-        return bar ? {bar, x, y} : null;
-      };
-      const select = (bar, role) => {
-        if (selected) chart.removeSeries(selected);
-        selected = chart.addLineSeries({color:"#42a5f5",lineVisible:false,priceLineVisible:false,lastValueVisible:false});
-        selected.setData([{time:bar.time,value:bar.close}]);
-        selected.setMarkers([{time:bar.time,position:"aboveBar",shape:"circle",color:"#42a5f5",text:role || "Selected"}]);
-        hooks.onEdit(bar, role);
-      };
-      const context = event => { const hit=at(event); if(hit){event.preventDefault();select(hit.bar);} };
-      const down = event => {
-        const hit=at(event);if(!hit)return;
-        const marker=(data.markers||[]).find(m=>m.time===hit.bar.time && m.price!=null && Math.abs(candleSeries.priceToCoordinate(m.price)-hit.y)<18);
-        if(marker){dragging=marker.text; chart.applyOptions({handleScroll:{pressedMouseMove:false}});event.stopImmediatePropagation();el.setPointerCapture(event.pointerId);}
-      };
-      const up = event => {
-        if(dragging){const hit=at(event);if(hit)select(hit.bar,dragging);dragging=null;chart.applyOptions({handleScroll:{pressedMouseMove:true}});}
-      };
-      for(const [name,fn] of [["contextmenu",context],["pointerdown",down],["pointerup",up]]){
-        el.addEventListener(name,fn,true);cleanup.push(()=>el.removeEventListener(name,fn,true));
-      }
-    }
+
 
 
     const volumeSeries = chart.addHistogramSeries({
@@ -136,8 +105,15 @@ window.TVChart = (function () {
           priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
         });
         pivot.setData([{ time: marker.time, value: marker.price }]);
-        pivot.setMarkers([marker]);
+        // Parts carrying a reason get their label from PatternNotes, which lays
+        // it out together with the reason; the library would draw it alone.
+        pivot.setMarkers([{ ...marker, text: marker.reason ? "" : (marker.text || "") }]);
       }
+    }
+
+    if (window.PatternNotes) {
+      const notes = window.PatternNotes.collect(data);
+      if (notes.length) candleSeries.attachPrimitive(window.PatternNotes.create(notes));
     }
 
     for (const segment of data.segments || []) {
@@ -153,7 +129,8 @@ window.TVChart = (function () {
         line.setMarkers([{
           time: point.time,
           position: /lower|support/i.test(segment.label) ? "belowBar" : "aboveBar",
-          shape: "circle", size: 0, color: segment.color, text: segment.label,
+          shape: "circle", size: 0, color: segment.color,
+          text: segment.reason ? "" : segment.label,
         }]);
       }
     }

@@ -140,3 +140,97 @@ def test_detected_pennant_saves_both_converging_rails():
     payload = build_trade_viewer_payload(df, symbol="TEST", pattern=signal.pattern, annotations=signal.chart_annotations)
     assert {s["label"] for s in payload["segments"]} == {"Pole", "Upper pennant fit", "Lower pennant fit"}
     assert all(s["color"] == ANN_PATTERN for s in payload["segments"])
+
+
+def test_viewer_payload_carries_part_reasons():
+    df = frame()
+    date = lambda i: str(df.index[i].date())
+    payload = build_trade_viewer_payload(
+        df, symbol="TEST", pattern="pattern_003_double_bottom",
+        annotations=[
+            ann_marker(date(10), 95, "L1", "#ffeb3b"),
+            ann_marker(date(20), 105, "neckline", "#ffeb3b"),
+            ann_marker(date(30), 92, "L2", "#ffeb3b"),
+            ann_hline(105, "neckline", "#ffeb3b"),
+        ],
+    )
+    markers = {m["text"]: m for m in payload["markers"]}
+    assert "swing low" in markers["First bottom (L1)"]["reason"]
+    assert "higher low" in markers["Second bottom (L2)"]["reason"]
+    assert markers["Neckline"]["reason"]
+    neckline = next(level for level in payload["levels"] if level["title"] == "Neckline")
+    assert neckline["reason"]
+
+
+def test_channel_rails_and_pivots_carry_reasons():
+    df = frame(160)
+    date = lambda i: str(df.index[i].date())
+    payload = build_trade_viewer_payload(
+        df, symbol="TEST", pattern="pattern_006_upward_channel",
+        annotations=[
+            ann_marker(date(5), float(df.high.iloc[5]), "start", "#ffeb3b"),
+            ann_marker(date(20), float(df.high.iloc[20]), "SH1", "#ffeb3b"),
+            ann_marker(date(30), float(df.low.iloc[30]), "valley", "#ffeb3b"),
+            ann_marker(date(45), float(df.high.iloc[45]), "SH2", "#ffeb3b"),
+            ann_segment(date(20), date(60), 100, 110, "#ffeb3b"),
+            ann_segment(date(30), date(60), 95, 105, "#ffeb3b"),
+        ],
+    )
+    rails = {segment["label"]: segment for segment in payload["segments"]}
+    assert "slope" in rails["Upper channel"]["reason"]
+    assert "parallel rail" in rails["Lower channel"]["reason"]
+    markers = {m["text"]: m for m in payload["markers"]}
+    assert "swing high" in markers["First swing high"]["reason"]
+
+
+def test_png_renderer_prints_the_reason_under_each_part():
+    """The explorer renders PNGs without a saved pattern id — infer it."""
+    df = frame()
+    date = lambda i: str(df.index[i].date())
+    axis = Mock()
+    ChartRenderer()._draw_annotations(
+        axis, df,
+        [ann_marker(date(10), 95, "L1", "#ffeb3b"),
+         ann_marker(date(30), 92, "L2", "#ffeb3b")],
+    )
+    captions = [call.args[0] for call in axis.annotate.call_args_list]
+    assert any("swing low" in str(text) for text in captions)
+    assert any("higher low" in str(text) for text in captions)
+
+
+def test_desktop_label_prints_the_reason_under_it():
+    from ui.tv_chart import TradingViewChart
+    chart = object.__new__(TradingViewChart)
+    chart._canvas = Mock()
+    chart._canvas.bbox.return_value = (0, 0, 80, 12)
+    chart._plot = (0, 0, 400, 200)
+    chart._pattern_label(100, 60, "Second bottom (L2)", "#ffeb3b", "higher low +7.1%")
+    calls = chart._canvas.create_text.call_args_list
+    assert [call.kwargs["text"] for call in calls] == [
+        "Second bottom (L2)", "higher low +7.1%",
+    ]
+    note = calls[1].kwargs
+    assert note["fill"] == "#787b86"
+    assert note["font"] == ("Trebuchet MS", 7)
+    assert calls[0].kwargs["font"] == ("Trebuchet MS", 9, "bold")
+    assert chart._canvas.create_rectangle.called
+    assert chart._canvas.tag_lower.called
+
+
+def test_desktop_markers_hand_their_reason_to_the_label():
+    from ui.tv_chart import TradingViewChart
+    chart = object.__new__(TradingViewChart)
+    chart._canvas = Mock()
+    chart._plot = (0, 0, 400, 200)
+    chart._price_lo, chart._price_hi = 0, 100
+    chart._visible = 1
+    candles = [{"time": "2024-01-02", "low": 90., "high": 100., "close": 95., "open": 94.}]
+    chart._markers = {"2024-01-02": [{
+        "time": "2024-01-02", "price": 92., "position": "belowBar",
+        "color": "#ffeb3b", "shape": "arrowUp", "text": "First bottom (L1)",
+        "reason": "swing low, RSI 8",
+    }]}
+    seen = []
+    chart._pattern_label = lambda x, y, text, color, reason="": seen.append((text, reason))
+    chart._draw_markers(candles)
+    assert seen == [("First bottom (L1)", "swing low, RSI 8")]

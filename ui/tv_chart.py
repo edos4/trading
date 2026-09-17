@@ -17,6 +17,9 @@ TV_KRONOS_UP = "#ffeb3b"
 TV_KRONOS_DOWN = "#f9a825"
 TV_CROSS = "#9598a1"
 
+# Reason text sits under a part label; wrap it so a note stays a narrow caption.
+NOTE_WRAP_PX = 190
+
 
 def open_trade_viewer(parent: tk.Misc, payload: dict[str, Any]) -> tk.Toplevel:
     win = tk.Toplevel(parent)
@@ -25,14 +28,8 @@ def open_trade_viewer(parent: tk.Misc, payload: dict[str, Any]) -> tk.Toplevel:
     win.minsize(720, 460)
     win.configure(bg=TV_BG)
     chart = TradingViewChart(win)
-    chart.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    chart.pack(fill=tk.BOTH, expand=True)
     chart.set_payload(payload)
-    if payload.get("edit_context"):
-        from ui.pattern_edit_panel import PatternEditPanel
-        panel = PatternEditPanel(win, chart, payload)
-        panel.pack(side=tk.RIGHT, fill=tk.BOTH)
-        chart.on_edit = panel.select
-        win.geometry("1480x800")
     win.focus_set()
     return win
 
@@ -40,9 +37,6 @@ def open_trade_viewer(parent: tk.Misc, payload: dict[str, Any]) -> tk.Toplevel:
 class TradingViewChart(tk.Frame):
     def __init__(self, master: tk.Misc, **kwargs):
         super().__init__(master, bg=TV_BG, **kwargs)
-        self.on_edit = None
-        self._edit_selected = None
-        self._edit_drag_role = None
         self._payload: dict[str, Any] = {}
         self._candles: list[dict] = []
         self._volume: dict[str, dict] = {}
@@ -86,8 +80,6 @@ class TradingViewChart(tk.Frame):
         self._canvas = tk.Canvas(self, bg=TV_BG, highlightthickness=0, cursor="crosshair")
         self._canvas.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-        self._canvas.bind("<Button-3>", self._on_edit_menu)
-        self._canvas.bind("<Control-Button-1>", self._on_edit_menu)
         self._canvas.bind("<Configure>", lambda _e: self._redraw())
         self._canvas.bind("<Motion>", self._on_motion)
         self._canvas.bind("<Leave>", self._on_leave)
@@ -225,12 +217,6 @@ class TradingViewChart(tk.Frame):
         self._draw_levels()
         self._draw_axis(visible)
         self._draw_markers(visible)
-        if self._edit_selected:
-            for i,row in enumerate(visible):
-                if row['time'] == self._edit_selected:
-                    x=self._x_for(i)
-                    self._canvas.create_rectangle(x-5,self._plot[1],x+5,self._plot[3],outline="#42a5f5",width=2)
-
         if self._hover is not None:
             self._draw_crosshair(self._hover)
 
@@ -399,18 +385,40 @@ class TradingViewChart(tk.Frame):
                 a, b = points[0], points[-1]
                 mid = points[len(points) // 2] if len(points) > 2 else ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
                 below = any(word in segment["label"].lower() for word in ("lower", "support"))
-                self._pattern_label(self._x_for(mid[0]), self._y_price(mid[1]) + (16 if below else -16), segment["label"], segment["color"])
+                self._pattern_label(
+                    self._x_for(mid[0]), self._y_price(mid[1]) + (16 if below else -16),
+                    segment["label"], segment["color"], segment.get("reason", ""),
+                )
 
-    def _pattern_label(self, x, y, text, color):
-        label = self._canvas.create_text(x, y, text=text, fill=color, font=("Trebuchet MS", 9, "bold"))
-        bounds = self._canvas.bbox(label)
-        if bounds:
-            x0, y0, x1, y1 = bounds
-            dx = max(self._plot[0] - x0, 0) - max(x1 - self._plot[2], 0)
-            dy = max(self._plot[1] - y0, 0) - max(y1 - self._plot[3], 0)
-            self._canvas.move(label, dx, dy)
-            bg = self._canvas.create_rectangle(x0 + dx - 2, y0 + dy - 2, x1 + dx + 2, y1 + dy + 2, fill=TV_BG, outline="")
-            self._canvas.tag_lower(bg, label)
+    def _pattern_label(self, x, y, text, color, reason: str = ""):
+        """A part label with its measured "why this part" note underneath."""
+        items = [
+            self._canvas.create_text(
+                x, y, text=text, fill=color, font=("Trebuchet MS", 9, "bold"),
+            )
+        ]
+        label_box = self._canvas.bbox(items[0])
+        if reason:
+            top = label_box[3] + 3 if label_box else y + 10
+            items.append(self._canvas.create_text(
+                x, top, text=reason, fill=TV_DIM, font=("Trebuchet MS", 7),
+                anchor="n", justify="center", width=NOTE_WRAP_PX,
+            ))
+        boxes = [box for box in (self._canvas.bbox(item) for item in items) if box]
+        if not boxes:
+            return
+        x0 = min(box[0] for box in boxes)
+        y0 = min(box[1] for box in boxes)
+        x1 = max(box[2] for box in boxes)
+        y1 = max(box[3] for box in boxes)
+        dx = max(self._plot[0] - x0, 0) - max(x1 - self._plot[2], 0)
+        dy = max(self._plot[1] - y0, 0) - max(y1 - self._plot[3], 0)
+        for item in items:
+            self._canvas.move(item, dx, dy)
+        bg = self._canvas.create_rectangle(
+            x0 + dx - 2, y0 + dy - 2, x1 + dx + 2, y1 + dy + 2, fill=TV_BG, outline="",
+        )
+        self._canvas.tag_lower(bg, items[0])
 
     def _draw_levels(self) -> None:
         x0, _, x1, _ = self._plot
@@ -423,6 +431,11 @@ class TradingViewChart(tk.Frame):
                 x1 - 4, y - 8, text=f"{level['title']} {_fmt_price(level['price'])}",
                 fill=level["color"], anchor="e", font=("Trebuchet MS", 8),
             )
+            if level.get("reason"):
+                self._canvas.create_text(
+                    x1 - 4, y + 3, text=level["reason"], fill=TV_DIM, anchor="ne",
+                    font=("Trebuchet MS", 7), width=NOTE_WRAP_PX, justify="right",
+                )
 
     def _draw_axis(self, visible: list[dict]) -> None:
         last = visible[-1]
@@ -456,8 +469,11 @@ class TradingViewChart(tk.Frame):
                     self._canvas.create_polygon(
                         x, y - 14, x - 6, y - 2, x + 6, y - 2, fill=color, outline=color,
                     )
-                self._pattern_label(x, y + (1 if buy else -1) * (22 + offsets[buy]), marker.get("text") or "", color)
-                offsets[buy] += 20
+                self._pattern_label(
+                    x, y + (1 if buy else -1) * (22 + offsets[buy]),
+                    marker.get("text") or "", color, marker.get("reason", ""),
+                )
+                offsets[buy] += 34 if marker.get("reason") else 20
 
     def _draw_crosshair(self, i: int) -> None:
         if i < 0 or i >= self._visible:
@@ -503,25 +519,11 @@ class TradingViewChart(tk.Frame):
         self._redraw()
 
     def _on_press(self, event) -> None:
-        self._edit_drag_role = None
-        row = self._editable_candle(event)
-        if self.on_edit and row:
-            for marker in self._markers.get(row['time'],[]):
-                if marker.get('price') is not None and abs(event.y-self._y_price(marker['price']))<16:
-                    self._edit_drag_role = marker.get('text') or 'anchor'
-                    self._drag_x = None
-                    return
         self._canvas.focus_set()
         self._drag_x = event.x
         self._drag_start = self._start
 
     def _on_drag(self, event) -> None:
-        if self._edit_drag_role:
-            row = self._editable_candle(event)
-            if row:
-                self._edit_selected = row['time']
-                self._redraw()
-            return
         if self._drag_x is None:
             return
         bar_px = max((self._plot[2] - self._plot[0]) / max(self._visible, 1), 1.0)
@@ -531,27 +533,7 @@ class TradingViewChart(tk.Frame):
         self._redraw()
 
     def _on_release(self, _event) -> None:
-        if self._edit_drag_role and self.on_edit:
-            row=self._editable_candle(_event)
-            if row:self.on_edit(row,self._edit_drag_role)
-        self._edit_drag_role=None
         self._drag_x = None
-
-    def _editable_candle(self, event):
-        if not self._plot[1] <= event.y <= self._plot[3]:
-            return None
-        index=self._index_at(event.x)
-        if index is None:return None
-        row=self._candles[self._start+index]
-        return None if row.get('predicted') else row
-
-    def _on_edit_menu(self, event):
-        row=self._editable_candle(event)
-        if self.on_edit and row:
-            menu=tk.Menu(self,tearoff=False)
-            menu.add_command(label='Edit Pattern',command=lambda:self.on_edit(row))
-            menu.tk_popup(event.x_root,event.y_root)
-
 
     def _on_wheel(self, event) -> None:
         factor = 0.85 if event.delta > 0 else 1.18

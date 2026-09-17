@@ -1,13 +1,31 @@
+"""Version-pinned execution: an approved pattern snapshot runs its own source.
+
+The candle fixture is a head-and-shoulders series that fires `pattern_008`, so
+the test can prove the frozen baseline -- not the live helper modules -- is what
+produced the signal.
+"""
+
 from pathlib import Path
-import shutil
+
+import pandas as pd
 
 from core.pattern_edit_store import EditStore, ROOT
 from core.pattern_versions import PatternVersions, collect_sources
 from core.pattern_loader import VersionPattern
-from core.test_pattern_edit_contracts import candles
 from data.ohlcv_store import OHLCVStore
+from data.tv_client import OHLCVCandle
 from patterns.chart_scan import _snapshot
 from patterns import _dedup
+
+FIXTURES = Path(__file__).resolve().parents[1] / "tests/fixtures/pattern_versions"
+
+
+def candles(name: str) -> list[OHLCVCandle]:
+    frame = pd.read_csv(FIXTURES / f"{name}.csv", index_col="date", parse_dates=True)
+    return [
+        OHLCVCandle(**row.to_dict(), timestamp=ts.to_pydatetime())
+        for ts, row in frame.iterrows()
+    ]
 
 
 def test_frozen_baseline_does_not_import_current_helper(tmp_path):

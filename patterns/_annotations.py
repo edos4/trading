@@ -4,6 +4,7 @@ from copy import deepcopy
 
 import numpy as np
 
+from patterns._rationale import pattern_reasons
 from patterns.base_pattern import ANN_PATTERN, BasePattern, ann_marker, ann_path, ann_segment
 
 
@@ -46,6 +47,9 @@ def pattern_annotations(annotations: list[dict], df=None, pattern: str | None = 
             path = ann_path(sorted(points.items()))
             path["outline"] = name
             result.append(path)
+    # Measured conditions per part, derived from the saved anchors. Advisory
+    # chart text only — detection already happened when the signal was saved.
+    reasons = pattern_reasons(pattern, result, df) if df is not None else {}
     for ann in result:
         label = ann.get("label", "")
         if label not in {"stop", "target"}:
@@ -63,6 +67,9 @@ def pattern_annotations(annotations: list[dict], df=None, pattern: str | None = 
             elif "pole start" in markers:
                 label = "Pole"
         ann["label"] = PART_LABELS.get(label, label)
+        reason = reasons.get(label) or reasons.get(ann["label"])
+        if reason:
+            ann["reason"] = reason
     return result
 
 

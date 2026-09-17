@@ -23,8 +23,7 @@ backtest_*_[0-9]*.txt
 deploy/designer
 frontend
 web/static/designer
-# Pattern editor registry and immutable user artifacts
+# Approved pattern-versions registry and immutable artifacts
 /pattern_versions/
 /data/pattern_edit/
-/web/pattern_editor_e2e.png
 .commandcode

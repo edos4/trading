@@ -18,11 +18,8 @@ class TradingMode(str, Enum):
 
 
 class Settings(BaseSettings):
-    # Pattern editing: credentials are consumed only by the Python service.
-    deepseek_api_key: str = ""
-    deepseek_base_url: str = "https://api.deepseek.com"
-    pattern_edit_model: str = "deepseek-flash"
-    pattern_edit_timeout: float = 90.0
+    # Sandbox used to execute approved pattern versions (see core/pattern_edit_worker.py).
+    # Empty = approved versions cannot be executed; the shipped pattern code runs instead.
     pattern_edit_cgroup_root: str = ""
     pattern_edit_worker_python: str = ""
 
