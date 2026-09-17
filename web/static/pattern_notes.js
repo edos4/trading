@@ -91,12 +91,15 @@ window.PatternNotes = (function () {
     return false;
   }
 
-  function create(notes) {
+  /* `band` (optional) is the candle area as fractions of the chart height; notes
+   * are kept inside it so they never cover the RSI or volume panes. */
+  function create(notes, band) {
     let series = null;
     let chart = null;
 
-    /* The label with its reason underneath, both clear of the anchor. */
-    function drawPart(context, item, x, y, placed, pane) {
+    /* The label with its reason underneath, both clear of the anchor.
+     * `lim` is the candle band: notes must not spill into the RSI/volume panes. */
+    function drawPart(context, item, x, y, placed, pane, lim) {
       const labelRows = wrap(context, FONT_LABEL, item.label, 1);
       const noteRows = wrap(context, FONT_NOTE, item.reason, MAX_LINES);
       if (!labelRows.length) return;
@@ -113,12 +116,15 @@ window.PatternNotes = (function () {
       // Prefer the label's own side; use the other one when it would not fit.
       const natural = item.below ? below : above;
       let top = natural;
-      if (top + h > pane.height - 2 && above >= 2) top = above;
-      else if (top < 2 && below + h <= pane.height - 2) top = below;
-      top = Math.min(Math.max(top, 2), Math.max(2, pane.height - h - 2));
+      const floor = lim.top + 2;
+      const ceiling = Math.max(floor, lim.bottom - h - 2);
+      if (top + h > lim.bottom - 2 && above >= floor) top = above;
+      else if (top < floor && below + h <= lim.bottom - 2) top = below;
+      top = Math.min(Math.max(top, floor), ceiling);
       for (let i = 0; i < NUDGE_TRIES && overlaps(placed, left, top, w, h); i++) {
         top += item.below ? NUDGE : -NUDGE;
       }
+      top = Math.min(Math.max(top, floor), ceiling);
       placed.push({ left, top, w, h });
       if (Math.abs(top - natural) > 8) {
         // Pushed clear of a neighbour: keep the block tied to its anchor.
@@ -152,15 +158,19 @@ window.PatternNotes = (function () {
     }
 
     /* A pattern price line's own title is drawn on the right axis. */
-    function drawAxisNote(context, item, y, placed, pane) {
+    function drawAxisNote(context, item, y, placed, pane, lim) {
       const rows = wrap(context, FONT_NOTE, item.reason, MAX_LINES);
       if (!rows.length) return;
       const w = width(context, FONT_NOTE, rows) + PAD * 2;
       const h = rows.length * NOTE_LINE + PAD * 2;
       const left = Math.max(2, pane.width - w - 8);
       // The library centres its own title box on the line; sit just below it.
-      let top = y + 13;
-      for (let i = 0; i < NUDGE_TRIES && overlaps(placed, left, top, w, h); i++) top += NUDGE;
+      const floor = lim.top + 2;
+      const ceiling = Math.max(floor, lim.bottom - h - 2);
+      let top = Math.min(Math.max(y + 13, floor), ceiling);
+      for (let i = 0; i < NUDGE_TRIES && overlaps(placed, left, top, w, h); i++) {
+        top = Math.min(top + NUDGE, ceiling);
+      }
       placed.push({ left, top, w, h });
       context.fillStyle = BG;
       context.fillRect(left, top, w, h);
@@ -181,11 +191,15 @@ window.PatternNotes = (function () {
         context.save();
         const placed = [];
         const pinned = [];
+        const lim = {
+          top: (band ? band.top : 0) * mediaSize.height,
+          bottom: (band ? band.bottom : 1) * mediaSize.height,
+        };
         for (const item of notes) {
           const y = series.priceToCoordinate(item.price);
           if (y == null) continue;
           if (item.axis) {
-            drawAxisNote(context, item, y, placed, mediaSize);
+            drawAxisNote(context, item, y, placed, mediaSize, lim);
             continue;
           }
           const x = chart.timeScale().timeToCoordinate(item.time);
@@ -195,7 +209,7 @@ window.PatternNotes = (function () {
         // Place the topmost block first so neighbours slide downward, not over.
         pinned.sort((a, b) => a.y - b.y);
         for (const entry of pinned) {
-          drawPart(context, entry.item, entry.x, entry.y, placed, mediaSize);
+          drawPart(context, entry.item, entry.x, entry.y, placed, mediaSize, lim);
         }
         context.restore();
       });

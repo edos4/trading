@@ -28,6 +28,13 @@ async function api(url, opts = {}) {
   return data;
 }
 
+/* RSI(14) suffix for the hover OHLC line, from the payload's rsi14 series —
+ * the same readout the desktop viewer shows. */
+function fmtRsi(data, time) {
+  const row = (data.rsi14 || []).find((r) => r.time === time);
+  return row == null ? "" : `    RSI ${Number(row.value).toFixed(1)}`;
+}
+
 function downloadText(filename, text, mime) {
   const blob = new Blob([text], { type: mime || "text/plain" });
   const a = document.createElement("a");
@@ -948,10 +955,11 @@ function initPaper() {
             const change = bar.close - prevClose;
             const pct = prevClose ? (change / prevClose) * 100 : 0;
             const sign = change >= 0 ? "+" : "";
+            const rsi = fmtRsi(data, bar.time);
             chartOhlc.textContent =
               `${bar.time}  O ${Number(bar.open).toFixed(2)}  H ${Number(bar.high).toFixed(2)}  ` +
               `L ${Number(bar.low).toFixed(2)}  C ${Number(bar.close).toFixed(2)}  ` +
-              `${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)`;
+              `${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)` + rsi;
             chartOhlc.classList.toggle("gain", change >= 0);
             chartOhlc.classList.toggle("loss", change < 0);
           },
@@ -1111,7 +1119,7 @@ function initKronos() {
         text:
           `${tag}${bar.time}  O ${Number(bar.open).toFixed(2)}  H ${Number(bar.high).toFixed(2)}  ` +
           `L ${Number(bar.low).toFixed(2)}  C ${Number(bar.close).toFixed(2)}  ` +
-          `${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)`,
+          `${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)` + fmtRsi(data, bar.time),
         gain: change >= 0,
       };
     }
@@ -1648,10 +1656,11 @@ function initReplay() {
           const change = bar.close - prevClose;
           const pct = prevClose ? (change / prevClose) * 100 : 0;
           const sign = change >= 0 ? "+" : "";
+          const rsi = fmtRsi(data, bar.time);
           chartOhlc.textContent =
             `${bar.time}  O ${Number(bar.open).toFixed(2)}  H ${Number(bar.high).toFixed(2)}  ` +
             `L ${Number(bar.low).toFixed(2)}  C ${Number(bar.close).toFixed(2)}  ` +
-            `${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)`;
+            `${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)` + rsi;
           chartOhlc.classList.toggle("gain", change >= 0);
           chartOhlc.classList.toggle("loss", change < 0);
         },
