@@ -26,6 +26,7 @@ from core.pattern_editor_contracts import (
 )
 from core.pattern_provenance import engine_hash
 from core.pattern_versions import PatternVersions
+from core.stream_backtest import ReplayCancelled, StreamReplay
 
 
 class Cancelled(EditError):
@@ -142,6 +143,17 @@ class BacktestService:
         """Validate a request without touching bars; returns the frozen plan."""
         request = _coerce_request(request)
         settings = self._validate_settings(request.preset.settings)
+        unsupported = [name for name, flag in (
+            ("kronos_gate", settings.execution.kronos_gate),
+            ("kronos_rank", settings.execution.kronos_rank),
+            ("collect_first", settings.execution.collect_first),
+        ) if flag]
+        if unsupported:
+            raise EditError("Unsupported in this release: " + ", ".join(unsupported))
+        if settings.mode == "offline" and settings.execution.volume_gate:
+            raise EditError("The volume gate is only available for historical-stream runs")
+        if settings.mode == "historical-stream" and settings.execution.sizing_mode != "fixed-notional":
+            raise EditError("Only fixed-notional sizing is supported for historical-stream runs")
         pinned = self._pin_versions(request)
         symbols = resolve_symbols(settings)
         return {"request": request, "settings": settings, "versions": pinned,
@@ -209,17 +221,23 @@ class BacktestService:
                 raise Cancelled("Job cancelled before execution")
             inputs = self.freeze_inputs(request, plan["symbols"])
             self._record_run(job_id, inputs)
+            stream = plan["settings"].mode == "historical-stream"
+            unit = "sessions" if stream else "symbols"
             self.jobs.touch(job_id, owner, state="backtesting",
                             progress={"completed_units": 0,
                                       "total_units": len(plan["symbols"]),
-                                      "unit": "symbols"})
-            result, artifacts = self._execute_offline(job_id, inputs, event, owner=owner)
+                                      "unit": unit})
+            if stream:
+                result, artifacts = self._execute_stream(job_id, inputs, event, owner=owner)
+            else:
+                result, artifacts = self._execute_offline(job_id, inputs, event, owner=owner)
             self._record_result(job_id, result)
+            total = (artifacts["trades"]["meta"]["sessions"] if stream
+                     else len(plan["symbols"]))
             return self.jobs.finish(
                 job_id, owner, JobState.COMPLETED.value,
-                progress={"completed_units": len(plan["symbols"]),
-                          "total_units": len(plan["symbols"]), "unit": "symbols"})
-        except Cancelled:
+                progress={"completed_units": total, "total_units": total, "unit": unit})
+        except (Cancelled, ReplayCancelled):
             return self.jobs.finish(job_id, owner, JobState.CANCELLED.value,
                                     error=_error(ErrorCode.EXECUTION_FAILED,
                                                  "Run cancelled", retryable=True))
@@ -238,9 +256,7 @@ class BacktestService:
     # ── frozen inputs / datasets ─────────────────────────────────────────
     def freeze_inputs(self, request: BacktestRequest, symbols: list[str]) -> FrozenRunInputs:
         settings = request.preset.settings
-        if settings.mode != "offline":
-            raise EditError("Historical-stream datasets are provided by the stream runner")
-        rows = self._load_offline_rows(settings, symbols)
+        rows = self._load_frozen_rows(settings, symbols)
         if not rows:
             raise EditError("No frozen daily history available for the selected symbols")
         dataset = self.store.blob(canonical(rows), "application/json")
@@ -261,7 +277,7 @@ class BacktestService:
                                dataset=dataset, runtime=runtime,
                                effective_parameters=effective, inputs_sha256=inputs_sha)
 
-    def _load_offline_rows(self, settings, symbols: list[str]) -> dict[str, list[list]]:
+    def _load_frozen_rows(self, settings, symbols: list[str]) -> dict[str, list[list]]:
         from data.barcache import load as load_barcache
 
         rows: dict[str, list[list]] = {}
@@ -316,11 +332,38 @@ class BacktestService:
         result = run_coro(backtester.run())
         if event.is_set():
             raise Cancelled("Run cancelled")
-        artifacts, drawdown_pct = self._offline_artifacts(result, settings)
-        contract = self._offline_result(job_id, inputs, result, artifacts, drawdown_pct, settings)
+        artifacts = self._offline_artifacts(result, settings)
+        contract = self._build_result(job_id, inputs, artifacts, artifacts["metrics"], settings)
         return contract, artifacts
 
-    def _offline_artifacts(self, result, settings) -> tuple[dict, float]:
+    def _execute_stream(self, job_id: str, inputs: FrozenRunInputs,
+                        event: threading.Event, *, owner: str) -> tuple[BacktestResult, dict]:
+        from core.pattern_loader import discover
+
+        settings = inputs.request.preset.settings
+        profile = get_market(settings.market)
+        pinned = {v.pattern_id: v.version_id for v in inputs.request.versions}
+        patterns = discover(disabled=(), version_set=pinned, store=self.store)
+        # The frozen dataset blob is the authority: the replay cannot see a
+        # different tape than the one recorded in the run's inputs hash.
+        dataset = self._read_json(inputs.dataset)
+
+        def _tick(completed: int, total: int) -> None:
+            if event.is_set():
+                raise Cancelled("Run cancelled")
+            self.jobs.touch(job_id, owner,
+                            progress={"completed_units": int(completed),
+                                      "total_units": int(total), "unit": "sessions"})
+
+        replay = StreamReplay(dataset=dataset, patterns=patterns, settings=settings,
+                              session_tz=profile.session_tz, cancel=event, progress=_tick)
+        artifacts = replay.run()
+        if event.is_set():
+            raise Cancelled("Run cancelled")
+        contract = self._build_result(job_id, inputs, artifacts, artifacts["metrics"], settings)
+        return contract, artifacts
+
+    def _offline_artifacts(self, result, settings) -> dict:
         ordered = sorted(result.trades, key=lambda t: t.exit_date)
         equity: list[dict] = []
         running = 0.0
@@ -332,43 +375,52 @@ class BacktestService:
             max_dd = max(max_dd, peak - running)
             equity.append({"date": trade.exit_date.isoformat(),
                            "realized_pnl": round(running, 6),
+                           "unrealized_pnl": 0.0,
                            "equity": round(settings.execution.initial_capital + running, 6)})
         drawdown_pct = (max_dd / settings.execution.initial_capital * 100.0
                         if settings.execution.initial_capital > 0 else 0.0)
-        artifacts = {
+        cost = settings.execution.txn_cost_pct
+        fees = sum((t.entry_price + t.exit_price) * cost * (t.qty or 0.0)
+                   for t in result.trades)
+        realized = sum(t.pnl_usd for t in result.trades)
+        return {
             "trades": result.to_dict(),
             "signals": {"total_signals": result.total_signals,
                         "blocked": list(result.blocked), "filtered": list(result.filtered)},
             "equity": equity,
             "open_positions": [],
             "logs": {"version": result.version},
+            "metrics": {
+                "trade_count": len(result.trades),
+                "wins": result.win_count,
+                "realized_pnl": round(realized, 6),
+                "unrealized_pnl": 0.0,
+                "open_count": 0,
+                "fees": round(fees, 6),
+                "drawdown_pct": round(drawdown_pct, 6),
+            },
         }
-        return artifacts, drawdown_pct
 
-    def _offline_result(self, run_id: str, inputs: FrozenRunInputs, result, artifacts: dict,
-                        drawdown_pct: float, settings) -> BacktestResult:
+    def _build_result(self, run_id: str, inputs: FrozenRunInputs, artifacts: dict,
+                      metrics: dict, settings) -> BacktestResult:
         profile = get_market(settings.market)
-        cost = settings.execution.txn_cost_pct
-        realized = round(sum(t.pnl_usd for t in result.trades), 4)
-        fees = round(sum(
-            (t.entry_price * cost + t.exit_price * cost) * (t.qty or 0.0)
-            for t in result.trades), 6)
-        metrics = BacktestMetrics(
-            trade_count=len(result.trades),
-            win_rate=result.win_rate if result.trades else None,
-            realized_pnl=realized,
-            unrealized_pnl=0.0,
-            net_pnl=realized,
-            fees=fees,
-            max_drawdown_pct=round(drawdown_pct, 6),
-            open_position_count=0,
+        count = int(metrics["trade_count"])
+        metrics_model = BacktestMetrics(
+            trade_count=count,
+            win_rate=(int(metrics["wins"]) / count) if count else None,
+            realized_pnl=round(float(metrics["realized_pnl"]), 4),
+            unrealized_pnl=round(float(metrics["unrealized_pnl"]), 4),
+            net_pnl=round(float(metrics["realized_pnl"]) + float(metrics["unrealized_pnl"]), 4),
+            fees=round(float(metrics["fees"]), 6),
+            max_drawdown_pct=round(float(metrics["drawdown_pct"]), 6),
+            open_position_count=int(metrics["open_count"]),
             currency=profile.currency,
         )
         return BacktestResult(
             run_id=run_id,
             completed_at=datetime.now(timezone.utc),
             inputs=inputs,
-            metrics=metrics,
+            metrics=metrics_model,
             trades=self._ref(artifacts["trades"]),
             signals=self._ref(artifacts["signals"]),
             equity_curve=self._ref(artifacts["equity"]),
