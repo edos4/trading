@@ -234,3 +234,54 @@ def test_desktop_markers_hand_their_reason_to_the_label():
     chart._pattern_label = lambda x, y, text, color, reason="": seen.append((text, reason))
     chart._draw_markers(candles)
     assert seen == [("First bottom (L1)", "swing low, RSI 8")]
+
+
+def test_desktop_trendline_clips_to_the_visible_window():
+    from ui.tv_chart import TradingViewChart
+    chart = object.__new__(TradingViewChart)
+    chart._start, chart._visible = 10, 20          # bars 10..29 in view
+    chart._plot = (0, 0, 400, 200)
+    chart._rsi_plot = (0, 300, 400, 400)
+    chart._price_lo, chart._price_hi = 0.0, 200.0
+    shape = {"kind": "trend", "i1": 0, "p1": 100.0, "i2": 40, "p2": 140.0}
+    assert chart._clip_trend(shape) == (0.0, 90.5, 400.0, 70.5)
+    assert chart._clip_trend({"kind": "trend", "i1": 0, "p1": 1, "i2": 5, "p2": 6}) is None
+    assert chart._clip_trend({"kind": "trend", "i1": 12, "p1": 5, "i2": 12, "p2": 9}) is None
+
+
+def test_desktop_trendline_can_span_price_and_rsi_panes():
+    from ui.tv_chart import TradingViewChart
+    chart = object.__new__(TradingViewChart)
+    chart._start, chart._visible = 0, 10
+    chart._plot = (0, 0, 400, 200)
+    chart._rsi_plot = (0, 300, 400, 400)
+    chart._price_lo, chart._price_hi = 0.0, 100.0
+    # Price end at chart top, RSI end at RSI 100 (top of the RSI panel).
+    shape = {"kind": "trend", "pane1": "price", "p1": 100.0,
+             "pane2": "rsi", "p2": 100.0, "i1": 0, "i2": 9}
+    assert chart._shape_points(shape) == ((20.0, 0.0), (380.0, 300.0))
+    assert chart._clip_trend(shape) == (20.0, 0.0, 380.0, 300.0)
+
+
+def test_desktop_drawings_use_the_pane_under_the_cursor():
+    from types import SimpleNamespace
+    from ui.tv_chart import TradingViewChart
+    chart = object.__new__(TradingViewChart)
+    chart._plot = (0, 0, 400, 200)         # price pane
+    chart._rsi_plot = (0, 300, 400, 400)   # RSI pane, with a gap between them
+    chart._price_lo, chart._price_hi = 0.0, 100.0
+    chart._start, chart._visible = 0, 10
+    chart._candles = [{"time": str(i)} for i in range(10)]
+    chart._draft = None
+
+    assert chart._locate_point(SimpleNamespace(x=200, y=100)) == (5, 50.0, "price")
+    assert chart._locate_point(SimpleNamespace(x=200, y=300)) == (5, 100.0, "rsi")
+    assert chart._locate_point(SimpleNamespace(x=200, y=250)) is None
+
+    # An RSI-pane trendline maps through the RSI scale, not the price scale.
+    chart._canvas = Mock()
+    chart._paint_shape(
+        {"kind": "trend", "pane1": "rsi", "pane2": "rsi",
+         "i1": 0, "p1": 100.0, "i2": 9, "p2": 0.0}, "#42a5f5",
+    )
+    assert chart._canvas.create_line.call_args.args[1::2] == (300.0, 400.0)
