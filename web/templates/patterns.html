@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}Patterns — Trading Bot{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Patterns</h1>
+  <p class="muted small">
+    Read patterns from PostgreSQL, submit an AI edit against a pinned immutable
+    version, and compare the generated candidate with its base on identical
+    frozen inputs. A generated version never becomes the default automatically.
+  </p>
+  <div class="param-grid">
+    <div class="param">
+      <label for="pat-pattern"><strong>Pattern</strong></label>
+      <select id="pat-pattern"><option value="">(loading…)</option></select>
+    </div>
+    <div class="param">
+      <label for="pat-include-archived"><strong>Include archived</strong></label>
+      <input id="pat-include-archived" type="checkbox" />
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Versions</h2>
+  <div class="table-wrap">
+    <table id="pat-versions">
+      <thead>
+        <tr>
+          <th>#</th><th>Version</th><th>Actor</th><th>Created</th>
+          <th>Validation</th><th>Default</th><th>Archived</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <div class="toolbar">
+    <button class="btn" id="pat-default" type="button">Set default</button>
+    <button class="btn" id="pat-again" type="button">Backtest again</button>
+    <button class="btn" id="pat-editfrom" type="button">Edit from this version</button>
+    <button class="btn ghost" id="pat-delete" type="button">Delete version</button>
+    <select id="pat-replacement" hidden></select>
+    <span id="pat-action-status" class="muted">Select a version.</span>
+  </div>
+  <div class="param-grid">
+    <div class="param">
+      <label for="pat-source"><strong>Source</strong></label>
+      <pre id="pat-source" class="summary">—</pre>
+    </div>
+    <div class="param">
+      <label for="pat-doc"><strong>Documentation</strong></label>
+      <pre id="pat-doc" class="summary">—</pre>
+    </div>
+    <div class="param">
+      <label for="pat-detail"><strong>History / reports</strong></label>
+      <pre id="pat-detail" class="summary">—</pre>
+    </div>
+    <div class="param">
+      <label for="pat-diff"><strong>Diff vs parent</strong></label>
+      <pre id="pat-diff" class="summary">—</pre>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>AI edit</h2>
+  <div class="param-grid">
+    <div class="param">
+      <label for="pat-preset"><strong>Saved preset</strong></label>
+      <p class="muted small">
+        Required. A saved historical-stream preset is reused as-is; leave blank to
+        save the settings below as a new preset with the given name.
+      </p>
+      <select id="pat-preset"><option value="">(new preset from form)</option></select>
+    </div>
+    <div class="param">
+      <label for="pat-preset-name"><strong>Preset name</strong></label>
+      <input id="pat-preset-name" type="text" placeholder="patterns smoke" />
+    </div>
+    <div class="param">
+      <label for="pat-market"><strong>Market</strong></label>
+      <select id="pat-market">
+        {% for m in markets %}<option value="{{ m.id }}">{{ m.id }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="param">
+      <label for="pat-symbols"><strong>Symbols</strong></label>
+      <input id="pat-symbols" type="text" placeholder="CDNS" />
+    </div>
+    <div class="param">
+      <label for="pat-universe"><strong>Universe</strong></label>
+      <input id="pat-universe" type="text" placeholder="(optional)" />
+    </div>
+    {% for p in params %}
+    {% if p.key not in ("mode", "timeframe") %}
+    <div class="param" data-key="{{ p.key }}">
+      <label for="pat-{{ p.key }}"><strong>{{ p.label }}</strong></label>
+      <p class="muted small">{{ p.description }}</p>
+      {% if p.type == "spin" %}
+      <input id="pat-{{ p.key }}" type="number" value="{{ p.default }}"
+             min="{{ p.min }}" max="{{ p.max }}" step="{{ p.step }}" />
+      {% elif p.type == "check" %}
+      <input id="pat-{{ p.key }}" type="checkbox" {% if p.default %}checked{% endif %} />
+      {% elif p.type == "combo" %}
+      <select id="pat-{{ p.key }}">
+        {% for c in p.choices %}<option value="{{ c }}" {% if c == p.default %}selected{% endif %}>{{ c }}</option>{% endfor %}
+      </select>
+      {% else %}
+      <input id="pat-{{ p.key }}" type="text" value="{{ p.default or '' }}" />
+      {% endif %}
+    </div>
+    {% endif %}
+    {% endfor %}
+    <div class="param">
+      <label for="pat-instruction"><strong>Instruction</strong></label>
+      <textarea id="pat-instruction" rows="4" cols="48"
+                placeholder="Require two closes above the neckline before entry."></textarea>
+    </div>
+  </div>
+  <div class="toolbar">
+    <button class="btn primary" id="pat-submit" type="button">Submit</button>
+    <button class="btn" id="pat-cancel" type="button" disabled>Cancel edit</button>
+    <progress id="pat-progress" max="100" value="0"></progress>
+    <span id="pat-pct">—</span>
+    <span id="pat-state" class="muted">Idle.</span>
+    <span id="pat-job-id" class="muted"></span>
+  </div>
+  <pre id="pat-error" class="summary" hidden></pre>
+  <h3>Explanation</h3>
+  <pre id="pat-explanation" class="summary">No edit submitted.</pre>
+  <h3>Edit diff</h3>
+  <pre id="pat-edit-diff" class="summary">—</pre>
+  <h3>Diagnostics</h3>
+  <pre id="pat-diagnostics" class="summary">—</pre>
+</section>
+
+<section class="panel">
+  <h2>Candidate vs base</h2>
+  <pre id="pat-comparison" class="summary">No automatic backtest yet.</pre>
+  <h3>Candidate trades</h3>
+  <div class="table-wrap">
+    <table id="pat-trades">
+      <thead>
+        <tr>
+          <th>Date</th><th>Action</th><th>Symbol</th><th>TF</th>
+          <th>Entry</th><th>Exit</th><th>P&amp;L%</th><th>Reason</th><th>Pattern</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+  window.TB_PAGE = "patterns";
+  window.TB_MARKETS = {{ markets | tojson }};
+  window.TB_DEFAULT_MARKET = {{ default_market | tojson }};
+  window.TB_STREAM_START = {{ stream_start_default | tojson }};
+</script>
+<script src="/static/patterns.js?v=1"></script>
+{% endblock %}

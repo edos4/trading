@@ -1,0 +1,37 @@
+# P09 smoke record — 2026-09-19
+
+# Environment: disposable PostgreSQL 16.15 on /tmp/pattern-editor-pg/socket:55484,
+# database pattern_editor_smoke, migration 1. Catalog: 10 published patterns.
+# Bootstrap report 4ff361ba0dde4a90beeedd39610ee41a (batch b091fdb53c494b0b84c4e2271bd0d449), passed.
+# Dataset: tests/fixtures/barcache (this working tree ships no data/barcache snapshot).
+# Provider: a local DeepSeek-compatible stub (127.0.0.1:18080) that echoes the
+# current source/documentation back with a marker; it stands in for a live model
+# because DEEPSEEK_API_KEY is not configured here.
+# Candidate sandbox: the real CandidateRunner is unconfigured, so validation
+# blocks (this is the production fail-closed path, not a test double).
+
+## main.py --web — real launch mode (WEB_UI_PORT=18086)
+# login 303
+# page /patterns 200 nav-beside-kronos True
+# catalog 10 patterns
+#   default 6bff1e5d enabled True generation 1
+# versions [1, 2]
+#   detail validation passed files 2
+# submit 200 {"job_id":"6c6e713b7a894f29a6d78280d4881d46","state":"queued"}
+#   job 6c6e713b state queued
+# terminal state blocked
+#   generated version aeb8c704
+#   explanation Smoke edit: appended a marker.
+#   report blocked ['passed', 'passed', 'passed', 'unavailable', 'unavailable', 'unavailable']
+#   error sandbox-unavailable - Candidate sandbox is unavailable; validation is blocked
+# reload reconnected True
+# SMOKE-OK
+
+# Defect found and fixed during this smoke: an unavailable sandbox produced job
+# state `failed` (report `blocked`). The coordinator now raises SandboxBlocked,
+# so the job is `blocked` with error code `sandbox-unavailable`, matching the
+# documented design. The generated version is preserved either way.
+
+# Not performed: a live DeepSeek call (no credentials) and a real candidate
+# sandbox (unconfigured). The full generated→validated→backtested workflow is
+# covered by core/test_patterns_web.py with deterministic doubles.

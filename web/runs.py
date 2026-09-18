@@ -12,6 +12,7 @@ import threading
 
 from core.backtest_service import BacktestService
 from core.pattern_edit_store import EditError
+from core.pattern_editor_api import run_payload
 from utils.logger import log
 
 
@@ -104,33 +105,8 @@ class BacktestRuns:
 
     # ── API-shaped payloads ──────────────────────────────────────────────
     def run_payload(self, run_id: str) -> dict:
-        status = self.status(run_id)
-        payload = {
-            "run_id": run_id,
-            "state": status["state"],
-            "attempt": status["attempt"],
-            "retry_of": status.get("retry_of"),
-            "completed_units": status["progress"].get("completed_units", 0),
-            "total_units": status["progress"].get("total_units"),
-            "unit": status["progress"].get("unit", "symbols"),
-            "cancel_requested": status.get("cancel_requested", False),
-            "error": status.get("error"),
-            "result": None,
-        }
-        if status["state"] == "completed":
-            stored = self.result(run_id)
-            if stored is not None:
-                metrics = stored["result"].metrics
-                payload["result"] = {
-                    "metrics": metrics.model_dump(mode="json"),
-                    "trades": stored["trades"].get("trades", []),
-                    "open_positions": stored["open_positions"],
-                    "equity": stored["equity"],
-                    "zero_trades": metrics.trade_count == 0,
-                    "end_policy": stored["inputs"].request.preset.settings.execution.end_policy,
-                    "mode": stored["inputs"].request.preset.settings.mode,
-                }
-        return payload
+        # One implementation, shared with the Patterns tab.
+        return run_payload(self.service(), run_id)
 
 
 backtest_runs = BacktestRuns()

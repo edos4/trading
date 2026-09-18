@@ -41,6 +41,7 @@ from web.jobs import (
     paper_books,
 )
 from web.runs import backtest_runs
+from web.patterns import pattern_edits, patterns_error
 from web import replay_store
 from web.services import TIMEFRAMES, get_explorer
 
@@ -121,6 +122,28 @@ class BacktestPresetRequest(BaseModel):
     preset_id: Optional[str] = None
     expected_generation: Optional[int] = None
     settings: dict[str, Any]
+
+
+class PatternEditRequest(BaseModel):
+    """Submit an AI edit against an explicit immutable base version."""
+    pattern_id: str
+    base_version_id: str
+    instruction: str = Field(..., min_length=1, max_length=16000)
+    preset_id: Optional[str] = None
+    preset_name: Optional[str] = None
+    settings: Optional[dict[str, Any]] = None
+    idempotency_key: Optional[str] = None
+
+
+class PatternDefaultRequest(BaseModel):
+    expected_generation: int = Field(..., ge=0)
+    idempotency_key: Optional[str] = None
+
+
+class PatternArchiveRequest(BaseModel):
+    expected_generation: int = Field(..., ge=0)
+    replacement_default_version_id: Optional[str] = None
+    idempotency_key: Optional[str] = None
 
 
 def _backtest_error(exc: Exception) -> JSONResponse:
@@ -286,6 +309,18 @@ def create_app() -> FastAPI:
             active="kronos",
             default_market=default_market().id,
             markets=markets_payload(),
+        )
+
+    @app.get("/patterns", response_class=HTMLResponse)
+    async def patterns_page(request: Request, _user: str = Depends(require_login)):
+        return render(
+            request,
+            "patterns.html",
+            active="patterns",
+            params=replay_param_schema(),
+            default_market=default_market().id,
+            markets=markets_payload(),
+            stream_start_default=_stream_start_default(),
         )
 
     @app.get("/replay", response_class=HTMLResponse)
@@ -547,6 +582,155 @@ def create_app() -> FastAPI:
         except Exception as exc:  # noqa: BLE001
             return _backtest_error(exc)
         return {"run_id": job["id"], "state": job["state"]}
+
+    # ── Pattern Editor API (Patterns tab) ─────────────────────────────────
+    @app.get("/api/patterns")
+    async def api_patterns_catalog(_user: str = Depends(require_login)):
+        try:
+            editor = pattern_edits.editor()
+            return {"patterns": await asyncio.to_thread(editor.catalog)}
+        except Exception as exc:  # noqa: BLE001 - mapped to a safe status
+            return patterns_error(exc)
+
+    @app.get("/api/patterns/{pattern_id}/versions")
+    async def api_pattern_versions(
+        pattern_id: str, include_archived: bool = False,
+        _user: str = Depends(require_login),
+    ):
+        try:
+            editor = pattern_edits.editor()
+            return {"versions": await asyncio.to_thread(
+                editor.versions_for, pattern_id, include_archived=include_archived)}
+        except Exception as exc:  # noqa: BLE001
+            return patterns_error(exc)
+
+    @app.get("/api/patterns/versions/{version_id}")
+    async def api_pattern_version_detail(version_id: str,
+                                         _user: str = Depends(require_login)):
+        try:
+            editor = pattern_edits.editor()
+            return await asyncio.to_thread(editor.version_detail, version_id)
+        except Exception as exc:  # noqa: BLE001
+            return patterns_error(exc)
+
+    @app.get("/api/patterns/versions/{version_id}/source")
+    async def api_pattern_version_source(version_id: str,
+                                         _user: str = Depends(require_login)):
+        try:
+            editor = pattern_edits.editor()
+            return await asyncio.to_thread(editor.source, version_id)
+        except Exception as exc:  # noqa: BLE001
+            return patterns_error(exc)
+
+    @app.get("/api/patterns/versions/{version_id}/diff")
+    async def api_pattern_version_diff(version_id: str, base_version_id: str | None = None,
+                                       _user: str = Depends(require_login)):
+        try:
+            editor = pattern_edits.editor()
+            return await asyncio.to_thread(editor.diff, version_id, base_version_id)
+        except Exception as exc:  # noqa: BLE001
+            return patterns_error(exc)
+
+    @app.post("/api/patterns/edits")
+    async def api_pattern_edit_submit(request: Request,
+                                      _user: str = Depends(require_login)):
+        from core.pattern_editor_api import edit_request_from_values
+
+        try:
+            body = PatternEditRequest.model_validate(await _json_body(request))
+        except (ValueError, ValidationError) as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        try:
+            editor = pattern_edits.editor()
+            built = await asyncio.to_thread(
+                edit_request_from_values, editor, body.settings or {},
+                pattern_id=body.pattern_id, base_version_id=body.base_version_id,
+                instruction=body.instruction, preset_id=body.preset_id,
+                preset_name=body.preset_name, idempotency_key=body.idempotency_key)
+            job = await asyncio.to_thread(editor.submit_edit, built)
+        except Exception as exc:  # noqa: BLE001
+            return patterns_error(exc)
+        return {"job_id": job["id"], "state": job["state"]}
+
+    @app.get("/api/patterns/edits/{job_id}")
+    async def api_pattern_edit_status(job_id: str,
+                                      _user: str = Depends(require_login)):
+        try:
+            editor = pattern_edits.editor()
+            return await asyncio.to_thread(editor.job_detail, job_id)
+        except Exception as exc:  # noqa: BLE001
+            return patterns_error(exc)
+
+    @app.post("/api/patterns/edits/{job_id}/cancel")
+    async def api_pattern_edit_cancel(job_id: str,
+                                      _user: str = Depends(require_login)):
+        try:
+            editor = pattern_edits.editor()
+            return await asyncio.to_thread(editor.cancel_job, job_id)
+        except Exception as exc:  # noqa: BLE001
+            return patterns_error(exc)
+
+    @app.post("/api/patterns/edits/{job_id}/retry")
+    async def api_pattern_edit_retry(job_id: str,
+                                     _user: str = Depends(require_login)):
+        try:
+            editor = pattern_edits.editor()
+            job = await asyncio.to_thread(editor.retry_backtest, job_id)
+        except Exception as exc:  # noqa: BLE001
+            return patterns_error(exc)
+        return {"job_id": job["id"], "state": job["state"]}
+
+    @app.get("/api/patterns/runs/{run_id}")
+    async def api_pattern_run(run_id: str, _user: str = Depends(require_login)):
+        try:
+            editor = pattern_edits.editor()
+            return await asyncio.to_thread(editor.run_payload, run_id)
+        except Exception as exc:  # noqa: BLE001
+            return patterns_error(exc)
+
+    @app.post("/api/patterns/versions/{version_id}/default")
+    async def api_pattern_set_default(version_id: str, request: Request,
+                                      _user: str = Depends(require_login)):
+        try:
+            body = PatternDefaultRequest.model_validate(await _json_body(request))
+        except (ValueError, ValidationError) as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        try:
+            editor = pattern_edits.editor()
+            version = await asyncio.to_thread(editor.version_detail, version_id)
+            result = await asyncio.to_thread(
+                editor.set_default, pattern_id=version["pattern_id"],
+                version_id=version_id, expected_generation=body.expected_generation,
+                idempotency_key=body.idempotency_key)
+        except Exception as exc:  # noqa: BLE001
+            return patterns_error(exc)
+        return {"pattern": {
+            "pattern_id": result["id"], "default_version_id": result["active"],
+            "generation": int(result["generation"]),
+        }}
+
+    @app.post("/api/patterns/versions/{version_id}/archive")
+    async def api_pattern_archive(version_id: str, request: Request,
+                                  _user: str = Depends(require_login)):
+        try:
+            body = PatternArchiveRequest.model_validate(await _json_body(request))
+        except (ValueError, ValidationError) as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        try:
+            editor = pattern_edits.editor()
+            version = await asyncio.to_thread(editor.version_detail, version_id)
+            result = await asyncio.to_thread(
+                editor.archive, pattern_id=version["pattern_id"],
+                version_id=version_id,
+                replacement_default_version_id=body.replacement_default_version_id,
+                expected_generation=body.expected_generation,
+                idempotency_key=body.idempotency_key)
+        except Exception as exc:  # noqa: BLE001
+            return patterns_error(exc)
+        return {"pattern": {
+            "pattern_id": result["id"], "default_version_id": result["active"],
+            "generation": int(result["generation"]),
+        }}
 
     # ── Paper API ─────────────────────────────────────────────────────────
     @app.get("/api/paper/status")
