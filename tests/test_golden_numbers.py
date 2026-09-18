@@ -17,11 +17,13 @@ here, not just one that drops a real trade.
 
 from __future__ import annotations
 
+from file_patterns import file_pattern
+
 from pathlib import Path
 
 import pytest
 
-from core.backtester import _core_backtest_symbol, _iter_pattern_classes, _summarize
+from core.backtester import _core_backtest_symbol, _summarize
 from core.market import get_market
 from data.barcache import load as _load_barcache
 
@@ -79,7 +81,7 @@ ROUNDING_BOTTOM_TRADES = {
 
 
 def _run(pattern_name: str, symbols: list[str]):
-    pattern = next(c() for _, c in _iter_pattern_classes() if c().name == pattern_name)
+    pattern = file_pattern(pattern_name)
     profile = get_market("us")
     config = {
         "position_notional": 10_000.0,

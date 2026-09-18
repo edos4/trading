@@ -1,0 +1,557 @@
+{
+  "disabled_patterns": [],
+  "dynamic_rationale_modules": {
+    "pattern_002_double_top": "patterns.002_double_top",
+    "pattern_003_double_bottom": "patterns.003_double_bottom",
+    "pattern_004_rounding_bottom": "patterns.004_rounding_bottom",
+    "pattern_005_rounding_top": "patterns.005_rounding_top",
+    "pattern_006_upward_channel": "patterns._channels",
+    "pattern_007_descending_channel": "patterns._channels",
+    "pattern_008_head_and_shoulders": "patterns.008_head_and_shoulders",
+    "pattern_009_flag_pattern": "patterns.009_flag_pattern",
+    "pattern_010_pennant": "patterns.010_pennant",
+    "pattern_011_breakout_retest": "patterns.011_breakout_retest"
+  },
+  "entries": [
+    {
+      "class_name": "DoubleTopPattern",
+      "configured_disabled": false,
+      "documentation": "patterns/002_double_top.md",
+      "horizon_bars": 3,
+      "max_open_per_symbol": null,
+      "min_bars": 30,
+      "pattern_id": "pattern_002_double_top",
+      "skipped": false,
+      "source": "patterns/002_double_top.py",
+      "static_repository_dependencies": [
+        "analysis/indicator_engine.py",
+        "config.py",
+        "core/market.py",
+        "data/__init__.py",
+        "data/barcache.py",
+        "data/db.py",
+        "data/edgar_client.py",
+        "data/history.py",
+        "data/history_client.py",
+        "data/ohlcv_store.py",
+        "data/pse_edge.py",
+        "data/tv_client.py",
+        "patterns/002_double_top.md",
+        "patterns/002_double_top.py",
+        "patterns/__init__.py",
+        "patterns/_dedup.py",
+        "patterns/_rules.py",
+        "patterns/base_pattern.py",
+        "utils/logger.py"
+      ],
+      "timeframes": [
+        "1d"
+      ]
+    },
+    {
+      "class_name": "DoubleBottomPattern",
+      "configured_disabled": false,
+      "documentation": "patterns/003_double_bottom.md",
+      "horizon_bars": 5,
+      "max_open_per_symbol": null,
+      "min_bars": 30,
+      "pattern_id": "pattern_003_double_bottom",
+      "skipped": false,
+      "source": "patterns/003_double_bottom.py",
+      "static_repository_dependencies": [
+        "analysis/indicator_engine.py",
+        "config.py",
+        "core/market.py",
+        "data/__init__.py",
+        "data/barcache.py",
+        "data/db.py",
+        "data/edgar_client.py",
+        "data/history.py",
+        "data/history_client.py",
+        "data/ohlcv_store.py",
+        "data/pse_edge.py",
+        "data/tv_client.py",
+        "patterns/003_double_bottom.md",
+        "patterns/003_double_bottom.py",
+        "patterns/__init__.py",
+        "patterns/_dedup.py",
+        "patterns/_rules.py",
+        "patterns/base_pattern.py",
+        "utils/logger.py"
+      ],
+      "timeframes": [
+        "1d"
+      ]
+    },
+    {
+      "class_name": "RoundingBottomPattern",
+      "configured_disabled": false,
+      "documentation": "patterns/004_rounding_bottom.md",
+      "horizon_bars": 5,
+      "max_open_per_symbol": null,
+      "min_bars": 121,
+      "pattern_id": "pattern_004_rounding_bottom",
+      "skipped": false,
+      "source": "patterns/004_rounding_bottom.py",
+      "static_repository_dependencies": [
+        "analysis/indicator_engine.py",
+        "config.py",
+        "core/market.py",
+        "data/__init__.py",
+        "data/barcache.py",
+        "data/db.py",
+        "data/edgar_client.py",
+        "data/history.py",
+        "data/history_client.py",
+        "data/ohlcv_store.py",
+        "data/pse_edge.py",
+        "data/tv_client.py",
+        "patterns/004_rounding_bottom.md",
+        "patterns/004_rounding_bottom.py",
+        "patterns/__init__.py",
+        "patterns/_annotations.py",
+        "patterns/_dedup.py",
+        "patterns/_rationale.py",
+        "patterns/_rounding.py",
+        "patterns/_rules.py",
+        "patterns/base_pattern.py",
+        "utils/logger.py"
+      ],
+      "timeframes": [
+        "1d"
+      ]
+    },
+    {
+      "class_name": "RoundingTopPattern",
+      "configured_disabled": false,
+      "documentation": "patterns/005_rounding_top.md",
+      "horizon_bars": 5,
+      "max_open_per_symbol": null,
+      "min_bars": 121,
+      "pattern_id": "pattern_005_rounding_top",
+      "skipped": false,
+      "source": "patterns/005_rounding_top.py",
+      "static_repository_dependencies": [
+        "analysis/indicator_engine.py",
+        "config.py",
+        "core/market.py",
+        "data/__init__.py",
+        "data/barcache.py",
+        "data/db.py",
+        "data/edgar_client.py",
+        "data/history.py",
+        "data/history_client.py",
+        "data/ohlcv_store.py",
+        "data/pse_edge.py",
+        "data/tv_client.py",
+        "patterns/005_rounding_top.md",
+        "patterns/005_rounding_top.py",
+        "patterns/__init__.py",
+        "patterns/_annotations.py",
+        "patterns/_dedup.py",
+        "patterns/_rationale.py",
+        "patterns/_rounding.py",
+        "patterns/_rules.py",
+        "patterns/base_pattern.py",
+        "utils/logger.py"
+      ],
+      "timeframes": [
+        "1d"
+      ]
+    },
+    {
+      "class_name": "UpwardChannelPattern",
+      "configured_disabled": false,
+      "documentation": "patterns/006_upward_channel.md",
+      "horizon_bars": 16,
+      "max_open_per_symbol": null,
+      "min_bars": 40,
+      "pattern_id": "pattern_006_upward_channel",
+      "skipped": false,
+      "source": "patterns/006_upward_channel.py",
+      "static_repository_dependencies": [
+        "analysis/indicator_engine.py",
+        "config.py",
+        "core/market.py",
+        "data/__init__.py",
+        "data/barcache.py",
+        "data/db.py",
+        "data/edgar_client.py",
+        "data/history.py",
+        "data/history_client.py",
+        "data/ohlcv_store.py",
+        "data/pse_edge.py",
+        "data/tv_client.py",
+        "patterns/006_upward_channel.md",
+        "patterns/006_upward_channel.py",
+        "patterns/__init__.py",
+        "patterns/_channels.py",
+        "patterns/_dedup.py",
+        "patterns/_rules.py",
+        "patterns/base_pattern.py",
+        "utils/logger.py"
+      ],
+      "timeframes": [
+        "1d"
+      ]
+    },
+    {
+      "class_name": "DescendingChannelPattern",
+      "configured_disabled": false,
+      "documentation": "patterns/007_descending_channel.md",
+      "horizon_bars": 5,
+      "max_open_per_symbol": null,
+      "min_bars": 40,
+      "pattern_id": "pattern_007_descending_channel",
+      "skipped": true,
+      "source": "patterns/007_descending_channel.py",
+      "static_repository_dependencies": [
+        "analysis/indicator_engine.py",
+        "config.py",
+        "core/market.py",
+        "data/__init__.py",
+        "data/barcache.py",
+        "data/db.py",
+        "data/edgar_client.py",
+        "data/history.py",
+        "data/history_client.py",
+        "data/ohlcv_store.py",
+        "data/pse_edge.py",
+        "data/tv_client.py",
+        "patterns/007_descending_channel.md",
+        "patterns/007_descending_channel.py",
+        "patterns/__init__.py",
+        "patterns/_channels.py",
+        "patterns/_dedup.py",
+        "patterns/_rules.py",
+        "patterns/base_pattern.py",
+        "utils/logger.py"
+      ],
+      "timeframes": [
+        "1d"
+      ]
+    },
+    {
+      "class_name": "HeadAndShouldersPattern",
+      "configured_disabled": false,
+      "documentation": "patterns/008_head_and_shoulders.md",
+      "horizon_bars": 3,
+      "max_open_per_symbol": null,
+      "min_bars": 80,
+      "pattern_id": "pattern_008_head_and_shoulders",
+      "skipped": true,
+      "source": "patterns/008_head_and_shoulders.py",
+      "static_repository_dependencies": [
+        "analysis/indicator_engine.py",
+        "config.py",
+        "core/market.py",
+        "data/__init__.py",
+        "data/barcache.py",
+        "data/db.py",
+        "data/edgar_client.py",
+        "data/history.py",
+        "data/history_client.py",
+        "data/ohlcv_store.py",
+        "data/pse_edge.py",
+        "data/tv_client.py",
+        "patterns/008_head_and_shoulders.md",
+        "patterns/008_head_and_shoulders.py",
+        "patterns/__init__.py",
+        "patterns/_dedup.py",
+        "patterns/_rules.py",
+        "patterns/base_pattern.py",
+        "utils/logger.py"
+      ],
+      "timeframes": [
+        "1d"
+      ]
+    },
+    {
+      "class_name": "FlagPattern",
+      "configured_disabled": false,
+      "documentation": "patterns/009_flag_pattern.md",
+      "horizon_bars": 3,
+      "max_open_per_symbol": 1,
+      "min_bars": 120,
+      "pattern_id": "pattern_009_flag_pattern",
+      "skipped": true,
+      "source": "patterns/009_flag_pattern.py",
+      "static_repository_dependencies": [
+        "analysis/indicator_engine.py",
+        "config.py",
+        "core/market.py",
+        "data/__init__.py",
+        "data/barcache.py",
+        "data/db.py",
+        "data/edgar_client.py",
+        "data/history.py",
+        "data/history_client.py",
+        "data/ohlcv_store.py",
+        "data/pse_edge.py",
+        "data/tv_client.py",
+        "patterns/009_flag_pattern.md",
+        "patterns/009_flag_pattern.py",
+        "patterns/__init__.py",
+        "patterns/_dedup.py",
+        "patterns/_rules.py",
+        "patterns/base_pattern.py",
+        "utils/logger.py"
+      ],
+      "timeframes": [
+        "1d"
+      ]
+    },
+    {
+      "class_name": "PennantPattern",
+      "configured_disabled": false,
+      "documentation": "patterns/010_pennant.md",
+      "horizon_bars": 25,
+      "max_open_per_symbol": 1,
+      "min_bars": 50,
+      "pattern_id": "pattern_010_pennant",
+      "skipped": false,
+      "source": "patterns/010_pennant.py",
+      "static_repository_dependencies": [
+        "analysis/indicator_engine.py",
+        "config.py",
+        "core/market.py",
+        "data/__init__.py",
+        "data/db.py",
+        "data/history.py",
+        "data/history_client.py",
+        "data/ohlcv_store.py",
+        "data/pse_edge.py",
+        "data/tv_client.py",
+        "patterns/010_pennant.md",
+        "patterns/010_pennant.py",
+        "patterns/__init__.py",
+        "patterns/_dedup.py",
+        "patterns/base_pattern.py",
+        "utils/logger.py"
+      ],
+      "timeframes": [
+        "1d"
+      ]
+    },
+    {
+      "class_name": "BreakoutRetestPattern",
+      "configured_disabled": false,
+      "documentation": "patterns/011_breakout_retest.md",
+      "horizon_bars": 5,
+      "max_open_per_symbol": null,
+      "min_bars": 105,
+      "pattern_id": "pattern_011_breakout_retest",
+      "skipped": true,
+      "source": "patterns/011_breakout_retest.py",
+      "static_repository_dependencies": [
+        "analysis/indicator_engine.py",
+        "config.py",
+        "core/market.py",
+        "data/__init__.py",
+        "data/barcache.py",
+        "data/db.py",
+        "data/edgar_client.py",
+        "data/history.py",
+        "data/history_client.py",
+        "data/ohlcv_store.py",
+        "data/pse_edge.py",
+        "data/tv_client.py",
+        "patterns/011_breakout_retest.md",
+        "patterns/011_breakout_retest.py",
+        "patterns/_rules.py",
+        "patterns/base_pattern.py",
+        "utils/logger.py"
+      ],
+      "timeframes": [
+        "1d"
+      ]
+    }
+  ],
+  "files": {
+    "analysis/indicator_engine.py": {
+      "sha256": "bf1b65b5761c8268ec462eca245890a89a04479aec2f3e9824ac690860409e35",
+      "size_bytes": 7331
+    },
+    "config.py": {
+      "sha256": "c38a5f02995c59a72a456172549747f5add52714aa8e1fbb4001d6a56a9b8a47",
+      "size_bytes": 18377
+    },
+    "core/market.py": {
+      "sha256": "dd66e660ffcdd12897b1321b8d3f8033811b1abc73e8f11258e28cacae4b1862",
+      "size_bytes": 18711
+    },
+    "data/__init__.py": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0
+    },
+    "data/barcache.py": {
+      "sha256": "6af39957f5fc00cd32ea112fd2139ba048facaf9b3df332d06ae600cda6abb8d",
+      "size_bytes": 3952
+    },
+    "data/db.py": {
+      "sha256": "e2b9d20e16a3e7e1d57a4dde474aa41a88989c9b9612195b570de3e1ab6ba417",
+      "size_bytes": 14104
+    },
+    "data/edgar_client.py": {
+      "sha256": "c2296bd0a3fb448892df61cae46ca2386ef1bdf8f0b5585a96de8427a3777b0d",
+      "size_bytes": 9513
+    },
+    "data/history.py": {
+      "sha256": "8400ae09181c7409b8d3be487175b702812fd617a5d571224d9f4ed722a6d818",
+      "size_bytes": 9400
+    },
+    "data/history_client.py": {
+      "sha256": "319a3837efea116222b57ffe8969e28252081bee3abb250daf102bf73aa9b096",
+      "size_bytes": 6260
+    },
+    "data/ohlcv_store.py": {
+      "sha256": "e10e952e37777fb523bc4362a832700ab764ee0cf231aa0214d35bd1e0450116",
+      "size_bytes": 6922
+    },
+    "data/pse_edge.py": {
+      "sha256": "6ab83fd05aab5ffb5b0f241d4eea24884af59b43094a4b08145ed8f5e8be0efe",
+      "size_bytes": 13959
+    },
+    "data/tv_client.py": {
+      "sha256": "f27646295af1c78588da8c95559f1d2100bf71d2f51ed5880caef3aefb948445",
+      "size_bytes": 36947
+    },
+    "patterns/002_double_top.md": {
+      "sha256": "5be5f0a4946adab4bb6fbcd4c2b5730a439df1f9d9d2c79a6cb6e935ecd2416b",
+      "size_bytes": 2820
+    },
+    "patterns/002_double_top.py": {
+      "sha256": "3717c084b015f3e008776e074965c5f218fc080ca212f4136f2cd31ddb02dfe1",
+      "size_bytes": 9432
+    },
+    "patterns/003_double_bottom.md": {
+      "sha256": "72e39f67676f7a4a15a4a77cf405c49e2e279019275abc900b6f46248039a44b",
+      "size_bytes": 1537
+    },
+    "patterns/003_double_bottom.py": {
+      "sha256": "f63aa4680b85f7a027156a76ba81fe3a31d4f6c916d79a876cc7ccbd2efeb881",
+      "size_bytes": 5984
+    },
+    "patterns/004_rounding_bottom.md": {
+      "sha256": "26293ccdbf7d7c71533395d357dcd12667cc659ea5917a341c20104225fb55bf",
+      "size_bytes": 3342
+    },
+    "patterns/004_rounding_bottom.py": {
+      "sha256": "395cc03c9d94ddd4944cc70232fbcebf424e9e24b7d8bf410c27e552a91586a1",
+      "size_bytes": 2961
+    },
+    "patterns/005_rounding_top.md": {
+      "sha256": "2c61594af1b032815b6402567fb85b4ae31b5254c7218bc4a66995147695ea49",
+      "size_bytes": 2800
+    },
+    "patterns/005_rounding_top.py": {
+      "sha256": "d049e2d905b874b2be6afc90127e62b5e6892acca7ca7e141d196d38ac109c31",
+      "size_bytes": 2849
+    },
+    "patterns/006_upward_channel.md": {
+      "sha256": "8ff5817721088b0148090ef5b5070eef2924aed428f8d7be187eac57c0a3d01b",
+      "size_bytes": 2409
+    },
+    "patterns/006_upward_channel.py": {
+      "sha256": "314c019183e40c71e92ebca09d19d5308726d708762e5158427ef7fb1d66e465",
+      "size_bytes": 5840
+    },
+    "patterns/007_descending_channel.md": {
+      "sha256": "4b2f2a8d14803297320dc2ca4e9753c3e12347f50ed2e6c16ed409c464c9523f",
+      "size_bytes": 2425
+    },
+    "patterns/007_descending_channel.py": {
+      "sha256": "4fac84300c0041e662ad686addb6f76479677bd60ae1c6e370d9c5cb57bf16f3",
+      "size_bytes": 3839
+    },
+    "patterns/008_head_and_shoulders.md": {
+      "sha256": "8abb61e4a7bcf64c255d749d10b92097e207a377e421a9a2d7789c05571ec0fc",
+      "size_bytes": 1501
+    },
+    "patterns/008_head_and_shoulders.py": {
+      "sha256": "af9a47af4f2d2940f19248ae65680263fe279e870fde474c1118d53a5c5e28a6",
+      "size_bytes": 9154
+    },
+    "patterns/009_flag_pattern.md": {
+      "sha256": "edc3b65bd3b5fd327659593342e984badae4804011e27f4a0d34aa0cc10392c8",
+      "size_bytes": 7145
+    },
+    "patterns/009_flag_pattern.py": {
+      "sha256": "232d2131db6636fe86c06864ce63ef22fd7d310808130962909c0223caf57e0f",
+      "size_bytes": 7670
+    },
+    "patterns/010_pennant.md": {
+      "sha256": "995802a17fec84b94a0ae0b417e696ea1f68c722eecda52978635e718e92c146",
+      "size_bytes": 4311
+    },
+    "patterns/010_pennant.py": {
+      "sha256": "4bc86d5f34c23bfe19dcad25b84e9c04009839584b5197e1094c38e3eb4e8dd2",
+      "size_bytes": 7574
+    },
+    "patterns/011_breakout_retest.md": {
+      "sha256": "70d297d417ad4746e1ea019bafb6a5f90929377f75966ef73dfa54c80e57d4d9",
+      "size_bytes": 3740
+    },
+    "patterns/011_breakout_retest.py": {
+      "sha256": "a16c5396b22c7d433b9d625ed3041756573a4b6a3c73ea06fe937775f4faabdf",
+      "size_bytes": 5969
+    },
+    "patterns/__init__.py": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0
+    },
+    "patterns/_annotations.py": {
+      "sha256": "f2d0ba207310ba91e8f6a264fc4745cd068bf570290e8a8675c1b3978ef9d9bd",
+      "size_bytes": 7144
+    },
+    "patterns/_channels.py": {
+      "sha256": "2b891a74daf4b1d518fabce7ac023972f71e8ec2a2a0c0ddb71676100f57e918",
+      "size_bytes": 10045
+    },
+    "patterns/_dedup.py": {
+      "sha256": "623a087a81d691b6e19b840110793eeb81fe2d5e19c001007d1a6b163c10b0de",
+      "size_bytes": 1809
+    },
+    "patterns/_rationale.py": {
+      "sha256": "5f075ac85e6b7cd673f528c80ebf269bdf914ce2c440199694bb25d0cffe1937",
+      "size_bytes": 29867
+    },
+    "patterns/_rounding.py": {
+      "sha256": "40b77626634c281ac7eb7644e7b1c8e65d55418f0035200894475aa44fe40534",
+      "size_bytes": 5905
+    },
+    "patterns/_rules.py": {
+      "sha256": "e536959a2e3c3e93ae91d9f0d912e10d627dbcc4ff18bae06047bf09231f003e",
+      "size_bytes": 4906
+    },
+    "patterns/base_pattern.py": {
+      "sha256": "5c076532f9fd821630a7b2b4547756753c90b905a8c968e09c6508b19b4c09c1",
+      "size_bytes": 11762
+    },
+    "utils/logger.py": {
+      "sha256": "e98ace42663f00333a48e0a0142b099cef4094ea6b95ce285364297ad9e51023",
+      "size_bytes": 1241
+    }
+  },
+  "git_commit": "7f343fa7c879243e8fc78fd119a504712a9918ca",
+  "packages": {
+    "mcp": "1.28.0",
+    "numpy": "2.5.1",
+    "pandas": "2.2.2",
+    "psycopg": "3.3.4",
+    "pydantic": "2.13.4",
+    "pytest": "9.1.1",
+    "tradingview-screener": "3.2.1"
+  },
+  "purpose": "P01 audit only; not a verified or published bootstrap snapshot",
+  "python_tag": "cpython-312",
+  "tracked_changed_paths": [],
+  "untracked_paths": [
+    "core/pattern_editor_contracts.py",
+    "core/test_pattern_editor_contracts.py",
+    "docs/pattern-editor-implementation-plan.md",
+    "docs/pattern-editor.md",
+    "docs/verification/pattern-editor-p01-inventory.json",
+    "scripts/audit_pattern_editor_baseline.py"
+  ]
+}

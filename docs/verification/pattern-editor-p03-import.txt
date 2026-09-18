@@ -1,0 +1,36 @@
+2026-09-18 15:40:25 | INFO     | Backtest | EXIT FIXTURE 1d reason=trailing_stop pnl=+3.11%
+
+2026-09-18 15:40:26 | INFO     | Backtest | EXIT FIXTURE 1d reason=trailing_stop pnl=+3.11%
+
+2026-09-18 15:40:29 | INFO     | Backtest | EXIT FIXTURE 1d reason=trailing_stop pnl=+4.35%
+
+2026-09-18 15:40:31 | INFO     | Backtest | EXIT FIXTURE 1d reason=trailing_stop pnl=+4.35%
+
+2026-09-18 15:41:09 | INFO     | Backtest | EXIT FIXTURE 1d reason=take_profit pnl=+23.19%
+
+2026-09-18 15:41:10 | INFO     | Backtest | EXIT FIXTURE 1d reason=take_profit pnl=+23.19%
+
+2026-09-18 15:41:13 | INFO     | Backtest | EXIT FIXTURE 1d reason=take_profit pnl=+26.46%
+
+2026-09-18 15:41:14 | INFO     | Backtest | EXIT FIXTURE 1d reason=take_profit pnl=+26.46%
+
+2026-09-18 15:41:17 | INFO     | Backtest | EXIT FIXTURE 1d reason=reclaim pnl=-4.23%
+
+2026-09-18 15:41:18 | INFO     | Backtest | EXIT FIXTURE 1d reason=reclaim pnl=-4.23%
+
+2026-09-18 15:41:25 | INFO     | Backtest | EXIT FIXTURE 1d reason=trailing_stop pnl=-5.20%
+
+2026-09-18 15:41:26 | INFO     | Backtest | EXIT FIXTURE 1d reason=trailing_stop pnl=-5.20%
+
+{
+  "batch_id": "de4263e88f084c538ff78f74cbd7c214",
+  "report_id": "635d8d7adf264bbd8189ea91f31540a4",
+  "snapshot_sha256": "ec429bff0fcb51b14fb7b49772c306b1d73c4276e447e4d8fc210ea11adfa1f5",
+  "status": "passed"
+}
+{
+  "batch_id": "de4263e88f084c538ff78f74cbd7c214",
+  "report_id": "635d8d7adf264bbd8189ea91f31540a4",
+  "snapshot_sha256": "ec429bff0fcb51b14fb7b49772c306b1d73c4276e447e4d8fc210ea11adfa1f5",
+  "status": "passed"
+}

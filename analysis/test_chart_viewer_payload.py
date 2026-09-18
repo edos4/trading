@@ -129,21 +129,11 @@ def test_trade_preserves_annotations_through_ledger_roundtrip():
     assert trade.chart_annotations[0]["start_price"] == 10
 
 
-def test_legacy_recovery_uses_entry_bar_only(monkeypatch):
-    from analysis.chart_renderer import _recover_trade_annotations
-    from types import SimpleNamespace
-    import core.backtester
-    seen = []
-    class Detector:
-        name = "legacy"
-        def analyze(self, snapshot, store):
-            seen.append(len(store.get_df("TEST", "1d")))
-            return SimpleNamespace(action="BUY", chart_annotations=[{"type": "hline", "price": 10}])
-    monkeypatch.setattr(core.backtester, "_iter_pattern_classes", lambda: [("legacy", Detector)])
+def test_legacy_trade_without_anchors_does_not_redetect():
     idx = pd.bdate_range("2024-01-01", periods=40)
     df = pd.DataFrame({"Open": 10, "High": 11, "Low": 9, "Close": 10, "Volume": 100}, index=idx)
-    assert _recover_trade_annotations(df, "TEST", "1d", "legacy", "BUY", idx[20], "America/New_York")
-    assert seen == [21]
+    payload = build_trade_viewer_payload(df, symbol="TEST", pattern="legacy", entry_time=idx[20])
+    assert payload['segments'] == []
 
 
 def test_desktop_pattern_segment_interpolates_when_panned():

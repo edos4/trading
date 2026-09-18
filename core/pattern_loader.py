@@ -2,18 +2,15 @@
 from __future__ import annotations
 
 import importlib
-import pkgutil
 
-from core.pattern_edit_store import EditStore, ROOT, uid
+from core.pattern_edit_store import EditStore, EditError, uid
 from core.pattern_versions import PatternVersions
 from core.pattern_provenance import rules
-from patterns.base_pattern import BasePattern, TradeSignal, skip_pattern_module
+from patterns.base_pattern import BasePattern, TradeSignal
 
 
-def active_versions():
-    if not (ROOT/'data/pattern_edit/registry.sqlite3').exists():
-        return {}
-    return EditStore().active_set()
+def active_versions(store=None):
+    return PatternVersions(store).resolve()
 
 
 def trusted_baseline(store, version):
@@ -21,6 +18,7 @@ def trusted_baseline(store, version):
     import builtins
     import types
     import sys
+    import weakref
     namespace = "_pattern_baseline_" + version['version_id'] + "_" + uid()
     modules = {}
     original_import = builtins.__import__
@@ -28,10 +26,17 @@ def trusted_baseline(store, version):
     def load(name):
         if name in modules:
             return modules[name]
+        if name == "patterns.base_pattern":
+            return importlib.import_module(name)
         if name == "patterns":
-            module = types.ModuleType(namespace)
+            module = types.ModuleType(namespace + ".patterns")
             module.__path__ = []
             modules[name] = module
+            module.__package__ = module.__name__
+            module.__builtins__ = {**vars(builtins), '__import__': importing}
+            if 'patterns/__init__.py' in version['files']:
+                exec(compile(store.read_blob(version['files']['patterns/__init__.py']),
+                             'patterns/__init__.py', 'exec'), module.__dict__)
             return module
         relative = name.replace('.', '/') + '.py'
         if relative not in version['files']:
@@ -47,7 +52,15 @@ def trusted_baseline(store, version):
 
     def importing(name, globals=None, locals=None, fromlist=(), level=0):
         if level:
-            raise ImportError("Relative imports require a versioned import adapter")
+            package = (globals or {}).get('__package__', '').removeprefix(namespace + '.')
+            name = importlib.util.resolve_name('.' * level + name, package)
+            level = 0
+        if name == 'importlib':
+            proxy = types.ModuleType('importlib')
+            proxy.__dict__.update(vars(importlib))
+            proxy.import_module = lambda target, package=None: (
+                load(target) if target.startswith('patterns.') else importlib.import_module(target, package))
+            return proxy
         if name == 'patterns.base_pattern':
             return original_import(name,globals,locals,fromlist,0)
         if name == 'patterns' or name.startswith('patterns.'):
@@ -71,8 +84,12 @@ def trusted_baseline(store, version):
         return original_import(name,globals,locals,fromlist,level)
 
     module = load(version['source_path'][:-3].replace('/','.'))
-    instance = next(c() for c in vars(module).values() if isinstance(c,type) and c is not BasePattern
-                    and issubclass(c,BasePattern) and c.__module__==module.__name__)
+    classes = [c for c in vars(module).values() if isinstance(c,type) and c is not BasePattern
+               and issubclass(c,BasePattern) and c.__module__ == module.__name__]
+    if len(classes) != 1:
+        raise ValueError('Expected exactly one detector class')
+    instance = classes[0]()
+    weakref.finalize(instance, lambda: [sys.modules.pop(m.__name__, None) for m in modules.values()])
     return instance, modules
 
 
@@ -82,16 +99,19 @@ class VersionPattern(BasePattern):
         self.version = PatternVersions(self.store).verify(version_id,runtime=True)
         self.pattern_version_id = version_id
         self.metadata = self.version.get('metadata')
-        if self.metadata is None:
+        if self.version.get('provenance') in ('file-import', 'trusted-snapshot'):
             # Baseline metadata is inspected from unchanged, trusted repository
             # source. Baselines are not activated edits, and use ordinary imports.
             if self.version['parent_version_id'] is not None:
                 raise ValueError('Validated version metadata is missing')
             self._baseline, self._baseline_modules = trusted_baseline(self.store,self.version)
             self.metadata = {'name':self._baseline.name,'timeframes':self._baseline.timeframes,
+                             'skipped':self._baseline.skipped, 'chart_description':self._baseline.chart_description,
                              **{k:getattr(self._baseline,k,d) for k,d in
                                 [('MIN_BARS',2),('HORIZON_BARS',5),('MAX_OPEN_PER_SYMBOL',None)]}}
         else:
+            if self.metadata is None:
+                raise EditError('Validated version metadata is missing')
             self._baseline = None
         for key in ('MIN_BARS','HORIZON_BARS','MAX_OPEN_PER_SYMBOL'):
             setattr(self,key,self.metadata[key])
@@ -103,6 +123,14 @@ class VersionPattern(BasePattern):
     @property
     def timeframes(self):
         return self.metadata['timeframes']
+
+    @property
+    def skipped(self):
+        return self.metadata.get('skipped', False)
+
+    @property
+    def chart_description(self):
+        return self.metadata.get('chart_description', super().chart_description)
 
     def analyze(self, snapshot, store):
         if self._baseline is not None:
@@ -126,6 +154,8 @@ class VersionPattern(BasePattern):
             result = Validator(self.store).execute(self.version,{},dataset)
             signal = TradeSignal(**result['signals'][0]) if result['signals'] else None
         if signal:
+            for annotation in signal.chart_annotations:
+                annotation['pattern_version_id'] = self.pattern_version_id
             signal.pattern_version_id = self.pattern_version_id
             signal.signal_id = signal.signal_id or uid()
             signal.provenance = 'versioned'
@@ -133,44 +163,33 @@ class VersionPattern(BasePattern):
         return signal
 
 
-def discover(disabled=(), version_set=None):
-    import patterns
-    versions = active_versions() if version_set is None else version_set
+def discover(disabled=(), version_set=None, *, store=None):
+    """Explicit version_set is an already pinned internal execution request."""
+    store = store or EditStore()
+    versions = PatternVersions(store).resolve(disabled=disabled) if version_set is None else dict(version_set)
     found = []
-    for module_info in pkgutil.iter_modules(patterns.__path__):
-        if skip_pattern_module(module_info.name):
-            continue
-        pattern_id = 'pattern_'+module_info.name
+    for pattern_id, version_id in versions.items():
         if pattern_id in disabled:
             continue
-        if pattern_id in versions:
-            instance = VersionPattern(versions[pattern_id])
-            found.append(instance)
-            continue
-        module = importlib.import_module('patterns.'+module_info.name)
-        for cls in vars(module).values():
-            if isinstance(cls,type) and cls is not BasePattern and issubclass(cls,BasePattern) and cls.__module__==module.__name__:
-                instance = cls()
-                if not instance.skipped and instance.name not in disabled:
-                    found.append(instance)
+        instance = VersionPattern(version_id, store)
+        if instance.name != pattern_id or instance.skipped:
+            raise EditError('Pinned pattern identity or availability mismatch')
+        found.append(instance)
     return found
 
 
 def worker_spec(pattern):
     if isinstance(pattern,VersionPattern):
         return ('version:'+pattern.pattern_version_id,pattern.name)
-    return (type(pattern).__module__,type(pattern).__qualname__)
+    raise EditError('Runtime workers require a pinned PostgreSQL version')
 
 
 def acknowledge_worker(worker, stopped=False):
     """Publish scan-boundary version set; stopped workers cannot hold activation."""
-    if not (ROOT/'data/pattern_edit/registry.sqlite3').exists():
-        return
     import os
-    from core.pattern_edit_store import canonical, now
+    from core.pattern_edit_store import now
     worker_id=getattr(worker,'_pattern_worker_id',None) or uid()
     worker._pattern_worker_id=worker_id
     payload={'worker_id':worker_id,'pid':os.getpid(),'stopped':stopped,
              'versions':getattr(worker,'_version_set',{}),'heartbeat':now()}
-    with EditStore().transaction() as con:
-        con.execute('INSERT OR REPLACE INTO workers VALUES(?,?,?)',(worker_id,now(),canonical(payload).decode()))
+    EditStore().save_worker(payload)

@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from core.pattern_edit_store import EditStore, EditError, canonical, digest, uid
+from core.pattern_edit_store import EditError, canonical, digest, uid
 from core.pattern_edit_validation import Validator, candle_rows, validate_candles
 from core.pattern_edit_worker import SandboxUnavailable
 from core.pattern_versions import PatternVersions
@@ -69,13 +69,13 @@ def revision(store, version, source='from patterns._helper import VALUE\nVALUE2=
             'patch': store.blob(b'diff', 'text/x-diff')}
 
 
-def validators(tmp_path, runner):
-    store = EditStore(repository(tmp_path))
+def validators(tmp_path, runner, editor_store_factory):
+    store = editor_store_factory(repository(tmp_path))
     return store, PatternVersions(store).baseline(PATTERN), Validator(store, runner)
 
 
-def test_ready_report_binds_hashes_and_passes_required_checks(tmp_path):
-    store, version, validator = validators(tmp_path, FakeRunner([candidate_signal()]))
+def test_ready_report_binds_hashes_and_passes_required_checks(tmp_path, editor_store_factory):
+    store, version, validator = validators(tmp_path, FakeRunner([candidate_signal()]), editor_store_factory)
     rev = revision(store, version)
     report = validator.validate(version, rev, dataset(), [anchor()])
     assert report['ready'] is True
@@ -89,8 +89,8 @@ def test_ready_report_binds_hashes_and_passes_required_checks(tmp_path):
     assert all(c['outcome'] == 'passed' for c in report['checks'] if c['required'])
 
 
-def test_anchor_mismatch_and_failed_tests_block_apply(tmp_path):
-    store, version, _ = validators(tmp_path, None)
+def test_anchor_mismatch_and_failed_tests_block_apply(tmp_path, editor_store_factory):
+    store, version, _ = validators(tmp_path, None, editor_store_factory)
     rev = revision(store, version)
     bad = candidate_signal()
     bad['chart_annotations'] = [{'type': 'marker', 'date': '1999-01-01', 'price': bad['price'], 'label': 'LS'}]
@@ -102,8 +102,8 @@ def test_anchor_mismatch_and_failed_tests_block_apply(tmp_path):
     assert any(c['name'] == 'trusted-regressions' and c['outcome'] == 'failed' for c in failed['checks'])
 
 
-def test_unavailable_sandbox_and_malformed_output_fail_closed(tmp_path):
-    store, version, _ = validators(tmp_path, None)
+def test_unavailable_sandbox_and_malformed_output_fail_closed(tmp_path, editor_store_factory):
+    store, version, _ = validators(tmp_path, None, editor_store_factory)
     rev = revision(store, version)
     unavailable = Validator(store, FakeRunner([candidate_signal()], unavailable=True)).validate(
         version, rev, dataset(), [anchor()])
@@ -114,8 +114,8 @@ def test_unavailable_sandbox_and_malformed_output_fail_closed(tmp_path):
     assert any(c['name'] == 'execution' and c['outcome'] == 'failed' for c in malformed['checks'])
 
 
-def test_execute_rejects_unknown_fields_and_wrong_pattern(tmp_path):
-    store, version, _ = validators(tmp_path, None)
+def test_execute_rejects_unknown_fields_and_wrong_pattern(tmp_path, editor_store_factory):
+    store, version, _ = validators(tmp_path, None, editor_store_factory)
     extra = dict(candidate_signal())
     extra['evil'] = 1
     with pytest.raises(EditError, match='incompatible'):

@@ -45,27 +45,14 @@ from utils.logger import log
 
 DEFAULT_ACCOUNT_PATH = Path("data/cache/paper_account.json")
 
-# pattern-name -> MAX_OPEN_PER_SYMBOL (None = unlimited). The backtester reads
-# this straight off the pattern instance; the paper account only has the signal,
-# so it resolves the cap by name. `.cjs` flag/pennant (F10) allow one open trade
-# per symbol; every reversal pattern lets a symbol carry every anchor at once.
-_MAX_OPEN_BY_PATTERN: dict[str, int | None] | None = None
-
-
 def _max_open_per_symbol(pattern_name: str) -> int | None:
-    global _MAX_OPEN_BY_PATTERN
-    if _MAX_OPEN_BY_PATTERN is None:
-        from core.backtester import _iter_pattern_classes
-
-        _MAX_OPEN_BY_PATTERN = {}
-        for _mod, cls in _iter_pattern_classes():
-            try:
-                _MAX_OPEN_BY_PATTERN[cls().name] = getattr(
-                    cls, "MAX_OPEN_PER_SYMBOL", None,
-                )
-            except Exception:  # pragma: no cover - defensive
-                continue
-    return _MAX_OPEN_BY_PATTERN.get(pattern_name)
+    # Legacy signals lack a rule snapshot. Consult catalog metadata, never source files.
+    from core.pattern_versions import PatternVersions
+    versions = PatternVersions()
+    pattern = next((p for p in versions.catalog() if p['id'] == pattern_name), None)
+    if pattern is None:
+        return None
+    return versions.store.get('versions', pattern['active']).get('metadata', {}).get('MAX_OPEN_PER_SYMBOL')
 
 
 def _setup_key(signal_or_trade) -> tuple:

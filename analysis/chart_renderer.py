@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
 from utils.logger import log
-from patterns._annotations import pattern_annotations
+from core.pattern_provenance import pattern_annotations
 
 CHARTS_DIR = Path("charts")
 
@@ -660,36 +660,6 @@ def _nearest_viewer_time(index: pd.Index, when) -> str | None:
     return _viewer_bar_time(index[loc])
 
 
-def _recover_trade_annotations(df, symbol, timeframe, pattern, action, entry_time, session_tz):
-    """Best-effort reconstruction for ledgers predating saved annotations."""
-    from core.backtester import _iter_pattern_classes
-    from patterns.chart_scan import _snapshot
-    from data.ohlcv_store import OHLCVStore
-    from data.tv_client import OHLCVCandle
-
-    try:
-        entry_day = pd.Timestamp(entry_time).tz_localize(None).normalize()
-        dates = pd.to_datetime(df.index, utc=True).tz_convert(None).normalize()
-        matches = [i for i, day in enumerate(dates) if day == entry_day]
-        if not matches:
-            return []
-        end = matches[-1]
-        for _, cls in _iter_pattern_classes():
-            detector = cls()
-            if detector.name != pattern:
-                continue
-            store = OHLCVStore(window=len(df) + 1, session_tz=session_tz)
-            candles = [OHLCVCandle(open=float(r.Open), high=float(r.High), low=float(r.Low), close=float(r.Close), volume=float(r.Volume), timestamp=t.to_pydatetime()) for t, r in df.iloc[:end + 1].iterrows()]
-            store.replace_all(symbol, timeframe, candles)
-            signal = detector.analyze(_snapshot(symbol, timeframe, candles[-1]), store)
-            if signal and signal.action == action:
-                return signal.chart_annotations
-            return []
-    except Exception:
-        log.exception("Trade chart | historical pattern reconstruction failed")
-    return []
-
-
 def build_trade_viewer_payload(
     ohlcv_df: pd.DataFrame,
     *,
@@ -712,8 +682,6 @@ def build_trade_viewer_payload(
     renderer = ChartRenderer(save_to_disk=False, session_tz=session_tz)
     df = renderer._prepare_df(ohlcv_df, timeframe)
     # Recover old ledger geometry only at the entry event, never from a newer setup.
-    if not annotations and pattern and entry_time:
-        annotations = _recover_trade_annotations(df, symbol, timeframe, pattern, action, entry_time, session_tz)
     annotations = pattern_annotations(annotations or [], df, pattern)
     anchor_dates = [a.get(k) for a in annotations for k in ("date", "start_date", "end_date") if a.get(k)]
     anchor_dates.extend(p["date"] for a in annotations for p in a.get("points", []) if p.get("date"))

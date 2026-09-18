@@ -142,7 +142,8 @@ def test_detected_pennant_saves_both_converging_rails():
     assert all(s["color"] == ANN_PATTERN for s in payload["segments"])
 
 
-def test_viewer_payload_carries_part_reasons():
+def test_viewer_payload_carries_part_reasons(published_pattern_catalog, monkeypatch):
+    pin_annotations(monkeypatch, published_pattern_catalog, "pattern_003_double_bottom")
     df = frame()
     date = lambda i: str(df.index[i].date())
     payload = build_trade_viewer_payload(
@@ -162,7 +163,8 @@ def test_viewer_payload_carries_part_reasons():
     assert neckline["reason"]
 
 
-def test_channel_rails_and_pivots_carry_reasons():
+def test_channel_rails_and_pivots_carry_reasons(published_pattern_catalog, monkeypatch):
+    pin_annotations(monkeypatch, published_pattern_catalog, "pattern_006_upward_channel")
     df = frame(160)
     date = lambda i: str(df.index[i].date())
     payload = build_trade_viewer_payload(
@@ -183,7 +185,8 @@ def test_channel_rails_and_pivots_carry_reasons():
     assert "swing high" in markers["First swing high"]["reason"]
 
 
-def test_png_renderer_prints_the_reason_under_each_part():
+def test_png_renderer_prints_the_reason_under_each_part(published_pattern_catalog, monkeypatch):
+    pin_annotations(monkeypatch, published_pattern_catalog, "pattern_003_double_bottom")
     """The explorer renders PNGs without a saved pattern id — infer it."""
     df = frame()
     date = lambda i: str(df.index[i].date())
@@ -285,3 +288,11 @@ def test_desktop_drawings_use_the_pane_under_the_cursor():
          "i1": 0, "p1": 100.0, "i2": 9, "p2": 0.0}, "#42a5f5",
     )
     assert chart._canvas.create_line.call_args.args[1::2] == (300.0, 400.0)
+
+
+def pin_annotations(monkeypatch, store, pattern):
+    import analysis.chart_renderer as renderer
+    from core.pattern_provenance import pattern_annotations as versioned
+    version_id = store.active_set()[pattern]
+    monkeypatch.setattr(renderer, 'pattern_annotations', lambda annotations, df=None, pattern=None:
+                        versioned([dict(a, pattern_version_id=version_id) for a in annotations], df, pattern))

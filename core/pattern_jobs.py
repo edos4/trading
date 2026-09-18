@@ -49,6 +49,7 @@ def init_analyze_worker(
     skip_edgar: bool,
     window: int = DEFAULT_WINDOW,
     version_set: dict | None = None,
+    store_config: dict | None = None,
 ) -> None:
     """ProcessPoolExecutor initializer — runs once per spawned worker."""
     global _worker_patterns, _worker_store, _worker_skip_edgar
@@ -60,7 +61,11 @@ def init_analyze_worker(
         window=max(int(window), DEFAULT_WINDOW),
         session_tz=session_tz or "America/New_York",
     )
-    _worker_patterns = load_patterns(disabled, version_set)
+    if version_set is None:
+        raise ValueError('Analyze workers require a pinned version set')
+    from core.pattern_loader import discover
+    from core.pattern_edit_store import EditStore
+    _worker_patterns = discover(disabled, version_set, store=EditStore(**(store_config or {})))
     log.debug(
         f"analyze worker pid={os.getpid()} patterns={len(_worker_patterns)}"
     )
@@ -73,16 +78,18 @@ def make_analyze_pool(
     skip_edgar: bool,
     window: int,
     workers: int,
+    version_set: dict,
+    store=None,
 ) -> ProcessPoolExecutor | None:
     if workers <= 1:
         return None
-    from core.pattern_loader import active_versions
     ctx = multiprocessing.get_context("spawn")
     return ProcessPoolExecutor(
         max_workers=workers,
         mp_context=ctx,
         initializer=init_analyze_worker,
-        initargs=(list(disabled), session_tz, bool(skip_edgar), int(window), active_versions()),
+        initargs=(list(disabled), session_tz, bool(skip_edgar), int(window), dict(version_set),
+                  None if store is None else dict(root=str(store.root), dsn=store._dsn, schema=store.schema)),
     )
 
 

@@ -9,13 +9,14 @@ entry / exit / reason / pnl.
 
 from __future__ import annotations
 
+from file_patterns import file_pattern
+
 from pathlib import Path
 
 import pytest
 
 from core.backtester import (
     _core_backtest_symbol,
-    _iter_pattern_classes,
     _make_snapshot,
 )
 from core.market import get_market
@@ -24,7 +25,7 @@ from data.barcache import load as _load_barcache
 from data.ohlcv_store import OHLCVStore
 from patterns import _dedup
 
-pytestmark = pytest.mark.slow
+pytestmark = [pytest.mark.slow, pytest.mark.usefixtures("published_pattern_catalog")]
 
 FIXTURE = str(Path(__file__).parent / "fixtures" / "barcache")
 
@@ -41,7 +42,7 @@ CASES = [
 
 
 def _pattern(name):
-    return next(c() for _, c in _iter_pattern_classes() if c().name == name)
+    return file_pattern(name)
 
 
 def _backtest_trade(pattern, symbol, candles):
