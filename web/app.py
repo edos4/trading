@@ -40,6 +40,7 @@ from web.jobs import (
     normalize_backtest_form,
     paper_books,
 )
+from web.runs import backtest_runs
 from web import replay_store
 from web.services import TIMEFRAMES, get_explorer
 
@@ -86,6 +87,66 @@ class KronosPredictRequest(BaseModel):
     symbol: str
     days: int = Field(5, ge=1, le=120)
     market: Optional[Literal["us", "ph"]] = None
+
+
+class BacktestRunRequest(BaseModel):
+    """Shared-service backtest run (offline or historical stream)."""
+    mode: Literal["offline", "historical-stream"] = "offline"
+    market: Literal["us", "ph"] = "us"
+    preset_id: Optional[str] = None
+    preset_name: Optional[str] = None
+    symbols: list[str] | str = Field(default_factory=list)
+    universe: Optional[str] = None
+    versions: Optional[dict[str, str]] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    session_count: int = Field(0, ge=0, le=5000)
+    warmup_bars: int = Field(40, ge=0, le=400)
+    initial_capital: float = Field(100_000.0, gt=0)
+    sizing_mode: Literal["fixed-notional", "paper-risk"] = "fixed-notional"
+    position_notional: float = Field(10_000.0, gt=0)
+    txn_cost_pct: float = Field(0.0, ge=0, lt=1)
+    slippage_pct: float = Field(0.0005, ge=0, lt=1)
+    pattern_only: bool = False
+    volume_gate: bool = False
+    kronos_gate: bool = False
+    kronos_rank: bool = False
+    collect_first: int = Field(0, ge=0, le=50)
+    end_policy: Literal["keep-open", "force-close"] = "keep-open"
+    idempotency_key: Optional[str] = None
+
+
+class BacktestPresetRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    preset_id: Optional[str] = None
+    expected_generation: Optional[int] = None
+    settings: dict[str, Any]
+
+
+def _backtest_error(exc: Exception) -> JSONResponse:
+    from core.pattern_edit_store import Conflict, EditError
+    from core.pattern_editor_db import DatabaseUnavailable, MigrationRequired
+
+    if isinstance(exc, Conflict):
+        return JSONResponse({"detail": str(exc)}, status_code=409)
+    if isinstance(exc, (DatabaseUnavailable, MigrationRequired)):
+        return JSONResponse({"detail": str(exc)}, status_code=503)
+    if isinstance(exc, EditError):
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+    if isinstance(exc, ValueError):
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+    log.exception("Web backtest | unexpected failure")
+    return JSONResponse({"detail": "Backtest service failed."}, status_code=500)
+
+
+def _run_request(payload: BacktestRunRequest):
+    """Build a validated durable request from posted form values."""
+    from core.backtest_service import request_from_values
+
+    return request_from_values(
+        backtest_runs.service(), payload.model_dump(),
+        versions=payload.versions, preset_id=payload.preset_id,
+        preset_name=payload.preset_name, idempotency_key=payload.idempotency_key)
 
 
 class ReplayChartRequest(BaseModel):
@@ -195,8 +256,10 @@ def create_app() -> FastAPI:
             "backtest.html",
             active="backtest",
             params=backtest_param_schema(),
+            replay_params=replay_param_schema(),
             default_market=default_market().id,
             markets=markets_payload(),
+            stream_start_default=_stream_start_default(),
         )
 
     @app.get("/paper", response_class=HTMLResponse)
@@ -388,6 +451,102 @@ def create_app() -> FastAPI:
         if err:
             return JSONResponse({"detail": err}, status_code=409)
         return {"ok": True}
+
+    # ── Shared-service backtest API (offline + historical stream) ─────────
+    @app.get("/api/backtest/catalog")
+    async def api_backtest_catalog(_user: str = Depends(require_login)):
+        try:
+            return {"patterns": await asyncio.to_thread(backtest_runs.catalog)}
+        except Exception as exc:  # noqa: BLE001 - mapped to a safe status
+            return _backtest_error(exc)
+
+    @app.get("/api/backtest/catalog/{pattern_id}/versions")
+    async def api_backtest_versions(
+        pattern_id: str, include_archived: bool = False,
+        _user: str = Depends(require_login),
+    ):
+        try:
+            return {"versions": await asyncio.to_thread(
+                backtest_runs.versions, pattern_id,
+                include_archived=include_archived)}
+        except Exception as exc:  # noqa: BLE001
+            return _backtest_error(exc)
+
+    @app.get("/api/backtest/presets")
+    async def api_backtest_presets(_user: str = Depends(require_login)):
+        try:
+            return {"presets": await asyncio.to_thread(backtest_runs.presets)}
+        except Exception as exc:  # noqa: BLE001
+            return _backtest_error(exc)
+
+    @app.post("/api/backtest/presets")
+    async def api_backtest_preset_save(request: Request,
+                                       _user: str = Depends(require_login)):
+        from core.backtest_params import settings_from_values
+
+        try:
+            body = BacktestPresetRequest.model_validate(await _json_body(request))
+        except (ValueError, ValidationError) as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        try:
+            settings = settings_from_values({**body.settings, "mode": body.settings.get("mode", "offline")})
+            preset = await asyncio.to_thread(
+                backtest_runs.save_preset, body.name, settings,
+                preset_id=body.preset_id, expected_generation=body.expected_generation)
+        except Exception as exc:  # noqa: BLE001
+            return _backtest_error(exc)
+        return {"preset": preset}
+
+    @app.post("/api/backtest/runs")
+    async def api_backtest_run_start(request: Request,
+                                     _user: str = Depends(require_login)):
+        try:
+            body = BacktestRunRequest.model_validate(await _json_body(request))
+        except (ValueError, ValidationError) as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        try:
+            built = await asyncio.to_thread(_run_request, body)
+            job = await asyncio.to_thread(backtest_runs.submit, built)
+        except Exception as exc:  # noqa: BLE001
+            return _backtest_error(exc)
+        return {"run_id": job["id"], "state": job["state"]}
+
+    @app.get("/api/backtest/runs/{run_id}")
+    async def api_backtest_run_status(run_id: str,
+                                      _user: str = Depends(require_login)):
+        from core.backtest_jobs import UnknownJob
+
+        try:
+            return await asyncio.to_thread(backtest_runs.run_payload, run_id)
+        except UnknownJob as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=404)
+        except Exception as exc:  # noqa: BLE001
+            return _backtest_error(exc)
+
+    @app.post("/api/backtest/runs/{run_id}/cancel")
+    async def api_backtest_run_cancel(run_id: str,
+                                      _user: str = Depends(require_login)):
+        from core.backtest_jobs import UnknownJob
+
+        try:
+            return await asyncio.to_thread(backtest_runs.cancel, run_id)
+        except UnknownJob as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=404)
+        except Exception as exc:  # noqa: BLE001
+            return _backtest_error(exc)
+
+    @app.post("/api/backtest/runs/{run_id}/retry")
+    async def api_backtest_run_retry(run_id: str,
+                                     _user: str = Depends(require_login)):
+        from core.backtest_jobs import UnknownJob
+
+        try:
+            job = await asyncio.to_thread(backtest_runs.retry, run_id)
+        except UnknownJob as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=404)
+        except Exception as exc:  # noqa: BLE001
+            return _backtest_error(exc)
+        return {"run_id": job["id"], "state": job["state"]}
 
     # ── Paper API ─────────────────────────────────────────────────────────
     @app.get("/api/paper/status")
@@ -664,6 +823,26 @@ def create_app() -> FastAPI:
         return payload
 
     return app
+
+
+def replay_param_schema() -> list[dict[str, Any]]:
+    """JSON-friendly copy of the shared REPLAY_PARAMS for the web form."""
+    from core.backtest_params import REPLAY_PARAMS
+
+    out: list[dict[str, Any]] = []
+    for key, label, desc, ptype, default, choices in REPLAY_PARAMS:
+        entry: dict[str, Any] = {"key": key, "label": label, "description": desc,
+                                 "type": ptype}
+        if ptype == "spin":
+            default_val, minv, maxv, inc = default
+            entry.update(default=default_val, min=minv, max=maxv, step=inc)
+        elif ptype == "check":
+            entry["default"] = bool(default)
+        else:
+            entry["default"] = default
+            entry["choices"] = choices or []
+        out.append(entry)
+    return out
 
 
 def _stream_start_default() -> str:

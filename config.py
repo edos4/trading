@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     pattern_editor_database_url: str = ""
     pattern_edit_cgroup_root: str = ""
     pattern_edit_worker_python: str = ""
+    # Frozen daily-bar dataset for shared backtest runs (offline + stream).
+    # Local files are import inputs only; PostgreSQL remains the durable store.
+    backtest_dataset_dir: str = "data/barcache"
 
     # ── IBKR ──────────────────────────────────────────────────────────────
     ibkr_host: str = "127.0.0.1"

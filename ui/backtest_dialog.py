@@ -56,7 +56,14 @@ class BacktestDialog:
         self._timer_running = False
         self._completed = 0
         self._total = 0
+        self._stream_entries: list = []
+        self._stream_running = False
+        self._stream_run_id: Optional[str] = None
+        self._stream_service = None
+        self._stream_catalog: dict[str, str] = {}
+        self._stream_presets: dict[str, str] = {}
         self._build_params()
+        self._build_stream_panel()
         self._build_controls()
         self._build_results()
 
@@ -103,6 +110,234 @@ class BacktestDialog:
                 "write", lambda *_: self._sync_pattern_only(),
             )
         self._sync_pattern_only()
+
+    # ── Pinned-version / historical-stream panel ─────────────────────────
+    STREAM_SKIP = ("mode", "timeframe")
+
+    def _build_stream_panel(self) -> None:
+        """Shared-service controls. Same request contract the web uses."""
+        from core.backtest_params import REPLAY_PARAMS
+
+        frame = ttk.LabelFrame(
+            self._top, text="Pinned versions / historical stream", padding=10,
+        )
+        frame.pack(side=tk.TOP, fill=tk.X, padx=8, pady=(4, 4))
+        for c in range(10):
+            frame.columnconfigure(c, weight=0, pad=8)
+
+        entries = [
+            ("mode", "Mode",
+             "offline replays the full tape; historical-stream replays session-by-session like paper.",
+             "combo", "offline", ["offline", "historical-stream"]),
+        ] + [e for e in REPLAY_PARAMS if e[0] not in self.STREAM_SKIP]
+        self._stream_entries = entries
+        row = 0
+        for i, entry in enumerate(entries):
+            if i and i % 5 == 0:
+                row += 2
+            col = (i % 5) * 2
+            key, label, desc, ptype, default, choices = entry
+            ttk.Label(frame, text=label, font=("TkDefaultFont", 9, "bold")).grid(
+                row=row, column=col, sticky=tk.W, padx=(0, 4))
+            ttk.Label(frame, text=desc, wraplength=170,
+                      font=("TkDefaultFont", 8)).grid(
+                row=row + 1, column=col, columnspan=2, sticky=tk.W, padx=(0, 4))
+            self._make_widget(frame, "sr_" + key, ptype, default, choices, col, row)
+
+        row += 2
+        ttk.Label(frame, text="Versions (one per pattern)",
+                  font=("TkDefaultFont", 9, "bold")).grid(row=row, column=0, sticky=tk.W)
+        self._stream_versions = tk.Listbox(frame, selectmode=tk.EXTENDED,
+                                           height=6, width=46)
+        self._stream_versions.grid(row=row + 1, column=0, columnspan=5, sticky=tk.W)
+
+        ttk.Label(frame, text="Saved preset",
+                  font=("TkDefaultFont", 9, "bold")).grid(row=row, column=6, sticky=tk.W)
+        self._stream_preset = ttk.Combobox(frame, width=30, state="readonly")
+        self._stream_preset.grid(row=row + 1, column=6, columnspan=2, sticky=tk.W)
+        ttk.Label(frame, text="Preset name").grid(row=row + 2, column=6, sticky=tk.W)
+        self._stream_preset_name = ttk.Entry(frame, width=30)
+        self._stream_preset_name.grid(row=row + 3, column=6, columnspan=2, sticky=tk.W)
+
+        controls = ttk.Frame(frame)
+        controls.grid(row=row + 2, column=0, columnspan=4, sticky=tk.W)
+        self._stream_run_btn = ttk.Button(
+            controls, text="Run pinned backtest", command=self._run_stream)
+        self._stream_run_btn.pack(side=tk.LEFT)
+        self._stream_cancel_btn = ttk.Button(
+            controls, text="Cancel run", command=self._cancel_stream, state=tk.DISABLED)
+        self._stream_cancel_btn.pack(side=tk.LEFT, padx=(6, 0))
+        self._stream_status_var = tk.StringVar(value="Idle.")
+        ttk.Label(controls, textvariable=self._stream_status_var).pack(
+            side=tk.LEFT, padx=(8, 0))
+        self._refresh_stream_choices()
+
+    def _refresh_stream_choices(self) -> None:
+        """Catalog/preset lists are optional: a DB outage leaves them empty."""
+        try:
+            from core.backtest_service import BacktestService
+
+            service = BacktestService()
+            self._stream_catalog = {
+                row["id"]: row["active"] for row in service.versions.catalog()
+                if row["enabled"] and row["active"]
+            }
+            self._stream_presets = {p.name: p.preset_id for p in service.list_presets()}
+        except Exception as exc:  # noqa: BLE001 - surfaced on Run instead
+            self._stream_status_var.set(f"Catalog unavailable: {exc}")
+            self._stream_catalog = {}
+            self._stream_presets = {}
+        self._stream_versions.delete(0, tk.END)
+        for pattern, version in sorted(self._stream_catalog.items()):
+            self._stream_versions.insert(tk.END, f"{pattern} -> {version[:8]}")
+            self._stream_versions.selection_set(tk.END)
+        self._stream_preset["values"] = [""] + sorted(self._stream_presets)
+
+    def _collect_stream_values(self) -> dict:
+        from core.market import parse_extra_symbols
+
+        values: dict = {}
+        for key, _label, _desc, ptype, default, _choices in self._stream_entries:
+            var = self._vars["sr_" + key]
+            if ptype == "check":
+                values[key] = bool(var.get())
+            elif ptype == "spin":
+                try:
+                    values[key] = float(var.get())
+                except (TypeError, ValueError, tk.TclError):
+                    values[key] = float(default[0])
+            elif ptype == "combo":
+                values[key] = str(var.get() or default)
+            else:
+                text = str(var.get()).strip()
+                values[key] = text or None
+        values["market"] = self._vars["market"].get() or default_market().id
+        values["symbols"] = parse_extra_symbols(self._vars["extra_symbols"].get())
+        values["universe"] = (self._vars["universe"].get() or "").strip() or None
+        # The shared form owns the transaction cost; keep the panel consistent.
+        try:
+            values["txn_cost_pct"] = float(self._vars["txn_cost_pct"].get())
+        except (KeyError, TypeError, ValueError, tk.TclError):
+            values["txn_cost_pct"] = 0.0
+        return values
+
+    def _selected_stream_versions(self) -> dict[str, str]:
+        patterns = sorted(self._stream_catalog)
+        chosen = {}
+        for index in self._stream_versions.curselection():
+            if index < len(patterns):
+                pattern = patterns[index]
+                chosen[pattern] = self._stream_catalog[pattern]
+        return chosen
+
+    def _run_stream(self) -> None:
+        if self._stream_running:
+            return
+        from core.backtest_service import BacktestService, request_from_values
+
+        self._stream_status_var.set("Submitting…")
+        self._top.update_idletasks()
+        try:
+            service = BacktestService()
+            preset_name = self._stream_preset.get()
+            request = request_from_values(
+                service, self._collect_stream_values(),
+                versions=self._selected_stream_versions() or None,
+                preset_id=self._stream_presets.get(preset_name) if preset_name else None,
+                preset_name=self._stream_preset_name.get() or None,
+            )
+            job = service.submit(request)
+        except Exception as exc:  # noqa: BLE001 - shown in the status bar
+            self._stream_status_var.set(f"Error: {exc}")
+            return
+        self._stream_running = True
+        self._stream_run_id = job["id"]
+        self._stream_service = service
+        self._stream_run_btn.config(state=tk.DISABLED)
+        self._stream_cancel_btn.config(state=tk.NORMAL)
+        self._stream_status_var.set(f"Run {job['id'][:8]}: queued")
+        threading.Thread(target=self._stream_worker, args=(service, job["id"]),
+                         daemon=True, name="ui-stream-backtest").start()
+        self._top.after(1000, self._poll_stream)
+
+    def _stream_worker(self, service, run_id: str) -> None:
+        try:
+            service.execute(run_id)
+        except Exception as exc:  # noqa: BLE001 - poll reports the durable state
+            log.warning(f"UI stream backtest | run {run_id}: {exc}")
+
+    def _cancel_stream(self) -> None:
+        if not self._stream_run_id:
+            return
+        try:
+            self._stream_service.cancel(self._stream_run_id)
+            self._stream_status_var.set("Cancellation requested…")
+        except Exception as exc:  # noqa: BLE001
+            self._stream_status_var.set(f"Error: {exc}")
+
+    def _poll_stream(self) -> None:
+        if self._closed or not self._stream_run_id:
+            return
+        service = self._stream_service
+        try:
+            status = service.status(self._stream_run_id)
+        except Exception as exc:  # noqa: BLE001
+            self._stream_status_var.set(f"Error: {exc}")
+            self._finish_stream()
+            return
+        progress = status.get("progress") or {}
+        done, total = progress.get("completed_units", 0), progress.get("total_units")
+        self._stream_status_var.set(
+            f"Run {self._stream_run_id[:8]}: {status['state']} "
+            f"({done}/{total if total is not None else '?'} {progress.get('unit', 'units')})")
+        if status["state"] in ("completed", "failed", "cancelled", "blocked", "interrupted"):
+            self._render_stream_result(service, status)
+            self._finish_stream()
+            return
+        self._top.after(1000, self._poll_stream)
+
+    def _render_stream_result(self, service, status: dict) -> None:
+        lines = [f"Run {self._stream_run_id}", f"State: {status['state']}"]
+        error = status.get("error")
+        if error:
+            lines.append(f"Error [{error.get('code')}]: {error.get('message')}")
+        payload = service.result(self._stream_run_id) if status["state"] == "completed" else None
+        if payload is not None:
+            m = payload["result"].metrics
+            settings = payload["inputs"].request.preset.settings
+            lines += [
+                f"Mode:        {settings.mode}",
+                f"End policy:  {settings.execution.end_policy}",
+                "",
+                f"Trades:      {m.trade_count}"
+                + ("  (zero trades is a valid result, not a failure)" if m.trade_count == 0 else ""),
+                f"Win rate:    {'n/a' if m.win_rate is None else f'{m.win_rate:.1%}'}",
+                f"Realized:    {m.realized_pnl:,.2f}",
+                f"Unrealized:  {m.unrealized_pnl:,.2f}",
+                f"Net P&L:     {m.net_pnl:,.2f}",
+                f"Fees:        {m.fees:,.4f}",
+                f"Max DD %:    {m.max_drawdown_pct:.2f}",
+                f"Open:        {m.open_position_count}",
+                f"Currency:    {m.currency}",
+            ]
+        self._summary_text.config(state=tk.NORMAL)
+        self._summary_text.delete("1.0", tk.END)
+        self._summary_text.insert(tk.END, "\n".join(lines) + "\n")
+        self._summary_text.config(state=tk.DISABLED)
+        if payload is not None:
+            self._tree.delete(*self._tree.get_children())
+            for trade in payload["trades"].get("trades", []):
+                self._tree.insert("", tk.END, values=(
+                    str(trade.get("entryDate", ""))[:10], trade.get("action"),
+                    trade.get("sym"), trade.get("timeframe"), trade.get("entryPrice"),
+                    trade.get("exitPrice"), trade.get("pnlPct"),
+                    trade.get("exitReason"), trade.get("pattern")))
+
+    def _finish_stream(self) -> None:
+        self._stream_running = False
+        self._stream_run_id = None
+        self._stream_run_btn.config(state=tk.NORMAL)
+        self._stream_cancel_btn.config(state=tk.DISABLED)
 
     def _sync_batch_kronos(self) -> None:
         gate = bool(self._vars.get("kronos_gate") and self._vars["kronos_gate"].get())
