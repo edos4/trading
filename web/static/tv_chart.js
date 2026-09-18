@@ -205,6 +205,7 @@ window.TVChart = (function () {
     }
 
     let predSeries = null;
+    let rsiSeries = null;
     if ((data.pred_candles || []).length) {
       predSeries = chart.addCandlestickSeries({
         upColor: "#ffeb3b",
@@ -287,7 +288,7 @@ window.TVChart = (function () {
         handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true },
         handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
       });
-      const rsiSeries = rsiChart.addLineSeries({
+      rsiSeries = rsiChart.addLineSeries({
         color: RSI,
         lineWidth: 1,
         priceLineVisible: false,
@@ -320,6 +321,17 @@ window.TVChart = (function () {
         const bar = time == null ? null : candles.find((c) => c.time === time);
         hooks.onCandle(bar ? { ...bar } : null);
       });
+    }
+
+    if (window.ChartDraw) {
+      const panes = [{ el: priceEl, chart, series: candleSeries, pane: "price" }];
+      if (rsiSeries) panes.push({ el: rsiEl, chart: rsiChart, series: rsiSeries, pane: "rsi" });
+      const tools = window.ChartDraw.attach({
+        host: el,
+        panes,
+        times: rsiData.map((row) => row.time),
+      });
+      cleanup.push(() => tools.destroy());
     }
   }
 

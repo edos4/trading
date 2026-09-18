@@ -16,6 +16,8 @@ TV_KRONOS = "#ffeb3b"
 TV_KRONOS_UP = "#ffeb3b"
 TV_KRONOS_DOWN = "#f9a825"
 TV_CROSS = "#9598a1"
+TV_DRAW = "#42a5f5"      # manual trendlines / vertical markers
+TV_TOOL = "#1e222d"      # toolbar button face
 
 # Reason text sits under a part label; wrap it so a note stays a narrow caption.
 NOTE_WRAP_PX = 190
@@ -56,6 +58,14 @@ class TradingViewChart(tk.Frame):
         self._plot = (0, 0, 1, 1)
         self._vol_plot = (0, 0, 1, 1)
         self._rsi_plot = (0, 0, 1, 1)
+        # Manual annotations: {"kind": "trend", "i1","p1","i2","p2"} or
+        # {"kind": "vert", "i"} — bar indexes are stable for the loaded payload.
+        self._tool: Optional[str] = None
+        self._draft: Optional[dict] = None
+        self._drawings: list[dict] = []
+        self._draw_history: list[list[dict]] = []
+        self._locate: Optional[tuple[int, float]] = None
+        self._tool_buttons: dict[str, tk.Button] = {}
 
         self._header = tk.Frame(self, bg=TV_BG)
         self._header.pack(fill=tk.X, padx=10, pady=(8, 0))
@@ -77,6 +87,23 @@ class TradingViewChart(tk.Frame):
             font=("Trebuchet MS", 9), anchor="w",
         ).pack(fill=tk.X)
 
+        tools = tk.Frame(self._header, bg=TV_BG)
+        tools.pack(fill=tk.X, pady=(4, 0))
+        for name, label, command in (
+            ("trend", "Trend", lambda: self._set_tool("trend")),
+            ("vert", "VLine", lambda: self._set_tool("vert")),
+            (None, "Undo", self._undo_drawing),
+            (None, "Clear", self._clear_drawings),
+        ):
+            button = tk.Button(
+                tools, text=label, command=command, bg=TV_TOOL, fg=TV_TEXT,
+                activebackground=TV_DRAW, activeforeground=TV_BG, relief=tk.FLAT,
+                font=("Trebuchet MS", 9), padx=8,
+            )
+            button.pack(side=tk.LEFT, padx=(0, 4))
+            if name:
+                self._tool_buttons[name] = button
+
         self._canvas = tk.Canvas(self, bg=TV_BG, highlightthickness=0, cursor="crosshair")
         self._canvas.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
@@ -89,6 +116,8 @@ class TradingViewChart(tk.Frame):
         self._canvas.bind("<MouseWheel>", self._on_wheel)
         self._canvas.bind("<Button-4>", lambda e: self._zoom_at(e.x, 0.85))
         self._canvas.bind("<Button-5>", lambda e: self._zoom_at(e.x, 1.18))
+        self._canvas.bind("<Control-z>", lambda _e: self._undo_drawing())
+        self._canvas.bind("<Escape>", lambda _e: self._set_tool(None))
         self._canvas.focus_set()
         self._canvas.bind("<Left>", lambda _e: self._pan(-max(1, self._visible // 12)))
         self._canvas.bind("<Right>", lambda _e: self._pan(max(1, self._visible // 12)))
@@ -217,8 +246,102 @@ class TradingViewChart(tk.Frame):
         self._draw_levels()
         self._draw_axis(visible)
         self._draw_markers(visible)
+        self._draw_drawings()
         if self._hover is not None:
             self._draw_crosshair(self._hover)
+
+    # ── manual annotations ────────────────────────────────────────────────────
+    def _set_tool(self, tool: Optional[str]) -> None:
+        self._tool = None if self._tool == tool else tool
+        self._draft = None
+        for name, button in self._tool_buttons.items():
+            active = name == self._tool
+            button.configure(bg=TV_DRAW if active else TV_TOOL,
+                             fg=TV_BG if active else TV_TEXT)
+        self._redraw()
+
+    def _undo_drawing(self) -> None:
+        if self._draw_history:
+            self._drawings = self._draw_history.pop()
+            self._draft = None
+            self._redraw()
+
+    def _clear_drawings(self) -> None:
+        if self._drawings:
+            self._draw_history.append(list(self._drawings))
+            self._drawings = []
+            self._redraw()
+
+    def _y_to_price(self, y: float) -> float:
+        _, y0, _, y1 = self._plot
+        span = self._price_hi - self._price_lo or 1.0
+        return self._price_lo + (y1 - y) / max(y1 - y0, 1) * span
+
+    def _y_to_rsi(self, y: float) -> float:
+        _, y0, _, y1 = self._rsi_plot
+        return (y1 - y) / max(y1 - y0, 1) * 100.0
+
+    def _locate_point(self, event) -> Optional[tuple[int, float, str]]:
+        """Cursor → (absolute bar index, value, pane) for the pane under it."""
+        if self._plot[1] <= event.y <= self._plot[3]:
+            pane, value = "price", self._y_to_price(event.y)
+        elif self._rsi_plot[1] <= event.y <= self._rsi_plot[3]:
+            pane, value = "rsi", self._y_to_rsi(event.y)
+        else:
+            return None
+        i = self._index_at(event.x)
+        if i is None:
+            return None
+        return self._start + i, value, pane
+
+    def _draw_drawings(self) -> None:
+        for shape in self._drawings:
+            self._paint_shape(shape, TV_DRAW)
+        if self._draft is not None:
+            self._paint_shape(self._draft, TV_DRAW)
+
+    def _paint_shape(self, shape: dict, color: str) -> None:
+        if shape["kind"] == "vert":
+            x = self._x_for(shape["i"] - self._start)
+            if self._plot[0] <= x <= self._plot[2]:
+                self._canvas.create_line(
+                    x, self._plot[1], x, self._rsi_plot[3],
+                    fill=color, width=1, dash=(4, 4),
+                )
+            return
+        clipped = self._clip_trend(shape)
+        if clipped is None:
+            return
+        x1, y1, x2, y2 = clipped
+        self._canvas.create_line(x1, y1, x2, y2, fill=color, width=2)
+        if shape is not self._draft:
+            (px1, py1), (px2, py2) = self._shape_points(shape)
+            for x, y in ((px1, py1), (px2, py2)):
+                self._canvas.create_oval(x - 3, y - 3, x + 3, y + 3, fill=color, outline=color)
+
+    def _shape_points(self, shape: dict) -> tuple[tuple[float, float], tuple[float, float]]:
+        """Screen endpoints, each mapped through its own pane's scale."""
+        y_of = lambda pane: self._y_rsi if pane == "rsi" else self._y_price
+        return (
+            (self._x_for(shape["i1"] - self._start), y_of(shape.get("pane1"))(shape["p1"])),
+            (self._x_for(shape["i2"] - self._start), y_of(shape.get("pane2"))(shape["p2"])),
+        )
+
+    def _clip_trend(self, shape: dict) -> Optional[tuple[float, float, float, float]]:
+        """Trim a trendline to the bars in view: (x1, y1, x2, y2) in screen space."""
+        (ax, ay), (bx, by) = self._shape_points(shape)
+        x0, x1 = self._plot[0], self._plot[2]
+        if ax == bx or max(ax, bx) < x0 or min(ax, bx) > x1:
+            return None
+        if ax > bx:
+            (ax, ay), (bx, by) = (bx, by), (ax, ay)
+        span = bx - ax
+        lo = max(0.0, (x0 - ax) / span)
+        hi = min(1.0, (x1 - ax) / span)
+        if hi <= lo:
+            return None
+        return (ax + span * lo, ay + (by - ay) * lo,
+                ax + span * hi, ay + (by - ay) * hi)
 
     def _clamp_window(self) -> None:
         n = len(self._candles)
@@ -520,10 +643,33 @@ class TradingViewChart(tk.Frame):
 
     def _on_press(self, event) -> None:
         self._canvas.focus_set()
+        if self._tool:
+            point = self._locate_point(event)
+            if point is not None:
+                index, value, pane = point
+                self._draft = (
+                    {"kind": "trend", "pane1": pane, "pane2": pane, "i1": index,
+                     "p1": value, "i2": index, "p2": value}
+                    if self._tool == "trend" else {"kind": "vert", "i": index}
+                )
+                self._redraw()
+            return
         self._drag_x = event.x
         self._drag_start = self._start
 
     def _on_drag(self, event) -> None:
+        if self._draft is not None:
+            point = self._locate_point(event)
+            if point is not None:
+                if self._draft["kind"] == "trend":
+                    # The moving end follows the pane under the cursor, so a
+                    # line can be dragged between the price and RSI panels.
+                    self._draft["i2"], self._draft["p2"] = point[0], point[1]
+                    self._draft["pane2"] = point[2]
+                else:
+                    self._draft["i"] = point[0]
+                self._redraw()
+            return
         if self._drag_x is None:
             return
         bar_px = max((self._plot[2] - self._plot[0]) / max(self._visible, 1), 1.0)
@@ -533,6 +679,14 @@ class TradingViewChart(tk.Frame):
         self._redraw()
 
     def _on_release(self, _event) -> None:
+        if self._draft is not None:
+            draft, self._draft = self._draft, None
+            # A click with the trend tool selected is not a line.
+            if draft["kind"] == "vert" or draft["i2"] != draft["i1"]:
+                self._draw_history.append(list(self._drawings))
+                self._drawings.append(draft)
+            self._redraw()
+            return
         self._drag_x = None
 
     def _on_wheel(self, event) -> None:
