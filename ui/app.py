@@ -83,6 +83,7 @@ class TradingBotUI:
         self._photo: Optional[ImageTk.PhotoImage] = None  # keep ref alive
         self._busy = False
         self._closed = False
+        self._patterns_job_id: Optional[str] = None
         self._ui_queue: queue.Queue[Callable[[], None]] = queue.Queue()
 
         self._build_ui()
@@ -100,6 +101,7 @@ class TradingBotUI:
         ttk.Button(toolbar, text="Backtest", command=self._open_backtest_dialog).pack(side=tk.LEFT, padx=(6, 0))
         ttk.Button(toolbar, text="Paper Trading", command=self._open_paper_dashboard).pack(side=tk.LEFT, padx=(6, 0))
         ttk.Button(toolbar, text="Kronos", command=self._open_kronos_dialog).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(toolbar, text="Patterns", command=self._open_patterns_dialog).pack(side=tk.LEFT, padx=(6, 0))
         self._lamp_us = tk.StringVar(value="US ○")
         self._lamp_ph = tk.StringVar(value="PH ○")
         ttk.Label(toolbar, textvariable=self._lamp_us, foreground="#1b6fc0").pack(
@@ -453,6 +455,15 @@ class TradingBotUI:
     def _open_kronos_dialog(self) -> None:
         from ui.kronos_dialog import KronosPredictDialog
         KronosPredictDialog(self.root, market=self.market_var.get())
+
+    def _open_patterns_dialog(self) -> None:
+        from ui.patterns_dialog import PatternsDialog
+        PatternsDialog(self.root, start_job_id=self._patterns_job_id,
+                       on_job=self._remember_patterns_job)
+
+    def _remember_patterns_job(self, job_id: str) -> None:
+        # Reopening the dialog reconnects to this durable job.
+        self._patterns_job_id = job_id
 
     def _download_csv(self) -> None:
         if self._current_df is None or self._current_symbol is None:
