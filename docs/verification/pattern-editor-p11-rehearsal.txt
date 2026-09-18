@@ -1,0 +1,60 @@
+## P11-02 migrate (first run)
+Applied editor migrations: 1
+## P11-02 migrate (rerun)
+Applied editor migrations: already up to date
+## P11-02 import (first run)
+2026-09-19 07:07:53 | INFO     | Backtest | EXIT FIXTURE 1d reason=trailing_stop pnl=+3.11%2026-09-19 07:07:54 | INFO     | Backtest | EXIT FIXTURE 1d reason=trailing_stop pnl=+3.11%2026-09-19 07:07:57 | INFO     | Backtest | EXIT FIXTURE 1d reason=trailing_stop pnl=+4.35%2026-09-19 07:07:58 | INFO     | Backtest | EXIT FIXTURE 1d reason=trailing_stop pnl=+4.35%2026-09-19 07:08:37 | INFO     | Backtest | EXIT FIXTURE 1d reason=take_profit pnl=+23.19%2026-09-19 07:08:38 | INFO     | Backtest | EXIT FIXTURE 1d reason=take_profit pnl=+23.19%2026-09-19 07:08:41 | INFO     | Backtest | EXIT FIXTURE 1d reason=take_profit pnl=+26.46%2026-09-19 07:08:42 | INFO     | Backtest | EXIT FIXTURE 1d reason=take_profit pnl=+26.46%2026-09-19 07:08:45 | INFO     | Backtest | EXIT FIXTURE 1d reason=reclaim pnl=-4.23%2026-09-19 07:08:47 | INFO     | Backtest | EXIT FIXTURE 1d reason=reclaim pnl=-4.23%2026-09-19 07:08:54 | INFO     | Backtest | EXIT FIXTURE 1d reason=trailing_stop pnl=-5.20%2026-09-19 07:08:55 | INFO     | Backtest | EXIT FIXTURE 1d reason=trailing_stop pnl=-5.20%{  "batch_id": "d79bfcda6132425f843fe983cf4fd3df",  "report_id": "21f3bb3d066246a8a2f40400631add55",  "snapshot_sha256": "a007b7423519c34ec6b4d7298f35384b849aee8f787a1f3aa282a3223e3d8b6f",  "status": "passed"}
+## P11-02 import (rerun)
+{  "batch_id": "d79bfcda6132425f843fe983cf4fd3df",  "report_id": "21f3bb3d066246a8a2f40400631add55",  "snapshot_sha256": "a007b7423519c34ec6b4d7298f35384b849aee8f787a1f3aa282a3223e3d8b6f",  "status": "passed"}
+## P11-02 verify
+patterns: 10  enabled: 6  skipped: 4
+skipped ids: ['pattern_007_descending_channel', 'pattern_008_head_and_shoulders', 'pattern_009_flag_pattern', 'pattern_011_breakout_retest']
+captured files: 440  byte-identical to working tree: 440
+import state: published  snapshot: a007b7423519c34e
+reports: 1  migrations applied: 1
+published defaults: 6
+PROBLEMS: none
+## P11-02 failed-publication recovery
+staged batch: bc460fc9 snapshot: a007b7423519c34e
+publication blocked: RuntimeError - simulated parity failure
+import state: failed | published patterns: 0
+report status: failed | error: simulated parity failure
+
+
+
+
+
+
+
+
+
+
+
+
+recovered status: passed | published: 6
+FAILED-PUBLICATION-RECOVERY-OK
+## P11-03 backup/restore
+backup table-data entries: 19
+-- verify restored catalog
+patterns: 10  enabled: 6  skipped: 4
+skipped ids: ['pattern_007_descending_channel', 'pattern_008_head_and_shoulders', 'pattern_009_flag_pattern', 'pattern_011_breakout_retest']
+captured files: 440  byte-identical to working tree: 440
+import state: published  snapshot: a007b7423519c34e
+reports: 1  migrations applied: 1
+published defaults: 6
+PROBLEMS: none
+## P11-03 restart during jobs
+expired leases: 1 | state: interrupted | retryable: True
+retry is a new attempt: True | retry_of=True | attempt=2
+retry terminal state: completed
+edit job after restart: interrupted
+historical result readable: True | trades: 0
+RESTART-RECOVERY-OK
+## P11-04 concurrency
+concurrent run states: ['completed', 'completed'] | notionals: [10000.0, 25000.0]
+distinct run ids: True | errors: []
+default race outcomes: ['conflict', 'ok']
+one usable default per enabled pattern: 6 defaults, all set: True
+CONCURRENCY-OK
+## sqlite/file-store check
+sqlite scan done

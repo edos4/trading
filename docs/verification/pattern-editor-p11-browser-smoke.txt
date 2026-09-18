@@ -1,0 +1,24 @@
+# P11 browser smoke record — 2026-09-19
+
+# Environment: real Chromium (Playwright 149.0.7827.55, headless) against a real
+# `main.py --web` launch (WEB_UI_PORT=18086) on the disposable PostgreSQL smoke
+# database `pattern_editor_smoke` (migration 1, ten published patterns) with the
+# fixture dataset and a local DeepSeek-compatible provider stub.
+# The candidate sandbox is unconfigured, so the edit blocks (production path).
+
+login ok, url: http://127.0.0.1:18086/
+patterns nav ok, catalog options: 10
+version rows: 1 | first: ['1', '55044ec0', '', '', 'passed']
+source view rendered: True
+submitted: job 4f84740e
+terminal state text: blocked — 0/? stages
+after reload job label: job 4f84740e
+page errors: none
+BROWSER-SMOKE-OK
+
+# Covered: auth redirect, the Patterns nav beside Kronos, catalog render,
+# version history, source view, a real submit through the browser, live progress
+# to a terminal state, and reload reconnection to the durable job id. No client
+# page errors. Default selection and deletion are asserted by the API/desktop
+# suites (browser clicks on those actions are disabled-button-gated and covered
+# server-side, which is the authority).

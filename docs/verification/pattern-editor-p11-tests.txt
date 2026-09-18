@@ -1,0 +1,43 @@
+# P11-01 full verification — 2026-09-18T22:34:13Z
+# env: disposable PostgreSQL 16.15 on /tmp/pattern-editor-pg/socket:55484 (db pattern_editor_test);
+#      WATCHLIST=FIXTURE TV_SCREENER=america TV_EXCHANGE=NASDAQ DISPLAY=:1
+# cmd: pytest -q core/test_patterns_desktop.py core/test_patterns_web.py core/test_pattern_edit_pipeline.py core/test_backtest_frontends.py core/test_stream_backtest.py core/test_backtest_service.py core/test_pattern_edit_store.py core/test_pattern_versions.py core/test_pattern_loader.py core/test_pattern_edit_validation.py core/test_pattern_editor_contracts.py core/test_pattern_lifecycle.py core/test_pattern_jobs.py core/test_pattern_bootstrap.py core/test_execution_accounting.py core/test_scanner_deferred_entry.py core/test_paper_trader.py core/test_paper_books.py core/test_cli_paper.py core/test_market.py core/test_signal_log.py tests/test_backtest_paper_parity.py tests/test_rsi_matches_cjs.py data/test_stream_replay_sync.py web/test_services_patterns.py web/test_http_auth.py web/test_auth.py web/test_kronos_api.py web/test_paper_api.py web/test_history_api.py web/test_replay_flow.py
+# note: tests/test_golden_numbers.py is marked slow and is excluded from this required set.
+........................................................................ [ 26%]
+........................................................................ [ 52%]
+........................................................................ [ 78%]
+..........................................................               [100%]
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:64
+  /home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:64: PyparsingDeprecationWarning: 'oneOf' deprecated - use 'one_of'
+    prop = Group((name + Suppress("=") + comma_separated(value)) | oneOf(_CONSTANTS))
+
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+  /home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85: PyparsingDeprecationWarning: 'parseString' deprecated - use 'parse_string'
+    parse = parser.parseString(pattern)
+
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+  /home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89: PyparsingDeprecationWarning: 'resetCache' deprecated - use 'reset_cache'
+    parser.resetCache()
+
+.venv/lib/python3.12/site-packages/matplotlib/_mathtext.py:45
+  /home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_mathtext.py:45: PyparsingDeprecationWarning: 'enablePackrat' deprecated - use 'enable_packrat'
+    ParserElement.enablePackrat()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+274 passed, 15 warnings in 1520.69s (0:25:20)
+EXIT=0
