@@ -1,0 +1,38 @@
+# P04 consumer/lifecycle verification
+
+Disposable PostgreSQL 17.11, Unix socket `/tmp/pattern-editor-p03-pg/socket`, port 55483,
+database `pattern_editor_test` (reused private test cluster; no application DSN). Schema
+migration 1; no new migration required. Each fixture creates/drops a random
+`pattern_editor_test_<uuid>` schema.
+
+## Gate command
+
+```bash
+WATCHLIST=FIXTURE TV_SCREENER=america TV_EXCHANGE=NASDAQ \
+  .venv/bin/python -m pytest -q \
+  core/test_pattern_bootstrap.py core/test_pattern_edit_store.py \
+  core/test_pattern_versions.py core/test_pattern_loader.py \
+  core/test_pattern_edit_validation.py core/test_pattern_editor_contracts.py \
+  core/test_pattern_lifecycle.py core/test_pattern_jobs.py \
+  core/test_scanner_deferred_entry.py core/test_paper_trader.py \
+  web/test_services_patterns.py analysis/test_pattern_overlays.py \
+  analysis/test_chart_viewer_payload.py tests/test_backtest_paper_parity.py \
+  core/test_execution_accounting.py core/test_paper_books.py \
+  patterns/test_rationale.py core/test_market.py tests/test_golden_numbers.py
+```
+
+- Result: **179 passed**, 0 failed, 0 skipped, 14 warnings in 198.35s.
+
+## Regression fixes found during the gate
+
+- `test_pattern_bootstrap.py::test_load_without_detector_files_and_isolated_helpers`
+  failed with a trusted-runtime mismatch: `runtime_manifest` walked the `patterns/`
+  package initializer and its detector imports, so deleting detector files removed a
+  reachable dependency (`data/edgar_client.py`) from the fingerprint. `collect_sources`
+  now accepts `prune_package` and `runtime_manifest` prunes `patterns/`, keeping the
+  trusted runtime fingerprint independent of detector/helper sources (P04-07).
+- `analysis/test_pattern_overlays.py::test_detected_pennant_saves_both_converging_rails`
+  failed only when a prior in-process `_core_backtest_symbol` run had left the global
+  `patterns._dedup` walk state set (`_current`). `_core_backtest_symbol` now resets the
+  registry before returning, matching the documented "empty outside a backtest" boundary
+  (P04-06 isolation).

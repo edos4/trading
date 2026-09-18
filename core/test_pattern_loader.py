@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from core.pattern_edit_store import EditStore, ROOT
+from core.pattern_edit_store import ROOT
 from core.pattern_versions import PatternVersions, collect_sources
 from core.pattern_loader import VersionPattern
 from data.ohlcv_store import OHLCVStore
@@ -28,11 +28,11 @@ def candles(name: str) -> list[OHLCVCandle]:
     ]
 
 
-def test_frozen_baseline_does_not_import_current_helper(tmp_path):
+def test_frozen_baseline_does_not_import_current_helper(tmp_path, editor_store_factory):
     for name,data in collect_sources(ROOT,'patterns/008_head_and_shoulders.py').items():
         path=tmp_path/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(data)
-    version=PatternVersions(EditStore(tmp_path)).baseline('pattern_008_head_and_shoulders')
-    pattern=VersionPattern(version['version_id'],EditStore(tmp_path))
+    version=PatternVersions(editor_store_factory(tmp_path)).baseline('pattern_008_head_and_shoulders')
+    pattern=VersionPattern(version['version_id'],editor_store_factory(tmp_path))
     # A later helper edit must not change this already loaded version.
     (tmp_path/'patterns/_rules.py').write_text('raise RuntimeError("wrong helper")')
     store=OHLCVStore(window=512,session_tz='America/New_York')

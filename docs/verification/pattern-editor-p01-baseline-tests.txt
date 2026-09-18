@@ -1,0 +1,100 @@
+F.....................F.....................................             [100%]
+=================================== FAILURES ===================================
+__________________________ test_two_process_baseline ___________________________
+concurrent.futures.process._RemoteTraceback: 
+"""
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/concurrent/futures/process.py", line 263, in _process_worker
+    r = call_item.fn(*call_item.args, **call_item.kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/concurrent/futures/process.py", line 212, in _process_chunk
+    return [fn(*args) for args in chunk]
+            ^^^^^^^^^
+  File "/tmp/pattern-editor-p01-baseline/core/test_pattern_versions.py", line 21, in create_baseline
+    return PatternVersions(EditStore(root)).baseline('pattern_008_head_and_shoulders')['version_id']
+                           ^^^^^^^^^^^^^^^
+  File "/tmp/pattern-editor-p01-baseline/core/pattern_edit_store.py", line 84, in __init__
+    con.execute('PRAGMA journal_mode=WAL')
+sqlite3.OperationalError: database is locked
+"""
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = PosixPath('/tmp/pytest-of-r00t/pytest-182/test_two_process_baseline0')
+
+    def test_two_process_baseline(tmp_path):
+        repository(tmp_path)
+        with ProcessPoolExecutor(2, mp_context=multiprocessing.get_context('spawn')) as pool:
+>           ids = list(pool.map(create_baseline, [str(tmp_path)]*2))
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+core/test_pattern_versions.py:27: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/usr/lib/python3.12/concurrent/futures/process.py:642: in _chain_from_iterable_of_lists
+    for element in iterable:
+/usr/lib/python3.12/concurrent/futures/_base.py:619: in result_iterator
+    yield _result_or_cancel(fs.pop())
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/_base.py:317: in _result_or_cancel
+    return fut.result(timeout)
+           ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/_base.py:456: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = None
+
+    def __get_result(self):
+        if self._exception:
+            try:
+>               raise self._exception
+E               sqlite3.OperationalError: database is locked
+
+/usr/lib/python3.12/concurrent/futures/_base.py:401: OperationalError
+_ DiscoverPatternsDisabledTests.test_default_run_covers_ported_patterns_but_not_retired_011 _
+
+self = <web.test_services_patterns.DiscoverPatternsDisabledTests testMethod=test_default_run_covers_ported_patterns_but_not_retired_011>
+
+    def test_default_run_covers_ported_patterns_but_not_retired_011(self):
+        # 2026-09 refactor: every ported pattern (002-010) runs by default;
+        # 011 is retired via `skipped = True` on its class.
+        names = {p.name for p in discover_patterns()}
+        self.assertIn("pattern_003_double_bottom", names)
+        self.assertIn("pattern_006_upward_channel", names)
+>       self.assertIn("pattern_009_flag_pattern", names)
+E       AssertionError: 'pattern_009_flag_pattern' not found in {'pattern_006_upward_channel', 'pattern_002_double_top', 'pattern_003_double_bottom', 'pattern_010_pennant', 'pattern_005_rounding_top', 'pattern_004_rounding_bottom'}
+
+web/test_services_patterns.py:25: AssertionError
+=============================== warnings summary ===============================
+../../home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:64
+  /home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:64: PyparsingDeprecationWarning: 'oneOf' deprecated - use 'one_of'
+    prop = Group((name + Suppress("=") + comma_separated(value)) | oneOf(_CONSTANTS))
+
+../../home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+../../home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+../../home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+../../home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+../../home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+../../home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+  /home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85: PyparsingDeprecationWarning: 'parseString' deprecated - use 'parse_string'
+    parse = parser.parseString(pattern)
+
+../../home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+../../home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+../../home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+../../home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+../../home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+../../home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+  /home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89: PyparsingDeprecationWarning: 'resetCache' deprecated - use 'reset_cache'
+    parser.resetCache()
+
+../../home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_mathtext.py:45
+  /home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_mathtext.py:45: PyparsingDeprecationWarning: 'enablePackrat' deprecated - use 'enable_packrat'
+    ParserElement.enablePackrat()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED core/test_pattern_versions.py::test_two_process_baseline - sqlite3.Ope...
+FAILED web/test_services_patterns.py::DiscoverPatternsDisabledTests::test_default_run_covers_ported_patterns_but_not_retired_011
+2 failed, 58 passed, 14 warnings in 8.86s

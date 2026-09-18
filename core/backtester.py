@@ -22,11 +22,9 @@ The same ``_open_trade`` / ``_check_exit`` / ``_close_trade`` functions drive
 from __future__ import annotations
 
 import asyncio
-import importlib
 import json
 import multiprocessing as mp
 import os
-import pkgutil
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
@@ -36,12 +34,11 @@ from typing import Callable, Literal
 
 import pandas as pd
 
-import patterns as patterns_pkg
 from core.engine_defaults import ENGINE, is_fractional_qty
 from core.market import apply_lot_rounding, get_market
 from data.ohlcv_store import DEFAULT_WINDOW, OHLCVStore
 from data.tv_client import MarketSnapshot, OHLCVCandle
-from patterns.base_pattern import BasePattern, TradeSignal, skip_pattern_module
+from patterns.base_pattern import BasePattern, TradeSignal
 from utils.logger import log
 
 # Legacy live-fetch cache (still used when no barcache_dir is given).
@@ -812,39 +809,22 @@ def _close_trade(
 
 # ── Pattern discovery ───────────────────────────────────────────────────────
 def _load_patterns(pattern_specs: list[tuple[str, str]]) -> list[BasePattern]:
-    out: list[BasePattern] = []
-    for module_name, class_name in pattern_specs:
-        if module_name.startswith("version:"):
-            from core.pattern_loader import VersionPattern
-            out.append(VersionPattern(module_name.split(":",1)[1]))
-            continue
-        module = importlib.import_module(module_name)
-        out.append(getattr(module, class_name)())
+    from core.pattern_loader import VersionPattern
+    from core.pattern_edit_store import EditError
+    out = []
+    for spec, pattern_id in pattern_specs:
+        if not spec.startswith('version:'):
+            raise EditError('Backtest workers require pinned PostgreSQL versions')
+        pattern = VersionPattern(spec.split(':', 1)[1])
+        if pattern.name != pattern_id or pattern.skipped:
+            raise EditError('Pinned pattern identity or availability mismatch')
+        out.append(pattern)
     return out
 
 
-def _iter_pattern_classes() -> list[tuple[str, type[BasePattern]]]:
-    found: list[tuple[str, type[BasePattern]]] = []
-    for module_info in pkgutil.iter_modules(patterns_pkg.__path__):
-        if skip_pattern_module(module_info.name):
-            continue
-        module = importlib.import_module(f"patterns.{module_info.name}")
-        for attr_name in dir(module):
-            attr = getattr(module, attr_name)
-            if (
-                isinstance(attr, type)
-                and issubclass(attr, BasePattern)
-                and attr is not BasePattern
-            ):
-                found.append((module_info.name, attr))
-    return found
-
-
 def discover_pattern_names() -> list[str]:
-    return sorted({
-        inst.name for _, cls in _iter_pattern_classes()
-        if not (inst := cls()).skipped
-    })
+    from core.pattern_versions import PatternVersions
+    return sorted(PatternVersions().resolve())
 
 
 # ── Per-symbol walk ─────────────────────────────────────────────────────────
@@ -975,6 +955,8 @@ def _core_backtest_symbol(
         _close_trade(pos, candles[-1].close, "data_end", candles[-1], txn_cost)
         trades.append(pos)
 
+    # Leave no walk/dedup state behind: outside a backtest the registry is empty.
+    _dedup.reset()
     return trades, signals_count, blocked, filtered
 
 
@@ -1079,6 +1061,7 @@ class Backtester:
         max_workers: int = 0,
         version: str = "",
         end_margin: int = 5,
+        version_set: dict[str, str] | None = None,
     ):
         self._symbols = symbols
         profile = get_market(market)
@@ -1095,6 +1078,9 @@ class Backtester:
         self._disabled_patterns = set(disabled_patterns or [])
         self._patterns: list[BasePattern] = []
         self._pattern_files: dict[str, str] = {}
+        from core.pattern_versions import PatternVersions
+        disabled = self._disabled_patterns if pattern_filter is None else ()
+        self._version_set = PatternVersions().resolve(version_set, disabled)
         self._discover_patterns()
         self._progress_callback = progress_callback
         self._max_workers = max_workers if max_workers > 0 else (os.cpu_count() or 4)
@@ -1102,11 +1088,11 @@ class Backtester:
     def _discover_patterns(self) -> None:
         from core.pattern_loader import discover
         disabled = self._disabled_patterns if self._pattern_filter is None else ()
-        for instance in discover(disabled):
+        for instance in discover(disabled, self._version_set):
             if self._pattern_filter is not None and self._pattern_filter.lower() not in instance.name.lower():
                 continue
             self._patterns.append(instance)
-            self._pattern_files[instance.name] = "patterns/" + instance.name.removeprefix("pattern_") + ".py"
+            self._pattern_files[instance.name] = "version:" + instance.pattern_version_id
 
     def _config(self) -> dict:
         profile = get_market(self._market)

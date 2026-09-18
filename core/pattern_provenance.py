@@ -28,3 +28,26 @@ def payload(value):
 def row_payload(value):
     return {key:deepcopy(value.get(key)) for key in
             ('trade_id','signal_id','pattern_version_id','provenance','requested_rules','resolved_rules')}
+
+
+def pattern_annotations(annotations, df=None, pattern=None):
+    """Never infer historical rules from today's mutable detector files."""
+    ids = {a.get('pattern_version_id') for a in annotations}
+    if ids == {None} or not ids:
+        # Legacy anchors remain readable, without inventing detector provenance.
+        from patterns._annotations import pattern_annotations as legacy, _historical_geometry
+        saved = deepcopy(annotations)
+        if df is not None and pattern:
+            markers = {a.get('label'): a for a in saved if a.get('type') == 'marker'}
+            saved.extend(_historical_geometry(df, pattern, saved, markers))
+        return legacy(saved, None, pattern)
+    if len(ids) != 1 or None in ids:
+        return deepcopy(annotations)
+    from core.pattern_loader import VersionPattern
+    pinned = VersionPattern(next(iter(ids)))
+    if pinned._baseline is None:
+        # Generated code and its helpers may execute only inside the sandbox.
+        return deepcopy(annotations)
+    module = pinned._baseline_modules['patterns.' + pinned.version['source_path'].split('/')[-1][:-3]]
+    helper = module.__builtins__['__import__']('patterns._annotations', fromlist=['pattern_annotations'])
+    return helper.pattern_annotations(annotations, df, pattern or pinned.name)

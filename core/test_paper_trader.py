@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+pytestmark = pytest.mark.usefixtures("published_pattern_catalog")
+
 from datetime import datetime, timezone
 
 from core.backtester import BacktestTrade, _check_exit

@@ -2,6 +2,9 @@
 same signal-bar entry core/backtester.py uses — not one bar late."""
 
 import asyncio
+import pytest
+
+pytestmark = pytest.mark.usefixtures("published_pattern_catalog")
 import tempfile
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta

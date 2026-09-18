@@ -382,11 +382,11 @@ class MarketScanner:
 
     def stop(self) -> None:
         from core.pattern_loader import acknowledge_worker
-        acknowledge_worker(self, stopped=True)
         self._running = False
         self._close_analyze_pool()
         for p in self._patterns:
             p.on_stop()
+        acknowledge_worker(self, stopped=True)
         # self._client.disconnect()
         log.info("Scanner stopped")
 
@@ -415,6 +415,7 @@ class MarketScanner:
             skip_edgar=get_market(self._market).skip_edgar,
             window=max(DEFAULT_WINDOW, settings.tv_history_days),
             workers=n,
+            version_set=self._version_set,
         )
         if self._analyze_pool is not None:
             log.info(f"Scanner | pattern analyze pool: {n} spawn workers")
@@ -583,11 +584,6 @@ class MarketScanner:
 
     # ── Scan cycle ─────────────────────────────────────────────────────────────
     async def _scan_all(self, feed_sessions: list | None = None) -> None:
-        from core.pattern_loader import active_versions
-        if active_versions() != getattr(self, "_version_set", {}):
-            self._close_analyze_pool()
-            self._discover_patterns()
-            self._open_analyze_pool()
         from core.pattern_loader import acknowledge_worker
         acknowledge_worker(self)
         """Run one full scan across all symbols x timeframes x patterns.
@@ -1378,7 +1374,8 @@ class MarketScanner:
             f.write(row)
 
     def _discover_patterns(self) -> None:
-        from core.pattern_loader import discover, active_versions
-        self._version_set = active_versions()
+        from core.pattern_loader import discover
+        from core.pattern_versions import PatternVersions
+        self._version_set = PatternVersions().resolve(disabled=self._disabled_patterns)
         self._patterns = discover(self._disabled_patterns, self._version_set)
-        self._pattern_files = {p.name: "patterns/" + p.name.removeprefix("pattern_") + ".py" for p in self._patterns}
+        self._pattern_files = {p.name: "version:" + p.pattern_version_id for p in self._patterns}

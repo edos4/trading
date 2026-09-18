@@ -20,6 +20,8 @@ class TradingMode(str, Enum):
 class Settings(BaseSettings):
     # Sandbox used to execute approved pattern versions (see core/pattern_edit_worker.py).
     # Empty = approved versions cannot be executed; the shipped pattern code runs instead.
+    # Empty editor DSN reuses the existing PostgreSQL DATABASE_URL/db_* settings.
+    pattern_editor_database_url: str = ""
     pattern_edit_cgroup_root: str = ""
     pattern_edit_worker_python: str = ""
 

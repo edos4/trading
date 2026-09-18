@@ -10,63 +10,21 @@ Usage:
 
 import argparse
 import asyncio
-import importlib
 import os
-import pkgutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import patterns as patterns_pkg
 from config import settings
-from core.backtester import Backtester
+from core.backtester import Backtester, discover_pattern_names
 from data.tv_client import TVClient
-from patterns.base_pattern import BasePattern, skip_pattern_module
 from utils.logger import log
-
-
-def discover_pattern_names() -> list[str]:
-    names: list[str] = []
-    for module_info in pkgutil.iter_modules(patterns_pkg.__path__):
-        if skip_pattern_module(module_info.name):
-            continue
-        module = importlib.import_module(f"patterns.{module_info.name}")
-        for attr_name in dir(module):
-            attr = getattr(module, attr_name)
-            if (
-                isinstance(attr, type)
-                and issubclass(attr, BasePattern)
-                and attr is not BasePattern
-            ):
-                instance = attr()
-                if not instance.skipped:
-                    names.append(instance.name)
-    return sorted(names)
 
 
 async def run_one(pattern_name: str, symbols: list[str]) -> tuple[str, int, int, int, int, float, float, float, float, float, list]:
     bt = Backtester(
         symbols,
-        # Kept in sync with main.py's run_backtest() tuned parameters (see
-        # the comments there for the rationale behind each value) so that
-        # per-pattern comparisons here reflect the same engine config used
-        # for actual tuning decisions, rather than an older, more lenient
-        # configuration.
-        min_confidence=0.65,
-        regime_filter=False,
-        cooldown_bars=10,
         txn_cost_pct=0.001,
-        position_sizing="risk",
-        account_value=100_000.0,
-        risk_per_trade_pct=0.02,
-        trailing_activation_default=0.02,
-        breakeven_trigger_pct=0.01,
-        breakeven_buffer_pct=0.001,
-        min_atr_stop_multiple=1.0,
-        synthetic_stop_multiple=0,
-        hard_stop_percentage=0.06,
-        max_open_positions=settings.max_open_positions,
-        min_hold_bars=2,
         pattern_filter=pattern_name,
     )
     r = await bt.run()

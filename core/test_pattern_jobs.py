@@ -110,7 +110,7 @@ def test_analyze_batch_spawn_pool_smoke():
         for i in range(PATTERN_SCAN_HISTORY_BARS)
     ]
     snap = _snapshot("AAPL", candles)
-    disabled = [p.name for p in pj.load_patterns([])]
+    disabled = []
     err: list[BaseException] = []
 
     def _run() -> None:
@@ -121,6 +121,7 @@ def test_analyze_batch_spawn_pool_smoke():
                 skip_edgar=True,
                 window=512,
                 workers=2,
+                version_set={},
             )
             assert pool is not None
             try:
