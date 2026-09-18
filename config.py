@@ -28,6 +28,16 @@ class Settings(BaseSettings):
     # Local files are import inputs only; PostgreSQL remains the durable store.
     backtest_dataset_dir: str = "data/barcache"
 
+    # ── DeepSeek (pattern editing) ────────────────────────────────────────
+    # Server-side only; never logged or returned to a client. API model id
+    # `deepseek-flash` verified 2026-09-18 against the official docs.
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-flash"
+    deepseek_timeout_seconds: float = 120.0
+    deepseek_max_retries: int = 2
+    deepseek_max_concurrency: int = 2
+
     # ── IBKR ──────────────────────────────────────────────────────────────
     ibkr_host: str = "127.0.0.1"
     ibkr_port: int = 7497

@@ -144,7 +144,16 @@ class BacktestService:
     def prepare(self, request: BacktestRequest) -> dict:
         """Validate a request without touching bars; returns the frozen plan."""
         request = _coerce_request(request)
-        settings = self._validate_settings(request.preset.settings)
+        settings = self.validate_settings(request.preset.settings)
+        pinned = self._pin_versions(request)
+        symbols = resolve_symbols(settings)
+        return {"request": request, "settings": settings, "versions": pinned,
+                "symbols": symbols,
+                "request_sha256": digest(canonical(request.model_dump(mode="json")))}
+
+    def validate_settings(self, settings):
+        """Reject unsupported or contradictory execution settings."""
+        settings = self._validate_settings(settings)
         unsupported = [name for name, flag in (
             ("kronos_gate", settings.execution.kronos_gate),
             ("kronos_rank", settings.execution.kronos_rank),
@@ -154,13 +163,10 @@ class BacktestService:
             raise EditError("Unsupported in this release: " + ", ".join(unsupported))
         if settings.mode == "offline" and settings.execution.volume_gate:
             raise EditError("The volume gate is only available for historical-stream runs")
-        if settings.mode == "historical-stream" and settings.execution.sizing_mode != "fixed-notional":
+        if (settings.mode == "historical-stream"
+                and settings.execution.sizing_mode != "fixed-notional"):
             raise EditError("Only fixed-notional sizing is supported for historical-stream runs")
-        pinned = self._pin_versions(request)
-        symbols = resolve_symbols(settings)
-        return {"request": request, "settings": settings, "versions": pinned,
-                "symbols": symbols,
-                "request_sha256": digest(canonical(request.model_dump(mode="json")))}
+        return settings
 
     def store_config(self) -> dict:
         """Connection config only — never a live connection across a process boundary."""
@@ -256,12 +262,17 @@ class BacktestService:
             _release_cancel(job_id)
 
     # ── frozen inputs / datasets ─────────────────────────────────────────
-    def freeze_inputs(self, request: BacktestRequest, symbols: list[str]) -> FrozenRunInputs:
-        settings = request.preset.settings
+    def dataset_ref(self, settings, symbols: list[str]) -> dict:
+        """Freeze the daily tape once; the returned ContentRef is the authority."""
+        settings = self.validate_settings(settings)
         rows = self._load_frozen_rows(settings, symbols)
         if not rows:
             raise EditError("No frozen daily history available for the selected symbols")
-        dataset = self.store.blob(canonical(rows), "application/json")
+        return self.store.blob(canonical(rows), "application/json")
+
+    def freeze_inputs(self, request: BacktestRequest, symbols: list[str]) -> FrozenRunInputs:
+        settings = request.preset.settings
+        dataset = self.dataset_ref(settings, symbols)
         effective = effective_parameters(settings, {"barcache_dir": str(self.dataset_root)})
         runtime = runtime_identity(self.store.root)
         # Identity is the frozen inputs themselves: versions, symbols, dataset,
