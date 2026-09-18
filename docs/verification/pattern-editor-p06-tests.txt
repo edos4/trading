@@ -1,0 +1,7 @@
+# P06 verification — 2026-09-18T09:05:58Z
+# cmd: pytest -q core/test_stream_backtest.py core/test_backtest_service.py + editor/store/version/loader/validation/lifecycle/jobs/bootstrap/web-patterns
+
+    ParserElement.enablePackrat()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+92 passed, 14 warnings in 169.11s (0:02:49)

@@ -24,14 +24,14 @@ Allowed status values: `not started`, `in progress`, `blocked`, `complete`. Coun
 | P03 | Exact file bootstrap and database loader | P02 | complete | 8/8 |
 | P04 | Version lifecycle and consumer pinning | P03 | complete | 7/7 |
 | P05 | Shared contracts, presets, and durable jobs | P04 | complete | 6/6 |
-| P06 | Isolated historical stream backtests | P05 | not started | 0/8 |
+| P06 | Isolated historical stream backtests | P05 | complete | 8/8 |
 | P07 | Stream backtests in both existing frontends | P06 | not started | 0/6 |
 | P08 | DeepSeek edit and automatic evaluation pipeline | P07 | not started | 0/8 |
 | P09 | Web Patterns tab | P08 | not started | 0/6 |
 | P10 | Desktop Patterns dialog | P09 | not started | 0/6 |
 | P11 | Integration, recovery, and release readiness | P10 | not started | 0/7 |
 
-**Current resume point:** P06-01. P05 shared parameter/request definitions, saved-preset service, durable PostgreSQL jobs and the offline adapter are complete; legacy offline frontends are unchanged. The candidate sandbox and live DeepSeek provider remain later gates.
+**Current resume point:** P07-01. P06 historical-stream replay is complete and reachable through the shared service; the offline frontends still expose only their existing offline form (wiring is P07). The candidate sandbox and live DeepSeek provider remain later gates.
 
 ## Requirements that apply to every phase
 
@@ -135,22 +135,22 @@ Build the explicit database loader here so verification can exercise it before t
 
 ## P06 — Isolated historical stream backtests
 
-**Status:** not started · **Progress:** 0/8 · **Depends on:** P05
+**Status:** complete · **Progress:** 8/8 · **Depends on:** P05
 
-**Primary files:** shared backtest service, `data/stream_client.py`, `data/stream_server.py`, `core/scanner.py`, `core/paper_trader.py`, `core/paper_books.py`, parity/replay tests.
+**Primary files:** new `core/stream_backtest.py`; shared backtest service, `data/stream_client.py`, `data/stream_server.py`, `core/scanner.py`, `core/paper_trader.py`, `core/paper_books.py`, parity/replay tests.
 
-- [ ] **P06-01:** Extract/reuse paper execution ordering for position management, signal analysis, deferred entries, fills, and accounting. Document the shared path so replay does not grow a separate trading implementation.
-- [ ] **P06-02:** Isolate each replay's stream endpoint/session, clock, account, workers, dedup state, and outputs. Parameterize fixed endpoint assumptions; never attach a backtest to an active paper stream or ledger.
-- [ ] **P06-03:** Freeze daily historical inputs and warmup. Expose only bars/derived aggregates available at each simulated timestamp; suppress pre-start trading. Enforce supported timeframes and date/session bounds.
-- [ ] **P06-04:** Advance only after all current-session work completes. Handle calendars, missing/duplicate bars, unequal histories, data/provider errors, and end-of-data with explicit statuses.
-- [ ] **P06-05:** Apply effective sizing, capital, costs, slippage, gates, and version set. Preserve open positions by default; implement optional labeled force-close behavior and consistent persisted metrics.
-- [ ] **P06-06:** Integrate progress, cancellation and process cleanup with durable jobs. On restart mark interrupted work truthfully; do not claim resumable execution without saved clock/account state.
-- [ ] **P06-07:** Extend paper/backtest parity fixtures to the complete stream/scanner path: signals, pending entries, deduplication, fills, quantities, exits, fees, and P&L. Add future-bar mutation, warmup, calendar, and open-position checks.
-- [ ] **P06-08:** Run simultaneous replay jobs alongside an isolated paper-session fixture and prove no interference. Measure representative replay throughput and record sandbox batching/resource decisions and results.
+- [x] **P06-01:** Extract/reuse paper execution ordering for position management, signal analysis, deferred entries, fills, and accounting. Document the shared path so replay does not grow a separate trading implementation.
+- [x] **P06-02:** Isolate each replay's stream endpoint/session, clock, account, workers, dedup state, and outputs. Parameterize fixed endpoint assumptions; never attach a backtest to an active paper stream or ledger.
+- [x] **P06-03:** Freeze daily historical inputs and warmup. Expose only bars/derived aggregates available at each simulated timestamp; suppress pre-start trading. Enforce supported timeframes and date/session bounds.
+- [x] **P06-04:** Advance only after all current-session work completes. Handle calendars, missing/duplicate bars, unequal histories, data/provider errors, and end-of-data with explicit statuses.
+- [x] **P06-05:** Apply effective sizing, capital, costs, slippage, gates, and version set. Preserve open positions by default; implement optional labeled force-close behavior and consistent persisted metrics.
+- [x] **P06-06:** Integrate progress, cancellation and process cleanup with durable jobs. On restart mark interrupted work truthfully; do not claim resumable execution without saved clock/account state.
+- [x] **P06-07:** Extend paper/backtest parity fixtures to the complete stream/scanner path: signals, pending entries, deduplication, fills, quantities, exits, fees, and P&L. Add future-bar mutation, warmup, calendar, and open-position checks.
+- [x] **P06-08:** Run simultaneous replay jobs alongside an isolated paper-session fixture and prove no interference. Measure representative replay throughput and record sandbox batching/resource decisions and results.
 
 **Exit gate:** Deterministic stream parity, no-lookahead, isolation, and cancellation tests pass. Results identify the exact versions, data, engine, and effective settings.
 
-**Checkpoint:** Last completed task: none. Next: P06-01 after P05. Changed files/commit: none. Verification/evidence and benchmark: none. Run IDs: none. Blockers: none recorded.
+**Checkpoint:** Last completed task: P06-08. Next: P07-01. Changed files (uncommitted): new `core/stream_backtest.py`, `core/test_stream_backtest.py`, [stream handoff](pattern-editor-stream.md); `core/backtest_service.py` dispatches stream runs, freezes the stream dataset, and reports `unit=sessions` progress. Verification: E13 — 92 tests passed (P06 replay suite + P05 service suite + editor/store/version/loader/validation/lifecycle/jobs/bootstrap/web-patterns), no skips; output in [P06 tests](verification/pattern-editor-p06-tests.txt). The replay reuses `_open_trade`/`_check_exit`/`_close_trade` (the paper account's own path) in paper ordering, owns its stores/dedup/clock/outputs, grows candle history causally, supports warmup/date-or-session bounds, records explicit calendar/error statuses, applies effective capital/costs/slippage/sizing/version set and the volume gate, and offers keep-open vs labeled force-close end policies; durable progress/cancellation/interruption behave as in P05. Measured single-symbol throughput 260 sessions in 1.34 s (~194 sessions/s). Concurrent replays in one process serialize their analysis section because `patterns._dedup` is process-global; no interference is proven against sequential twins and a live paper account. **Recorded limitation:** the ported detectors are full-history `.cjs` replicas, so on a strictly causal window most are gated off by their own trailing-edge bounds (only `pattern_003_double_bottom`, plus one `pattern_010_pennant` case, trigger on the pinned fixtures; `pattern_002_double_top` cannot). The replay keeps causal semantics rather than reintroducing lookahead; making detectors walk-forward is out of P06 scope. No P06 blocker.
 
 ## P07 — Stream backtests in both existing frontends
 
@@ -258,6 +258,7 @@ Populate as work proceeds. Store durable import/job/backtest reports in PostgreS
 | E10 | P03-08 | Test-schema cleanup query, source-file diff, compile check, `git diff --check`, private server shutdown | No test schemas remain; no original pattern file changes; checks pass | Private `/tmp/pattern-editor-p03-pg` cluster only | P03 handoff |
 | E11 | P04-01–P04-07 | Nineteen-file editor/consumer gate against disposable PostgreSQL; two regression fixes (`collect_sources(prune_package=...)`, `_core_backtest_symbol` dedup reset) | 179 passed, 0 failed, 0 skipped; source-less discovery/execution, lifecycle invariants, pinning and concurrency verified | PostgreSQL 17.11 private test DB; migration 1 | [Test output](verification/pattern-editor-p04-tests.txt), [handoff](pattern-editor-lifecycle.md) |
 | E12 | P05-01–P05-06 | P05 service suite plus editor/store/version/loader/validation/lifecycle/jobs/bootstrap/web-patterns suites against disposable PostgreSQL; headless `web.jobs` import checked without Tkinter | 83 passed, 0 failed, 0 skipped; presets, idempotent Submit, concurrent independent runs, cancellation races, stale-lease interruption, traceable retry and frozen result persistence verified | PostgreSQL 16.15 private test DB; migration 1 | [Test output](verification/pattern-editor-p05-tests.txt) |
+| E13 | P06-01–P06-08 | `core/test_stream_backtest.py` + P05/editor gate against disposable PostgreSQL | 92 passed, 0 failed, 0 skipped; deterministic causal replay, future-bar mutation isolation, warmup suppression, both end policies, concurrent-replay/live-paper isolation, cancellation and durable stream execution verified; measured 260 sessions in 1.34 s (~194 sessions/s) | PostgreSQL 16.15 private test DB; migration 1 | [Test output](verification/pattern-editor-p06-tests.txt), [handoff](pattern-editor-stream.md) |
 
 Suggested existing suites to incorporate after adapting storage fixtures: `core/test_pattern_versions.py`, `core/test_pattern_loader.py`, `core/test_pattern_edit_validation.py`, `core/test_pattern_jobs.py`, `tests/test_backtest_paper_parity.py`, `web/test_services_patterns.py`, and relevant scanner/accounting/replay tests. Record the actual selected commands and results; these suggestions are not claims that the suites already cover the new behavior.
 
@@ -273,3 +274,4 @@ Append a row after each implementation session or material decision. Update the 
 | 2026-09-18 | P03-01–P03-08 | Added exact trusted inventory/freeze, immutable idempotent staging, captured helper/dynamic imports, strict runtime compatibility, clean-worker signal/trade/accounting parity, and atomic verified publication; preserved six available/four skipped | E08–E10; 59 tests passed; actual import/rerun and exported report in disposable PostgreSQL | P04-01: normal consumer discovery and pinned lifecycle cutover; no production publication performed |
 | 2026-09-18 | P04-01–P04-07 | Cut every runtime consumer over to published PostgreSQL discovery and default-pointer operations; added version list/detail/source/diff, validation/backtest-gated default selection and idempotent archive with replacement; pinned one version set per run/session into inline and spawned workers; preserved version provenance and moved worker acknowledgements to PostgreSQL; fixed detector-dependent runtime fingerprint and `_dedup` walk-state leak | E11; 179 passed, 0 failed, 0 skipped across editor + consumer gate in disposable PostgreSQL | P05-01: shared typed service, presets and durable jobs; candidate sandbox/live provider remain later gates |
 | 2026-09-18 | P05-01–P05-06 | Added UI-independent parameter/request definitions, saved presets with generation-guarded edits, a durable PostgreSQL job store (transactional claim, leases/heartbeats, cancellation, traceable retry), frozen dataset/result schemas, and the offline adapter; offline workers now receive pinned-store config so spawned processes load the same immutable versions | E12; 83 passed, 0 failed, 0 skipped; headless web import proven Tkinter-free | P06-01: isolated historical stream replay reusing the paper execution path |
+| 2026-09-18 | P06-01–P06-08 | Added a causal session-at-a-time historical replay that reuses the paper account's own `_open_trade`/`_check_exit`/`_close_trade` path, owns its stores/dedup/clock/outputs, applies effective settings and end policy, records explicit calendar/error statuses, and runs through the durable job layer; concurrent replays in one process serialize the process-global detector registry | E13; 92 passed, 0 failed, 0 skipped; future-bar mutation, warmup, isolation, cancellation and throughput recorded | P07-01: expose mode/version/preset/replay controls in web and desktop; detector causal-window limitation recorded in the stream handoff |
