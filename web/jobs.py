@@ -9,10 +9,10 @@ from typing import Any, Optional
 
 from config import DISABLED_PATTERNS
 from core.backtester import Backtester, BacktestResult, discover_pattern_names
+from core.backtest_params import PARAMS, _universe_for_pattern
 from core.market import default_market, get_market
 from core.paper_books import paper_books
 from data.tv_client import TVClient
-from ui.backtest_dialog import PARAMS, _universe_for_pattern
 from utils.logger import log
 
 

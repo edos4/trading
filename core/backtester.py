@@ -808,14 +808,14 @@ def _close_trade(
 
 
 # ── Pattern discovery ───────────────────────────────────────────────────────
-def _load_patterns(pattern_specs: list[tuple[str, str]]) -> list[BasePattern]:
+def _load_patterns(pattern_specs: list[tuple[str, str]], store=None) -> list[BasePattern]:
     from core.pattern_loader import VersionPattern
     from core.pattern_edit_store import EditError
     out = []
     for spec, pattern_id in pattern_specs:
         if not spec.startswith('version:'):
             raise EditError('Backtest workers require pinned PostgreSQL versions')
-        pattern = VersionPattern(spec.split(':', 1)[1])
+        pattern = VersionPattern(spec.split(':', 1)[1], store)
         if pattern.name != pattern_id or pattern.skipped:
             raise EditError('Pinned pattern identity or availability mismatch')
         out.append(pattern)
@@ -1040,7 +1040,12 @@ def _worker_symbol_backtest(
 ) -> tuple[list[BacktestTrade], int, list[dict], list[dict]]:
     if candles is None:
         return [], 0, [], []
-    patterns = _load_patterns(pattern_specs)
+    store = None
+    store_config = config.get("store_config")
+    if store_config:
+        from core.pattern_edit_store import EditStore
+        store = EditStore(**store_config)
+    patterns = _load_patterns(pattern_specs, store)
     return _core_backtest_symbol(symbol, timeframe, candles, patterns, config)
 
 
@@ -1062,6 +1067,7 @@ class Backtester:
         version: str = "",
         end_margin: int = 5,
         version_set: dict[str, str] | None = None,
+        store_config: dict | None = None,
     ):
         self._symbols = symbols
         profile = get_market(market)
@@ -1078,6 +1084,7 @@ class Backtester:
         self._disabled_patterns = set(disabled_patterns or [])
         self._patterns: list[BasePattern] = []
         self._pattern_files: dict[str, str] = {}
+        self._store_config = dict(store_config) if store_config else None
         from core.pattern_versions import PatternVersions
         disabled = self._disabled_patterns if pattern_filter is None else ()
         self._version_set = PatternVersions().resolve(version_set, disabled)
@@ -1104,6 +1111,7 @@ class Backtester:
             "lot_round": profile.lot_round,
             "session_tz": profile.session_tz,
             "market": self._market,
+            "store_config": self._store_config,
         }
 
     def _load_candles(self, symbol: str) -> list[OHLCVCandle] | None:

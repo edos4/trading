@@ -23,7 +23,7 @@ Allowed status values: `not started`, `in progress`, `blocked`, `complete`. Coun
 | P02 | PostgreSQL schema and repository | P01 | complete | 7/7 |
 | P03 | Exact file bootstrap and database loader | P02 | complete | 8/8 |
 | P04 | Version lifecycle and consumer pinning | P03 | complete | 7/7 |
-| P05 | Shared contracts, presets, and durable jobs | P04 | not started | 0/6 |
+| P05 | Shared contracts, presets, and durable jobs | P04 | complete | 6/6 |
 | P06 | Isolated historical stream backtests | P05 | not started | 0/8 |
 | P07 | Stream backtests in both existing frontends | P06 | not started | 0/6 |
 | P08 | DeepSeek edit and automatic evaluation pipeline | P07 | not started | 0/8 |
@@ -31,7 +31,7 @@ Allowed status values: `not started`, `in progress`, `blocked`, `complete`. Coun
 | P10 | Desktop Patterns dialog | P09 | not started | 0/6 |
 | P11 | Integration, recovery, and release readiness | P10 | not started | 0/7 |
 
-**Current resume point:** P05-01. P04 version lifecycle, default/archive operations, and consumer version pinning are complete. Normal runtime discovery and execution now require a configured, migrated PostgreSQL catalog. Publication was rehearsed only in disposable PostgreSQL databases; production migration, import, and consumer cutover have not been performed.
+**Current resume point:** P06-01. P05 shared parameter/request definitions, saved-preset service, durable PostgreSQL jobs and the offline adapter are complete; legacy offline frontends are unchanged. The candidate sandbox and live DeepSeek provider remain later gates.
 
 ## Requirements that apply to every phase
 
@@ -118,20 +118,20 @@ Build the explicit database loader here so verification can exercise it before t
 
 ## P05 — Shared contracts, presets, and durable jobs
 
-**Status:** not started · **Progress:** 0/6 · **Depends on:** P04
+**Status:** complete · **Progress:** 6/6 · **Depends on:** P04
 
-**Primary files:** new `core/backtest_service.py` and shared schema/job modules; `web/jobs.py`, `ui/backtest_dialog.py`, PostgreSQL repository.
+**Primary files:** new `core/backtest_service.py`, `core/backtest_params.py`, `core/backtest_jobs.py`; shared schema/job modules; `web/jobs.py`, `ui/backtest_dialog.py`, PostgreSQL repository.
 
-- [ ] **P05-01:** Move shared parameter definitions/validation out of the Tkinter module. Define offline and historical-stream requests with explicit version IDs, market, symbols, timeframe, dates/session count, warmup, capital, sizing, costs, slippage, gates, and end policy.
-- [ ] **P05-02:** Persist editable saved presets, freezing an immutable effective preset and resolved universe on each run. Reject unsupported/contradictory inputs; do not silently replace user values.
-- [ ] **P05-03:** Implement durable per-run job/status/result interfaces with transactional claiming, leases/heartbeats, bounded concurrency, cancellation, ownership checks, and traceable retry attempts. Keep slow work outside database transactions.
-- [ ] **P05-04:** Define frozen dataset storage and result schemas covering signals, trades, equity, drawdown, realized/unrealized P&L, fees, open positions, provenance, and engine/runtime hashes. Store editor-owned artifacts in PostgreSQL; immutable references to existing history must be reproducible, not mutable URLs alone.
-- [ ] **P05-05:** Adapt offline backtests to the shared service without changing their documented execution/end-of-data semantics. Remove the single global result-slot assumption while preserving existing frontend behavior until P07.
-- [ ] **P05-06:** Test preset freezing, independent concurrent jobs, duplicate requests, stale leases, cancellation races, restart/interruption reporting, and result persistence. Ensure retries cannot publish duplicate attempts/results unintentionally.
+- [x] **P05-01:** Move shared parameter definitions/validation out of the Tkinter module. Define offline and historical-stream requests with explicit version IDs, market, symbols, timeframe, dates/session count, warmup, capital, sizing, costs, slippage, gates, and end policy.
+- [x] **P05-02:** Persist editable saved presets, freezing an immutable effective preset and resolved universe on each run. Reject unsupported/contradictory inputs; do not silently replace user values.
+- [x] **P05-03:** Implement durable per-run job/status/result interfaces with transactional claiming, leases/heartbeats, bounded concurrency, cancellation, ownership checks, and traceable retry attempts. Keep slow work outside database transactions.
+- [x] **P05-04:** Define frozen dataset storage and result schemas covering signals, trades, equity, drawdown, realized/unrealized P&L, fees, open positions, provenance, and engine/runtime hashes. Store editor-owned artifacts in PostgreSQL; immutable references to existing history must be reproducible, not mutable URLs alone.
+- [x] **P05-05:** Adapt offline backtests to the shared service without changing their documented execution/end-of-data semantics. Remove the single global result-slot assumption while preserving existing frontend behavior until P07.
+- [x] **P05-06:** Test preset freezing, independent concurrent jobs, duplicate requests, stale leases, cancellation races, restart/interruption reporting, and result persistence. Ensure retries cannot publish duplicate attempts/results unintentionally.
 
 **Exit gate:** Both future adapters and AI orchestration have one typed, durable service contract; offline regression tests pass and jobs survive application restarts as records with truthful states.
 
-**Checkpoint:** Last completed task: none. Next: P05-01 after P04. Changed files/commit: none. Verification/evidence: none. Job/run IDs: none. Blockers: none recorded.
+**Checkpoint:** Last completed task: P05-06. Next: P06-01. Changed files (uncommitted): new `core/backtest_params.py`, `core/backtest_jobs.py`, `core/backtest_service.py`, `core/test_backtest_service.py`; `core/backtester.py` (worker `store_config` so pinned PostgreSQL versions load in spawned offline workers); `ui/backtest_dialog.py` and `web/jobs.py` now import the shared definitions (headless web no longer imports Tkinter). Verification: E12 — 83 tests passed across the P05 service suite plus the editor/store/version/loader/validation/lifecycle/jobs/bootstrap/web-patterns suites, no skips; output in [P05 tests](verification/pattern-editor-p05-tests.txt). Presets carry immutable effective settings with generation-guarded edits; duplicate Submit is idempotent; two concurrent offline runs with different effective settings complete independently; queued and racing cancellations stay terminal; a leaked lease is marked `interrupted` rather than re-run; retries create a distinct attempt without duplicating the prior result; frozen inputs/artifacts are stored in PostgreSQL with an inputs hash for reuse. `BacktestSettings` is still the only durable request schema and no new migration was required. No P05 blocker. Historical-stream execution (P06) and the frontend wiring (P07) remain.
 
 ## P06 — Isolated historical stream backtests
 
@@ -257,6 +257,7 @@ Populate as work proceeds. Store durable import/job/backtest reports in PostgreS
 | E09 | P03-03–P03-07 | Explicit migration, `scripts/import_pattern_baselines.py`, identical CLI rerun, read-only catalog queries | Same batch/report/defaults on rerun; ten version-1 defaults, six enabled; complete verification report | Disposable test database only; migration 1 | [CLI output](verification/pattern-editor-p03-import.txt), [report export](verification/pattern-editor-p03-report.json) |
 | E10 | P03-08 | Test-schema cleanup query, source-file diff, compile check, `git diff --check`, private server shutdown | No test schemas remain; no original pattern file changes; checks pass | Private `/tmp/pattern-editor-p03-pg` cluster only | P03 handoff |
 | E11 | P04-01–P04-07 | Nineteen-file editor/consumer gate against disposable PostgreSQL; two regression fixes (`collect_sources(prune_package=...)`, `_core_backtest_symbol` dedup reset) | 179 passed, 0 failed, 0 skipped; source-less discovery/execution, lifecycle invariants, pinning and concurrency verified | PostgreSQL 17.11 private test DB; migration 1 | [Test output](verification/pattern-editor-p04-tests.txt), [handoff](pattern-editor-lifecycle.md) |
+| E12 | P05-01–P05-06 | P05 service suite plus editor/store/version/loader/validation/lifecycle/jobs/bootstrap/web-patterns suites against disposable PostgreSQL; headless `web.jobs` import checked without Tkinter | 83 passed, 0 failed, 0 skipped; presets, idempotent Submit, concurrent independent runs, cancellation races, stale-lease interruption, traceable retry and frozen result persistence verified | PostgreSQL 16.15 private test DB; migration 1 | [Test output](verification/pattern-editor-p05-tests.txt) |
 
 Suggested existing suites to incorporate after adapting storage fixtures: `core/test_pattern_versions.py`, `core/test_pattern_loader.py`, `core/test_pattern_edit_validation.py`, `core/test_pattern_jobs.py`, `tests/test_backtest_paper_parity.py`, `web/test_services_patterns.py`, and relevant scanner/accounting/replay tests. Record the actual selected commands and results; these suggestions are not claims that the suites already cover the new behavior.
 
@@ -271,3 +272,4 @@ Append a row after each implementation session or material decision. Update the 
 | 2026-09-18 | P02-01–P02-07 | Replaced editor store with PostgreSQL, explicit checksummed migrations, immutable blobs/versions and transactional constraints; ported storage tests; documented setup/recovery | E05–E07; 47 passed, no skips; CLI apply/rerun verified | P03-01: exact file bootstrap; runtime consumers still require P04 cutover |
 | 2026-09-18 | P03-01–P03-08 | Added exact trusted inventory/freeze, immutable idempotent staging, captured helper/dynamic imports, strict runtime compatibility, clean-worker signal/trade/accounting parity, and atomic verified publication; preserved six available/four skipped | E08–E10; 59 tests passed; actual import/rerun and exported report in disposable PostgreSQL | P04-01: normal consumer discovery and pinned lifecycle cutover; no production publication performed |
 | 2026-09-18 | P04-01–P04-07 | Cut every runtime consumer over to published PostgreSQL discovery and default-pointer operations; added version list/detail/source/diff, validation/backtest-gated default selection and idempotent archive with replacement; pinned one version set per run/session into inline and spawned workers; preserved version provenance and moved worker acknowledgements to PostgreSQL; fixed detector-dependent runtime fingerprint and `_dedup` walk-state leak | E11; 179 passed, 0 failed, 0 skipped across editor + consumer gate in disposable PostgreSQL | P05-01: shared typed service, presets and durable jobs; candidate sandbox/live provider remain later gates |
+| 2026-09-18 | P05-01–P05-06 | Added UI-independent parameter/request definitions, saved presets with generation-guarded edits, a durable PostgreSQL job store (transactional claim, leases/heartbeats, cancellation, traceable retry), frozen dataset/result schemas, and the offline adapter; offline workers now receive pinned-store config so spawned processes load the same immutable versions | E12; 83 passed, 0 failed, 0 skipped; headless web import proven Tkinter-free | P06-01: isolated historical stream replay reusing the paper execution path |
