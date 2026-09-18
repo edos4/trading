@@ -435,8 +435,8 @@ def test_edit_pipeline_unavailable_sandbox_blocks_without_fallback(published_pat
     job = service.submit(_request(service, _base_version(store)))
     service.execute(job["id"])
     status = service.status(job["id"])
-    assert status["state"] in ("blocked", "failed")
-    assert status["error"]["code"] in ("provider-failed", "validation-failed")
+    assert status["state"] == "blocked"
+    assert status["error"]["code"] == "sandbox-unavailable"
     report = service.detail(job["id"])["report"]
     assert report is not None and report["status"] == "blocked"
     assert any(c["outcome"] == "unavailable" for c in report["checks"])

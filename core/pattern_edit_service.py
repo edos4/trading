@@ -34,6 +34,10 @@ class EditCancelled(EditError):
     pass
 
 
+class SandboxBlocked(EditError):
+    """The candidate sandbox is unavailable; the job is blocked, not failed."""
+
+
 class PatternEditService:
     def __init__(self, store=None, *, provider=None, runner=None,
                  jobs=None, versions=None, backtests=None, validator_factory=None,
@@ -170,6 +174,9 @@ class PatternEditService:
         except ProviderError as exc:
             return self.jobs.finish(job_id, owner, JobState.FAILED.value,
                                     error=_error("provider-failed", str(exc), exc.retryable))
+        except SandboxBlocked as exc:
+            return self.jobs.finish(job_id, owner, JobState.BLOCKED.value,
+                                    error=_error("sandbox-unavailable", str(exc), True))
         except EditError as exc:
             return self.jobs.finish(job_id, owner, JobState.FAILED.value,
                                     error=_error("validation-failed", str(exc), False))
@@ -256,8 +263,7 @@ class PatternEditService:
             con.execute("UPDATE version_lifecycle SET validation=%s, validation_report_id=%s "
                         "WHERE version=%s", (state, report["report_id"], version_id))
         if state == "blocked":
-            raise ProviderError("Candidate sandbox is unavailable; validation is blocked",
-                                retryable=True)
+            raise SandboxBlocked("Candidate sandbox is unavailable; validation is blocked")
         if state == "failed":
             raise EditError("Candidate failed validation; see its report")
         self.jobs.touch(job_id, owner, state="backtesting",

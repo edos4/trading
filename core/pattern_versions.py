@@ -178,7 +178,8 @@ class PatternVersions:
             lifecycle = con.execute('SELECT * FROM version_lifecycle WHERE version=%s', (version_id,)).fetchone()
             reports = con.execute('SELECT payload FROM reports WHERE version=%s OR id=%s OR id=%s',
                                   (version_id, lifecycle['validation_report_id'], lifecycle['baseline_report_id'])).fetchall()
-            runs = con.execute('''SELECT b.payload, j.state, r.payload AS result FROM run_versions v
+            runs = con.execute('''SELECT v.run AS run_id, b.payload, j.state, r.payload AS result
+                FROM run_versions v
                 JOIN backtest_runs b ON b.id=v.run JOIN jobs j ON j.id=b.job
                 LEFT JOIN results r ON r.run=b.id WHERE v.version=%s ORDER BY b.created_at''', (version_id,)).fetchall()
         return dict(version=version, lifecycle=lifecycle, reports=[r['payload'] for r in reports], backtests=runs)

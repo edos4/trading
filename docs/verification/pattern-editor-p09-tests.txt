@@ -1,0 +1,42 @@
+# P09 verification — 2026-09-18T21:19:50Z
+# cmd: pytest -q core/test_patterns_web.py core/test_pattern_edit_pipeline.py core/test_backtest_frontends.py \
+#      core/test_stream_backtest.py core/test_backtest_service.py core/test_pattern_edit_store.py \
+#      core/test_pattern_versions.py core/test_pattern_loader.py core/test_pattern_edit_validation.py \
+#      core/test_pattern_editor_contracts.py core/test_pattern_lifecycle.py core/test_pattern_jobs.py \
+#      core/test_pattern_bootstrap.py web/test_services_patterns.py web/test_http_auth.py
+........................................................................ [ 52%]
+................................................................         [100%]
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:64
+  /home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:64: PyparsingDeprecationWarning: 'oneOf' deprecated - use 'one_of'
+    prop = Group((name + Suppress("=") + comma_separated(value)) | oneOf(_CONSTANTS))
+
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+  /home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85: PyparsingDeprecationWarning: 'parseString' deprecated - use 'parse_string'
+    parse = parser.parseString(pattern)
+
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+  /home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89: PyparsingDeprecationWarning: 'resetCache' deprecated - use 'reset_cache'
+    parser.resetCache()
+
+.venv/lib/python3.12/site-packages/matplotlib/_mathtext.py:45
+  /home/r00t/codes/trading_bot/trading_bot_v2_swing_jun22/.venv/lib/python3.12/site-packages/matplotlib/_mathtext.py:45: PyparsingDeprecationWarning: 'enablePackrat' deprecated - use 'enable_packrat'
+    ParserElement.enablePackrat()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+136 passed, 15 warnings in 1407.68s (0:23:27)
+EXIT=0
