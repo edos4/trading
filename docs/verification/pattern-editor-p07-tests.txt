@@ -1,0 +1,7 @@
+# P07 verification — 2026-09-18T09:25:01Z
+# cmd: pytest -q core/test_backtest_frontends.py core/test_stream_backtest.py core/test_backtest_service.py + editor/store/version/loader/validation/lifecycle/jobs/bootstrap/web-services/web-auth
+
+    ParserElement.enablePackrat()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+106 passed, 15 warnings in 186.16s (0:03:06)

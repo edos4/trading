@@ -1,0 +1,42 @@
+# P07 smoke record — 2026-09-18T09:29:12Z
+# Environment: Xvfb DISPLAY=:1; disposable PostgreSQL 16.15 on /tmp/pattern-editor-pg/socket:55484
+# Catalog: schema pattern_editor, migration 1, bootstrap report e1647ad4abfe41abaf5afda82c2ccf73 (passed)
+# Dataset: tests/fixtures/barcache (this working tree ships no data/barcache snapshot)
+# Both launch modes use the same pinned version, window (2025-06-20..2026-07-02), warmup 30,
+# $100k capital, $10k notional, 0.001 txn cost, keep-open policy.
+
+## main.py --web — real launch mode (WEB_UI_PORT=18085)
+# /health 200, /login 200, / 401, /api/backtest/catalog 401 unauthenticated
+# GET /backtest returns 200 even when the catalog DB is down (page no longer 500s)
+login 200
+catalog 200 patterns: 10
+  default: 59a36f82 enabled: True
+submit 200 {'run_id': '11b7afca783e49d8bdd41d39e4f8c6a9', 'state': 'queued'}
+run completed units: sessions 260/260
+  mode: historical-stream end_policy: keep-open
+  trades: 2 net: -631.207 open: 0 fees: 38.895148 maxDD%: 0.631207
+  first trade: CDNS trailing_stop
+
+## desktop BacktestDialog — real ui/backtest_dialog.py driven offscreen
+stream panel widgets: True | catalog entries: 6
+collected mode/symbols: historical-stream ['CDNS']
+selected versions: 6
+
+
+status: Run 85a4b53b: completed (260/260 sessions)
+--- summary ---
+Run 85a4b53b509948b68b1bceeb45f8a078
+State: completed
+Mode:        historical-stream
+End policy:  keep-open
+
+Trades:      2
+Win rate:    0.0%
+Realized:    -631.21
+Unrealized:  0.00
+Net P&L:     -631.21
+Fees:        38.8951
+Max DD %:    0.63
+Open:        0
+Currency:    USD
+--- trades rows: 2

@@ -25,13 +25,13 @@ Allowed status values: `not started`, `in progress`, `blocked`, `complete`. Coun
 | P04 | Version lifecycle and consumer pinning | P03 | complete | 7/7 |
 | P05 | Shared contracts, presets, and durable jobs | P04 | complete | 6/6 |
 | P06 | Isolated historical stream backtests | P05 | complete | 8/8 |
-| P07 | Stream backtests in both existing frontends | P06 | not started | 0/6 |
+| P07 | Stream backtests in both existing frontends | P06 | complete | 6/6 |
 | P08 | DeepSeek edit and automatic evaluation pipeline | P07 | not started | 0/8 |
 | P09 | Web Patterns tab | P08 | not started | 0/6 |
 | P10 | Desktop Patterns dialog | P09 | not started | 0/6 |
 | P11 | Integration, recovery, and release readiness | P10 | not started | 0/7 |
 
-**Current resume point:** P07-01. P06 historical-stream replay is complete and reachable through the shared service; the offline frontends still expose only their existing offline form (wiring is P07). The candidate sandbox and live DeepSeek provider remain later gates.
+**Current resume point:** P08-01. Both frontends can start, inspect, cancel and revisit durable offline/stream backtests against pinned versions. The candidate sandbox and the live DeepSeek provider remain later gates.
 
 ## Requirements that apply to every phase
 
@@ -154,20 +154,20 @@ Build the explicit database loader here so verification can exercise it before t
 
 ## P07 — Stream backtests in both existing frontends
 
-**Status:** not started · **Progress:** 0/6 · **Depends on:** P06
+**Status:** complete · **Progress:** 6/6 · **Depends on:** P06
 
-**Primary files:** `web/app.py`, `web/jobs.py`, `web/templates/backtest.html`, relevant web scripts, `ui/backtest_dialog.py`, `main.py`.
+**Primary files:** `web/app.py`, `web/runs.py`, `web/templates/backtest.html`, `web/static/backtest_runs.js`, `ui/backtest_dialog.py`, `main.py`.
 
-- [ ] **P07-01:** Add web mode/version/preset/replay controls and shared validation; launch/query/cancel durable runs by ID through authenticated endpoints.
-- [ ] **P07-02:** Add equivalent desktop controls using the same service contract. Run work off the Tk thread and marshal progress/results safely to the main thread.
-- [ ] **P07-03:** Display trades, equity, metrics, open positions, errors, and interruption/cancellation states consistently. Distinguish zero trades from failures and offline from stream end policies.
-- [ ] **P07-04:** Audit `main.py --web` and `main.py --ui` history-provider initialization, shutdown, and job reconnection. Prove headless web imports do not require Tkinter UI modules.
-- [ ] **P07-05:** Add frontend contract tests for malformed settings, unavailable PostgreSQL/data, version selection, preset reuse, cancellation, and persisted results after reopening.
-- [ ] **P07-06:** Smoke-test both actual launch modes with the same preset/version; compare effective requests and results. Record exact commands, run IDs, screenshots or observation notes, and any infrastructure blockers.
+- [x] **P07-01:** Add web mode/version/preset/replay controls and shared validation; launch/query/cancel durable runs by ID through authenticated endpoints.
+- [x] **P07-02:** Add equivalent desktop controls using the same service contract. Run work off the Tk thread and marshal progress/results safely to the main thread.
+- [x] **P07-03:** Display trades, equity, metrics, open positions, errors, and interruption/cancellation states consistently. Distinguish zero trades from failures and offline from stream end policies.
+- [x] **P07-04:** Audit `main.py --web` and `main.py --ui` history-provider initialization, shutdown, and job reconnection. Prove headless web imports do not require Tkinter UI modules.
+- [x] **P07-05:** Add frontend contract tests for malformed settings, unavailable PostgreSQL/data, version selection, preset reuse, cancellation, and persisted results after reopening.
+- [x] **P07-06:** Smoke-test both actual launch modes with the same preset/version; compare effective requests and results. Record exact commands, run IDs, screenshots or observation notes, and any infrastructure blockers.
 
 **Exit gate:** Users can start, inspect, cancel, and revisit stream backtests from both launch modes. This gate is required before AI auto-backtesting work.
 
-**Checkpoint:** Last completed task: none. Next: P07-01 after P06. Changed files/commit: none. Verification/evidence: none. Run IDs: none. Blockers: none recorded.
+**Checkpoint:** Last completed task: P07-06. Next: P08-01. Changed files (uncommitted): new `web/runs.py`, `web/static/backtest_runs.js`; `web/app.py` (catalog/versions/presets/run status/cancel/retry endpoints + `replay_param_schema`), `web/templates/backtest.html`, `web/jobs.py` (page renders when the catalog DB is down), `ui/backtest_dialog.py` (pinned-version/stream panel with off-thread runs and Tk-thread marshaling), `core/backtest_service.py` (`request_from_values` shared builder + configurable dataset root), `config.py`/`.env.example` (`BACKTEST_DATASET_DIR`), new `core/test_backtest_frontends.py`. Verification: E14 — 106 tests passed (frontend contract suite + P06/P05 + editor/store/version/loader/validation/lifecycle/jobs/bootstrap/web-services/web-auth), no skips; [test output](verification/pattern-editor-p07-tests.txt). Smoke: [launch-mode record](verification/pattern-editor-p07-smoke.txt) — real `main.py --web` (login → catalog → submit → completed 260/260 sessions, 2 trades, net −631.21, fees 38.8951) and the real desktop `BacktestDialog` driven offscreen on Xvfb with identical settings and byte-identical metrics. Endpoints are authenticated and mapped (400 malformed/unsupported, 409 conflict, 404 unknown run, 503 database unavailable — never a file fallback); duplicates are idempotent, cancellation is durable, and a page reload reconnects by run ID because the job record is the authority. No P07 blocker. Not performed: launching the full `main.py --ui` window (the real dialog module was exercised instead); the production `stocks_history` DSN was unavailable, so the launch-mode smoke used the disposable test cluster and the fixture dataset.
 
 ## P08 — DeepSeek editing and automatic evaluation
 
@@ -259,6 +259,7 @@ Populate as work proceeds. Store durable import/job/backtest reports in PostgreS
 | E11 | P04-01–P04-07 | Nineteen-file editor/consumer gate against disposable PostgreSQL; two regression fixes (`collect_sources(prune_package=...)`, `_core_backtest_symbol` dedup reset) | 179 passed, 0 failed, 0 skipped; source-less discovery/execution, lifecycle invariants, pinning and concurrency verified | PostgreSQL 17.11 private test DB; migration 1 | [Test output](verification/pattern-editor-p04-tests.txt), [handoff](pattern-editor-lifecycle.md) |
 | E12 | P05-01–P05-06 | P05 service suite plus editor/store/version/loader/validation/lifecycle/jobs/bootstrap/web-patterns suites against disposable PostgreSQL; headless `web.jobs` import checked without Tkinter | 83 passed, 0 failed, 0 skipped; presets, idempotent Submit, concurrent independent runs, cancellation races, stale-lease interruption, traceable retry and frozen result persistence verified | PostgreSQL 16.15 private test DB; migration 1 | [Test output](verification/pattern-editor-p05-tests.txt) |
 | E13 | P06-01–P06-08 | `core/test_stream_backtest.py` + P05/editor gate against disposable PostgreSQL | 92 passed, 0 failed, 0 skipped; deterministic causal replay, future-bar mutation isolation, warmup suppression, both end policies, concurrent-replay/live-paper isolation, cancellation and durable stream execution verified; measured 260 sessions in 1.34 s (~194 sessions/s) | PostgreSQL 16.15 private test DB; migration 1 | [Test output](verification/pattern-editor-p06-tests.txt), [handoff](pattern-editor-stream.md) |
+| E14 | P07-01–P07-06 | `core/test_backtest_frontends.py` + P06/P05/editor/web suites against disposable PostgreSQL; real `main.py --web` launch and real desktop `BacktestDialog` offscreen on Xvfb with identical pinned settings | 106 passed, 0 failed, 0 skipped; both launch modes completed the same run (260/260 sessions, 2 trades, net −631.21, fees 38.8951) and produced identical metrics | PostgreSQL 16.15 private test cluster, schema `pattern_editor`, bootstrap report `e1647ad4abfe41abaf5afda82c2ccf73`; Xvfb `DISPLAY=:1` | [Test output](verification/pattern-editor-p07-tests.txt), [smoke record](verification/pattern-editor-p07-smoke.txt) |
 
 Suggested existing suites to incorporate after adapting storage fixtures: `core/test_pattern_versions.py`, `core/test_pattern_loader.py`, `core/test_pattern_edit_validation.py`, `core/test_pattern_jobs.py`, `tests/test_backtest_paper_parity.py`, `web/test_services_patterns.py`, and relevant scanner/accounting/replay tests. Record the actual selected commands and results; these suggestions are not claims that the suites already cover the new behavior.
 
@@ -275,3 +276,4 @@ Append a row after each implementation session or material decision. Update the 
 | 2026-09-18 | P04-01–P04-07 | Cut every runtime consumer over to published PostgreSQL discovery and default-pointer operations; added version list/detail/source/diff, validation/backtest-gated default selection and idempotent archive with replacement; pinned one version set per run/session into inline and spawned workers; preserved version provenance and moved worker acknowledgements to PostgreSQL; fixed detector-dependent runtime fingerprint and `_dedup` walk-state leak | E11; 179 passed, 0 failed, 0 skipped across editor + consumer gate in disposable PostgreSQL | P05-01: shared typed service, presets and durable jobs; candidate sandbox/live provider remain later gates |
 | 2026-09-18 | P05-01–P05-06 | Added UI-independent parameter/request definitions, saved presets with generation-guarded edits, a durable PostgreSQL job store (transactional claim, leases/heartbeats, cancellation, traceable retry), frozen dataset/result schemas, and the offline adapter; offline workers now receive pinned-store config so spawned processes load the same immutable versions | E12; 83 passed, 0 failed, 0 skipped; headless web import proven Tkinter-free | P06-01: isolated historical stream replay reusing the paper execution path |
 | 2026-09-18 | P06-01–P06-08 | Added a causal session-at-a-time historical replay that reuses the paper account's own `_open_trade`/`_check_exit`/`_close_trade` path, owns its stores/dedup/clock/outputs, applies effective settings and end policy, records explicit calendar/error statuses, and runs through the durable job layer; concurrent replays in one process serialize the process-global detector registry | E13; 92 passed, 0 failed, 0 skipped; future-bar mutation, warmup, isolation, cancellation and throughput recorded | P07-01: expose mode/version/preset/replay controls in web and desktop; detector causal-window limitation recorded in the stream handoff |
+| 2026-09-18 | P07-01–P07-06 | Wired both frontends to the shared service: authenticated web catalog/version/preset/run/cancel/retry endpoints with a client panel, an equivalent desktop pinned-version/stream panel running off the Tk thread, shared `request_from_values` validation, and a configurable dataset root; contract tests cover malformed settings, DB/data unavailability, preset reuse, cancellation and reload reconnection | E14; 106 passed, 0 failed, 0 skipped; real `main.py --web` and the real desktop dialog both completed the same pinned run with identical metrics | P08-01: DeepSeek adapter and durable edit/validate/backtest coordinator; sandbox and live provider remain gates |

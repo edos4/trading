@@ -37,6 +37,75 @@
 </section>
 
 <section class="panel">
+  <h2>Stream / pinned-version run</h2>
+  <p class="muted small">
+    Runs through the durable backtest service with pinned PostgreSQL versions.
+    Offline replays the full daily tape; Historical stream replays
+    session-by-session exactly like paper trading.
+  </p>
+  <div class="param-grid">
+    <div class="param">
+      <label for="sr-mode"><strong>Mode</strong></label>
+      <select id="sr-mode">
+        <option value="offline">offline</option>
+        <option value="historical-stream">historical-stream</option>
+      </select>
+    </div>
+    {% for p in replay_params %}
+    {% if p.key not in ("mode", "timeframe") %}
+    <div class="param" data-key="{{ p.key }}">
+      <label for="sr-{{ p.key }}"><strong>{{ p.label }}</strong></label>
+      <p class="muted small">{{ p.description }}</p>
+      {% if p.type == "spin" %}
+      <input id="sr-{{ p.key }}" type="number" value="{{ p.default }}"
+             min="{{ p.min }}" max="{{ p.max }}" step="{{ p.step }}" />
+      {% elif p.type == "check" %}
+      <input id="sr-{{ p.key }}" type="checkbox" {% if p.default %}checked{% endif %} />
+      {% elif p.type == "combo" %}
+      <select id="sr-{{ p.key }}">
+        {% for c in p.choices %}<option value="{{ c }}" {% if c == p.default %}selected{% endif %}>{{ c }}</option>{% endfor %}
+      </select>
+      {% else %}
+      <input id="sr-{{ p.key }}" type="text" value="{{ p.default or '' }}" />
+      {% endif %}
+    </div>
+    {% endif %}
+    {% endfor %}
+    <div class="param">
+      <label for="sr-preset"><strong>Saved preset</strong></label>
+      <p class="muted small">Selecting a preset uses its frozen settings; leave blank to save the form as a new preset.</p>
+      <select id="sr-preset"><option value="">(new preset from form)</option></select>
+    </div>
+    <div class="param">
+      <label for="sr-preset-name"><strong>Preset name</strong></label>
+      <input id="sr-preset-name" type="text" placeholder="stream smoke" />
+    </div>
+    <div class="param">
+      <label for="sr-versions"><strong>Versions</strong></label>
+      <p class="muted small">One version per pattern. Defaults are preselected.</p>
+      <select id="sr-versions" multiple size="8"></select>
+    </div>
+  </div>
+  <div class="toolbar">
+    <button class="btn primary" id="sr-run" type="button">Run pinned backtest</button>
+    <button class="btn" id="sr-cancel" type="button">Cancel run</button>
+    <progress id="sr-progress" max="100" value="0"></progress>
+    <span id="sr-pct">—</span>
+    <span id="sr-state" class="muted">Idle.</span>
+    <span id="sr-run-id" class="muted"></span>
+  </div>
+  <pre id="sr-error" class="summary" hidden></pre>
+  <pre id="sr-metrics" class="summary">No pinned run yet.</pre>
+  <h3>Open positions</h3>
+  <div class="table-wrap">
+    <table id="sr-open">
+      <thead><tr><th>Symbol</th><th>Pattern</th><th>Action</th><th>Entry</th><th>Qty</th><th>Unrealized %</th><th>Unrealized $</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
   <h2>Results</h2>
   <pre id="bt-summary" class="summary">No results yet.</pre>
   <div id="bt-ab-box" class="ab-box" hidden></div>
@@ -58,5 +127,7 @@
   window.TB_PAGE = "backtest";
   window.TB_MARKETS = {{ markets | tojson }};
   window.TB_DEFAULT_MARKET = {{ default_market | tojson }};
+  window.TB_STREAM_START = {{ stream_start_default | tojson }};
 </script>
+<script src="/static/backtest_runs.js?v=1"></script>
 {% endblock %}

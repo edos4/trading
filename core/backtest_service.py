@@ -84,12 +84,14 @@ class BacktestService:
 
     def __init__(self, store=None, *, job_store=None, versions=None,
                  dataset_root: str | Path | None = None):
+        from config import settings
         from core.pattern_edit_store import EditStore
 
         self.store = store or EditStore()
         self.versions = versions or PatternVersions(self.store)
         self.jobs = job_store or BacktestJobStore(self.store)
-        self.dataset_root = Path(dataset_root or "data/barcache")
+        self.dataset_root = Path(
+            dataset_root or settings.backtest_dataset_dir or "data/barcache")
 
     # ── presets ──────────────────────────────────────────────────────────
     def save_preset(self, name: str, settings, *, preset_id: str | None = None,
@@ -527,6 +529,44 @@ def _coerce_request(request) -> BacktestRequest:
     if isinstance(request, dict):
         return BacktestRequest.model_validate(request)
     raise EditError("Unsupported backtest request payload")
+
+
+def request_from_values(service: "BacktestService", values: dict,
+                        *, versions: dict | None = None,
+                        preset_id: str | None = None,
+                        preset_name: str | None = None,
+                        idempotency_key: str | None = None) -> BacktestRequest:
+    """Build one durable request from raw form values (shared by both frontends).
+
+    ``preset_id`` reuses a saved preset's frozen settings; otherwise the values
+    are validated and persisted as a new named preset. Version defaults come
+    from the published catalog when the caller does not pin them.
+    """
+    from core.backtest_params import settings_from_values
+    from core.pattern_editor_contracts import BacktestPreset, VersionSelection
+
+    if preset_id:
+        preset = service.get_preset(preset_id)
+    else:
+        settings = settings_from_values(values)
+        name = (preset_name or "").strip() or "backtest run"
+        # Find-or-create by (name, settings) so an identical duplicate Submit
+        # maps to the same frozen preset and therefore the same durable request.
+        preset = next((p for p in service.list_presets()
+                       if p.name == name and p.settings == settings), None)
+        if preset is None:
+            preset = service.save_preset(name, settings)
+
+    selected = dict(versions) if versions else {
+        row["id"]: row["active"] for row in service.versions.catalog()
+        if row["enabled"] and row["active"]
+    }
+    selections = tuple(VersionSelection(pattern_id=pattern, version_id=version)
+                       for pattern, version in sorted(selected.items()) if version)
+    if not selections:
+        raise EditError("No pattern versions selected")
+    key = (idempotency_key or "").strip() or f"run-{uid()}"
+    return BacktestRequest(idempotency_key=key, versions=selections, preset=preset)
 
 
 def _error(code: ErrorCode, message: str, *, retryable: bool = False) -> dict:

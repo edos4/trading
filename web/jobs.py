@@ -27,7 +27,12 @@ def backtest_param_schema() -> list[dict[str, Any]]:
             "type": ptype,
         }
         if key == "pattern_filter":
-            entry["choices"] = [""] + discover_pattern_names()
+            # A catalog outage must not stop the page rendering; the
+            # shared-service panel reports the actionable error itself.
+            try:
+                entry["choices"] = [""] + discover_pattern_names()
+            except Exception:
+                entry["choices"] = [""]
             entry["default"] = default
         elif ptype == "spin":
             default_val, minv, maxv, inc = default
