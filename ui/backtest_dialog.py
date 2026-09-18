@@ -20,6 +20,7 @@ from tkinter import ttk
 from typing import Any, Callable, Optional
 
 from config import settings, DISABLED_PATTERNS
+from core.backtest_params import PARAMS, _universe_for_pattern  # noqa: F401 - shared with headless web
 from core.backtester import Backtester, BacktestResult, discover_pattern_names
 from core.engine_defaults import ENGINE
 from core.market import default_market, get_market
@@ -28,71 +29,13 @@ from utils.logger import log
 
 
 # ── Parameter definitions ──────────────────────────────────────────────
-# Each entry: (key, label, description, type, default, choices_or_None)
-#   type: "entry" (free text), "spin" (numeric spinbox), "combo" (dropdown), "check" (checkbox)
-#   For "spin": default is packed as (default_value, min, max, increment).
-#   For the "pattern_filter" combo, choices is None here and filled in
-#   dynamically at dialog build time from discover_pattern_names().
-# Defaults come from ENGINE so the UI form matches CLI backtest + paper.
+# Shared, UI-independent definitions live in core.backtest_params so headless
+# web startup never imports Tkinter. Re-exported here for existing callers.
 
 def _decimals_for_increment(inc: float) -> int:
     """Decimal places to display for a spinbox increment (1 -> 0, 0.001 -> 3)."""
     s = f"{inc:.10f}".rstrip("0")
     return len(s.split(".")[1]) if "." in s else 0
-
-
-PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
-    (
-        "market", "Market",
-        "US = NASDAQ/NYSE, USD, shorts allowed. PH = PSE, PHP, long-only.",
-        "combo", default_market().id, ["us", "ph"],
-    ),
-    (
-        "pattern_filter", "Pattern filter",
-        "Filter to one pattern (case-insensitive substring). Blank = all patterns.",
-        "combo", "", None,
-    ),
-    (
-        "universe", "Universe",
-        "Ticker list under data/universes/. Blank = the pattern's own .cjs "
-        "universe when a Pattern filter is set, else 'default'.",
-        "entry", "", None,
-    ),
-    (
-        "barcache_dir", "Barcache dir",
-        "Offline daily-bar cache (build with scripts/build_barcache.py).",
-        "entry", "data/barcache", None,
-    ),
-    (
-        "extra_symbols", "Additional symbols",
-        "Optional extra tickers (comma or space separated).",
-        "entry", "", None,
-    ),
-    (
-        "txn_cost_pct", "Txn cost (per leg)",
-        "0.0 = documented headline numbers; 0.001 matches the .cjs 'cost optional' mode.",
-        "spin", (0.0, 0.0, 0.01, 0.0001), None,
-    ),
-    (
-        "max_workers", "CPU workers",
-        f"Detected {os.cpu_count() or '?'} cores. 0 = use all.",
-        "spin", (max(1, (os.cpu_count() or 2) - 1), 0, 64, 1), None,
-    ),
-]
-
-def _universe_for_pattern(pattern: Optional[str]) -> str:
-    if not pattern:
-        return "default"
-    for key, uni in {
-        "double_top": "double_top", "upward_channel": "upward_channel",
-        "descending_channel": "upward_channel",
-        "head_and_shoulders": "head_and_shoulders",
-        "rounding_bottom": "rounding_bottom", "rounding_top": "rounding_bottom",
-        "flag": "flag", "pennant": "pennant",
-    }.items():
-        if key in pattern.lower():
-            return uni
-    return "default"
 
 
 class BacktestDialog:
