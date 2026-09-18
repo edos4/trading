@@ -208,7 +208,7 @@ class PatternVersions:
             raise EditError('Version must belong to the selected pattern')
         if life['archived_at'] is not None:
             raise EditError('Archived versions cannot be selected for new runs or defaults')
-        if version.get('metadata', {}).get('skipped', True):
+        if version.get('metadata') is None or version.get('metadata', {}).get('skipped', True):
             raise EditError('Skipped or unvalidated version is unavailable')
         if life['validation'] != 'passed':
             raise EditError('Version requires successful validation')

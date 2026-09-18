@@ -22,6 +22,9 @@ def candle_rows(frame, session_timezone):
         stamp = pd.Timestamp(ts)
         if stamp.tzinfo is None:
             stamp = stamp.tz_localize(session_timezone)
+        # Normalize to UTC: a series spanning a DST change would otherwise carry
+        # mixed offsets and pandas refuses to build a datetime64 index from it.
+        stamp = stamp.tz_convert("UTC")
         rows.append({'timestamp':stamp.isoformat(),'time':str(stamp.date()),
                      **{key:float(row[key]) for key in ('open','high','low','close','volume')}})
     return rows
@@ -60,8 +63,16 @@ class Validator:
         inputs = {name:self.store.read_blob(ref) for name,ref in version['files'].items()}
         inputs.update(files)
         # Fixed trusted harness is never part of the provider file allowlist.
-        for name in ('core/pattern_edit_evaluator.py',):
-            inputs[name] = (Path(__file__).resolve().parents[1]/name).read_bytes()
+        # The evaluator is always taken from the working tree; the rest of the
+        # trusted harness is only added when the immutable version does not
+        # already carry it, so a candidate can never shadow trusted code.
+        from core.pattern_versions import collect_sources
+        trusted_root = Path(__file__).resolve().parents[1]
+        inputs['core/pattern_edit_evaluator.py'] = (
+            trusted_root / 'core/pattern_edit_evaluator.py').read_bytes()
+        for name, data in collect_sources(
+                trusted_root, 'patterns/chart_scan.py', paired=False).items():
+            inputs.setdefault(name, data)
         return inputs
 
     def execute(self, version, files, dataset, cancel=None):
@@ -121,7 +132,9 @@ class Validator:
             trusted_root=Path(__file__).resolve().parents[1]
             test_paths=['core/test_execution_accounting.py','analysis/test_pattern_overlays.py']
             test_files={}
-            for name in test_paths:
+            # conftest.py carries the fixture definitions the trusted suites
+            # rely on; without it database-backed tests error instead of skip.
+            for name in ['conftest.py'] + test_paths:
                 test_files.update(collect_sources(trusted_root,name,paired=False))
             tests_hash=digest(canonical({n:digest(v) for n,v in test_files.items()}))
             try:
