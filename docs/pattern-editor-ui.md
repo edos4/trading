@@ -55,6 +55,20 @@ frontend resolves patterns, validates presets, or decides eligibility itself.
   replacement chosen in the same transaction. Archived versions cannot be
   selected for new runs or reused as defaults.
 
+## Desktop dialog (P10)
+
+- `ui/patterns_dialog.py` is opened by the **Patterns** toolbar button beside
+  **Kronos** in `ui/app.py`. It uses the same `PatternEditor` facade and the same
+  `edit_request_from_values` builder, so both frontends enforce identical rules.
+- It shows the same history/badges, source/documentation/diff, saved-preset
+  selector with the replay settings, live progress, diagnostics and a
+  candidate-vs-base comparison, plus the same four lifecycle actions.
+- Every service call runs on a background thread; results are delivered through a
+  `queue.Queue` drained on the Tk thread. Worker threads never touch Tk directly.
+- Closing the window only stops that window's polling — it never marks a durable
+  job cancelled or completed. The last job id is remembered by the app, so
+  reopening the dialog reconnects to the same durable job.
+
 ## Evidence
 
 - Web tests: `core/test_patterns_web.py` (auth, navigation, catalog/versions/
@@ -62,10 +76,17 @@ frontend resolves patterns, validates presets, or decides eligibility itself.
   reload reconnect, failed validation, block+retry without a model call,
   backtest-only retry, cancellation, expired lease, default/archive with
   replacement and conflict, malformed requests, database unavailable).
-- Smoke: [P09 smoke](verification/pattern-editor-p09-smoke.txt) — real
-  `main.py --web` launch. See the tracker for the recorded gate command.
+- Desktop tests: `core/test_patterns_desktop.py` (one request builder for both
+  frontends, offscreen submit→results, closing during a job keeps the durable
+  state, reopen reconnects, PostgreSQL error surfacing, stale-generation conflict
+  when another frontend changes the default).
+- Smokes: [P09 smoke](verification/pattern-editor-p09-smoke.txt) (real
+  `main.py --web`) and [P10 smoke](verification/pattern-editor-p10-smoke.txt)
+  (real `main.py --ui` toolbar → dialog → submit → blocked → reopen reconnect).
+  See the tracker for the recorded gate commands.
 
 ## Not performed / gates
 
 - Live DeepSeek calls and a real candidate sandbox remain unconfigured here.
-- Desktop dialog is P10; full integration/release rehearsal is P11.
+- Full integration/release rehearsal (backup/restore, restart, concurrency,
+  cutover) is P11.

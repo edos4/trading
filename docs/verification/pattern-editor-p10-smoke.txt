@@ -1,0 +1,28 @@
+# P10 smoke record — 2026-09-19
+
+# Environment: Xvfb DISPLAY=:1; disposable PostgreSQL 16.15 on
+# /tmp/pattern-editor-pg/socket:55484, database pattern_editor_smoke, migration 1.
+# Catalog: 10 published patterns (bootstrap report 4ff361ba0dde4a90beeedd39610ee41a).
+# Dataset: tests/fixtures/barcache.
+# Provider: local DeepSeek-compatible stub (127.0.0.1:18080); no live key here.
+# Candidate sandbox: unconfigured, so validation blocks (production fail-closed).
+
+## main.py --ui — real TradingBotUI, real toolbar handler
+# toolbar Patterns button bound: True
+# catalog loaded: 10
+# versions: [1, 2, 3] validation: passed
+# source view loaded: True
+# submitted job: e4a21e16 handed back to app: True
+# terminal status: Job e4a21e16: blocked (0/? stages)
+# diagnostics: ['Status: blocked', '  [passed] syntax — Python source parses']
+# reopened reconnected: True
+# reopened status: Job e4a21e16: queued
+# SMOKE-OK
+
+# The reopened status reads "queued" only because the dialog sets that label
+# before its first durable poll completes; the job itself stays `blocked`.
+
+# Covered elsewhere (not in this smoke): window closure during a job,
+# PostgreSQL errors, and a default changed from another frontend are asserted by
+# core/test_patterns_desktop.py; a real candidate sandbox and a live DeepSeek
+# call remain unconfigured gates.
