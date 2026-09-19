@@ -28,6 +28,7 @@ frontend resolves patterns, validates presets, or decides eligibility itself.
   - `GET /patterns`
   - `GET /api/patterns`, `GET /api/patterns/{pattern_id}/versions`
   - `GET /api/patterns/versions/{version_id}`, `.../source`, `.../diff`
+  - `GET /api/patterns/provider` (AI provider config + account balance)
   - `POST /api/patterns/edits`, `GET /api/patterns/edits/{job_id}`,
     `POST /api/patterns/edits/{job_id}/cancel`, `.../retry`
   - `GET /api/patterns/runs/{run_id}`
@@ -42,6 +43,9 @@ frontend resolves patterns, validates presets, or decides eligibility itself.
   settings, live progress, the explanation, edit diff, validation diagnostics and
   a candidate-vs-base metrics/trades comparison. Submit disables itself as a fast
   path only; the API is idempotent and enforces every invariant.
+- The AI-edit panel shows the DeepSeek account balance (`Provider: <model> ·
+  Balance: <CUR> <total>`), refreshed on load and after a terminal job, with a red
+  `INSUFFICIENT — top up` when the provider reports no funds.
 
 ## Lifecycle actions
 
@@ -61,8 +65,9 @@ frontend resolves patterns, validates presets, or decides eligibility itself.
   **Kronos** in `ui/app.py`. It uses the same `PatternEditor` facade and the same
   `edit_request_from_values` builder, so both frontends enforce identical rules.
 - It shows the same history/badges, source/documentation/diff, saved-preset
-  selector with the replay settings, live progress, diagnostics and a
-  candidate-vs-base comparison, plus the same four lifecycle actions.
+  selector with the replay settings, the same provider/provider-balance line,
+  live progress, diagnostics and a candidate-vs-base comparison, plus the same
+  four lifecycle actions.
 - Every service call runs on a background thread; results are delivered through a
   `queue.Queue` drained on the Tk thread. Worker threads never touch Tk directly.
 - Closing the window only stops that window's polling — it never marks a durable

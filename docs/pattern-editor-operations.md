@@ -111,6 +111,22 @@ an offline or incomplete preset instead of choosing defaults for you.
 - A blocked job (unavailable provider or sandbox) reports `blocked`, keeps any
   version already generated, and is retryable.
 
+## Provider balance
+
+The Patterns tab (web) and the Patterns dialog (desktop) show the DeepSeek
+account balance in the AI-edit panel, so a submission cannot run out of credit
+unexpectedly:
+
+- Source: `GET /user/balance` via the provider adapter (`DeepSeekProvider.balance`),
+  cached for 30 seconds and bounded by the same timeout/retry limits as generation.
+- Refresh: on load and again when an edit job reaches a terminal state (a
+  generation consumes credit).
+- Display: `Provider: <model> · Balance: <CUR> <total>` per currency; when the
+  provider reports no funds (`is_available: false`) or the total is zero, the
+  line is shown in red with `INSUFFICIENT — top up`. A missing key or a failed
+  balance call shows `not configured`/`unavailable` and never blocks the editor,
+  and the API key is never sent to the client.
+
 ## Error codes
 
 | Code | Meaning | Status (web) |

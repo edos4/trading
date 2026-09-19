@@ -66,6 +66,7 @@ class PatternsDialog:
         self._build_results()
         self._top.after(50, self._drain_queue)
         self._load_presets()
+        self._refresh_balance()
         self._refresh_catalog()
 
         if start_job_id:
@@ -335,6 +336,11 @@ class PatternsDialog:
         self._status_var = tk.StringVar(value="Idle.")
         ttk.Label(controls, textvariable=self._status_var).pack(side=tk.LEFT, padx=(6, 0))
 
+        row += 1
+        self._balance_var = tk.StringVar(value="Provider balance: loading…")
+        self._balance_label = ttk.Label(frame, textvariable=self._balance_var)
+        self._balance_label.grid(row=row, column=0, columnspan=6, sticky=tk.W, pady=(4, 0))
+
     def _make_widget(self, parent, key, ptype, default, choices, column, row) -> None:
         if ptype == "spin":
             default_val, minv, maxv, inc = default
@@ -357,6 +363,33 @@ class PatternsDialog:
 
     def _load_presets(self) -> None:
         self._run_async(self.editor().presets, on_done=self._populate_presets)
+
+    def _refresh_balance(self) -> None:
+        """Show the provider's account balance so a submission cannot surprise."""
+        def render(data: dict) -> None:
+            if not data.get("available"):
+                self._balance_var.set(
+                    "Provider: not configured — " + (data.get("error") or "no API key"))
+                self._balance_label.configure(foreground="#b00020")
+                return
+            balance = data.get("balance") or {}
+            parts = []
+            for info in balance.get("infos", []):
+                extra = ""
+                granted = info.get("granted_balance")
+                if granted not in (None, "", "0", "0.0", "0.00"):
+                    extra = f" (granted {granted})"
+                parts.append(f"{info.get('currency')} {info.get('total_balance')}{extra}")
+            insufficient = balance.get("is_available") is False
+            self._balance_var.set(
+                f"Provider: {data.get('model')}  ·  Balance: "
+                + (", ".join(parts) or "?")
+                + ("  — INSUFFICIENT: top up" if insufficient else ""))
+            self._balance_label.configure(foreground="#b00020" if insufficient else "")
+
+        self._run_async(self.editor().balance, on_done=render,
+                        on_error=lambda exc: self._balance_var.set(
+                            f"Provider balance unavailable: {exc}"))
 
     def _populate_presets(self, presets: list[dict]) -> None:
         self._presets = {p["name"]: p["preset_id"] for p in presets}
@@ -499,6 +532,7 @@ class PatternsDialog:
         self._runs = detail.get("runs") or {}
         if detail["state"] in TERMINAL_STATES:
             self._finish_job()
+            self._refresh_balance()  # a generation consumes credit
             if self._runs:
                 self._load_comparison()
         else:

@@ -210,6 +210,35 @@ class PatternEditor:
     def presets(self) -> list[dict]:
         return [p.model_dump(mode="json") for p in self.backtests.list_presets()]
 
+    # ── provider status ──────────────────────────────────────────────────
+    def balance(self) -> dict:
+        """AI provider configuration + account balance for the editor UI.
+
+        This is informational: a missing key, HTTP error, or transport failure is
+        returned as a payload with ``available: false`` and a message, never as
+        an exception, so the editor stays usable.
+        """
+        from dataclasses import asdict
+
+        from ai.providers.deepseek import ProviderError
+
+        provider = self.service.provider()
+        model = getattr(provider, "model", None)
+        try:
+            snapshot = provider.balance()
+        except ProviderError as exc:
+            return {"available": False, "model": model, "balance": None,
+                    "error": str(exc), "retryable": bool(getattr(exc, "retryable", False))}
+        return {
+            "available": True,
+            "model": model,
+            "balance": {
+                "is_available": snapshot.is_available,
+                "infos": [asdict(info) for info in snapshot.infos],
+            },
+            "error": None,
+        }
+
     def save_preset(self, name: str, settings, *, preset_id=None,
                     expected_generation=None) -> dict:
         return self.backtests.save_preset(

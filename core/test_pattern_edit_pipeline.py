@@ -143,6 +143,77 @@ def test_provider_reports_missing_configuration():
         provider.generate(_generation_request())
 
 
+# ── account balance ──────────────────────────────────────────────────────
+def _balance_body(**overrides):
+    body = {"is_available": True, "balance_infos": [
+        {"currency": "USD", "total_balance": "1.89",
+         "granted_balance": "0.00", "topped_up_balance": "1.89"}]}
+    body.update(overrides)
+    return body
+
+
+def test_provider_parses_balance_and_caches_briefly():
+    seen = {}
+
+    def handler(request):
+        seen["method"] = request.method
+        seen["auth"] = request.headers.get("authorization")
+        return httpx.Response(200, json=_balance_body())
+
+    provider = _provider(handler)
+    snapshot = provider.balance()
+    assert seen["method"] == "GET" and seen["auth"] == "Bearer test-key"
+    assert snapshot.is_available is True
+    assert snapshot.infos[0].currency == "USD"
+    assert snapshot.infos[0].total_balance == "1.89"
+    assert snapshot.infos[0].topped_up_balance == "1.89"
+
+    calls = {"n": 0}
+
+    def counting(request):
+        calls["n"] += 1
+        return httpx.Response(200, json=_balance_body())
+
+    provider = _provider(counting)
+    provider.balance()
+    provider.balance()
+    assert calls["n"] == 1  # cached within the TTL
+    provider.balance(ttl=0)
+    assert calls["n"] == 2
+
+
+def test_provider_balance_failures_are_classified():
+    def status(code):
+        return lambda request: httpx.Response(code, json={"error": "nope"})
+
+    with pytest.raises(ProviderError) as excinfo:
+        _provider(status(402)).balance()
+    assert excinfo.value.retryable is False
+
+    with pytest.raises(ProviderError) as transient:
+        _provider(status(503), max_retries=1).balance()
+    assert transient.value.retryable is True
+
+    def malformed(request):
+        return httpx.Response(200, json={"is_available": True})
+
+    with pytest.raises(ProviderError, match="balance information"):
+        _provider(malformed).balance()
+
+    def missing_amount(request):
+        return httpx.Response(200, json=_balance_body(balance_infos=[
+            {"currency": "USD"}]))
+
+    with pytest.raises(ProviderError, match="malformed balance"):
+        _provider(missing_amount).balance()
+
+
+def test_provider_balance_requires_configuration():
+    provider = DeepSeekProvider(api_key="", base_url="https://api.example.test")
+    with pytest.raises(ProviderUnavailable):
+        provider.balance()
+
+
 def test_provider_timeout_is_retryable_and_bounded():
     calls = {"n": 0}
 

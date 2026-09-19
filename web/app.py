@@ -631,6 +631,15 @@ def create_app() -> FastAPI:
         except Exception as exc:  # noqa: BLE001
             return patterns_error(exc)
 
+    @app.get("/api/patterns/provider")
+    async def api_pattern_provider(_user: str = Depends(require_login)):
+        """AI provider configuration and account balance (informational)."""
+        try:
+            editor = pattern_edits.editor()
+            return await asyncio.to_thread(editor.balance)
+        except Exception as exc:  # noqa: BLE001
+            return patterns_error(exc)
+
     @app.post("/api/patterns/edits")
     async def api_pattern_edit_submit(request: Request,
                                       _user: str = Depends(require_login)):

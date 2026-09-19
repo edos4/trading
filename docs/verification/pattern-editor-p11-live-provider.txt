@@ -67,6 +67,19 @@ after reload job label: job 696d0eda
 page errors: none
 BROWSER-SMOKE-OK
 
+## Provider balance (added after the user asked to surface it)
+# Real API: GET /user/balance -> 200
+#   {"is_available":true,"balance_infos":[{"currency":"USD","total_balance":"1.89",
+#     "granted_balance":"0.00","topped_up_balance":"1.89"}]}
+# DeepSeekProvider.balance(): available True | is_available True
+#   USD: total=1.89 granted=0.00 topped_up=1.89
+#   second call served from cache (<0.01 ms)
+# Real Chromium against the live API rendered:
+#   Provider: deepseek-flash · Balance: USD 1.89
+#   BALANCE-BROWSER-OK
+# Web/desktop tests assert the line, the unavailable ("not configured") state,
+# and that the endpoint is 200 (never a 5xx) so the editor stays usable.
+
 ## Remaining gate
 The real candidate sandbox (`PATTERN_EDIT_CGROUP_ROOT` / `PATTERN_EDIT_WORKER_PYTHON`)
 is still unconfigured; a production deployment must set it for generated code to

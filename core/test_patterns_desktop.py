@@ -108,6 +108,8 @@ def test_desktop_dialog_submits_and_renders_results(desktop_editor):
         dialog._on_pattern_change()
         assert pump(root, lambda: bool(dialog._versions)), "versions did not load"
         assert service.store is store
+        assert pump(root, lambda: "USD" in dialog._balance_var.get()), \
+            f"balance not shown: {dialog._balance_var.get()!r}"
 
         dialog._instruction.insert("1.0", "Require two closes above the neckline.")
         dialog._preset_name.insert(0, "desktop smoke")
