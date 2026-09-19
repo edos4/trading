@@ -224,13 +224,16 @@ class PatternEditor:
 
         provider = self.service.provider()
         model = getattr(provider, "model", None)
+        configured = bool(provider.available())
         try:
             snapshot = provider.balance()
         except ProviderError as exc:
-            return {"available": False, "model": model, "balance": None,
-                    "error": str(exc), "retryable": bool(getattr(exc, "retryable", False))}
+            return {"available": False, "configured": configured, "model": model,
+                    "balance": None, "error": str(exc),
+                    "retryable": bool(getattr(exc, "retryable", False))}
         return {
             "available": True,
+            "configured": True,
             "model": model,
             "balance": {
                 "is_available": snapshot.is_available,

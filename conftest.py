@@ -83,9 +83,9 @@ class FakeEditProvider:
         return not self._unavailable()
 
     def balance(self):
-        from ai.providers.deepseek import BalanceInfo, ProviderBalance, ProviderUnavailable
-        if self._unavailable():
-            raise ProviderUnavailable("DeepSeek is not configured")
+        from ai.providers.deepseek import BalanceInfo, ProviderBalance
+        if self.raises is not None:
+            raise self.raises
         return ProviderBalance(is_available=True, infos=(
             BalanceInfo(currency="USD", total_balance="42.00",
                         granted_balance="0.00", topped_up_balance="42.00"),))

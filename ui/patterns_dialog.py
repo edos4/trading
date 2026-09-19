@@ -368,8 +368,10 @@ class PatternsDialog:
         """Show the provider's account balance so a submission cannot surprise."""
         def render(data: dict) -> None:
             if not data.get("available"):
+                state = ("not configured" if data.get("configured") is False
+                         else "unavailable")
                 self._balance_var.set(
-                    "Provider: not configured — " + (data.get("error") or "no API key"))
+                    f"Provider: {state} — {data.get('error') or 'unknown error'}")
                 self._balance_label.configure(foreground="#b00020")
                 return
             balance = data.get("balance") or {}

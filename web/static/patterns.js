@@ -243,7 +243,8 @@
 
   function balanceText(data) {
     if (!data || !data.available) {
-      return "Provider: not configured — " + ((data && data.error) || "no API key");
+      const state = data && data.configured === false ? "not configured" : "unavailable";
+      return "Provider: " + state + " — " + ((data && data.error) || "no API key");
     }
     const balance = data.balance || {};
     const parts = (balance.infos || []).map(
