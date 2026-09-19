@@ -38,6 +38,14 @@ class SandboxBlocked(EditError):
     """The candidate sandbox is unavailable; the job is blocked, not failed."""
 
 
+class BacktestFailed(EditError):
+    """An automatic candidate/base backtest did not complete; the job failed."""
+
+    def __init__(self, message: str, *, run_id: str | None = None):
+        super().__init__(message)
+        self.run_id = run_id
+
+
 class PatternEditService:
     def __init__(self, store=None, *, provider=None, runner=None,
                  jobs=None, versions=None, backtests=None, validator_factory=None,
@@ -177,6 +185,9 @@ class PatternEditService:
         except SandboxBlocked as exc:
             return self.jobs.finish(job_id, owner, JobState.BLOCKED.value,
                                     error=_error("sandbox-unavailable", str(exc), True))
+        except BacktestFailed as exc:
+            return self.jobs.finish(job_id, owner, JobState.FAILED.value,
+                                    error=_error("execution-failed", str(exc), True))
         except EditError as exc:
             return self.jobs.finish(job_id, owner, JobState.FAILED.value,
                                     error=_error("validation-failed", str(exc), False))
@@ -273,13 +284,28 @@ class PatternEditService:
     def _backtest(self, job_id: str, owner: str, request: EditRequest,
                   payload: dict, version_id: str, event: threading.Event) -> dict:
         self._check_cancel(job_id, event)
-        candidate = self._run_or_reuse(job_id, request, version_id, owner, event)
-        base = self._run_or_reuse(job_id, request, request.base_version_id, owner, event)
-        runs = {"candidate": candidate["id"], "base": base["id"], "version_id": version_id}
+        runs: dict = {"version_id": version_id}
+
+        def run(slot: str, selected_version_id: str) -> None:
+            try:
+                runs[slot] = self._run_or_reuse(
+                    job_id, request, selected_version_id, owner, event)["id"]
+            except BacktestFailed as exc:
+                # Keep the failed run's evidence linked to the edit job too.
+                if exc.run_id:
+                    runs[slot] = exc.run_id
+                raise
+            finally:
+                self._record_runs(job_id, runs)
+
+        run("candidate", version_id)
+        run("base", request.base_version_id)
+        return runs
+
+    def _record_runs(self, job_id: str, runs: dict) -> None:
         with self.store.transaction() as con:
             con.execute("UPDATE jobs SET payload = payload || %s WHERE id=%s",
                         (Jsonb({"run_ids": runs}), job_id))
-        return runs
 
     def _run_or_reuse(self, job_id: str, request: EditRequest, version_id: str,
                       owner: str, event: threading.Event) -> dict:
@@ -291,7 +317,16 @@ class PatternEditService:
             return self.backtests.status(existing) | {"reused": True}
         job = self.backtests.submit(run_request)
         self.backtests.execute(job["id"], cancel_event=event)
-        return self.backtests.status(job["id"]) | {"reused": False}
+        status = self.backtests.status(job["id"])
+        # The durable backtest adapter records a failed/interrupted run without
+        # raising; a non-completed automatic run must fail the edit job so the
+        # version stays recoverable via "Backtest again" instead of being
+        # reported as a completed edit.
+        if status["state"] != "completed":
+            message = (status.get("error") or {}).get("message") or status["state"]
+            raise BacktestFailed(
+                f"Automatic backtest {status['state']}: {message}", run_id=job["id"])
+        return status | {"reused": False}
 
     # ── helpers ──────────────────────────────────────────────────────────
     def _base_version(self, pattern_id: str, version_id: str) -> dict:

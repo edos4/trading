@@ -58,7 +58,11 @@ adapter never silently substitutes one because the returned model is recorded.
   `failed`; the default is unchanged.
 - Data/backtest failure after a valid version exists → the job `failed`; the
   version survives and `retry_backtest` re-runs only the backtests with no
-  further provider call and no new version.
+  further provider call and no new version. The durable backtest adapter records
+  a non-completed run without raising, so the coordinator now raises
+  `BacktestFailed` when the run is not `completed`; the failed run's evidence is
+  linked to the edit job as well as to the version. (Fixed after the live-provider
+  test; see E19.)
 - Cancellation at any stage → the job is `cancelled`; a version created before
   the cancellation stays preserved. A leaked lease is marked `interrupted`
   rather than re-run.
@@ -84,13 +88,20 @@ adapter never silently substitutes one because the returned model is recorded.
 
 ## Not performed / remaining gates
 
-- **Live provider smoke:** `DEEPSEEK_API_KEY` is not configured in this
-  environment, so no real call was made. Mocked/provider-double verification is
-  not a live-provider result.
-- **Real candidate sandbox:** unavailable here; the pipeline tests use a sandbox
-  double and the blocked path is asserted separately. Production
-  `PATTERN_EDIT_*` sandbox prerequisites are unchanged from P02/P04.
+- **Live provider smoke:** performed on 2026-09-19 after `DEEPSEEK_API_KEY` was
+  configured — see [live provider smoke](verification/pattern-editor-p11-live-provider.txt).
+  `GET /models` advertises `deepseek-flash`; the real adapter call returned a
+  structured response with requested/returned model provenance; and the full
+  pipeline generated, validated and backtested a real candidate (one immutable
+  version, all validation checks passed, candidate/base runs completed). The
+  `/models` list also exposes `deepseek-v4-pro`; the configured model stays
+  `deepseek-flash`.
+- **Real candidate sandbox:** still unavailable here; the pipeline tests and the
+  live smoke use a sandbox double, and the blocked/failed paths are asserted
+  separately. Production `PATTERN_EDIT_*` sandbox prerequisites are unchanged
+  from P02/P04.
 - User-facing editing UI is P09 (web) and P10 (desktop); integration/release
   rehearsal is P11.
 
-Resume at **P09-01** in [the implementation tracker](pattern-editor-implementation-plan.md).
+Resume at the [implementation tracker](pattern-editor-implementation-plan.md) and
+[acceptance review](pattern-editor-acceptance.md).

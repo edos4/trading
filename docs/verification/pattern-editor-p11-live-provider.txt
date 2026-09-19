@@ -1,0 +1,60 @@
+# P11 live DeepSeek provider smoke — 2026-09-19
+
+The `DEEPSEEK_API_KEY` was configured after P11 was first recorded, so the
+previously blocked live-provider gate was executed.
+
+# Environment: real API at https://api.deepseek.com, model `deepseek-flash`.
+# Disposable PostgreSQL 16.15 database `pattern_editor_live`, migration 1,
+# freshly bootstrapped catalog (parity shortcut used for bootstrap speed; parity
+# itself is the P11-02 rehearsal). Dataset: tests/fixtures/barcache.
+# The candidate sandbox is still unconfigured, so candidate execution uses the
+# same in-process double the test suite uses. The provider call is real.
+
+## API compatibility
+# GET /models -> 200: deepseek-flash, deepseek-v4-pro (deepseek-flash is valid)
+# provider.available(): True
+
+## Adapter probe (real call)
+# requested_model: deepseek-flash
+# returned_model : deepseek-flash
+# request_id     : 69beef17-0152-4c6f-9135-1a92ea3aae88
+# usage          : prompt 2496, completion 2628, total 5124, reasoning 172
+# parser accepted the structured JSON {source, documentation, explanation}
+
+## Full pipeline (real generation -> validation -> candidate/base backtests)
+provider available: True | model: deepseek-flash
+base version: a291845a | instruction: Require two closes above the neckline before entry.
+submitted job: 7474be0e state: queued
+terminal state : completed
+generated ver  : acac673b
+explanation    : The double-bottom detector no longer buys on day 7 after the second low or on the first close above the neckline. It now waits for a confirmed breakout, defined as two consecutive closes above the neckline, and enters on the bar that prints that second confirming close. ...
+report status  : passed
+   [passed] syntax: Python source parses
+   [passed] scope: No disallowed direct imports
+   [passed] example-hardcoding: Scoped symbol/date check; does not prove general semantics
+   [passed] execution: Baseline and candidate ran on identical causal prefixes
+   [passed] determinism: Repeated identical frozen input
+   [passed] trusted-regressions: Trusted execution-accounting and chart-overlay suites
+   [passed] rule-document-agreement: Paired rules/explanation present; labeled stop/target annotations match signal fields. ...
+provider prov  : deepseek-flash -> deepseek-flash | request_id: 429e75d1-869
+parent is base : True
+version count  : 2
+candidate run  : completed | trades: 0 | net: 0.0 | fees: 0.0
+base run       : completed | trades: 0 | net: 0.0
+same preset    : True
+default moved  : False
+LIVE-PIPELINE-OK
+
+## Defect found by this test and fixed
+An unpatched first run showed the candidate *backtest* failing (sandbox
+unavailable) while the edit job still reported `completed`. The documented
+design says a data/backtest failure after a valid version exists must fail the
+job so it stays recoverable. `PatternEditService._run_or_reuse` now raises
+`BacktestFailed` when the durable run is not `completed`, and the job ends
+`failed`/`execution-failed`/retryable with the version preserved. Regression:
+`core/test_pattern_edit_pipeline.py::test_edit_pipeline_incomplete_backtest_fails_the_job`.
+
+## Remaining gate
+The real candidate sandbox (`PATTERN_EDIT_CGROUP_ROOT` / `PATTERN_EDIT_WORKER_PYTHON`)
+is still unconfigured; a production deployment must set it for generated code to
+execute outside validation.
