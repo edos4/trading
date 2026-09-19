@@ -8,7 +8,7 @@ import subprocess
 
 from psycopg.types.json import Jsonb
 
-from core.pattern_edit_store import Conflict, EditError, canonical, digest, uid
+from core.pattern_edit_store import Conflict, EditError, canonical, digest, now, uid
 from core.pattern_versions import collect_sources, runtime_manifest
 
 
@@ -137,7 +137,8 @@ class Bootstrap:
                     entry['metadata']['skipped'] or entry['configured_disabled']), con=con)
                 self.store.insert_version(dict(
                     **entry, version_id=uid(), parent_version_id=None, provenance='file-import',
-                    import_batch_id=batch, files=refs, runtime=snapshot.manifest['runtime'],
+                    actor='file-import', created_at=now(), import_batch_id=batch, files=refs,
+                    runtime=snapshot.manifest['runtime'],
                     mirror_paths=[entry['source_path'], entry['documentation']],
                     content_sha256=digest(canonical(refs))), con)
             snapshot.unchanged()
