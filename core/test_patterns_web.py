@@ -180,6 +180,7 @@ def test_patterns_provider_balance_endpoint(patterns_web):
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["available"] is True
+    assert data["configured"] is True
     assert data["error"] is None
     assert data["model"]
     balance = data["balance"]
@@ -197,8 +198,22 @@ def test_patterns_provider_balance_reports_unavailable(patterns_web):
     assert resp.status_code == 200, resp.text  # informational, never a 5xx
     data = resp.json()
     assert data["available"] is False
+    assert data["configured"] is False
     assert data["balance"] is None
     assert "not configured" in data["error"]
+
+
+def test_patterns_provider_balance_call_failure_is_distinct(patterns_web):
+    """A configured provider whose balance call fails reads as unavailable."""
+    from ai.providers.deepseek import ProviderError
+
+    client, _service, _editor, provider, _store = patterns_web
+    provider.raises = ProviderError("DeepSeek transport error: ConnectError",
+                                    retryable=True)
+    data = client.get("/api/patterns/provider").json()
+    assert data["available"] is False and data["configured"] is True
+    assert data["retryable"] is True
+    assert "transport error" in data["error"]
 
 
 # ── the full submit → generate → validate → backtest pipeline ────────────
