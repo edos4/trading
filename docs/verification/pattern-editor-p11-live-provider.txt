@@ -54,6 +54,19 @@ job so it stays recoverable. `PatternEditService._run_or_reuse` now raises
 `failed`/`execution-failed`/retryable with the version preserved. Regression:
 `core/test_pattern_edit_pipeline.py::test_edit_pipeline_incomplete_backtest_fails_the_job`.
 
+## Real browser + real API (no stub)
+# Real Chromium against a real `main.py --web` launch using the live DeepSeek
+# API (no stub). The candidate sandbox is unconfigured, so validation blocks.
+login ok, url: http://127.0.0.1:18086/
+patterns nav ok, catalog options: 10
+version rows: 1 | first: ['1', 'ba2422ee', '', '', 'passed']
+source view rendered: True
+submitted: job 696d0eda
+terminal state text: blocked — 0/? stages
+after reload job label: job 696d0eda
+page errors: none
+BROWSER-SMOKE-OK
+
 ## Remaining gate
 The real candidate sandbox (`PATTERN_EDIT_CGROUP_ROOT` / `PATTERN_EDIT_WORKER_PYTHON`)
 is still unconfigured; a production deployment must set it for generated code to
