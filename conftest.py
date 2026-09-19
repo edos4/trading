@@ -72,10 +72,23 @@ class FakeEditProvider:
         self.calls = 0
         self.raises = raises
         self.source_suffix = source_suffix
+        self.model = "test-model"
+
+    def _unavailable(self) -> bool:
+        from ai.providers.deepseek import ProviderUnavailable
+        return (self.raises is ProviderUnavailable
+                or isinstance(self.raises, ProviderUnavailable))
 
     def available(self):
-        from ai.providers.deepseek import ProviderUnavailable
-        return self.raises is not ProviderUnavailable
+        return not self._unavailable()
+
+    def balance(self):
+        from ai.providers.deepseek import BalanceInfo, ProviderBalance, ProviderUnavailable
+        if self._unavailable():
+            raise ProviderUnavailable("DeepSeek is not configured")
+        return ProviderBalance(is_available=True, infos=(
+            BalanceInfo(currency="USD", total_balance="42.00",
+                        granted_balance="0.00", topped_up_balance="42.00"),))
 
     def generate(self, request):
         from ai.providers.deepseek import EditGeneration

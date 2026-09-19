@@ -223,6 +223,38 @@
     }
   }
 
+  async function loadBalance() {
+    const el = $("pat-balance");
+    if (!el) return;
+    try {
+      const data = await api("/api/patterns/provider");
+      el.textContent = balanceText(data);
+      el.classList.toggle("balance-low", balanceIsLow(data));
+    } catch (err) {
+      el.textContent = "Provider balance: unavailable (" + err.message + ")";
+    }
+  }
+
+  function balanceIsLow(data) {
+    if (!data || !data.available || !data.balance) return true;
+    if (data.balance.is_available === false) return true;
+    return (data.balance.infos || []).every((i) => Number(i.total_balance) <= 0);
+  }
+
+  function balanceText(data) {
+    if (!data || !data.available) {
+      return "Provider: not configured — " + ((data && data.error) || "no API key");
+    }
+    const balance = data.balance || {};
+    const parts = (balance.infos || []).map(
+      (i) => i.currency + " " + i.total_balance
+        + (i.granted_balance && Number(i.granted_balance) > 0
+           ? " (granted " + i.granted_balance + ")" : ""));
+    const funds = balance.is_available === false ? " · INSUFFICIENT — top up" : "";
+    return "Provider: " + (data.model || "deepseek") + " · Balance: "
+      + (parts.join(", ") || "?") + funds;
+  }
+
   // ── edit request ──────────────────────────────────────────────────────
   function replayValues() {
     const out = { mode: "historical-stream", timeframe: "1d" };
@@ -305,6 +337,7 @@
         stopPolling();
         $("pat-submit").disabled = false;
         $("pat-cancel").disabled = true;
+        loadBalance();  // a generation consumes credit; refresh the displayed balance
         if (detail.runs) { state.runs = detail.runs; await loadComparison(); }
       }
     } catch (err) {
@@ -505,6 +538,7 @@
     $("pat-start_date").value = $("pat-start_date").value || window.TB_STREAM_START || "";
     await loadCatalog();
     await loadPresets();
+    await loadBalance();
     const params = new URLSearchParams(window.location.search);
     const jobId = params.get("job");
     if (jobId) {

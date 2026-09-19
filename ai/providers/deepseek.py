@@ -22,6 +22,7 @@ from core.pattern_edit_store import EditError
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-flash"
 MAX_OUTPUT_BYTES = 512 * 1024
+BALANCE_TTL_SECONDS = 30.0
 
 
 class ProviderError(EditError):
@@ -59,10 +60,30 @@ class EditGeneration:
     usage: dict = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class BalanceInfo:
+    """One currency's account balance; amounts are decimal strings from the API."""
+
+    currency: str
+    total_balance: str
+    granted_balance: str | None = None
+    topped_up_balance: str | None = None
+
+
+@dataclass(frozen=True)
+class ProviderBalance:
+    """Account balance snapshot; ``is_available`` is the provider's own flag."""
+
+    is_available: bool
+    infos: tuple[BalanceInfo, ...]
+
+
 class EditProvider(Protocol):
     def available(self) -> bool: ...
 
     def generate(self, request: EditGenerationRequest) -> EditGeneration: ...
+
+    def balance(self) -> ProviderBalance: ...
 
 
 SYSTEM_PROMPT = (
@@ -120,22 +141,31 @@ class DeepSeekProvider:
         self._slots = threading.BoundedSemaphore(self.max_concurrency)
         self._client = client
         self._sleep = sleep
+        self._balance_cache: tuple[float, ProviderBalance] | None = None
 
     def available(self) -> bool:
         return bool(self._api_key and self.base_url and self.model)
 
-    def _post(self, payload: dict) -> httpx.Response:
-        headers = {
+    def _headers(self) -> dict:
+        return {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
+
+    def _post(self, payload: dict) -> httpx.Response:
         if self._client is not None:
             return self._client.post(f"{self.base_url}/chat/completions",
-                                     json=payload, headers=headers)
+                                     json=payload, headers=self._headers())
         with httpx.Client(timeout=self.timeout) as client:
             return client.post(f"{self.base_url}/chat/completions",
-                               json=payload, headers=headers)
+                               json=payload, headers=self._headers())
+
+    def _get(self, path: str) -> httpx.Response:
+        if self._client is not None:
+            return self._client.get(f"{self.base_url}{path}", headers=self._headers())
+        with httpx.Client(timeout=self.timeout) as client:
+            return client.get(f"{self.base_url}{path}", headers=self._headers())
 
     def generate(self, request: EditGenerationRequest) -> EditGeneration:
         if not self.available():
@@ -212,3 +242,69 @@ class DeepSeekProvider:
             request_id=body.get("id"),
             usage=body.get("usage") or {},
         )
+
+    # ── account balance ──────────────────────────────────────────────────
+    def balance(self, *, ttl: float = BALANCE_TTL_SECONDS) -> ProviderBalance:
+        """Current account balance, so a submission cannot run out of credit.
+
+        Bounded and cached briefly; a failure raises rather than returning a
+        stale/zero value. Never exposes the API key.
+        """
+        if not self.available():
+            raise ProviderUnavailable(
+                "DeepSeek credentials/base URL are not configured", retryable=False)
+        if self._balance_cache is not None:
+            cached_at, cached = self._balance_cache
+            if time.monotonic() - cached_at < ttl:
+                return cached
+        with self._slots:
+            snapshot = self._fetch_balance()
+        self._balance_cache = (time.monotonic(), snapshot)
+        return snapshot
+
+    def _fetch_balance(self) -> ProviderBalance:
+        last: ProviderError | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = self._get("/user/balance")
+            except httpx.HTTPError as exc:
+                last = ProviderError(f"DeepSeek transport error: {type(exc).__name__}",
+                                     retryable=True)
+            else:
+                if response.status_code == 200:
+                    return self._parse_balance(response)
+                retryable = response.status_code == 429 or response.status_code >= 500
+                last = ProviderError(
+                    f"DeepSeek returned HTTP {response.status_code}", retryable=retryable)
+                if not retryable:
+                    raise last
+            if attempt < self.max_retries:
+                self._sleep(min(2 ** attempt, 8))
+        raise last or ProviderError("DeepSeek balance call failed", retryable=True)
+
+    def _parse_balance(self, response: httpx.Response) -> ProviderBalance:
+        raw = response.content
+        if len(raw) > self.max_output_bytes:
+            raise ProviderError("DeepSeek balance response exceeded the size limit")
+        try:
+            body = json.loads(raw)
+        except ValueError:
+            raise ProviderError("DeepSeek returned a non-JSON envelope") from None
+        infos = body.get("balance_infos")
+        if not isinstance(infos, list) or not infos:
+            raise ProviderError("DeepSeek returned no balance information")
+        parsed = []
+        for info in infos:
+            if (not isinstance(info, dict) or not info.get("currency")
+                    or info.get("total_balance") is None):
+                raise ProviderError("DeepSeek returned malformed balance information")
+            parsed.append(BalanceInfo(
+                currency=str(info["currency"]),
+                total_balance=str(info["total_balance"]),
+                granted_balance=(str(info["granted_balance"])
+                                 if info.get("granted_balance") is not None else None),
+                topped_up_balance=(str(info["topped_up_balance"])
+                                   if info.get("topped_up_balance") is not None else None),
+            ))
+        return ProviderBalance(is_available=bool(body.get("is_available")),
+                               infos=tuple(parsed))

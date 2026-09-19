@@ -129,7 +129,8 @@ def test_patterns_endpoints_require_auth():
         client = TestClient(create_app())
         for path in ("/patterns", "/api/patterns",
                      f"/api/patterns/{PATTERN}/versions",
-                     "/api/patterns/versions/x", "/api/patterns/edits/x"):
+                     "/api/patterns/versions/x", "/api/patterns/edits/x",
+                     "/api/patterns/provider"):
             assert client.get(path).status_code == 401, path
     finally:
         for item in patches:
@@ -171,6 +172,33 @@ def test_patterns_catalog_versions_source_and_diff(patterns_web):
     # the file-import baseline has no parent, so its diff is the whole file
     diff = client.get(f"/api/patterns/versions/{version_id}/diff").json()
     assert source["source_path"] in diff["files"]
+
+
+def test_patterns_provider_balance_endpoint(patterns_web):
+    client, _service, _editor, _provider, _store = patterns_web
+    resp = client.get("/api/patterns/provider")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["available"] is True
+    assert data["error"] is None
+    assert data["model"]
+    balance = data["balance"]
+    assert balance["is_available"] is True
+    assert balance["infos"][0]["currency"] == "USD"
+    assert balance["infos"][0]["total_balance"] == "42.00"
+
+
+def test_patterns_provider_balance_reports_unavailable(patterns_web):
+    from ai.providers.deepseek import ProviderUnavailable
+
+    client, _service, _editor, provider, _store = patterns_web
+    provider.raises = ProviderUnavailable("DeepSeek credentials are not configured")
+    resp = client.get("/api/patterns/provider")
+    assert resp.status_code == 200, resp.text  # informational, never a 5xx
+    data = resp.json()
+    assert data["available"] is False
+    assert data["balance"] is None
+    assert "not configured" in data["error"]
 
 
 # ── the full submit → generate → validate → backtest pipeline ────────────

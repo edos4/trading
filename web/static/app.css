@@ -201,6 +201,7 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 }
 
 .muted { color: var(--muted); }
+.balance-low { color: var(--danger); font-weight: 600; }
 .small { font-size: 0.78rem; line-height: 1.35; }
 .error { color: var(--danger); }
 .status { color: var(--muted); margin-top: 0.5rem; }
