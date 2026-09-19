@@ -15,19 +15,25 @@ separate: **no production cutover was performed.**
 | 7 | From both `main.py --web` and `main.py --ui`, a user can run and cancel a historical stream backtest with a selected version and inspect persistent results. | E14 (both launch modes, identical metrics); P09/P10 smokes; P11-01 suites. | pass |
 | 8 | Pinned fixtures produce matching signal times, entries, exits, quantities, costs and P&L through paper replay and the stream backtest; pending entries, dedup, missing bars, warmup, gates, end-of-run positions covered. | `tests/test_backtest_paper_parity.py` + `core/test_stream_backtest.py` green in P11-01 (E13). | pass |
 | 9 | A future-bar mutation cannot affect earlier signals/fills; two simultaneous replays cannot alter each other's clock/account/dedup or the active paper session. | E13 (future-bar mutation isolation; concurrent replay vs live paper account); P11-04 two concurrent runs completed independently with distinct notionals. | pass |
-| 10 | Submit with a mocked provider creates exactly one immutable version and automatically validates/backtests it; invalid code, malformed responses, timeouts, cancellation, missing data, and unavailable sandbox/model produce visible, recoverable outcomes. | E15, E16 (each path asserted); P09/P10 smokes reached `blocked` with a preserved version. | pass |
+| 10 | Submit with a mocked provider creates exactly one immutable version and automatically validates/backtests it; invalid code, malformed responses, timeouts, cancellation, missing data, and unavailable sandbox/model produce visible, recoverable outcomes. | E15, E16 (each path asserted); a real DeepSeek submission also produced one immutable version, a passing validation report and completed candidate/base runs (E19); failed automatic backtests now fail the job and stay recoverable. | pass |
 | 11 | An unsuccessful candidate never changes the default; repeating only a failed backtest does not regenerate code. | E15/E16 (backtest-only retry with no provider call; no auto-promotion across default changes). | pass |
 | 12 | Complete browser and desktop smoke checks for navigation, submission, progress, results, default selection, deletion, and restart recovery; existing suites plus targeted new integration tests. | E16/E17 smokes, [P11 browser smoke](verification/pattern-editor-p11-browser-smoke.txt), P11-01/P11-03. | pass, with limitation |
 
 ## Recorded limitations and remaining gates
 
-- **Live DeepSeek call:** `DEEPSEEK_API_KEY` is not configured here. All provider
-  verification is against doubles and the local stub; no real model call was
-  made. Configure the key before declaring AI edits live.
+- **Live DeepSeek call:** performed on 2026-09-19 (see
+  [live provider smoke](verification/pattern-editor-p11-live-provider.txt)).
+  `GET /models` advertises `deepseek-flash`; a real adapter call returned the
+  structured response with requested/returned model provenance; and one real
+  submission generated, validated and backtested a candidate — all validation
+  checks passed and both runs completed on identical frozen presets. This test
+  also found and fixed a defect: an automatic backtest that ends non-`completed`
+  used to leave the edit job `completed`; the job now ends `failed`/retryable
+  with the failed run linked to it (E19).
 - **Real candidate sandbox:** `PATTERN_EDIT_CGROUP_ROOT` / `PATTERN_EDIT_WORKER_PYTHON`
-  are unconfigured, so generated candidates validate as `blocked`. The pipeline
-  is exercised end-to-end with a sandbox double; the fail-closed path is
-  asserted. Production requires a delegated cgroup v2 subtree.
+  are unconfigured, so candidate execution uses the test double. A production
+  deployment must set a delegated cgroup v2 subtree for generated code to execute
+  outside validation; the unconfigured path is asserted to fail closed.
 - **Browser default/deletion clicks:** the browser smoke covers navigation,
   submission, progress, and reload reconnect; default selection and deletion are
   enforced and tested server-side (the buttons are only a fast path), so those

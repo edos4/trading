@@ -443,6 +443,37 @@ def test_edit_pipeline_unavailable_sandbox_blocks_without_fallback(published_pat
     assert len(PatternVersions(store).list_versions(PATTERN)) == 2
 
 
+def test_edit_pipeline_incomplete_backtest_fails_the_job(published_pattern_catalog, sandbox_double, monkeypatch):
+    """A backtest that ends failed/interrupted must not report a completed edit."""
+    store = published_pattern_catalog
+    provider = FakeProvider()
+    service = _service(store, provider, runner=InProcessRunner(store.root))
+    base = _base_version(store)
+    preset = _short_preset(service.backtests, _rows())
+
+    # The durable adapter records a non-completed run without raising.
+    real_execute = service.backtests.execute
+    monkeypatch.setattr(service.backtests, "execute", lambda job_id, **kwargs: None)
+    job = service.submit(_request(service, base, preset=preset))
+    service.execute(job["id"])
+    status = service.status(job["id"])
+    assert status["state"] == "failed"
+    assert status["error"]["code"] == "execution-failed"
+    assert status["error"]["retryable"] is True
+    assert status["generated_version_id"]
+    assert len(PatternVersions(store).list_versions(PATTERN)) == 2
+    assert _base_version(store) == base
+
+    # "Backtest again" recovers with no new model call or version.
+    monkeypatch.setattr(service.backtests, "execute", real_execute)
+    provider_calls = provider.calls
+    retry = service.retry_backtest(job["id"])
+    service.execute(retry["id"])
+    assert service.status(retry["id"])["state"] == "completed"
+    assert provider.calls == provider_calls
+    assert len(PatternVersions(store).list_versions(PATTERN)) == 2
+
+
 def test_edit_pipeline_cancellation_and_backtest_only_retry(published_pattern_catalog, sandbox_double):
     store = published_pattern_catalog
     provider = FakeProvider()
