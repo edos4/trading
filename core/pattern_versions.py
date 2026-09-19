@@ -167,7 +167,7 @@ class PatternVersions:
 
     def list_versions(self, pattern_id, *, include_archived=False):
         with self.store.connect() as con:
-            return con.execute('''SELECT v.payload, l.* FROM versions v
+            return con.execute('''SELECT v.payload, v.created_at AS created_at, l.* FROM versions v
                 JOIN version_lifecycle l ON l.version=v.id JOIN patterns p ON p.id=v.pattern
                 WHERE p.published AND p.id=%s AND (%s OR l.archived_at IS NULL)
                 ORDER BY v.number''', (pattern_id, include_archived)).fetchall()
@@ -175,6 +175,8 @@ class PatternVersions:
     def detail(self, version_id):
         with self.store.connect() as con:
             version = self.store.get('versions', version_id, con)
+            created_at = con.execute('SELECT created_at FROM versions WHERE id=%s',
+                                     (version_id,)).fetchone()['created_at']
             lifecycle = con.execute('SELECT * FROM version_lifecycle WHERE version=%s', (version_id,)).fetchone()
             reports = con.execute('SELECT payload FROM reports WHERE version=%s OR id=%s OR id=%s',
                                   (version_id, lifecycle['validation_report_id'], lifecycle['baseline_report_id'])).fetchall()
@@ -182,7 +184,8 @@ class PatternVersions:
                 FROM run_versions v
                 JOIN backtest_runs b ON b.id=v.run JOIN jobs j ON j.id=b.job
                 LEFT JOIN results r ON r.run=b.id WHERE v.version=%s ORDER BY b.created_at''', (version_id,)).fetchall()
-        return dict(version=version, lifecycle=lifecycle, reports=[r['payload'] for r in reports], backtests=runs)
+        return dict(version=version, created_at=created_at, lifecycle=lifecycle,
+                    reports=[r['payload'] for r in reports], backtests=runs)
 
     def source(self, version_id):
         version = self.store.get('versions', version_id)

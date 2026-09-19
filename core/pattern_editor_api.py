@@ -36,6 +36,15 @@ def _iso(value):
     return value
 
 
+def _actor(payload: dict) -> str | None:
+    """Version actor; file-import baselines predate the payload field."""
+    if payload.get("actor"):
+        return payload["actor"]
+    if payload.get("provenance") == "file-import":
+        return "file-import"
+    return None
+
+
 def _jsonable(value):
     """Recursively make PostgreSQL rows/JSON safe for an HTTP response."""
     if isinstance(value, dict):
@@ -138,8 +147,8 @@ class PatternEditor:
             "version_id": row["payload"]["version_id"],
             "number": int(row["payload"]["version_number"]),
             "parent_version_id": row["payload"].get("parent_version_id"),
-            "actor": row["payload"].get("actor"),
-            "created_at": row["payload"].get("created_at"),
+            "actor": _actor(row["payload"]),
+            "created_at": _iso(row.get("created_at")) or row["payload"].get("created_at"),
             "instruction": row["payload"].get("instruction"),
             "explanation": row["payload"].get("explanation"),
             "provenance": row["payload"].get("provenance"),
@@ -163,9 +172,9 @@ class PatternEditor:
             "pattern_id": version["pattern_id"],
             "number": int(version["version_number"]),
             "parent_version_id": version.get("parent_version_id"),
-            "actor": version.get("actor"),
+            "actor": _actor(version),
             "provenance": version.get("provenance"),
-            "created_at": version.get("created_at"),
+            "created_at": _iso(detail.get("created_at")) or version.get("created_at"),
             "source_path": version.get("source_path"),
             "instruction": version.get("instruction"),
             "explanation": version.get("explanation"),
