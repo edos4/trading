@@ -27,9 +27,6 @@ class Settings(BaseSettings):
     # Frozen daily-bar dataset for shared backtest runs (offline + stream).
     # Local files are import inputs only; PostgreSQL remains the durable store.
     backtest_dataset_dir: str = "data/barcache"
-    # Fetch symbols missing from the dataset from the history provider (and
-    # cache them under backtest_dataset_dir). Disable for strictly offline runs.
-    backtest_fetch_history: bool = True
 
     # ── DeepSeek (pattern editing) ────────────────────────────────────────
     # Server-side only; never logged or returned to a client. API model id

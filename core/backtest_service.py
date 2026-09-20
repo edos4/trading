@@ -97,9 +97,9 @@ class BacktestService:
             dataset_root or settings.backtest_dataset_dir or "data/barcache")
         # A symbol missing from the dataset is fetched from the history provider
         # (and cached), so a preset works without pre-building the whole cache.
+        # Callers that must stay offline pass fetch_missing_history=False.
         self.fetch_missing_history = (
-            settings.backtest_fetch_history if fetch_missing_history is None
-            else bool(fetch_missing_history))
+            True if fetch_missing_history is None else bool(fetch_missing_history))
         self._history_fetcher = history_fetcher
 
     # ── presets ──────────────────────────────────────────────────────────
