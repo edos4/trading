@@ -55,18 +55,19 @@ even if the source data changes. Bars come from:
 
 1. the local dataset (`BACKTEST_DATASET_DIR`, default `data/barcache`) when the
    symbol is already cached there, otherwise
-2. the history provider, fetched on demand and cached into that dataset.
+2. the history API (`data/history_client`, `GET /api/history` at
+   `STOCKS_HISTORY_URL`), fetched on demand and cached into that dataset.
 
-A cache miss therefore does not block a run while the history provider is
-reachable, and the cache grows as you use symbols. `scripts/build_barcache.py`
+A cache miss therefore does not block a run while the history API is reachable,
+and the cache grows as you use symbols. `scripts/build_barcache.py`
 still pre-builds a whole universe when you want an offline snapshot. If neither
-the dataset nor the provider yields bars, the request fails with
+the dataset nor the API yields bars, the request fails with
 `No frozen daily history available for the selected symbols`. Bars are
-de-duplicated to one per session, because the provider can return both a
+de-duplicated to one per session, because the API can return both a
 midnight-stamped row and the real session bar for the same day.
 
 To stay strictly offline, pre-build the dataset (`scripts/build_barcache.py`):
-a cached symbol never calls the provider.
+a cached symbol never calls the API.
 
 ## Deployment
 

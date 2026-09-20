@@ -338,16 +338,19 @@ class BacktestService:
         return rows
 
     def _fetch_and_cache(self, settings, symbol: str):
-        """Fetch one symbol's daily bars from the history provider and cache them."""
+        """Fetch one symbol's daily bars from the history API and cache them.
+
+        Uses ``data.history_client`` (GET /api/history) through
+        ``load_daily_candles`` so it works in the web process, a worker, or a
+        CLI without the UI history facade or a local database.
+        """
         try:
             if self._history_fetcher is not None:
                 candles = self._history_fetcher(symbol, settings.timeframe, settings.market)
             else:
-                from data.history import enable_ui_web_history, fetch_ohlcv_candles
+                from data.history import load_daily_candles
 
-                enable_ui_web_history()
-                candles = fetch_ohlcv_candles(
-                    symbol, settings.timeframe, market=settings.market)
+                candles = load_daily_candles(symbol, market=settings.market)
         except Exception:  # noqa: BLE001 - reported as "no history" by the caller
             log.exception(f"BacktestService | history fetch failed for {symbol}")
             return []
