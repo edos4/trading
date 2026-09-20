@@ -101,12 +101,25 @@ def freeze(root, disabled=None):
                             documentation=str(Path(source).with_suffix('.md')),
                             class_name=type(pattern).__name__, metadata=metadata(pattern),
                             configured_disabled=pattern.name in disabled))
-    git = lambda *args: subprocess.check_output(['git', *args], cwd=root, text=True).strip()
+    def git(*args):
+        """Git audit context, or None where the tree is not a checkout.
+
+        The deployed app directory is rsynced without .git, so the manifest
+        records no commit there instead of failing the whole import.
+        """
+        try:
+            return subprocess.check_output(
+                ['git', *args], cwd=root, text=True,
+                stderr=subprocess.DEVNULL).strip()
+        except (OSError, subprocess.CalledProcessError):
+            return None
+
+    status = git('status', '--porcelain')
     manifest = dict(entries=entries, runtime=runtime, disabled_patterns=disabled,
                     dynamic_imports=dynamic,
                     files={p: dict(sha256=digest(b), size_bytes=len(b)) for p, b in sorted(files.items())},
-                    git=dict(commit=git('rev-parse', 'HEAD'), status=git('status', '--porcelain'),
-                             dirty=bool(git('status', '--porcelain'))))
+                    git=dict(commit=git('rev-parse', 'HEAD'), status=status,
+                             dirty=bool(status)))
     snapshot = Snapshot(root, files, manifest)
     snapshot.unchanged()
     return snapshot
