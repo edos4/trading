@@ -232,34 +232,71 @@ blob hashes, default references and reports there before any cutover. Rollback
 restores a verified backup or the prior application deployment — it is not an
 automatic runtime storage fallback.
 
+## Candidate sandbox prerequisites
+
+Generated code executes only inside the sandbox (`core/pattern_edit_worker.py`).
+It needs Bubblewrap, `prlimit`, a writable delegated cgroup subtree, and the
+worker Python. On a host where the app runs as a systemd service:
+
+```bash
+sudo apt-get install -y bubblewrap          # util-linux provides prlimit
+sudo loginctl enable-linger <service-user>  # keep the user session cgroup after logout
+scripts/sandbox.sh                          # creates the delegated subtree, prints the env values
+```
+
+Then set the two printed values in `.env`
+(`PATTERN_EDIT_CGROUP_ROOT`, `PATTERN_EDIT_WORKER_PYTHON`) and restart.
+
+On Ubuntu 24.04+, unprivileged user namespaces are restricted by AppArmor and
+Bubblewrap fails with `loopback: Failed RTM_NEWADDR: Operation not permitted`.
+Allow it for bwrap only, rather than relaxing the global sysctl:
+
+```bash
+sudo tee /etc/apparmor.d/bwrap >/dev/null <<'EOF'
+abi <abi/4.0>,
+include <tunables/global>
+profile bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+  include if exists <local/bwrap>
+}
+EOF
+sudo apparmor_parser -r /etc/apparmor.d/bwrap
+```
+
+The sandbox cannot run without these; an unavailable sandbox blocks edits
+(`blocked`) rather than falling back to unrestricted execution.
+
 ## Runtime compatibility failures
 
 Every version records the runtime it was created under: the Python build, the
-package versions, and the trusted engine/interface files (base pattern,
+installed packages, and the trusted engine/interface files (base pattern,
 indicator engine, engine defaults, market, backtester, loaders, config — the
-full transitive closure, ~26 files). Execution re-checks that fingerprint, so a
-version can never silently run against different trusted code.
+full transitive closure, ~26 files).
+
+Execution enforces the Python build and re-checks the version's own captured
+non-pattern files against the working tree. The installed-package list is
+recorded for audit only — a dependency upgrade does not change the detector
+interface, and every candidate is validated against the current environment in
+the sandbox anyway. (Enforcing the package list made a single `pip install`
+invalid every version, baselines included.)
 
 Consequences you should expect:
 
-- Editing a detector/document pair does **not** invalidate versions; only the
-  trusted closure above does. Edit those deliberately.
-- A version that reports `runtime-incompatible` / "restore its runtime before
-  execution" was created under an older trusted runtime.
-- The imported baselines carry the fingerprint from import time. Because the
-  import batch is immutable, a changed trusted runtime **cannot be re-imported
-  into the same catalog**: `scripts/setup_editor_db.py` reports the snapshot
-  difference instead. Recreate the catalog (new database or schema, then
-  migrate + import) when you want the baselines to match the new runtime.
-- Generated versions now record the runtime they were generated under, so a
-  fresh submission after a trusted-runtime change is valid. Older generated
-  versions from before that fix inherited their base's fingerprint and will
-  report the incompatibility.
+- Editing a detector/document pair does **not** invalidate versions.
+- Changing one of the captured trusted files (`config.py`, `core/*`, `data/*`,
+  `analysis/*`, `utils/*`) does: runs then report `runtime-incompatible` /
+  "restore its runtime before execution".
+- Because the import batch is immutable, a changed trusted file **cannot be
+  re-imported into the same catalog**: `scripts/setup_editor_db.py` reports the
+  snapshot difference instead. Recreate the catalog (new database or schema,
+  then migrate + import) when you want the baselines to match.
+- Generated versions record the runtime they were generated under, so a fresh
+  submission after such a change is valid; older ones inherit their base's
+  fingerprint and report the incompatibility.
 
-If the closure feels too broad for your workflow, the fix is to narrow
-`runtime_manifest`'s file set to the pattern interface (it already records a
-separate `engine_sha256` interface identity); that is a deliberate change with
-its own tests, not a configuration toggle.
+If the captured-file set feels too broad for your workflow, the fix is to narrow
+it to the pattern interface; that is a deliberate change with its own tests, not
+a configuration toggle.
 
 ## Tests
 
