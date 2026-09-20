@@ -134,6 +134,32 @@ def test_duplicate_key_with_different_request_is_rejected(published_pattern_cata
         service.submit(other)
 
 
+def test_frozen_rows_dedupe_a_repeated_session(published_pattern_catalog, tmp_path):
+    """Vendor history can return two rows for one session; the replay needs one.
+
+    A midnight-stamped artefact plus the real session bar for the same day made
+    the causal replay reject the frozen dataset ("timestamps must be unique").
+    """
+    import json
+
+    (tmp_path / "us").mkdir()
+    bars = [
+        {"t": 1267419600, "o": 1.0, "h": 1.0, "l": 1.0, "c": 1.0, "v": 1.0},  # 00:00 New York
+        {"t": 1267453800, "o": 2.0, "h": 2.0, "l": 2.0, "c": 2.0, "v": 2.0},  # 09:30 New York
+    ]
+    (tmp_path / "us" / "CDNS.json").write_text(json.dumps(
+        {"symbol": "CDNS", "timeframe": "1d", "bars": bars}), encoding="utf-8")
+
+    service = BacktestService(published_pattern_catalog, dataset_root=tmp_path)
+    settings = settings_from_values({
+        "mode": "historical-stream", "market": "us", "symbols": ["CDNS"],
+        "start_date": "2010-03-01", "end_date": "2010-03-02", "warmup_bars": 0,
+    })
+    rows = service._load_frozen_rows(settings, ["CDNS"])["CDNS"]
+    assert len(rows) == 1
+    assert rows[0][4] == 2.0  # keeps the real session bar, not the artefact
+
+
 def test_concurrent_jobs_are_independent(published_pattern_catalog):
     store = published_pattern_catalog
     service = service_for(store)

@@ -27,7 +27,7 @@ from core.pattern_edit_store import EditStore
 from core.pattern_editor_contracts import (
     BacktestRequest, DomainError, EditRequest, ErrorCode, JobState, VersionSelection,
 )
-from core.pattern_versions import PatternVersions
+from core.pattern_versions import PatternVersions, runtime_manifest
 
 
 class EditCancelled(EditError):
@@ -227,6 +227,10 @@ class PatternEditService:
             base, version_id=uid(), parent_version_id=base["version_id"],
             provenance="generated", import_batch_id=None, files=files,
             content_sha256=digest(canonical(files)), actor="ai-edit",
+            # Record the runtime this version was actually generated under; the
+            # base's fingerprint may predate it and would fail the compatibility
+            # check when the trusted runtime has moved on.
+            runtime=runtime_manifest(self.store.root),
             instruction=request.instruction, explanation=generation.explanation,
             edit_job_id=job_id,
             provider={
