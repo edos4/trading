@@ -134,6 +134,36 @@ def test_duplicate_key_with_different_request_is_rejected(published_pattern_cata
         service.submit(other)
 
 
+def test_missing_symbol_is_fetched_from_history_and_cached(published_pattern_catalog, tmp_path):
+    """A cache miss is fetched from the history provider and written to the dataset."""
+    from datetime import datetime, timezone
+
+    from data.tv_client import OHLCVCandle
+
+    calls = []
+
+    def fetcher(symbol, timeframe, market):
+        calls.append((symbol, timeframe, market))
+        return [OHLCVCandle(open=1.0, high=2.0, low=0.5, close=1.5, volume=10.0,
+                            timestamp=datetime(2024, 1, 2, tzinfo=timezone.utc))]
+
+    settings = settings_from_values({
+        "mode": "historical-stream", "market": "us", "symbols": ["ZZZZ"],
+        "start_date": "2024-01-01", "end_date": "2024-01-05", "warmup_bars": 0,
+    })
+    service = BacktestService(published_pattern_catalog, dataset_root=tmp_path,
+                              history_fetcher=fetcher)
+    rows = service._load_frozen_rows(settings, ["ZZZZ"])["ZZZZ"]
+    assert calls == [("ZZZZ", "1d", "us")]
+    assert len(rows) == 1
+    assert (tmp_path / "us" / "ZZZZ.json").is_file()  # cached for next time
+
+    # now served from the cache, without another provider call
+    offline = BacktestService(published_pattern_catalog, dataset_root=tmp_path,
+                              history_fetcher=lambda *a: pytest.fail("should use the cache"))
+    assert len(offline._load_frozen_rows(settings, ["ZZZZ"])["ZZZZ"]) == 1
+
+
 def test_frozen_rows_dedupe_a_repeated_session(published_pattern_catalog, tmp_path):
     """Vendor history can return two rows for one session; the replay needs one.
 
