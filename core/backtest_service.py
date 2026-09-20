@@ -291,17 +291,32 @@ class BacktestService:
                                effective_parameters=effective, inputs_sha256=inputs_sha)
 
     def _load_frozen_rows(self, settings, symbols: list[str]) -> dict[str, list[list]]:
+        from zoneinfo import ZoneInfo
+
         from data.barcache import load as load_barcache
+
+        session_tz = get_market(settings.market).session_tz
+        if isinstance(session_tz, str):
+            session_tz = ZoneInfo(session_tz)
 
         rows: dict[str, list[list]] = {}
         for symbol in symbols:
             candles = load_barcache(settings.market, symbol, root=self.dataset_root)
             if not candles:
                 continue
+            # One bar per session: vendor history can return both a
+            # midnight-stamped row and the real session bar for the same day,
+            # which the causal replay rejects as duplicate timestamps.
+            unique: dict[str, object] = {}
+            for candle in candles:
+                if candle.timestamp is None:
+                    continue
+                unique[candle.timestamp.astimezone(session_tz).date().isoformat()] = candle
+            ordered = sorted(unique.values(), key=lambda candle: candle.timestamp)
             rows[symbol] = [
-                [c.timestamp.isoformat() if c.timestamp else "", float(c.open), float(c.high),
+                [c.timestamp.isoformat(), float(c.open), float(c.high),
                  float(c.low), float(c.close), float(c.volume or 0.0)]
-                for c in candles
+                for c in ordered
             ]
         return rows
 

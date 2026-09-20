@@ -212,11 +212,32 @@ automatic runtime storage fallback.
 
 ## Runtime compatibility failures
 
-Trusted engine/interface code is application code with a recorded compatibility
-manifest. If a version's runtime fingerprint or a trusted file hash no longer
-matches, loading raises an explicit error instead of silently loading a
-different file or version. Restore the matching runtime or re-import; do not
-edit the immutable version.
+Every version records the runtime it was created under: the Python build, the
+package versions, and the trusted engine/interface files (base pattern,
+indicator engine, engine defaults, market, backtester, loaders, config — the
+full transitive closure, ~26 files). Execution re-checks that fingerprint, so a
+version can never silently run against different trusted code.
+
+Consequences you should expect:
+
+- Editing a detector/document pair does **not** invalidate versions; only the
+  trusted closure above does. Edit those deliberately.
+- A version that reports `runtime-incompatible` / "restore its runtime before
+  execution" was created under an older trusted runtime.
+- The imported baselines carry the fingerprint from import time. Because the
+  import batch is immutable, a changed trusted runtime **cannot be re-imported
+  into the same catalog**: `scripts/setup_editor_db.py` reports the snapshot
+  difference instead. Recreate the catalog (new database or schema, then
+  migrate + import) when you want the baselines to match the new runtime.
+- Generated versions now record the runtime they were generated under, so a
+  fresh submission after a trusted-runtime change is valid. Older generated
+  versions from before that fix inherited their base's fingerprint and will
+  report the incompatibility.
+
+If the closure feels too broad for your workflow, the fix is to narrow
+`runtime_manifest`'s file set to the pattern interface (it already records a
+separate `engine_sha256` interface identity); that is a deliberate change with
+its own tests, not a configuration toggle.
 
 ## Tests
 
