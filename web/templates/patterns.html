@@ -132,7 +132,11 @@
     <span id="pat-state" class="muted">Idle.</span>
     <span id="pat-job-id" class="muted"></span>
   </div>
-  <pre id="pat-error" class="summary" hidden></pre>
+  <p class="muted small" id="pat-submit-hint">
+    Submit needs a base version, an instruction, and a preset: pick a saved one,
+    or name a new one and fill in symbols plus an end date or session count.
+  </p>
+  <pre id="pat-error" class="summary error" hidden></pre>
   <h3>Explanation</h3>
   <pre id="pat-explanation" class="summary">No edit submitted.</pre>
   <h3>Edit diff</h3>
@@ -165,5 +169,5 @@
   window.TB_DEFAULT_MARKET = {{ default_market | tojson }};
   window.TB_STREAM_START = {{ stream_start_default | tojson }};
 </script>
-<script src="/static/patterns.js?v=2"></script>
+<script src="/static/patterns.js?v=4"></script>
 {% endblock %}

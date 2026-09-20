@@ -42,6 +42,54 @@
 
   function setStatus(text) { $("pat-action-status").textContent = text; }
 
+  // Form problems are shown next to Submit (the version-list status is far away
+  // and made a blocked submit look like nothing happened).
+  function formError(message) {
+    const box = $("pat-error");
+    box.hidden = false;
+    box.classList.add("error");
+    box.textContent = message;
+    $("pat-state").textContent = "Not submitted.";
+  }
+
+  function clearFormError() {
+    const box = $("pat-error");
+    box.hidden = true;
+    box.classList.remove("error");
+    box.textContent = "";
+  }
+
+  // Keep the job buttons in sync wherever the durable job id is set — including
+  // the ?job= reload path, where no version row is re-selected afterwards.
+  function setJobButtons() {
+    $("pat-again").disabled = !state.jobId;
+    $("pat-cancel").disabled = !state.jobId;
+  }
+
+  function submitProblem(instruction, presetId, presetName) {
+    if (!state.versionId) return "Select a base version first.";
+    if (!instruction) return "Enter an instruction describing the change.";
+    if (presetId) return null;  // a saved preset already carries its settings
+    if (!presetName) {
+      return "Select a saved preset, or name a new one to save the settings below.";
+    }
+    const symbols = String($("pat-symbols").value || "").trim();
+    const universe = String($("pat-universe").value || "").trim();
+    if (!symbols && !universe) {
+      return "Enter at least one symbol (or a universe) for the new preset.";
+    }
+    if (!$("pat-start_date").value.trim()) {
+      return "Set a start date for the historical-stream preset.";
+    }
+    const end = $("pat-end_date") ? $("pat-end_date").value.trim() : "";
+    const sessions = Number($("pat-session_count") ? $("pat-session_count").value : 0) || 0;
+    if (end && sessions > 0) return "Set either an end date or a session count, not both.";
+    if (!end && sessions <= 0) {
+      return "Set an end date or a session count for the new preset.";
+    }
+    return null;
+  }
+
   // ── catalog / versions ────────────────────────────────────────────────
   async function loadCatalog() {
     try {
@@ -285,14 +333,14 @@
 
   async function submit() {
     const instruction = $("pat-instruction").value.trim();
-    if (!state.versionId) { setStatus("Select a base version first."); return; }
-    if (!instruction) { setStatus("Enter an instruction."); return; }
     const presetId = $("pat-preset").value;
-    if (!presetId && !$("pat-preset-name").value.trim()) {
-      setStatus("Select a saved preset or name a new one.");
+    const presetName = $("pat-preset-name").value.trim();
+    const problem = submitProblem(instruction, presetId, presetName);
+    if (problem) {
+      formError(problem);
       return;
     }
-    $("pat-error").hidden = true;
+    clearFormError();
     $("pat-state").textContent = "Submitting…";
     $("pat-submit").disabled = true;  // fast path only; the API is idempotent
     try {
@@ -304,17 +352,17 @@
           base_version_id: state.versionId,
           instruction: instruction,
           preset_id: presetId || null,
-          preset_name: $("pat-preset-name").value.trim() || null,
+          preset_name: presetName || null,
           settings: presetId ? null : replayValues(),
         }),
       });
       state.jobId = data.job_id;
       jobUrl();
       $("pat-job-id").textContent = "job " + data.job_id.slice(0, 8);
-      $("pat-cancel").disabled = false;
+      setJobButtons();
       startPolling();
     } catch (err) {
-      $("pat-state").textContent = "Error: " + err.message;
+      formError("Could not submit: " + err.message);
       $("pat-submit").disabled = false;
     }
   }
@@ -338,6 +386,7 @@
         stopPolling();
         $("pat-submit").disabled = false;
         $("pat-cancel").disabled = true;
+        setJobButtons();
         loadBalance();  // a generation consumes credit; refresh the displayed balance
         if (detail.runs) { state.runs = detail.runs; await loadComparison(); }
       }
@@ -360,10 +409,12 @@
     const error = $("pat-error");
     if (detail.error) {
       error.hidden = false;
+      error.classList.add("error");
       error.textContent = "[" + detail.error.code + "] " + detail.error.message
         + (detail.error.retryable ? " (retryable)" : "");
     } else {
       error.hidden = true;
+      error.classList.remove("error");
     }
     $("pat-explanation").textContent = detail.explanation || "No explanation yet.";
     const diff = detail.diff || {};
@@ -473,7 +524,7 @@
         { method: "POST" });
       state.jobId = data.job_id;
       jobUrl();
-      $("pat-cancel").disabled = false;
+      setJobButtons();
       startPolling();
     });
   }
@@ -545,7 +596,7 @@
     if (jobId) {
       state.jobId = jobId;
       $("pat-job-id").textContent = "job " + jobId.slice(0, 8);
-      $("pat-cancel").disabled = false;
+      setJobButtons();
       startPolling();
     }
   }
