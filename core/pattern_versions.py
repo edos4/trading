@@ -110,8 +110,19 @@ class PatternVersions:
                 path = self.store.root / name
                 if not path.is_file() or digest(path.read_bytes()) != ref['sha256']:
                     raise EditError('Version runtime dependency is incompatible: ' + name)
-        if runtime and version['runtime'] != runtime_manifest(self.store.root):
-            raise EditError('Version runtime is incompatible; restore its runtime before execution')
+        if runtime:
+            recorded = version['runtime']
+            current = runtime_manifest(self.store.root)
+            # Installed package versions and unrelated application modules are
+            # recorded for provenance, not enforced: a dependency upgrade or a
+            # change to code the detector never imports does not make the
+            # interface incompatible, and every candidate is validated against
+            # the current environment in the sandbox anyway. The Python build is
+            # still enforced here, and the version's own trusted files are
+            # checked above.
+            if (recorded.get('python') != current.get('python')
+                    or recorded.get('cache_tag') != current.get('cache_tag')):
+                raise EditError('Version runtime is incompatible; restore its runtime before execution')
         return version
 
     def mirror_matches(self, version):
