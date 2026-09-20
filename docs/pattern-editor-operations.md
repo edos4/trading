@@ -28,11 +28,9 @@ PATTERN_EDITOR_DATABASE_URL=postgresql://user:pass@host:5432/dbname
 # Candidate sandbox (both required for generated code to execute).
 PATTERN_EDIT_CGROUP_ROOT=/sys/fs/cgroup/<delegated-subtree>
 PATTERN_EDIT_WORKER_PYTHON=/path/to/.venv/bin/python
-# Frozen daily-bar dataset for offline + stream backtests.
+# Frozen daily-bar dataset for offline + stream backtests. Symbols missing from
+# it are fetched from the history provider and cached here.
 BACKTEST_DATASET_DIR=data/barcache
-# Fetch symbols missing from that dataset from the history provider and cache
-# them (set false for strictly offline runs).
-BACKTEST_FETCH_HISTORY=true
 # DeepSeek (never logged or returned to a client).
 DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=https://api.deepseek.com
@@ -67,8 +65,8 @@ the dataset nor the provider yields bars, the request fails with
 de-duplicated to one per session, because the provider can return both a
 midnight-stamped row and the real session bar for the same day.
 
-Set `BACKTEST_FETCH_HISTORY=false` to require the pre-built dataset and never
-call the provider.
+To stay strictly offline, pre-build the dataset (`scripts/build_barcache.py`):
+a cached symbol never calls the provider.
 
 ## Deployment
 
