@@ -47,6 +47,33 @@ WEB_UI_PORT=8080
 `PATTERN_EDITOR_TEST_DATABASE_URL` is for tests only and never supplies runtime
 configuration. Keep credentials out of examples, logs, and evidence.
 
+## Deployment
+
+`./deploy_to_contabo.sh` rsyncs the code, installs dependencies, then runs
+`scripts/setup_editor_db.py` **before** restarting the service. The database step
+is idempotent and:
+
+- creates the target database when it is missing (via `postgres`/`template1`);
+- applies pending editor migrations;
+- imports the file-derived baselines only when the catalog is still empty;
+- warns (without failing) when detector files differ from the imported snapshot,
+  because a changed file is a deliberate new-version operation.
+
+A failure to reach PostgreSQL aborts the deploy before the service restarts, so
+the app is never rolled out against a database that is not ready. The remote
+`.env` must set `PATTERN_EDITOR_DATABASE_URL` or `DATABASE_URL`
+(`PATTERN_EDITOR_DATABASE_URL` wins). Deploy without touching the database with:
+
+```bash
+SKIP_DB_SETUP=1 ./deploy_to_contabo.sh
+```
+
+To run the same step by hand from anywhere:
+
+```bash
+.venv/bin/python scripts/setup_editor_db.py
+```
+
 ## First-time setup
 
 A dedicated, user-owned PostgreSQL 18 instance serves the editor (no root

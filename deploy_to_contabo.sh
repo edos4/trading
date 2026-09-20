@@ -13,6 +13,7 @@
 #   SERVICE          systemd unit name (default: trading-web)
 #   APP_HOST         Cloudflare subdomain host (default: 33ai)
 #   DOMAIN           Cloudflare zone (default: edos.uk)
+#   SKIP_DB_SETUP=1  Skip the editor database create/migrate/seed step
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -90,6 +91,16 @@ fi
 
 if ! grep -qE '^WEB_UI_PASSWORD=.+' .env 2>/dev/null; then
   echo "WARNING: WEB_UI_PASSWORD not set in $REMOTE_APP_DIR/.env — the web UI will refuse to bind." >&2
+fi
+
+if [[ "${SKIP_DB_SETUP:-0}" == "1" ]]; then
+  echo "    SKIP_DB_SETUP=1 — skipping editor database setup"
+else
+  if ! grep -qE '^(PATTERN_EDITOR_DATABASE_URL|DATABASE_URL)=.+' .env 2>/dev/null; then
+    echo "WARNING: no PATTERN_EDITOR_DATABASE_URL/DATABASE_URL set in $REMOTE_APP_DIR/.env" >&2
+  fi
+  echo "    ensuring the pattern-editor database (create / migrate / seed)"
+  .venv/bin/python scripts/setup_editor_db.py
 fi
 
 sudo systemctl restart "$SERVICE"
