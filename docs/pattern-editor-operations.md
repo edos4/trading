@@ -49,6 +49,25 @@ configuration. Keep credentials out of examples, logs, and evidence.
 
 ## First-time setup
 
+A dedicated, user-owned PostgreSQL 18 instance serves the editor (no root
+needed, and separate from the shared system clusters):
+
+```bash
+scripts/pg18.sh init      # first time only: initdb + create the stocks_history database
+scripts/pg18.sh start     # start (idempotent); also: stop | restart | status | psql
+```
+
+It listens on `127.0.0.1:5433` with a private Unix socket under
+`$HOME/.local/share/trading-pg18/socket`. Point the app at it in `.env`:
+
+```
+PATTERN_EDITOR_DATABASE_URL=postgresql:///stocks_history?host=/home/<you>/.local/share/trading-pg18/socket&port=5433
+```
+
+The editor database must be running before the app serves `/patterns`; if it is
+not, the tab reports `PostgreSQL unavailable` and the catalog is empty (there is
+no file/SQLite fallback).
+
 ```bash
 # 1. Provision a PostgreSQL database and role (DDL privileges for migration).
 # 2. Apply the editor schema (idempotent; reruns are a no-op).
