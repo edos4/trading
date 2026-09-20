@@ -30,6 +30,9 @@ PATTERN_EDIT_CGROUP_ROOT=/sys/fs/cgroup/<delegated-subtree>
 PATTERN_EDIT_WORKER_PYTHON=/path/to/.venv/bin/python
 # Frozen daily-bar dataset for offline + stream backtests.
 BACKTEST_DATASET_DIR=data/barcache
+# Fetch symbols missing from that dataset from the history provider and cache
+# them (set false for strictly offline runs).
+BACKTEST_FETCH_HISTORY=true
 # DeepSeek (never logged or returned to a client).
 DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=https://api.deepseek.com
@@ -46,6 +49,26 @@ WEB_UI_PORT=8080
 
 `PATTERN_EDITOR_TEST_DATABASE_URL` is for tests only and never supplies runtime
 configuration. Keep credentials out of examples, logs, and evidence.
+
+## Historical data for backtests
+
+Each run freezes its daily bars into PostgreSQL, so the run stays reproducible
+even if the source data changes. Bars come from:
+
+1. the local dataset (`BACKTEST_DATASET_DIR`, default `data/barcache`) when the
+   symbol is already cached there, otherwise
+2. the history provider, fetched on demand and cached into that dataset.
+
+A cache miss therefore does not block a run while the history provider is
+reachable, and the cache grows as you use symbols. `scripts/build_barcache.py`
+still pre-builds a whole universe when you want an offline snapshot. If neither
+the dataset nor the provider yields bars, the request fails with
+`No frozen daily history available for the selected symbols`. Bars are
+de-duplicated to one per session, because the provider can return both a
+midnight-stamped row and the real session bar for the same day.
+
+Set `BACKTEST_FETCH_HISTORY=false` to require the pre-built dataset and never
+call the provider.
 
 ## Deployment
 

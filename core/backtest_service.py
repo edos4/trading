@@ -27,6 +27,7 @@ from core.pattern_editor_contracts import (
 from core.pattern_provenance import engine_hash
 from core.pattern_versions import PatternVersions
 from core.stream_backtest import ReplayCancelled, StreamReplay
+from utils.logger import log
 
 
 class Cancelled(EditError):
@@ -83,7 +84,9 @@ class BacktestService:
     """One typed, durable service contract for every backtest consumer."""
 
     def __init__(self, store=None, *, job_store=None, versions=None,
-                 dataset_root: str | Path | None = None):
+                 dataset_root: str | Path | None = None,
+                 fetch_missing_history: bool | None = None,
+                 history_fetcher=None):
         from config import settings
         from core.pattern_edit_store import EditStore
 
@@ -92,6 +95,12 @@ class BacktestService:
         self.jobs = job_store or BacktestJobStore(self.store)
         self.dataset_root = Path(
             dataset_root or settings.backtest_dataset_dir or "data/barcache")
+        # A symbol missing from the dataset is fetched from the history provider
+        # (and cached), so a preset works without pre-building the whole cache.
+        self.fetch_missing_history = (
+            settings.backtest_fetch_history if fetch_missing_history is None
+            else bool(fetch_missing_history))
+        self._history_fetcher = history_fetcher
 
     # ── presets ──────────────────────────────────────────────────────────
     def save_preset(self, name: str, settings, *, preset_id: str | None = None,
@@ -267,7 +276,9 @@ class BacktestService:
         settings = self.validate_settings(settings)
         rows = self._load_frozen_rows(settings, symbols)
         if not rows:
-            raise EditError("No frozen daily history available for the selected symbols")
+            raise EditError(
+                "No frozen daily history available for the selected symbols: not in "
+                f"{self.dataset_root} and the history provider returned no bars")
         return self.store.blob(canonical(rows), "application/json")
 
     def freeze_inputs(self, request: BacktestRequest, symbols: list[str]) -> FrozenRunInputs:
@@ -300,9 +311,13 @@ class BacktestService:
             session_tz = ZoneInfo(session_tz)
 
         rows: dict[str, list[list]] = {}
+        unavailable: list[str] = []
         for symbol in symbols:
             candles = load_barcache(settings.market, symbol, root=self.dataset_root)
+            if not candles and self.fetch_missing_history:
+                candles = self._fetch_and_cache(settings, symbol)
             if not candles:
+                unavailable.append(symbol)
                 continue
             # One bar per session: vendor history can return both a
             # midnight-stamped row and the real session bar for the same day,
@@ -318,7 +333,34 @@ class BacktestService:
                  float(c.low), float(c.close), float(c.volume or 0.0)]
                 for c in ordered
             ]
+        if unavailable:
+            log.info(f"BacktestService | no daily history for: {', '.join(unavailable)}")
         return rows
+
+    def _fetch_and_cache(self, settings, symbol: str):
+        """Fetch one symbol's daily bars from the history provider and cache them."""
+        try:
+            if self._history_fetcher is not None:
+                candles = self._history_fetcher(symbol, settings.timeframe, settings.market)
+            else:
+                from data.history import enable_ui_web_history, fetch_ohlcv_candles
+
+                enable_ui_web_history()
+                candles = fetch_ohlcv_candles(
+                    symbol, settings.timeframe, market=settings.market)
+        except Exception:  # noqa: BLE001 - reported as "no history" by the caller
+            log.exception(f"BacktestService | history fetch failed for {symbol}")
+            return []
+        if not candles:
+            return []
+        try:
+            from data.barcache import write as write_barcache
+
+            write_barcache(settings.market, symbol, candles,
+                           source="history-provider", root=self.dataset_root)
+        except Exception:  # noqa: BLE001 - caching is best-effort
+            log.warning(f"BacktestService | could not cache history for {symbol}")
+        return candles
 
     def _record_run(self, run_id: str, inputs: FrozenRunInputs) -> None:
         with self.store.transaction() as con:

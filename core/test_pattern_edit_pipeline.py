@@ -630,7 +630,9 @@ def test_edit_pipeline_missing_data_fails_before_generation(published_pattern_ca
     provider = FakeProvider()
     service = PatternEditService(
         store, provider=provider, runner=InProcessRunner(store.root),
-        backtests=BacktestService(store, dataset_root=tmp_path), dataset_root=tmp_path)
+        backtests=BacktestService(store, dataset_root=tmp_path,
+                                  fetch_missing_history=False),
+        dataset_root=tmp_path)
 
     with pytest.raises(EditError, match="frozen daily history"):
         service.submit(_request(service, _base_version(store)))
