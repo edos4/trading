@@ -8,7 +8,7 @@
     version, and compare the generated candidate with its base on identical
     frozen inputs. A generated version never becomes the default automatically.
   </p>
-  <div class="param-grid">
+  <div class="param-grid selector-grid">
     <div class="param">
       <label for="pat-pattern"><strong>Pattern</strong></label>
       <select id="pat-pattern"><option value="">(loading…)</option></select>
@@ -41,20 +41,20 @@
     <select id="pat-replacement" hidden></select>
     <span id="pat-action-status" class="muted">Select a version.</span>
   </div>
-  <div class="param-grid">
-    <div class="param">
+  <div class="detail-grid">
+    <div class="param detail-source">
       <label for="pat-source"><strong>Source</strong></label>
       <pre id="pat-source" class="summary">—</pre>
     </div>
-    <div class="param">
+    <div class="param detail-doc">
       <label for="pat-doc"><strong>Documentation</strong></label>
       <pre id="pat-doc" class="summary">—</pre>
     </div>
-    <div class="param">
+    <div class="param detail-history">
       <label for="pat-detail"><strong>History / reports</strong></label>
       <pre id="pat-detail" class="summary">—</pre>
     </div>
-    <div class="param">
+    <div class="param detail-diff">
       <label for="pat-diff"><strong>Diff vs parent</strong></label>
       <pre id="pat-diff" class="summary">—</pre>
     </div>
@@ -91,29 +91,36 @@
       <label for="pat-universe"><strong>Universe</strong></label>
       <input id="pat-universe" type="text" placeholder="(optional)" />
     </div>
+    {% set unsupported = ("kronos_gate", "kronos_rank", "collect_first") %}
     {% for p in params %}
     {% if p.key not in ("mode", "timeframe") %}
-    <div class="param" data-key="{{ p.key }}">
+    <div class="param{% if p.key in unsupported %} dimmed{% endif %}" data-key="{{ p.key }}">
       <label for="pat-{{ p.key }}"><strong>{{ p.label }}</strong></label>
-      <p class="muted small">{{ p.description }}</p>
+      <p class="muted small">
+        {% if p.key in unsupported %}Not supported for historical-stream runs in this release.
+        {% else %}{{ p.description }}{% endif %}
+      </p>
       {% if p.type == "spin" %}
       <input id="pat-{{ p.key }}" type="number" value="{{ p.default }}"
-             min="{{ p.min }}" max="{{ p.max }}" step="{{ p.step }}" />
+             min="{{ p.min }}" max="{{ p.max }}" step="{{ p.step }}"
+             {% if p.key in unsupported %}disabled{% endif %} />
       {% elif p.type == "check" %}
-      <input id="pat-{{ p.key }}" type="checkbox" {% if p.default %}checked{% endif %} />
+      <input id="pat-{{ p.key }}" type="checkbox" {% if p.default %}checked{% endif %}
+             {% if p.key in unsupported %}disabled{% endif %} />
       {% elif p.type == "combo" %}
-      <select id="pat-{{ p.key }}">
+      <select id="pat-{{ p.key }}" {% if p.key in unsupported %}disabled{% endif %}>
         {% for c in p.choices %}<option value="{{ c }}" {% if c == p.default %}selected{% endif %}>{{ c }}</option>{% endfor %}
       </select>
       {% else %}
-      <input id="pat-{{ p.key }}" type="text" value="{{ p.default or '' }}" />
+      <input id="pat-{{ p.key }}" type="text" value="{{ p.default or '' }}"
+             {% if p.key in unsupported %}disabled{% endif %} />
       {% endif %}
     </div>
     {% endif %}
     {% endfor %}
-    <div class="param">
+    <div class="param param-wide">
       <label for="pat-instruction"><strong>Instruction</strong></label>
-      <textarea id="pat-instruction" rows="4" cols="48"
+      <textarea id="pat-instruction" rows="4"
                 placeholder="Require two closes above the neckline before entry."></textarea>
     </div>
   </div>

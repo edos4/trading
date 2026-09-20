@@ -226,7 +226,32 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .param input:not([type="checkbox"]):not([type="radio"]),
 .param select, .param textarea { width: 100%; min-width: 0; }
 .param input[type="checkbox"], .param input[type="radio"] { width: auto; }
+/* Version detail: three readable panels, with the diff given the full width.
+ * (auto-fill would leave the panels ~220px wide and the rest of the row empty.) */
+.detail-grid {
+  display: grid;
+  gap: 0.85rem;
+  margin: 1rem 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.detail-grid .detail-diff { grid-column: 1 / -1; }
+.detail-grid .summary { max-height: 380px; }
+.detail-grid .detail-diff .summary { max-height: 460px; }
+@media (max-width: 1100px) {
+  .detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .detail-grid .detail-history { grid-column: 1 / -1; }
+}
+@media (max-width: 700px) {
+  .detail-grid { grid-template-columns: 1fr; }
+  .detail-grid .detail-history { grid-column: auto; }
+  .detail-grid .summary { max-height: 280px; }
+  .detail-grid .detail-diff .summary { max-height: 320px; }
+}
 .param.dimmed { opacity: 0.45; }
+/* Patterns: the pattern/version picker is a short two-control row. */
+.param-grid.selector-grid { grid-template-columns: minmax(0, 24rem) minmax(0, 12rem); }
+/* Patterns: the instruction is the primary input, so give it a full row. */
+.param-grid .param-wide { grid-column: 1 / -1; }
 .ab-box {
   margin: 0.75rem 0;
   padding: 0.75rem;
@@ -538,6 +563,7 @@ img, video, canvas, pre, table { max-width: 100%; }
   h2 { font-size: 1.1rem; }
   .panel { padding: 0.8rem; border-radius: 10px; }
   .param-grid { grid-template-columns: 1fr; gap: 0.7rem; margin: 0.75rem 0; }
+  .param-grid.selector-grid { grid-template-columns: 1fr; }
   .param input, .param select, .param textarea, textarea { width: 100%; min-width: 0; }
   .summary { max-height: 220px; font-size: 0.74rem; }
   .table-wrap { max-height: 60vh; }
