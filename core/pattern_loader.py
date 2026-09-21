@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import importlib
 
-from core.pattern_edit_store import EditStore, EditError, uid
+from core.pattern_edit_store import EditError, open_pattern_store, uid
 from core.pattern_versions import PatternVersions
 from core.pattern_provenance import rules
 from patterns.base_pattern import BasePattern, TradeSignal
@@ -95,7 +95,7 @@ def trusted_baseline(store, version):
 
 class VersionPattern(BasePattern):
     def __init__(self, version_id, store=None):
-        self.store = store or EditStore()
+        self.store = store or open_pattern_store()
         self.version = PatternVersions(self.store).verify(version_id,runtime=True)
         self.pattern_version_id = version_id
         self.metadata = self.version.get('metadata')
@@ -165,7 +165,7 @@ class VersionPattern(BasePattern):
 
 def discover(disabled=(), version_set=None, *, store=None):
     """Explicit version_set is an already pinned internal execution request."""
-    store = store or EditStore()
+    store = store or open_pattern_store()
     versions = PatternVersions(store).resolve(disabled=disabled) if version_set is None else dict(version_set)
     found = []
     for pattern_id, version_id in versions.items():
@@ -192,4 +192,4 @@ def acknowledge_worker(worker, stopped=False):
     worker._pattern_worker_id=worker_id
     payload={'worker_id':worker_id,'pid':os.getpid(),'stopped':stopped,
              'versions':getattr(worker,'_version_set',{}),'heartbeat':now()}
-    EditStore().save_worker(payload)
+    open_pattern_store().save_worker(payload)

@@ -43,6 +43,7 @@ from web.jobs import (
 from web.runs import backtest_runs
 from web.patterns import pattern_edits, patterns_error
 from web import replay_store
+from web.remote_proxy import RemotePatternProxy
 from web.services import TIMEFRAMES, get_explorer
 
 ROOT = Path(__file__).resolve().parent
@@ -165,11 +166,15 @@ def _backtest_error(exc: Exception) -> JSONResponse:
 def _run_request(payload: BacktestRunRequest):
     """Build a validated durable request from posted form values."""
     from core.backtest_service import request_from_values
+    from core.remote_pattern_store import remote_patterns_enabled
 
+    # With a remote registry nothing is written here: the run is executed
+    # locally and the host resolves the preset when it records the evidence.
     return request_from_values(
         backtest_runs.service(), payload.model_dump(),
         versions=payload.versions, preset_id=payload.preset_id,
-        preset_name=payload.preset_name, idempotency_key=payload.idempotency_key)
+        preset_name=payload.preset_name, idempotency_key=payload.idempotency_key,
+        persist=not remote_patterns_enabled())
 
 
 class ReplayChartRequest(BaseModel):
@@ -208,6 +213,9 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="Trading Bot Web UI", docs_url=None, redoc_url=None)
     app.add_middleware(GZipMiddleware, minimum_size=500)
+    # Inert unless PATTERN_API_URL is set: a client with no editor database has
+    # the registry endpoints served by the host that owns the database.
+    app.add_middleware(RemotePatternProxy)
 
     app.mount("/static", StaticFiles(directory=str(ROOT / "static")), name="static")
 
@@ -421,6 +429,8 @@ def create_app() -> FastAPI:
 
     @app.post("/api/symbol")
     async def api_symbol(request: Request, _user: str = Depends(require_login)):
+        from core.pattern_editor_db import DatabaseUnavailable, MigrationRequired
+
         try:
             raw = await _json_body(request)
             payload = SymbolRequest.model_validate(raw)
@@ -439,6 +449,10 @@ def create_app() -> FastAPI:
                 volume_gate=payload.volume_gate,
                 market=payload.market,
             )
+        except (DatabaseUnavailable, MigrationRequired) as exc:
+            # Pattern resolution needs the editor database; that is a server
+            # outage, not a bad request.
+            return JSONResponse({"detail": str(exc)}, status_code=503)
         except ValueError as exc:
             # Safe, user-facing message (bad timeframe, no history, etc.).
             return JSONResponse({"detail": str(exc)}, status_code=400)
@@ -592,6 +606,28 @@ def create_app() -> FastAPI:
         except Exception as exc:  # noqa: BLE001 - mapped to a safe status
             return patterns_error(exc)
 
+    @app.get("/api/patterns/pinned")
+    async def api_patterns_pinned(request: Request, _user: str = Depends(require_login)):
+        """Eligibility-checked version set for a caller with no database."""
+        try:
+            selected = _selected_pairs(request.query_params.getlist("selected"))
+            editor = pattern_edits.editor()
+            return {"versions": await asyncio.to_thread(
+                editor.pinned, request.query_params.getlist("disabled"), selected)}
+        except Exception as exc:  # noqa: BLE001
+            return patterns_error(exc)
+
+    @app.get("/api/patterns/bundle")
+    async def api_patterns_bundle(request: Request, _user: str = Depends(require_login)):
+        """Pinned versions plus the bytes of every file a loader must execute."""
+        try:
+            selected = _selected_pairs(request.query_params.getlist("selected"))
+            editor = pattern_edits.editor()
+            return await asyncio.to_thread(
+                editor.bundle, request.query_params.getlist("disabled"), selected)
+        except Exception as exc:  # noqa: BLE001
+            return patterns_error(exc)
+
     @app.get("/api/patterns/{pattern_id}/versions")
     async def api_pattern_versions(
         pattern_id: str, include_archived: bool = False,
@@ -628,6 +664,30 @@ def create_app() -> FastAPI:
         try:
             editor = pattern_edits.editor()
             return await asyncio.to_thread(editor.diff, version_id, base_version_id)
+        except Exception as exc:  # noqa: BLE001
+            return patterns_error(exc)
+
+    @app.post("/api/patterns/runs")
+    async def api_pattern_run_ingest(request: Request,
+                                     _user: str = Depends(require_login)):
+        """Record a run executed on another host, with its evidence."""
+        try:
+            body = await _json_body(request)
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        try:
+            editor = pattern_edits.editor()
+            return await asyncio.to_thread(editor.ingest_run, body)
+        except Exception as exc:  # noqa: BLE001
+            return patterns_error(exc)
+
+    @app.get("/api/patterns/versions/{version_id}/bundle")
+    async def api_pattern_version_bundle(version_id: str,
+                                         _user: str = Depends(require_login)):
+        """Single-version execution material, for a version that just landed."""
+        try:
+            editor = pattern_edits.editor()
+            return await asyncio.to_thread(editor.version_bundle, version_id)
         except Exception as exc:  # noqa: BLE001
             return patterns_error(exc)
 
@@ -1056,6 +1116,17 @@ def _stream_start_default() -> str:
     return _roll_forward_session_day(
         date.today() - timedelta(days=365), "us",
     ).isoformat()
+
+
+def _selected_pairs(values: list[str]) -> dict[str, str]:
+    """Parse repeated ``pattern_id:version_id`` pairs from a query string."""
+    selected: dict[str, str] = {}
+    for raw in values:
+        pattern_id, sep, version_id = (raw or "").partition(":")
+        if not sep or not pattern_id or not version_id:
+            raise ValueError(f"selected must be pattern_id:version_id, got {raw!r}")
+        selected[pattern_id] = version_id
+    return selected
 
 
 def _safe_next(next_url: str) -> str:

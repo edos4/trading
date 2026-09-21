@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     # Empty = approved versions cannot be executed; the shipped pattern code runs instead.
     # Empty editor DSN reuses the existing PostgreSQL DATABASE_URL/db_* settings.
     pattern_editor_database_url: str = ""
+    # Editor schema. Production uses `pattern_editor`; the test fixtures point
+    # this at a disposable `pattern_editor_test_*` schema.
+    pattern_editor_schema: str = "pattern_editor"
     pattern_edit_cgroup_root: str = ""
     pattern_edit_worker_python: str = ""
     # Frozen daily-bar dataset for shared backtest runs (offline + stream).
@@ -198,6 +201,16 @@ class Settings(BaseSettings):
     stocks_history_password: str = ""
     stocks_history_owner: bool = False
 
+    # ── Remote pattern registry (editor / scanner / backtests) ──────────────
+    # A client without a local editor database reads pattern versions from the
+    # VPS API instead. Empty URL means "use the local editor database", so an
+    # unset value keeps today's behaviour everywhere. The VPS that serves the
+    # API must set owner=true so it never routes back to itself.
+    pattern_api_url: str = ""
+    pattern_api_username: str = ""
+    pattern_api_password: str = ""
+    pattern_api_owner: bool = False
+
     # ── Web UI (python main.py --web) ───────────────────────────────────────
     # Session login. WEB_UI_PASSWORD is required — the server refuses to bind
     # if it is empty so an open VPS dashboard cannot ship by accident.
@@ -289,6 +302,19 @@ class Settings(BaseSettings):
         user = (self.stocks_history_username or self.web_ui_username or "").strip()
         password = (self.stocks_history_password or self.web_ui_username or "").strip()
         return user, password
+
+    @property
+    def pattern_api_auth(self) -> tuple[str, str]:
+        """Basic auth for /api/patterns, which uses require_login.
+
+        Unlike /api/history this needs the serving host's real WEB_UI_PASSWORD;
+        the username-as-password scheme is rejected. There is deliberately no
+        fallback to ``web_ui_password`` — on a laptop that is the *local*
+        dashboard password and would silently 401 against the remote host.
+        """
+        user = (self.pattern_api_username or self.stocks_history_username
+                or self.web_ui_username or "").strip()
+        return user, (self.pattern_api_password or "").strip()
 
     @property
     def is_live(self) -> bool:

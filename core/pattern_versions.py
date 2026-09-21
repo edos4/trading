@@ -6,7 +6,8 @@ import importlib.metadata
 from pathlib import Path
 import sys
 
-from core.pattern_edit_store import EditStore, EditError, Conflict, canonical, digest, now, uid, safe_relative
+from core.pattern_edit_store import (EditError, Conflict, canonical, digest, now,
+                                     open_pattern_store, safe_relative, uid)
 
 
 def runtime_manifest(root):
@@ -97,7 +98,7 @@ def collect_sources(root, source, paired=True, *, strict=False, prune_package=No
 
 class PatternVersions:
     def __init__(self, store=None):
-        self.store = store or EditStore()
+        self.store = store or open_pattern_store()
 
     def verify(self, version_id, *, runtime=False):
         version = self.store.get('versions', version_id)
@@ -248,6 +249,11 @@ class PatternVersions:
 
     def resolve(self, selected=None, disabled=()):
         """Pin once at submission/start. Workers load these IDs without resolving again."""
+        pinned = getattr(self.store, 'pinned', None)
+        if pinned is not None:
+            # A remote registry decides eligibility where the lifecycle, report
+            # and run rows live; a client cannot compute the verdict.
+            return pinned(disabled=tuple(disabled), selected=selected)
         with self.store.transaction() as con:
             rows = con.execute('SELECT * FROM patterns WHERE published ORDER BY id FOR SHARE').fetchall()
             if not rows:

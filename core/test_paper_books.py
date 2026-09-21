@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import socket
 import threading
 import tempfile
@@ -342,12 +343,27 @@ def test_port_open_works_inside_running_event_loop() -> None:
     srv.bind(("127.0.0.1", 0))
     srv.listen(1)
     host, port = srv.getsockname()[:2]
+
+    def accept_one() -> None:
+        """Answer the handshake the probe sends, then return to listening."""
+        conn, _ = srv.accept()
+        with conn:
+            conn.recv(1024)
+            conn.sendall(
+                b"HTTP/1.1 101 Switching Protocols\r\n"
+                b"Upgrade: websocket\r\nConnection: Upgrade\r\n"
+                b"Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n"
+            )
+
+    answer = threading.Thread(target=accept_one, daemon=True)
+    answer.start()
     try:
         async def _check() -> bool:
             return PaperBook._port_open(host, port)
 
         assert asyncio.run(_check()) is True
     finally:
+        answer.join(timeout=5)
         srv.close()
 
     async def _closed() -> bool:
@@ -426,3 +442,68 @@ def test_ph_live_snapshot_session_idle_when_closed() -> None:
     assert payload["books"]["us"] == {"running": False}
     assert payload["books"]["ph"] == {"running": False}
     assert "clocks" not in payload
+
+
+# ── stream-server readiness probe ────────────────────────────────────────
+def _free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def _serve_in_thread(port: int):
+    """Run a real WebSocket server until the returned stop function is called."""
+    import logging
+
+    import websockets
+
+    records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    logger = logging.getLogger("websockets")
+    logger.setLevel(logging.DEBUG)
+    handler = _Capture()
+    logger.addHandler(handler)
+    ready, stop = threading.Event(), threading.Event()
+
+    async def handler_fn(ws):
+        await ws.wait_closed()
+
+    def serve() -> None:
+        async def run() -> None:
+            async with websockets.serve(handler_fn, "127.0.0.1", port):
+                ready.set()
+                while not stop.is_set():
+                    await asyncio.sleep(0.02)
+
+        asyncio.run(run())
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    assert ready.wait(10), "test WebSocket server did not start"
+
+    def shutdown() -> None:
+        stop.set()
+        thread.join(timeout=10)
+        logger.removeHandler(handler)
+
+    return records, shutdown
+
+
+def test_stream_probe_does_not_log_a_failed_handshake() -> None:
+    """A bare connect made the server report 'opening handshake failed'."""
+    port = _free_port()
+    records, shutdown = _serve_in_thread(port)
+    try:
+        assert PaperBook._port_open("127.0.0.1", port) is True
+    finally:
+        shutdown()
+    errors = [r.getMessage() for r in records if r.levelno >= logging.WARNING]
+    assert errors == [], errors
+
+
+def test_stream_probe_reports_a_closed_port_as_down() -> None:
+    assert PaperBook._port_open("127.0.0.1", _free_port()) is False

@@ -503,7 +503,15 @@ class StreamServer:
         # process, so an unhandled exception here (previously: any history or
         # lookup error) closed that worker's socket with code 1011 and
         # surfaced as a scary-looking error for an otherwise fine symbol.
-        async for raw in ws:
+        while True:
+            try:
+                raw = await ws.recv()
+            except websockets.exceptions.ConnectionClosed:
+                # A client that goes away ends this handler. That includes the
+                # startup readiness probe, which handshakes and immediately
+                # disconnects — it used to surface as "connection handler
+                # failed" with a traceback for a perfectly healthy start.
+                return
             try:
                 try:
                     req = json.loads(raw)

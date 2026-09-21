@@ -21,9 +21,10 @@ from ai.providers.deepseek import (
 )
 from core.backtest_jobs import BacktestJobStore
 from core.backtest_service import BacktestService
-from core.pattern_edit_store import Conflict, EditError, canonical, digest, uid
+from core.pattern_edit_store import (
+    Conflict, EditError, canonical, digest, open_pattern_store, uid,
+)
 from core.pattern_edit_validation import Validator
-from core.pattern_edit_store import EditStore
 from core.pattern_editor_contracts import (
     BacktestRequest, DomainError, EditRequest, ErrorCode, JobState, VersionSelection,
 )
@@ -50,7 +51,7 @@ class PatternEditService:
     def __init__(self, store=None, *, provider=None, runner=None,
                  jobs=None, versions=None, backtests=None, validator_factory=None,
                  dataset_root=None):
-        self.store = store or EditStore()
+        self.store = store or open_pattern_store()
         self.versions = versions or PatternVersions(self.store)
         self.jobs = jobs or BacktestJobStore(self.store)
         self._provider = provider
