@@ -957,6 +957,21 @@ async def main(args: argparse.Namespace | None = None) -> None:
         )
 
 
+def _run_async_entry(args) -> int:
+    """Run the async entry point; an operator interrupt is a clean stop.
+
+    Ctrl-C cancels the running task, so ``asyncio.run`` surfaces
+    ``CancelledError``. That is the operator stopping a stream, not a crash,
+    and it must not print a traceback.
+    """
+    try:
+        asyncio.run(main(args))
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        log.info("Interrupted.")
+        return 130
+    return 0
+
+
 if __name__ == "__main__":
     # --ui / --web own their own event loop (tk / uvicorn). Running them
     # inside asyncio.run(main()) nests asyncio.run and crashes uvicorn.
@@ -970,4 +985,4 @@ if __name__ == "__main__":
 
         run_web()
     else:
-        asyncio.run(main(_args))
+        raise SystemExit(_run_async_entry(_args))

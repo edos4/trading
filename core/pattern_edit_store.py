@@ -254,3 +254,76 @@ class EditStore:
             con.execute('INSERT INTO workers(id,heartbeat,payload) VALUES(%s,%s,%s) '
                         'ON CONFLICT(id) DO UPDATE SET heartbeat=EXCLUDED.heartbeat,payload=EXCLUDED.payload',
                         (payload['worker_id'],payload['heartbeat'],Jsonb(payload)))
+
+    def record_external_run(self, run_id, *, preset_id, idempotency_key, request,
+                            inputs, result, dataset, artifacts):
+        """Insert a run that was executed somewhere else, with its artifacts.
+
+        The registry's run tables are append-only, so this is INSERT-only apart
+        from the lifecycle pointer that makes the run count as default
+        evidence. Uploaded bytes are re-hashed against their recorded
+        references before anything is written, and a repeated idempotency key
+        resolves to the run already recorded.
+        """
+        request_sha = digest(canonical(request))
+        check_content_ref(inputs['dataset'], dataset, 'dataset')
+        for name in ARTIFACT_NAMES:
+            check_content_ref(result[name], artifacts.get(name), name)
+        with self.transaction() as con:
+            prior = con.execute('SELECT id,state,request_sha256 FROM jobs '
+                                'WHERE idempotency_key=%s', (idempotency_key,)).fetchone()
+            if prior is not None:
+                if prior['request_sha256'] != request_sha:
+                    raise Conflict('Idempotency key was used for a different request')
+                return {'run_id': prior['id'], 'state': prior['state']}
+            self.blob(dataset, 'application/json', con)
+            for name in ARTIFACT_NAMES:
+                self.blob(artifacts[name], 'application/json', con)
+            units = len(inputs['resolved_symbols'])
+            stream = request.get('preset', {}).get('settings', {}).get('mode') == 'historical-stream'
+            progress = {'completed_units': units, 'total_units': units,
+                        'unit': 'sessions' if stream else 'symbols'}
+            con.execute('INSERT INTO jobs(id,kind,preset,idempotency_key,request_sha256,'
+                        "payload,state,attempt) VALUES(%s,'backtest',%s,%s,%s,%s,'completed',1)",
+                        (run_id, preset_id, idempotency_key, request_sha,
+                         Jsonb({'request': request, 'progress': progress})))
+            con.execute('INSERT INTO backtest_runs(id,job,inputs_sha256,payload) '
+                        'VALUES(%s,%s,%s,%s)',
+                        (run_id, run_id, inputs['inputs_sha256'], Jsonb(inputs)))
+            for selection in request['versions']:
+                con.execute('INSERT INTO run_versions(run,pattern,version) VALUES(%s,%s,%s)',
+                            (run_id, selection['pattern_id'], selection['version_id']))
+            con.execute('INSERT INTO results(id,run,payload) VALUES(%s,%s,%s)',
+                        (uid(), run_id, Jsonb(result)))
+            for selection in request['versions']:
+                con.execute('UPDATE version_lifecycle SET successful_run_id=%s '
+                            'WHERE version=%s AND successful_run_id IS DISTINCT FROM %s',
+                            (run_id, selection['version_id'], run_id))
+        return {'run_id': run_id, 'state': 'completed'}
+
+
+ARTIFACT_NAMES = ('trades', 'signals', 'equity_curve', 'open_positions', 'logs')
+
+
+def check_content_ref(ref, data, name):
+    """Fail closed when uploaded bytes do not hash to their content reference."""
+    if not isinstance(data, (bytes, bytearray)):
+        raise EditError('Missing artifact: ' + name)
+    if digest(data) != ref['sha256'] or len(data) != ref['size_bytes']:
+        raise EditError('Artifact does not match its content reference: ' + name)
+
+
+def open_pattern_store(*, root=ROOT, dsn=None, schema=None):
+    """The configured pattern registry: the local database, or the remote API.
+
+    A client with ``PATTERN_API_URL`` set has no local editor database, so the
+    remote store serves reads and refuses writes. The import is deferred to
+    keep this module free of a cycle with the store's error types.
+    """
+    from config import settings
+    from core.remote_pattern_store import RemotePatternStore, remote_patterns_enabled
+
+    if remote_patterns_enabled():
+        return RemotePatternStore(root)
+    return EditStore(root, dsn=dsn,
+                     schema=settings.pattern_editor_schema if schema is None else schema)

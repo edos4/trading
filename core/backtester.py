@@ -1043,8 +1043,8 @@ def _worker_symbol_backtest(
     store = None
     store_config = config.get("store_config")
     if store_config:
-        from core.pattern_edit_store import EditStore
-        store = EditStore(**store_config)
+        from core.pattern_edit_store import open_pattern_store
+        store = open_pattern_store(**store_config)
     patterns = _load_patterns(pattern_specs, store)
     return _core_backtest_symbol(symbol, timeframe, candles, patterns, config)
 

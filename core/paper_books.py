@@ -485,10 +485,33 @@ class PaperBook:
 
     @staticmethod
     def _port_open(host: str, port: int) -> bool:
-        """TCP probe — must stay sync; callers already sit on an asyncio loop."""
+        """Complete a WebSocket handshake — must stay sync; callers hold a loop.
+
+        A bare connect-and-close, or a plain HTTP request, reaches the server
+        as an invalid handshake, which it reports as "opening handshake failed"
+        with a full traceback. Speaking the protocol both proves the stream
+        server is genuinely accepting clients and keeps a healthy start quiet.
+        """
+        key = base64.b64encode(os.urandom(16)).decode("ascii")
+        request = (
+            "GET / HTTP/1.1\r\n"
+            f"Host: {host}:{port}\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: {key}\r\n"
+            "Sec-WebSocket-Version: 13\r\n\r\n"
+        ).encode("ascii")
         try:
-            with socket.create_connection((host, port), timeout=0.5):
-                return True
+            with socket.create_connection((host, port), timeout=0.5) as sock:
+                sock.sendall(request)
+                sock.settimeout(0.5)
+                status = b""
+                while b"\r\n" not in status and len(status) < 256:
+                    chunk = sock.recv(256 - len(status))
+                    if not chunk:
+                        break
+                    status += chunk
+                return status.startswith(b"HTTP/1.1 101")
         except OSError:
             return False
 

@@ -23,6 +23,25 @@ import uuid
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def local_pattern_registry(monkeypatch):
+    """Tests never inherit a remote registry from the developer's .env.
+
+    Pattern storage is remote only when PATTERN_API_URL is set, so a machine
+    configured to read the VPS would otherwise route every test's pattern reads
+    to production. A test that wants the remote path sets the URL itself.
+
+    The environment is cleared as well: spawned workers re-import config and
+    would otherwise read the developer's .env rather than this process's view.
+    """
+    from config import settings
+
+    monkeypatch.setattr(settings, "pattern_api_url", "")
+    monkeypatch.setattr(settings, "pattern_api_owner", False)
+    monkeypatch.setenv("PATTERN_API_URL", "")
+    monkeypatch.setenv("PATTERN_API_OWNER", "false")
+
+
 @pytest.fixture
 def editor_store_factory():
     from psycopg import sql
@@ -60,8 +79,13 @@ def published_pattern_catalog(editor_store_factory, monkeypatch):
         patch.setattr(parity, 'verify_parity', lambda store, version, snapshot:
                       {'version_id': version['version_id'], 'consumer_fixture': True})
         Bootstrap(store).verify_and_publish(Bootstrap(store).stage(snapshot), snapshot)
-    monkeypatch.setattr('core.pattern_loader.EditStore', lambda: store)
-    monkeypatch.setattr('core.pattern_versions.EditStore', lambda: store)
+    # Route every default store at the disposable schema through configuration,
+    # so `open_pattern_store()` -- including its use inside spawned workers --
+    # resolves here rather than to the developer's own database.
+    from config import settings
+
+    monkeypatch.setattr(settings, 'pattern_editor_database_url', store._dsn)
+    monkeypatch.setattr(settings, 'pattern_editor_schema', store.schema)
     return store
 
 

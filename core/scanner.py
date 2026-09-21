@@ -382,11 +382,18 @@ class MarketScanner:
 
     def stop(self) -> None:
         from core.pattern_loader import acknowledge_worker
+        from core.pattern_editor_db import DatabaseUnavailable
         self._running = False
         self._close_analyze_pool()
         for p in self._patterns:
             p.on_stop()
-        acknowledge_worker(self, stopped=True)
+        try:
+            acknowledge_worker(self, stopped=True)
+        except DatabaseUnavailable:
+            # Worker bookkeeping must not turn a stop into a crash.
+            log.warning(
+                "Scanner | worker acknowledgement skipped — editor database unavailable"
+            )
         # self._client.disconnect()
         log.info("Scanner stopped")
 
@@ -533,8 +540,29 @@ class MarketScanner:
                 return
 
     # ── Main async loop ────────────────────────────────────────────────────────
+    async def _start_when_ready(self) -> None:
+        """Resolve pattern versions, waiting out a transient database outage.
+
+        Pinned versions live in PostgreSQL, so one connection blip at start
+        used to end the book outright. Retry until they resolve, or until the
+        run is cancelled (PaperBook.stop cancels this task).
+        """
+        from core.pattern_editor_db import DatabaseUnavailable
+
+        delay = min(max(self._scan_interval, 5.0), 60.0)
+        while True:
+            try:
+                self.start()
+                return
+            except DatabaseUnavailable as exc:
+                log.warning(
+                    f"Scanner | pattern versions unavailable ({exc}) — "
+                    f"retrying in {delay:.0f}s"
+                )
+            await asyncio.sleep(delay)
+
     async def run(self) -> None:
-        self.start()
+        await self._start_when_ready()
         n_workers = self._feed_worker_count()
         try:
             while self._running:

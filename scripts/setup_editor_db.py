@@ -75,6 +75,7 @@ def ensure_database(dsn: str) -> None:
 
 
 def main() -> int:
+    from config import settings
     from core.pattern_editor_db import DatabaseUnavailable, configured_dsn, migrate
     from core.pattern_edit_store import EditError, EditStore
 
@@ -84,15 +85,16 @@ def main() -> int:
               file=sys.stderr)
         return 1
 
+    schema = settings.pattern_editor_schema
     _info, name = _target(dsn)
-    print(f"editor database: {name}")
+    print(f"editor database: {name} (schema {schema})")
 
     try:
         ensure_database(dsn)
-        applied = migrate(dsn)
+        applied = migrate(dsn, schema)
         print(f"    migrations: {'applied ' + ','.join(map(str, applied)) if applied else 'already up to date'}")
 
-        store = EditStore()
+        store = EditStore(schema=schema)
         with store.connect() as con:
             published = con.execute(
                 "SELECT COUNT(*) AS n FROM patterns WHERE published").fetchone()["n"]

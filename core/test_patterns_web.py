@@ -7,6 +7,9 @@ sandbox is unavailable here); validation, jobs, versions and backtests are real.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 import time
 from pathlib import Path
 from unittest.mock import patch
@@ -414,3 +417,167 @@ def test_patterns_database_unavailable_is_503(patterns_web):
         resp = client.get("/api/patterns")
     assert resp.status_code == 503
     assert "unavailable" in resp.json()["detail"].lower()
+
+
+# ── execution material for a caller with no database ─────────────────────
+def _decode(bundle, name):
+    data = base64.b64decode(bundle["files"][name])
+    ref = bundle["payload"]["files"][name]
+    assert len(data) == ref["size_bytes"], name
+    assert hashlib.sha256(data).hexdigest() == ref["sha256"], name
+    return data
+
+
+def test_pinned_matches_the_eligible_catalog(patterns_web):
+    client, _service, editor, _provider, store = patterns_web
+    resp = client.get("/api/patterns/pinned")
+    assert resp.status_code == 200
+    pinned = resp.json()["versions"]
+    expected = {p["id"]: p["active"] for p in editor.versions.catalog()
+                if p["enabled"] and p["active"]}
+    assert pinned == expected
+    assert PATTERN in pinned
+
+
+def test_pinned_honours_a_disabled_pattern(patterns_web):
+    client, _service, _editor, _provider, _store = patterns_web
+    resp = client.get("/api/patterns/pinned", params={"disabled": PATTERN})
+    assert resp.status_code == 200
+    assert PATTERN not in resp.json()["versions"]
+
+
+def test_bundle_carries_every_executable_file_byte_exact(patterns_web):
+    client, _service, editor, _provider, store = patterns_web
+    resp = client.get("/api/patterns/bundle")
+    assert resp.status_code == 200
+    body = resp.json()
+    pinned = body["versions"]
+    assert pinned
+    assert set(body["bundles"]) == set(pinned.values())
+    for pattern_id, version_id in pinned.items():
+        bundle = body["bundles"][version_id]
+        assert bundle["payload"]["version_id"] == version_id
+        assert bundle["payload"]["pattern_id"] == pattern_id
+        # every file the loader execs is present, not just the detector source
+        assert set(bundle["files"]) == set(bundle["payload"]["files"])
+        for name in bundle["files"]:
+            _decode(bundle, name)
+
+
+def test_version_bundle_excludes_nothing_and_fails_closed(patterns_web):
+    client, _service, _editor, _provider, store = patterns_web
+    version_id = base_version(store)
+    resp = client.get(f"/api/patterns/versions/{version_id}/bundle")
+    assert resp.status_code == 200
+    bundle = resp.json()
+    assert bundle["payload"]["version_id"] == version_id
+    assert set(bundle["files"]) == set(bundle["payload"]["files"])
+    assert bundle["payload"]["source_path"] in bundle["files"]
+    # unknown material is an error, never an empty bundle
+    assert client.get("/api/patterns/versions/does-not-exist/bundle").status_code == 400
+
+
+def upload_request(backtests):
+    """A request built the way a client with no registry database builds one."""
+    from core.backtest_service import request_from_values
+
+    return request_from_values(backtests, settings_values(sessions=40),
+                               preset_name="uploaded run", persist=False)
+
+
+def test_run_upload_records_usable_lifecycle_evidence(patterns_web):
+    """A run executed elsewhere must read back and satisfy the eligibility query."""
+    from core.pattern_edit_store import uid
+
+    client, service, _editor, _provider, store = patterns_web
+    request = upload_request(service.backtests)
+    run_id = uid()
+    payload = service.backtests.run_locally(request, run_id)
+
+    resp = client.post("/api/patterns/runs", json=payload)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"run_id": run_id, "state": "completed"}
+
+    # The host's own read path must be able to serve it, artifacts included.
+    detail = client.get(f"/api/backtest/runs/{run_id}")
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["state"] == "completed"
+    assert body["result"]["metrics"]["currency"] in ("USD", "PHP")
+
+    pattern_id = request.versions[0].pattern_id
+    version_id = request.versions[0].version_id
+    with store.transaction() as con:
+        pointer = con.execute("SELECT successful_run_id FROM version_lifecycle "
+                              "WHERE version=%s", (version_id,)).fetchone()
+        # The exact join the default-eligibility check performs.
+        evidence = con.execute(
+            "SELECT 1 FROM backtest_runs b JOIN jobs j ON j.id=b.job "
+            "JOIN run_versions v ON v.run=b.id JOIN results r ON r.run=b.id "
+            "WHERE b.id=%s AND v.version=%s AND j.state='completed'",
+            (pointer["successful_run_id"], version_id)).fetchone()
+    assert pointer["successful_run_id"] == run_id
+    assert evidence is not None
+
+
+def test_run_upload_is_idempotent_and_validated(patterns_web):
+    from core.pattern_edit_store import uid
+
+    client, service, _editor, _provider, store = patterns_web
+    payload = service.backtests.run_locally(upload_request(service.backtests), uid())
+
+    first = client.post("/api/patterns/runs", json=payload)
+    assert first.status_code == 200
+    # A retried upload resolves to the run already recorded.
+    again = client.post("/api/patterns/runs", json=payload)
+    assert again.status_code == 200
+    assert again.json() == first.json()
+
+    # Artifacts that do not hash to their reference are refused.
+    tampered = dict(payload, artifacts=dict(payload["artifacts"],
+                                            trades=base64.b64encode(b"[]").decode()))
+    bad = client.post("/api/patterns/runs", json=tampered)
+    assert bad.status_code == 400
+    assert "content reference" in bad.json()["detail"]
+
+    # A result that violates the contract never reaches the registry.
+    malformed = json.loads(json.dumps(payload))
+    malformed["result"]["metrics"]["win_rate"] = 5.0
+    assert client.post("/api/patterns/runs", json=malformed).status_code == 400
+
+    # A missing artifact is rejected rather than stored half-complete.
+    missing = dict(payload, artifacts={k: v for k, v in payload["artifacts"].items()
+                                       if k != "logs"})
+    assert client.post("/api/patterns/runs", json=missing).status_code == 400
+
+
+def test_bundle_is_sufficient_to_load_a_pattern_without_a_database(patterns_web):
+    """`discover()` must work from the bundle alone -- it execs the closure."""
+    client, _service, _editor, _provider, store = patterns_web
+    version_id = base_version(store)
+    bundle = client.get(f"/api/patterns/versions/{version_id}/bundle").json()
+
+    class BundleStore:
+        """Store double backed only by the HTTP bundle, with no database."""
+
+        root = store.root
+
+        def __init__(self, bundle):
+            self.bundle = bundle
+
+        def get(self, table, identity, con=None):
+            assert table == "versions"
+            return self.bundle["payload"]
+
+        def read_blob(self, ref, con=None):
+            for name in self.bundle["files"]:
+                data = _decode(self.bundle, name)
+                if hashlib.sha256(data).hexdigest() == ref["sha256"]:
+                    return data
+            raise AssertionError(f"bundle is missing blob {ref['sha256']}")
+
+    from core.pattern_loader import VersionPattern
+
+    pattern = VersionPattern(version_id, BundleStore(bundle))
+    assert pattern.name == PATTERN
+    assert pattern.timeframes

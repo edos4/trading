@@ -12,6 +12,7 @@ authority for state, progress and results.
 """
 from __future__ import annotations
 
+import base64
 import threading
 from datetime import datetime
 
@@ -85,6 +86,17 @@ def run_payload(service: BacktestService, run_id: str) -> dict:
                 "mode": stored["inputs"].request.preset.settings.mode,
             }
     return payload
+
+
+def _artifact_bytes(payload: dict, name: str) -> bytes:
+    """Runner artifacts travel base64 so the wire format stays JSON."""
+    encoded = payload.get("dataset") if name == "dataset" else (payload.get("artifacts") or {}).get(name)
+    if not isinstance(encoded, str):
+        raise EditError("Missing artifact: " + name)
+    try:
+        return base64.b64decode(encoded, validate=True)
+    except Exception:
+        raise EditError("Undecodable artifact: " + name) from None
 
 
 def edit_request_from_values(editor: "PatternEditor", values: dict, *,
@@ -214,6 +226,73 @@ class PatternEditor:
 
     def diff(self, version_id: str, base_version_id: str | None = None) -> dict:
         return {"files": self.versions.diff(version_id, base_version_id)}
+
+    # ── remote execution material ────────────────────────────────────────
+    def pinned(self, disabled=(), selected=None) -> dict:
+        """Eligibility-checked version set; the verdict needs the registry SQL."""
+        return self.versions.resolve(
+            selected=dict(selected) if selected else None,
+            disabled=tuple(disabled))
+
+    def version_bundle(self, version_id: str) -> dict:
+        """Payload plus the raw bytes of every file a loader has to execute.
+
+        The loader execs the whole ``version['files']`` closure, so a caller
+        that cannot reach PostgreSQL needs all of it -- ``source()`` returns
+        only the detector and its documentation.
+        """
+        version = self.store.get("versions", version_id)
+        files = {
+            name: base64.b64encode(self.store.read_blob(ref)).decode("ascii")
+            for name, ref in sorted(version.get("files", {}).items())
+        }
+        return {
+            "payload": _jsonable(version),
+            "files": files,
+            "content_sha256": version.get("content_sha256"),
+        }
+
+    def ingest_run(self, payload: dict) -> dict:
+        """Record a run executed elsewhere as durable lifecycle evidence.
+
+        The registry enforces nothing about these payloads beyond NOT NULL, so
+        they are validated against the same contracts the local path produces
+        before any row is written, and the artifacts are re-hashed against
+        their references.
+        """
+        from core.pattern_editor_contracts import BacktestResult, FrozenRunInputs
+
+        inputs = FrozenRunInputs.model_validate(payload["inputs"])
+        result = BacktestResult.model_validate(payload["result"])
+        preset = self.backtests.find_or_create_preset(
+            inputs.request.preset.name, inputs.request.preset.settings)
+        # Store this registry's preset identity so jobs.preset and the recorded
+        # request agree. inputs_sha256 deliberately ignores preset identity.
+        request = inputs.request.model_copy(update={"preset": preset})
+        inputs = inputs.model_copy(update={"request": request})
+        result = result.model_copy(update={"inputs": inputs})
+        return self.store.record_external_run(
+            result.run_id,
+            preset_id=preset.preset_id,
+            idempotency_key=(payload.get("idempotency_key")
+                             or request.idempotency_key),
+            request=request.model_dump(mode="json"),
+            inputs=inputs.model_dump(mode="json"),
+            result=result.model_dump(mode="json"),
+            dataset=_artifact_bytes(payload, "dataset"),
+            artifacts={name: _artifact_bytes(payload, name)
+                       for name in ("trades", "signals", "equity_curve",
+                                    "open_positions", "logs")},
+        )
+
+    def bundle(self, disabled=(), selected=None) -> dict:
+        """The pinned set and every pinned version's execution material."""
+        pinned = self.pinned(disabled, selected)
+        return {
+            "versions": pinned,
+            "bundles": {version_id: self.version_bundle(version_id)
+                        for version_id in pinned.values()},
+        }
 
     # ── presets ──────────────────────────────────────────────────────────
     def presets(self) -> list[dict]:

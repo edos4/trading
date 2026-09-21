@@ -30,7 +30,18 @@ class ExplorerService:
     def __init__(self) -> None:
         profile = get_market()
         self._bind_market(profile)
-        self._patterns = discover_patterns()
+        self._patterns: Optional[list] = None
+
+    @property
+    def patterns(self) -> list:
+        """Resolve pinned versions on first use, never in the constructor.
+
+        Universe/symbol endpoints must keep working while PostgreSQL is down;
+        a failed resolve is not cached, so the next scan retries it.
+        """
+        if self._patterns is None:
+            self._patterns = discover_patterns()
+        return self._patterns
 
     def _bind_market(self, profile) -> None:
         self._market = profile.id
@@ -103,7 +114,7 @@ class ExplorerService:
         signals: list[TradeSignal] = []
         if run_patterns:
             raw = latest_signals_over_lookback(
-                self._patterns, symbol, timeframe, candles,
+                self.patterns, symbol, timeframe, candles,
                 session_tz=profile.session_tz,
             )
             cheap: list[TradeSignal] = []

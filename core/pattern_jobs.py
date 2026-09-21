@@ -64,8 +64,8 @@ def init_analyze_worker(
     if version_set is None:
         raise ValueError('Analyze workers require a pinned version set')
     from core.pattern_loader import discover
-    from core.pattern_edit_store import EditStore
-    _worker_patterns = discover(disabled, version_set, store=EditStore(**(store_config or {})))
+    from core.pattern_edit_store import open_pattern_store
+    _worker_patterns = discover(disabled, version_set, store=open_pattern_store(**(store_config or {})))
     log.debug(
         f"analyze worker pid={os.getpid()} patterns={len(_worker_patterns)}"
     )

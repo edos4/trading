@@ -8,6 +8,7 @@ the authority, and an in-process cancellation event is only a fast path.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import threading
 from datetime import datetime, timezone
@@ -18,7 +19,9 @@ from psycopg.types.json import Jsonb
 from core.backtest_jobs import BacktestJobStore
 from core.backtest_params import effective_parameters, resolve_symbols
 from core.market import get_market
-from core.pattern_edit_store import Conflict, EditError, canonical, digest, uid
+from core.pattern_edit_store import (
+    ARTIFACT_NAMES, Conflict, EditError, canonical, digest, uid,
+)
 from core.pattern_editor_contracts import (
     BacktestMetrics, BacktestPreset, BacktestRequest, BacktestResult, ContentRef,
     DomainError, ErrorCode, FrozenRunInputs, JobProgress, JobState, Parameter,
@@ -88,9 +91,9 @@ class BacktestService:
                  fetch_missing_history: bool | None = None,
                  history_fetcher=None):
         from config import settings
-        from core.pattern_edit_store import EditStore
+        from core.pattern_edit_store import open_pattern_store
 
-        self.store = store or EditStore()
+        self.store = store or open_pattern_store()
         self.versions = versions or PatternVersions(self.store)
         self.jobs = job_store or BacktestJobStore(self.store)
         self.dataset_root = Path(
@@ -101,6 +104,9 @@ class BacktestService:
         self.fetch_missing_history = (
             True if fetch_missing_history is None else bool(fetch_missing_history))
         self._history_fetcher = history_fetcher
+        # Set while a run is executed for recording elsewhere: artifacts are
+        # staged in memory instead of written to this process's registry.
+        self._staging: dict[str, bytes] | None = None
 
     # ── presets ──────────────────────────────────────────────────────────
     def save_preset(self, name: str, settings, *, preset_id: str | None = None,
@@ -139,6 +145,18 @@ class BacktestService:
         if row is None:
             raise EditError("Preset not found")
         return BacktestPreset.model_validate(row["payload"])
+
+    def find_or_create_preset(self, name: str, settings) -> BacktestPreset:
+        """The find-or-create rule submission uses, by (name, settings).
+
+        A run recorded from another host carries preset settings, not this
+        registry's preset id, so the identity is resolved here.
+        """
+        name = (name or "").strip() or "backtest run"
+        settings = self._validate_settings(settings)
+        existing = next((p for p in self.list_presets()
+                         if p.name == name and p.settings == settings), None)
+        return existing if existing is not None else self.save_preset(name, settings)
 
     # ── request preparation ──────────────────────────────────────────────
     def _validate_settings(self, settings):
@@ -179,8 +197,12 @@ class BacktestService:
 
     def store_config(self) -> dict:
         """Connection config only — never a live connection across a process boundary."""
-        return {"root": str(self.store.root), "dsn": self.store._dsn,
-                "schema": self.store.schema}
+        dsn = getattr(self.store, "_dsn", None)
+        if dsn is None:
+            # A remote registry has no connection to hand a worker; the worker
+            # rebuilds the same remote store from configuration.
+            return {}
+        return {"root": str(self.store.root), "dsn": dsn, "schema": self.store.schema}
 
     # ── submission ───────────────────────────────────────────────────────
     def submit(self, request: BacktestRequest) -> dict:
@@ -226,6 +248,51 @@ class BacktestService:
         if row is None:
             return None
         return self._run_claimed(row, worker_id)
+
+    def run_locally(self, request, run_id: str, *,
+                    cancel_event: threading.Event | None = None) -> dict:
+        """Execute a run in this process and return what records it elsewhere.
+
+        Nothing durable is written here: the dataset and artifacts are staged
+        in memory and handed back for the caller to upload. Used by a client
+        whose registry lives on another host.
+        """
+        request = _coerce_request(request)
+        plan = self.prepare(request)
+        event = cancel_event or threading.Event()
+        staging: dict[str, bytes] = {}
+        self._staging = staging
+        try:
+            inputs = self.freeze_inputs(request, plan["symbols"])
+            if plan["settings"].mode == "historical-stream":
+                result, _ = self._execute_stream(run_id, inputs, event, owner="local")
+            else:
+                result, _ = self._execute_offline(run_id, inputs, event, owner="local")
+        finally:
+            self._staging = None
+        return self._upload_payload(run_id=run_id, request=request, inputs=inputs,
+                                    result=result, staged=staging)
+
+    def _upload_payload(self, *, run_id: str, request: BacktestRequest,
+                        inputs: FrozenRunInputs, result: BacktestResult,
+                        staged: dict[str, bytes]) -> dict:
+        """Wire format that records a locally-executed run on another host."""
+
+        def encode(ref) -> str:
+            data = staged.get(ref.sha256)
+            if data is None:
+                raise EditError("Artifact was not staged for upload: " + ref.sha256)
+            return base64.b64encode(data).decode("ascii")
+
+        return {
+            "run_id": run_id,
+            "idempotency_key": request.idempotency_key,
+            "inputs": inputs.model_dump(mode="json"),
+            "result": result.model_dump(mode="json"),
+            "dataset": encode(inputs.dataset),
+            "artifacts": {name: encode(getattr(result, name))
+                          for name in ARTIFACT_NAMES},
+        }
 
     def _run_claimed(self, row: dict, owner: str,
                      cancel_event: threading.Event | None = None) -> dict:
@@ -279,7 +346,7 @@ class BacktestService:
             raise EditError(
                 "No frozen daily history available for the selected symbols: not in "
                 f"{self.dataset_root} and the history provider returned no bars")
-        return self.store.blob(canonical(rows), "application/json")
+        return self._blob(canonical(rows), "application/json")
 
     def freeze_inputs(self, request: BacktestRequest, symbols: list[str]) -> FrozenRunInputs:
         settings = request.preset.settings
@@ -388,9 +455,10 @@ class BacktestService:
         def _tick(completed: int, _total: int) -> None:
             if event.is_set():
                 raise Cancelled("Run cancelled")
-            self.jobs.touch(job_id, owner,
-                            progress={"completed_units": int(completed),
-                                      "total_units": total, "unit": "symbols"})
+            if self._staging is None:
+                self.jobs.touch(job_id, owner,
+                                progress={"completed_units": int(completed),
+                                          "total_units": total, "unit": "symbols"})
 
         backtester = Backtester(
             list(inputs.resolved_symbols),
@@ -424,9 +492,10 @@ class BacktestService:
         def _tick(completed: int, total: int) -> None:
             if event.is_set():
                 raise Cancelled("Run cancelled")
-            self.jobs.touch(job_id, owner,
-                            progress={"completed_units": int(completed),
-                                      "total_units": int(total), "unit": "sessions"})
+            if self._staging is None:
+                self.jobs.touch(job_id, owner,
+                                progress={"completed_units": int(completed),
+                                          "total_units": int(total), "unit": "sessions"})
 
         replay = StreamReplay(dataset=dataset, patterns=patterns, settings=settings,
                               session_tz=profile.session_tz, cancel=event, progress=_tick)
@@ -504,7 +573,16 @@ class BacktestService:
 
     def _ref(self, payload) -> ContentRef:
         return ContentRef.model_validate(
-            self.store.blob(canonical(_json_safe(payload)), "application/json"))
+            self._blob(canonical(_json_safe(payload)), "application/json"))
+
+    def _blob(self, data: bytes, media_type: str = "application/json") -> dict:
+        """Store an artifact, or stage it when the run is recorded elsewhere."""
+        if self._staging is None:
+            return self.store.blob(data, media_type)
+        ref = {"sha256": digest(data), "media_type": media_type,
+               "size_bytes": len(data)}
+        self._staging[ref["sha256"]] = data
+        return ref
 
     def _record_result(self, run_id: str, result: BacktestResult) -> None:
         with self.store.transaction() as con:
@@ -566,6 +644,9 @@ class BacktestService:
         }
 
     def _read_json(self, ref: ContentRef):
+        staged = None if self._staging is None else self._staging.get(ref.sha256)
+        if staged is not None:
+            return json.loads(staged)
         return json.loads(self.store.read_blob(ref.model_dump(mode="json")))
 
     def find_reusable_run(self, inputs_sha256: str) -> str | None:
@@ -606,32 +687,44 @@ def request_from_values(service: "BacktestService", values: dict,
                         *, versions: dict | None = None,
                         preset_id: str | None = None,
                         preset_name: str | None = None,
-                        idempotency_key: str | None = None) -> BacktestRequest:
+                        idempotency_key: str | None = None,
+                        persist: bool = True) -> BacktestRequest:
     """Build one durable request from raw form values (shared by both frontends).
 
     ``preset_id`` reuses a saved preset's frozen settings; otherwise the values
     are validated and persisted as a new named preset. Version defaults come
     from the published catalog when the caller does not pin them.
+
+    ``persist=False`` is for a run recorded on another host: nothing is written
+    here, and that host resolves the preset from the same name and settings.
     """
     from core.backtest_params import settings_from_values
     from core.pattern_editor_contracts import BacktestPreset, VersionSelection
 
-    if preset_id:
+    if preset_id and persist:
         preset = service.get_preset(preset_id)
     else:
         settings = settings_from_values(values)
         name = (preset_name or "").strip() or "backtest run"
-        # Find-or-create by (name, settings) so an identical duplicate Submit
-        # maps to the same frozen preset and therefore the same durable request.
-        preset = next((p for p in service.list_presets()
-                       if p.name == name and p.settings == settings), None)
-        if preset is None:
-            preset = service.save_preset(name, settings)
+        if not persist:
+            preset = BacktestPreset(preset_id=uid(), generation=0, name=name,
+                                    settings=settings)
+        else:
+            # Find-or-create by (name, settings) so an identical duplicate Submit
+            # maps to the same frozen preset and therefore the same durable request.
+            preset = next((p for p in service.list_presets()
+                           if p.name == name and p.settings == settings), None)
+            if preset is None:
+                preset = service.save_preset(name, settings)
 
-    selected = dict(versions) if versions else {
-        row["id"]: row["active"] for row in service.versions.catalog()
-        if row["enabled"] and row["active"]
-    }
+    if versions:
+        selected = dict(versions)
+    elif persist:
+        selected = {row["id"]: row["active"] for row in service.versions.catalog()
+                    if row["enabled"] and row["active"]}
+    else:
+        # Resolve remotely: the local catalog requires the editor database.
+        selected = service.versions.resolve()
     selections = tuple(VersionSelection(pattern_id=pattern, version_id=version)
                        for pattern, version in sorted(selected.items()) if version)
     if not selections:
