@@ -42,6 +42,54 @@
 
   function setStatus(text) { $("pat-action-status").textContent = text; }
 
+  // The backtest settings only apply when saving a new preset, so they stay
+  // folded (and hidden) while a saved preset is selected.
+  function openSettings() {
+    const box = $("pat-settings");
+    if (box) box.open = true;
+  }
+
+  function syncPresetMode() {
+    const box = $("pat-settings");
+    const preset = $("pat-preset");
+    if (!box || !preset) return;
+    const usingSaved = !!preset.value;
+    box.hidden = usingSaved;
+    if (usingSaved) box.open = false;
+  }
+
+  function setBaseChip(isDefault) {
+    const chip = $("pat-base");
+    if (!chip) return;
+    if (state.versionId) {
+      chip.textContent = "Base " + state.versionId.slice(0, 8) + (isDefault ? " · default" : "");
+      chip.classList.add("armed");
+    } else {
+      chip.textContent = "No base version selected";
+      chip.classList.remove("armed");
+    }
+  }
+
+  function initResultsTabs() {
+    const root = $("pat-results");
+    if (!root) return;
+    root.querySelectorAll(".tab").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const name = btn.dataset.tab;
+        root.querySelectorAll(".tab").forEach((b) => {
+          const on = b === btn;
+          b.classList.toggle("active", on);
+          b.setAttribute("aria-selected", on ? "true" : "false");
+        });
+        root.querySelectorAll(".tab-panel").forEach((panel) => {
+          const on = panel.id === "pat-tab-" + name;
+          panel.classList.toggle("active", on);
+          panel.hidden = !on;
+        });
+      });
+    });
+  }
+
   // Form problems are shown next to Submit (the version-list status is far away
   // and made a blocked submit look like nothing happened).
   function formError(message) {
@@ -191,6 +239,7 @@
       replacement.appendChild(opt);
     });
     replacement.hidden = !(isDefault && others.length);
+    setBaseChip(isDefault);
     setStatus(isDefault
       ? "Current default. Deleting it requires a replacement."
       : "Selected version " + (state.versionId || "").slice(0, 8));
@@ -337,6 +386,9 @@
     const presetName = $("pat-preset-name").value.trim();
     const problem = submitProblem(instruction, presetId, presetName);
     if (problem) {
+      // A blocked submit that names a new-preset field is invisible while the
+      // settings are folded, so reveal them before showing the reason.
+      if (!presetId) openSettings();
       formError(problem);
       return;
     }
@@ -578,6 +630,7 @@
     });
     const preset = $("pat-preset");
     preset.addEventListener("change", () => {
+      syncPresetMode();
       if (!preset.value) return;
       const chosen = state.presets.find((p) => p.preset_id === preset.value);
       if (!chosen) return;
@@ -587,6 +640,8 @@
       if ($("pat-initial_capital")) $("pat-initial_capital").value = s.execution.initial_capital;
       $("pat-preset-name").value = chosen.name;
     });
+    initResultsTabs();
+    syncPresetMode();
     $("pat-start_date").value = $("pat-start_date").value || window.TB_STREAM_START || "";
     await loadCatalog();
     await loadPresets();

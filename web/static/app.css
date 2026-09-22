@@ -226,12 +226,44 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
 .param input:not([type="checkbox"]):not([type="radio"]),
 .param select, .param textarea { width: 100%; min-width: 0; }
 .param input[type="checkbox"], .param input[type="radio"] { width: auto; }
+/* Version detail collapse: the raw source, documentation, history and diff are
+ * long and rarely needed, so they stay folded away until the row is expanded.
+ * Native <details> gives the toggle, keyboard support and find-in-page for free. */
+.details-collapse {
+  margin: 1rem 0 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.details-collapse > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.85rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+.details-collapse > summary::-webkit-details-marker { display: none; }
+.details-collapse > summary::before {
+  content: "▸";
+  transition: transform 0.15s ease;
+}
+.details-collapse[open] > summary::before { transform: rotate(90deg); }
+.details-collapse > summary:hover { color: var(--text); }
+.details-collapse > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* A settings grid inside a disclosure gets the same inset as the detail grid. */
+.details-collapse > .param-grid { margin: 0; padding: 0.15rem 0.85rem 0.85rem; }
 /* Version detail: three readable panels, with the diff given the full width.
  * (auto-fill would leave the panels ~220px wide and the rest of the row empty.) */
 .detail-grid {
   display: grid;
   gap: 0.85rem;
-  margin: 1rem 0;
+  margin: 0;
+  padding: 0.15rem 0.85rem 0.85rem;
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .detail-grid .detail-diff { grid-column: 1 / -1; }
@@ -248,10 +280,50 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
   .detail-grid .detail-diff .summary { max-height: 320px; }
 }
 .param.dimmed { opacity: 0.45; }
-/* Patterns: the pattern/version picker is a short two-control row. */
-.param-grid.selector-grid { grid-template-columns: minmax(0, 24rem) minmax(0, 12rem); }
+/* ── Patterns page ─────────────────────────────────────────────────────
+ * A three-step flow (base version → change → results), so the operator never
+ * faces every control at once. */
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.page-head h1 { margin: 0; font-size: 1.4rem; }
+.page-head-title { min-width: 0; }
+.page-head-title .muted { margin: 0.25rem 0 0; max-width: 62ch; }
+.page-head-controls { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 1rem; }
+.page-head-controls .param { min-width: 11rem; }
+/* The version the edit starts from, carried next to the instruction. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.chip.armed { color: var(--accent); border-color: #2d4d73; }
 /* Patterns: the instruction is the primary input, so give it a full row. */
 .param-grid .param-wide { grid-column: 1 / -1; }
+/* The commit row closes the change step. It stays in flow: a sticky bar
+ * overlays the settings grid it is meant to commit. */
+.commit-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+  margin-top: 1rem;
+  padding: 0.65rem 0.75rem;
+  background: rgba(15, 20, 25, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.commit-bar .spacer { flex: 1; }
 .ab-box {
   margin: 0.75rem 0;
   padding: 0.75rem;
@@ -261,7 +333,19 @@ th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background
   font-size: 0.8rem;
   white-space: pre-wrap;
 }
-progress { width: 180px; height: 0.7rem; }
+/* The UA track is near-white, which reads as a full bar on dark panels.
+ * `appearance: none` is required before the track/fill pseudos take hold. */
+progress {
+  width: 180px;
+  height: 0.7rem;
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  background: transparent;
+}
+progress::-webkit-progress-bar { background: #111821; border: 1px solid var(--border); border-radius: 999px; }
+progress::-webkit-progress-value { background: var(--accent); border-radius: 999px; }
+progress::-moz-progress-bar { background: var(--accent); border-radius: 999px; }
 .gain { color: var(--ok); }
 .loss { color: var(--danger); }
 
@@ -563,7 +647,6 @@ img, video, canvas, pre, table { max-width: 100%; }
   h2 { font-size: 1.1rem; }
   .panel { padding: 0.8rem; border-radius: 10px; }
   .param-grid { grid-template-columns: 1fr; gap: 0.7rem; margin: 0.75rem 0; }
-  .param-grid.selector-grid { grid-template-columns: 1fr; }
   .param input, .param select, .param textarea, textarea { width: 100%; min-width: 0; }
   .summary { max-height: 220px; font-size: 0.74rem; }
   .table-wrap { max-height: 60vh; }

@@ -1,14 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Patterns — Trading Bot{% endblock %}
 {% block content %}
-<section class="panel">
-  <h1>Patterns</h1>
-  <p class="muted small">
-    Read patterns from PostgreSQL, submit an AI edit against a pinned immutable
-    version, and compare the generated candidate with its base on identical
-    frozen inputs. A generated version never becomes the default automatically.
-  </p>
-  <div class="param-grid selector-grid">
+<section class="panel page-head">
+  <div class="page-head-title">
+    <h1>Patterns</h1>
+    <p class="muted small">
+      Pick a base version, describe a change, and compare the candidate with its
+      base on identical frozen inputs. Nothing publishes automatically.
+    </p>
+  </div>
+  <div class="page-head-controls">
     <div class="param">
       <label for="pat-pattern"><strong>Pattern</strong></label>
       <select id="pat-pattern"><option value="">(loading…)</option></select>
@@ -21,7 +22,13 @@
 </section>
 
 <section class="panel">
-  <h2>Versions</h2>
+  <div class="blotter-head">
+    <div>
+      <h2>1 · Base version</h2>
+      <p class="muted small">The edit starts from the version you select here.</p>
+    </div>
+    <span id="pat-action-status" class="muted small">Select a version.</span>
+  </div>
   <div class="table-wrap">
     <table id="pat-versions">
       <thead>
@@ -33,134 +40,166 @@
       <tbody></tbody>
     </table>
   </div>
-  <div class="toolbar">
-    <button class="btn" id="pat-default" type="button">Set default</button>
-    <button class="btn" id="pat-again" type="button">Backtest again</button>
+  <div class="toolbar version-actions">
     <button class="btn" id="pat-editfrom" type="button">Edit from this version</button>
+    <button class="btn" id="pat-default" type="button">Set default</button>
     <button class="btn ghost" id="pat-delete" type="button">Delete version</button>
     <select id="pat-replacement" hidden></select>
-    <span id="pat-action-status" class="muted">Select a version.</span>
   </div>
-  <div class="detail-grid">
-    <div class="param detail-source">
-      <label for="pat-source"><strong>Source</strong></label>
-      <pre id="pat-source" class="summary">—</pre>
+  <details class="details-collapse">
+    <summary>Version details — source · documentation · history · diff vs parent</summary>
+    <div class="detail-grid">
+      <div class="param detail-source">
+        <label for="pat-source"><strong>Source</strong></label>
+        <pre id="pat-source" class="summary">—</pre>
+      </div>
+      <div class="param detail-doc">
+        <label for="pat-doc"><strong>Documentation</strong></label>
+        <pre id="pat-doc" class="summary">—</pre>
+      </div>
+      <div class="param detail-history">
+        <label for="pat-detail"><strong>History / reports</strong></label>
+        <pre id="pat-detail" class="summary">—</pre>
+      </div>
+      <div class="param detail-diff">
+        <label for="pat-diff"><strong>Diff vs parent</strong></label>
+        <pre id="pat-diff" class="summary">—</pre>
+      </div>
     </div>
-    <div class="param detail-doc">
-      <label for="pat-doc"><strong>Documentation</strong></label>
-      <pre id="pat-doc" class="summary">—</pre>
-    </div>
-    <div class="param detail-history">
-      <label for="pat-detail"><strong>History / reports</strong></label>
-      <pre id="pat-detail" class="summary">—</pre>
-    </div>
-    <div class="param detail-diff">
-      <label for="pat-diff"><strong>Diff vs parent</strong></label>
-      <pre id="pat-diff" class="summary">—</pre>
-    </div>
-  </div>
+  </details>
 </section>
 
 <section class="panel">
-  <h2>AI edit</h2>
-  <p id="pat-balance" class="muted small">Provider balance: loading…</p>
+  <div class="blotter-head">
+    <div>
+      <h2>2 · Describe the change</h2>
+      <p class="muted small">What should the AI change about this pattern?</p>
+    </div>
+    <span id="pat-base" class="chip">No base version selected</span>
+  </div>
   <div class="param-grid">
-    <div class="param">
-      <label for="pat-preset"><strong>Saved preset</strong></label>
-      <p class="muted small">
-        Required. A saved historical-stream preset is reused as-is; leave blank to
-        save the settings below as a new preset with the given name.
-      </p>
-      <select id="pat-preset"><option value="">(new preset from form)</option></select>
-    </div>
-    <div class="param">
-      <label for="pat-preset-name"><strong>Preset name</strong></label>
-      <input id="pat-preset-name" type="text" placeholder="patterns smoke" />
-    </div>
-    <div class="param">
-      <label for="pat-market"><strong>Market</strong></label>
-      <select id="pat-market">
-        {% for m in markets %}<option value="{{ m.id }}">{{ m.id }}</option>{% endfor %}
-      </select>
-    </div>
-    <div class="param">
-      <label for="pat-symbols"><strong>Symbols</strong></label>
-      <input id="pat-symbols" type="text" placeholder="CDNS" />
-    </div>
-    <div class="param">
-      <label for="pat-universe"><strong>Universe</strong></label>
-      <input id="pat-universe" type="text" placeholder="(optional)" />
-    </div>
-    {% set kronos_keys = ("kronos_gate", "kronos_rank") %}
-    {% set unsupported = ("kronos_gate", "kronos_rank", "collect_first") %}
-    {% for p in params %}
-    {% if p.key not in ("mode", "timeframe") and (kronos_enabled or p.key not in kronos_keys) %}
-    <div class="param{% if p.key in unsupported %} dimmed{% endif %}" data-key="{{ p.key }}">
-      <label for="pat-{{ p.key }}"><strong>{{ p.label }}</strong></label>
-      <p class="muted small">
-        {% if p.key in unsupported %}Not supported for historical-stream runs in this release.
-        {% else %}{{ p.description }}{% endif %}
-      </p>
-      {% if p.type == "spin" %}
-      <input id="pat-{{ p.key }}" type="number" value="{{ p.default }}"
-             min="{{ p.min }}" max="{{ p.max }}" step="{{ p.step }}"
-             {% if p.key in unsupported %}disabled{% endif %} />
-      {% elif p.type == "check" %}
-      <input id="pat-{{ p.key }}" type="checkbox" {% if p.default %}checked{% endif %}
-             {% if p.key in unsupported %}disabled{% endif %} />
-      {% elif p.type == "combo" %}
-      <select id="pat-{{ p.key }}" {% if p.key in unsupported %}disabled{% endif %}>
-        {% for c in p.choices %}<option value="{{ c }}" {% if c == p.default %}selected{% endif %}>{{ c }}</option>{% endfor %}
-      </select>
-      {% else %}
-      <input id="pat-{{ p.key }}" type="text" value="{{ p.default or '' }}"
-             {% if p.key in unsupported %}disabled{% endif %} />
-      {% endif %}
-    </div>
-    {% endif %}
-    {% endfor %}
     <div class="param param-wide">
       <label for="pat-instruction"><strong>Instruction</strong></label>
       <textarea id="pat-instruction" rows="4"
                 placeholder="Require two closes above the neckline before entry."></textarea>
     </div>
   </div>
-  <div class="toolbar">
-    <button class="btn primary" id="pat-submit" type="button">Submit</button>
+  <div class="param-grid preset-grid">
+    <div class="param">
+      <label for="pat-preset"><strong>Backtest preset</strong></label>
+      <p class="muted small">
+        Reuse a saved preset as-is, or leave blank to save new settings with this run.
+      </p>
+      <select id="pat-preset"><option value="">(new preset from form)</option></select>
+    </div>
+    <div class="param">
+      <label for="pat-preset-name"><strong>New preset name</strong></label>
+      <p class="muted small">Ignored when a saved preset is selected above.</p>
+      <input id="pat-preset-name" type="text" placeholder="patterns smoke" />
+    </div>
+  </div>
+  <details class="details-collapse" id="pat-settings">
+    <summary>Backtest settings — used when saving a new preset</summary>
+    <div class="param-grid">
+      <div class="param">
+        <label for="pat-market"><strong>Market</strong></label>
+        <select id="pat-market">
+          {% for m in markets %}<option value="{{ m.id }}">{{ m.id }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="param">
+        <label for="pat-symbols"><strong>Symbols</strong></label>
+        <input id="pat-symbols" type="text" placeholder="CDNS" />
+      </div>
+      <div class="param">
+        <label for="pat-universe"><strong>Universe</strong></label>
+        <input id="pat-universe" type="text" placeholder="(optional)" />
+      </div>
+      {% set kronos_keys = ("kronos_gate", "kronos_rank") %}
+      {% set unsupported = ("kronos_gate", "kronos_rank", "collect_first") %}
+      {% for p in params %}
+      {% if p.key not in ("mode", "timeframe") and (kronos_enabled or p.key not in kronos_keys) %}
+      <div class="param{% if p.key in unsupported %} dimmed{% endif %}" data-key="{{ p.key }}">
+        <label for="pat-{{ p.key }}"><strong>{{ p.label }}</strong></label>
+        <p class="muted small">
+          {% if p.key in unsupported %}Not supported for historical-stream runs in this release.
+          {% else %}{{ p.description }}{% endif %}
+        </p>
+        {% if p.type == "spin" %}
+        <input id="pat-{{ p.key }}" type="number" value="{{ p.default }}"
+               min="{{ p.min }}" max="{{ p.max }}" step="{{ p.step }}"
+               {% if p.key in unsupported %}disabled{% endif %} />
+        {% elif p.type == "check" %}
+        <input id="pat-{{ p.key }}" type="checkbox" {% if p.default %}checked{% endif %}
+               {% if p.key in unsupported %}disabled{% endif %} />
+        {% elif p.type == "combo" %}
+        <select id="pat-{{ p.key }}" {% if p.key in unsupported %}disabled{% endif %}>
+          {% for c in p.choices %}<option value="{{ c }}" {% if c == p.default %}selected{% endif %}>{{ c }}</option>{% endfor %}
+        </select>
+        {% else %}
+        <input id="pat-{{ p.key }}" type="text" value="{{ p.default or '' }}"
+               {% if p.key in unsupported %}disabled{% endif %} />
+        {% endif %}
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+  </details>
+  <div class="commit-bar">
+    <button class="btn primary" id="pat-submit" type="button">Submit edit</button>
     <button class="btn" id="pat-cancel" type="button" disabled>Cancel edit</button>
     <progress id="pat-progress" max="100" value="0"></progress>
-    <span id="pat-pct">—</span>
-    <span id="pat-state" class="muted">Idle.</span>
-    <span id="pat-job-id" class="muted"></span>
+    <span id="pat-pct" class="muted small">—</span>
+    <span id="pat-state" class="muted small">Idle.</span>
+    <span id="pat-job-id" class="muted small"></span>
+    <span class="spacer"></span>
+    <span id="pat-balance" class="muted small">Provider balance: loading…</span>
   </div>
   <p class="muted small" id="pat-submit-hint">
-    Submit needs a base version, an instruction, and a preset: pick a saved one,
-    or name a new one and fill in symbols plus an end date or session count.
+    Submit needs a base version, an instruction, and a backtest preset: pick a
+    saved one, or name a new one and fill in symbols plus an end date or session count.
   </p>
   <pre id="pat-error" class="summary error" hidden></pre>
-  <h3>Explanation</h3>
-  <pre id="pat-explanation" class="summary">No edit submitted.</pre>
-  <h3>Edit diff</h3>
-  <pre id="pat-edit-diff" class="summary">—</pre>
-  <h3>Diagnostics</h3>
-  <pre id="pat-diagnostics" class="summary">—</pre>
 </section>
 
-<section class="panel">
-  <h2>Candidate vs base</h2>
-  <pre id="pat-comparison" class="summary">No automatic backtest yet.</pre>
-  <h3>Candidate trades</h3>
-  <div class="table-wrap">
-    <table id="pat-trades">
-      <thead>
-        <tr>
-          <th>Date</th><th>Action</th><th>Symbol</th><th>TF</th>
-          <th>Entry</th><th>Exit</th><th>P&amp;L%</th><th>Reason</th><th>Pattern</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
+<section class="panel" id="pat-results">
+  <div class="blotter-head">
+    <div>
+      <h2>3 · Results</h2>
+      <p class="muted small">Explanation, diff and diagnostics for the most recent edit.</p>
+    </div>
+    <button class="btn" id="pat-again" type="button" disabled>Backtest again</button>
   </div>
+  <div class="tabs" role="tablist">
+    <button class="tab active" type="button" data-tab="explanation" role="tab" aria-selected="true">Explanation</button>
+    <button class="tab" type="button" data-tab="diff" role="tab" aria-selected="false">Edit diff</button>
+    <button class="tab" type="button" data-tab="diagnostics" role="tab" aria-selected="false">Diagnostics</button>
+    <button class="tab" type="button" data-tab="comparison" role="tab" aria-selected="false">Candidate vs base</button>
+  </div>
+  <section class="tab-panel active" id="pat-tab-explanation">
+    <pre id="pat-explanation" class="summary">No edit submitted.</pre>
+  </section>
+  <section class="tab-panel" id="pat-tab-diff" hidden>
+    <pre id="pat-edit-diff" class="summary">—</pre>
+  </section>
+  <section class="tab-panel" id="pat-tab-diagnostics" hidden>
+    <pre id="pat-diagnostics" class="summary">—</pre>
+  </section>
+  <section class="tab-panel" id="pat-tab-comparison" hidden>
+    <pre id="pat-comparison" class="summary">No automatic backtest yet.</pre>
+    <h3>Candidate trades</h3>
+    <div class="table-wrap">
+      <table id="pat-trades">
+        <thead>
+          <tr>
+            <th>Date</th><th>Action</th><th>Symbol</th><th>TF</th>
+            <th>Entry</th><th>Exit</th><th>P&amp;L%</th><th>Reason</th><th>Pattern</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
 </section>
 {% endblock %}
 {% block scripts %}
@@ -170,5 +209,5 @@
   window.TB_DEFAULT_MARKET = {{ default_market | tojson }};
   window.TB_STREAM_START = {{ stream_start_default | tojson }};
 </script>
-<script src="/static/patterns.js?v=4"></script>
+<script src="/static/patterns.js?v=5"></script>
 {% endblock %}
