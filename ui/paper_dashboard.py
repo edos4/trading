@@ -86,9 +86,10 @@ class MarketBookFrame(ttk.LabelFrame):
         self.n_var = tk.IntVar(value=profile.default_n_symbols)
         self.extra_var = tk.StringVar(value="")
         self.stream_var = tk.BooleanVar(value=False)
-        self.kronos_gate_var = tk.BooleanVar(value=profile.kronos_gate_default)
-        self.kronos_rank_var = tk.BooleanVar(value=profile.kronos_rank_default)
-        self.kronos_batch_var = tk.BooleanVar(value=settings.kronos_batch_enabled)
+        kronos = settings.enable_kronos
+        self.kronos_gate_var = tk.BooleanVar(value=kronos and profile.kronos_gate_default)
+        self.kronos_rank_var = tk.BooleanVar(value=kronos and profile.kronos_rank_default)
+        self.kronos_batch_var = tk.BooleanVar(value=kronos and settings.kronos_batch_enabled)
         self.volume_gate_var = tk.BooleanVar(value=settings.volume_gate_enabled)
         self.collect_first_var = tk.BooleanVar(value=settings.collect_first_enabled)
         self.collect_first_top_n_var = tk.IntVar(value=settings.collect_first_top_n)
@@ -134,17 +135,19 @@ class MarketBookFrame(ttk.LabelFrame):
         ttk.Checkbutton(
             flags, text="Pattern-only", variable=self.pattern_only_var,
         ).pack(side=tk.LEFT)
-        ttk.Checkbutton(
-            flags, text="Kronos 3d gate", variable=self.kronos_gate_var,
-            command=self._sync_batch_kronos,
-        ).pack(side=tk.LEFT, padx=(8, 0))
-        ttk.Checkbutton(
-            flags, text="Kronos rank", variable=self.kronos_rank_var,
-            command=self._sync_batch_kronos,
-        ).pack(side=tk.LEFT, padx=(8, 0))
-        self._batch_kronos_cb = ttk.Checkbutton(
-            flags, text="Batch Kronos", variable=self.kronos_batch_var,
-        )
+        self._batch_kronos_cb: Optional[ttk.Checkbutton] = None
+        if settings.enable_kronos:
+            ttk.Checkbutton(
+                flags, text="Kronos 3d gate", variable=self.kronos_gate_var,
+                command=self._sync_batch_kronos,
+            ).pack(side=tk.LEFT, padx=(8, 0))
+            ttk.Checkbutton(
+                flags, text="Kronos rank", variable=self.kronos_rank_var,
+                command=self._sync_batch_kronos,
+            ).pack(side=tk.LEFT, padx=(8, 0))
+            self._batch_kronos_cb = ttk.Checkbutton(
+                flags, text="Batch Kronos", variable=self.kronos_batch_var,
+            )
         self._volume_gate_cb = ttk.Checkbutton(
             flags, text="Volume gate", variable=self.volume_gate_var,
         )
@@ -172,6 +175,8 @@ class MarketBookFrame(ttk.LabelFrame):
         self._sync_batch_kronos()
 
     def _sync_batch_kronos(self) -> None:
+        if self._batch_kronos_cb is None:
+            return
         if self.kronos_gate_var.get() or self.kronos_rank_var.get():
             self._batch_kronos_cb.pack(
                 side=tk.LEFT, padx=(8, 0), before=self._volume_gate_cb,

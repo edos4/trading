@@ -220,7 +220,12 @@ def create_app() -> FastAPI:
     app.mount("/static", StaticFiles(directory=str(ROOT / "static")), name="static")
 
     def ctx(request: Request, **extra: Any) -> dict[str, Any]:
-        return {"request": request, "user": current_username(request), **extra}
+        return {
+            "request": request,
+            "user": current_username(request),
+            "kronos_enabled": settings.enable_kronos,
+            **extra,
+        }
 
     def render(request: Request, name: str, *, status_code: int = 200, **extra: Any):
         return templates.TemplateResponse(
@@ -268,12 +273,13 @@ def create_app() -> FastAPI:
     # ── Pages ─────────────────────────────────────────────────────────────
     @app.get("/", response_class=HTMLResponse)
     async def explorer_page(request: Request, _user: str = Depends(require_login)):
+        kronos = settings.enable_kronos
         return render(
             request,
             "explorer.html",
             active="explorer",
-            kronos_gate=default_market().kronos_gate_default,
-            kronos_batch=settings.kronos_batch_enabled,
+            kronos_gate=kronos and default_market().kronos_gate_default,
+            kronos_batch=kronos and settings.kronos_batch_enabled,
             volume_gate=settings.volume_gate_enabled,
             default_market=default_market().id,
             markets=markets_payload(),
@@ -311,6 +317,8 @@ def create_app() -> FastAPI:
 
     @app.get("/kronos", response_class=HTMLResponse)
     async def kronos_page(request: Request, _user: str = Depends(require_login)):
+        if not settings.enable_kronos:
+            return JSONResponse({"detail": "Not found."}, status_code=404)
         return render(
             request,
             "kronos.html",
@@ -438,14 +446,15 @@ def create_app() -> FastAPI:
             return JSONResponse({"detail": str(exc)}, status_code=400)
         if payload.timeframe not in TIMEFRAMES:
             return JSONResponse({"detail": "Invalid timeframe"}, status_code=400)
+        kronos = settings.enable_kronos
         try:
             result = get_explorer().load_symbol(
                 payload.symbol.upper().strip(),
                 payload.exchange.upper().strip(),
                 payload.timeframe,
                 run_patterns=payload.run_patterns,
-                kronos_gate=payload.kronos_gate,
-                kronos_batch=payload.kronos_batch,
+                kronos_gate=payload.kronos_gate if kronos else False,
+                kronos_batch=payload.kronos_batch if kronos else False,
                 volume_gate=payload.volume_gate,
                 market=payload.market,
             )
@@ -817,14 +826,16 @@ def create_app() -> FastAPI:
         return await asyncio.to_thread(paper_books.snapshot_all)
 
     def _start_book(payload: PaperStartRequest, market: str) -> str | None:
+        # A hidden Kronos control can never enable the gate: force it off.
+        kronos = settings.enable_kronos
         return paper_books.start(
             market,
             payload.n_symbols,
             extra_symbols=payload.extra_symbols,
             use_stream=payload.use_stream,
-            kronos_gate=payload.kronos_gate,
-            kronos_rank=payload.kronos_rank,
-            kronos_batch=payload.kronos_batch,
+            kronos_gate=payload.kronos_gate and kronos,
+            kronos_rank=payload.kronos_rank and kronos,
+            kronos_batch=payload.kronos_batch and kronos,
             volume_gate=payload.volume_gate,
             pattern_only=payload.pattern_only,
             collect_first=payload.collect_first,
@@ -872,6 +883,11 @@ def create_app() -> FastAPI:
             specs["ph"] = payload.ph.model_dump()
         if not specs:
             return JSONResponse({"detail": "us and/or ph start payload required."}, status_code=400)
+        if not settings.enable_kronos:
+            for spec in specs.values():
+                spec["kronos_gate"] = False
+                spec["kronos_rank"] = False
+                spec["kronos_batch"] = False
         errors = paper_books.start_both(specs)
         if errors and len(errors) == len(specs):
             return JSONResponse({"ok": False, "errors": errors}, status_code=409)
@@ -1042,6 +1058,8 @@ def create_app() -> FastAPI:
 
     @app.post("/api/kronos/predict")
     async def api_kronos_predict(request: Request, _user: str = Depends(require_login)):
+        if not settings.enable_kronos:
+            return JSONResponse({"detail": "Not found."}, status_code=404)
         try:
             body = KronosPredictRequest.model_validate(await _json_body(request))
         except ValueError as exc:
