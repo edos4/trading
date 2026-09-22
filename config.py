@@ -123,6 +123,15 @@ class Settings(BaseSettings):
     tv_screener_max_retries: int = 5
     tv_screener_retry_backoff_seconds: float = 2.0
 
+    # ── Kronos feature switch ──────────────────────────────────────────────
+    # Master switch for the Kronos forecast feature. When false (the
+    # default), the desktop (--ui) and web (--web) frontends hide every
+    # Kronos control and never enable the Kronos gate/rank — a hidden gate
+    # cannot be re-enabled from either UI. Set ENABLE_KRONOS=true to expose
+    # the Kronos controls again. The CLI flags (--kronos-test/--kronos-gate)
+    # are unaffected.
+    enable_kronos: bool = False
+
     # ── Kronos confirm gate (core/kronos_gate.py) ───────────────────────────
     # After a chart pattern fires, require Kronos 3-trading-day forecast to agree
     # on direction and clear 3% in those 3 days (kronos_min_move_pct). Not a

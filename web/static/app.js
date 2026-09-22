@@ -133,14 +133,15 @@ function initExplorer() {
     renderList();
     status.textContent = `Loading ${row.symbol}...`;
     header.textContent = `${row.symbol} | loading...`;
+    const kronosGate = document.getElementById("kronos-gate");
+    const kronosBatch = document.getElementById("kronos-batch");
     const body = {
       symbol: row.symbol,
       exchange: row.exchange,
       timeframe: document.getElementById("timeframe").value,
       run_patterns: document.getElementById("run-patterns").checked,
-      kronos_gate: document.getElementById("kronos-gate").checked,
-      kronos_batch: document.getElementById("kronos-gate").checked
-        && !!(document.getElementById("kronos-batch") || {}).checked,
+      kronos_gate: !!(kronosGate && kronosGate.checked),
+      kronos_batch: !!(kronosGate && kronosGate.checked && kronosBatch && kronosBatch.checked),
       volume_gate: document.getElementById("volume-gate").checked,
       market: (document.getElementById("market") || {}).value || "",
     };
@@ -190,8 +191,11 @@ function initExplorer() {
       const spec = (window.TB_MARKETS || []).find((m) => m.id === id);
       if (spec) {
         document.getElementById("count").value = spec.default_n_symbols;
-        document.getElementById("kronos-gate").checked = !!spec.kronos_gate;
-        syncExplorerBatchKronos();
+        const gateEl = document.getElementById("kronos-gate");
+        if (gateEl) {
+          gateEl.checked = !!spec.kronos_gate;
+          syncExplorerBatchKronos();
+        }
       }
       refreshSymbols().catch((e) => {
         status.textContent = String(e.message || e);

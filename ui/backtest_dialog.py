@@ -125,11 +125,15 @@ class BacktestDialog:
         for c in range(10):
             frame.columnconfigure(c, weight=0, pad=8)
 
+        hide_kronos = () if settings.enable_kronos else ("kronos_gate", "kronos_rank")
         entries = [
             ("mode", "Mode",
              "offline replays the full tape; historical-stream replays session-by-session like paper.",
              "combo", "offline", ["offline", "historical-stream"]),
-        ] + [e for e in REPLAY_PARAMS if e[0] not in self.STREAM_SKIP]
+        ] + [
+            e for e in REPLAY_PARAMS
+            if e[0] not in self.STREAM_SKIP and e[0] not in hide_kronos
+        ]
         self._stream_entries = entries
         row = 0
         for i, entry in enumerate(entries):

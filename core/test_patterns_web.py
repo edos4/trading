@@ -71,6 +71,7 @@ def patterns_web(published_pattern_catalog, edit_doubles, sandbox_double):
             mock.web_ui_secret_key = "test-secret-key"
             mock.web_ui_https = False
             mock.web_ui_session_hours = 12
+            mock.enable_kronos = True
             mock.kronos_gate_enabled = True
             mock.volume_gate_enabled = False
             mock.papertrade_stream_start_date = ""

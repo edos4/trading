@@ -63,6 +63,7 @@ class TradingBotUI:
 
         profile = default_market()
         self._market = profile.id
+        self._kronos_enabled = settings.enable_kronos
         self._tv = TVClient(
             profile.tv_screener,
             profile.tv_exchange,
@@ -100,7 +101,8 @@ class TradingBotUI:
         ttk.Button(toolbar, text="Refresh symbols", command=self._load_symbols_threaded).pack(side=tk.LEFT)
         ttk.Button(toolbar, text="Backtest", command=self._open_backtest_dialog).pack(side=tk.LEFT, padx=(6, 0))
         ttk.Button(toolbar, text="Paper Trading", command=self._open_paper_dashboard).pack(side=tk.LEFT, padx=(6, 0))
-        ttk.Button(toolbar, text="Kronos", command=self._open_kronos_dialog).pack(side=tk.LEFT, padx=(6, 0))
+        if self._kronos_enabled:
+            ttk.Button(toolbar, text="Kronos", command=self._open_kronos_dialog).pack(side=tk.LEFT, padx=(6, 0))
         ttk.Button(toolbar, text="Patterns", command=self._open_patterns_dialog).pack(side=tk.LEFT, padx=(6, 0))
         self._lamp_us = tk.StringVar(value="US ○")
         self._lamp_ph = tk.StringVar(value="PH ○")
@@ -137,15 +139,21 @@ class TradingBotUI:
         ttk.Entry(toolbar, textvariable=self.filter_var, width=10).pack(side=tk.LEFT)
         self.run_patterns_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(toolbar, text="Run patterns", variable=self.run_patterns_var).pack(side=tk.LEFT, padx=(12, 0))
-        self.kronos_gate_var = tk.BooleanVar(value=default_market().kronos_gate_default)
-        ttk.Checkbutton(
-            toolbar, text="Kronos 3d gate", variable=self.kronos_gate_var,
-            command=self._sync_batch_kronos,
-        ).pack(side=tk.LEFT, padx=(12, 0))
-        self.kronos_batch_var = tk.BooleanVar(value=settings.kronos_batch_enabled)
-        self._batch_kronos_cb = ttk.Checkbutton(
-            toolbar, text="Batch Kronos", variable=self.kronos_batch_var,
+        self.kronos_gate_var = tk.BooleanVar(
+            value=self._kronos_enabled and default_market().kronos_gate_default
         )
+        self.kronos_batch_var = tk.BooleanVar(
+            value=self._kronos_enabled and settings.kronos_batch_enabled
+        )
+        self._batch_kronos_cb: Optional[ttk.Checkbutton] = None
+        if self._kronos_enabled:
+            ttk.Checkbutton(
+                toolbar, text="Kronos 3d gate", variable=self.kronos_gate_var,
+                command=self._sync_batch_kronos,
+            ).pack(side=tk.LEFT, padx=(12, 0))
+            self._batch_kronos_cb = ttk.Checkbutton(
+                toolbar, text="Batch Kronos", variable=self.kronos_batch_var,
+            )
         self.volume_gate_var = tk.BooleanVar(value=settings.volume_gate_enabled)
         self._volume_gate_cb = ttk.Checkbutton(
             toolbar, text="Volume gate", variable=self.volume_gate_var,
@@ -262,6 +270,8 @@ class TradingBotUI:
 
     # Symbol selection -> load chart + patterns
     def _sync_batch_kronos(self) -> None:
+        if self._batch_kronos_cb is None:
+            return
         if self.kronos_gate_var.get():
             self._batch_kronos_cb.pack(
                 side=tk.LEFT, padx=(12, 0), before=self._volume_gate_cb,
@@ -278,7 +288,7 @@ class TradingBotUI:
             session_tz=profile.session_tz,
         )
         self._renderer = ChartRenderer(save_to_disk=False, session_tz=profile.session_tz)
-        self.kronos_gate_var.set(profile.kronos_gate_default)
+        self.kronos_gate_var.set(self._kronos_enabled and profile.kronos_gate_default)
         self._sync_batch_kronos()
         self.count_var.set(profile.default_n_symbols)
         self._load_symbols_threaded()

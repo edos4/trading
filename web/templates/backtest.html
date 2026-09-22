@@ -51,8 +51,9 @@
         <option value="historical-stream">historical-stream</option>
       </select>
     </div>
+    {% set kronos_keys = ("kronos_gate", "kronos_rank") %}
     {% for p in replay_params %}
-    {% if p.key not in ("mode", "timeframe") %}
+    {% if p.key not in ("mode", "timeframe") and (kronos_enabled or p.key not in kronos_keys) %}
     <div class="param" data-key="{{ p.key }}">
       <label for="sr-{{ p.key }}"><strong>{{ p.label }}</strong></label>
       <p class="muted small">{{ p.description }}</p>

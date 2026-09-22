@@ -91,9 +91,10 @@
       <label for="pat-universe"><strong>Universe</strong></label>
       <input id="pat-universe" type="text" placeholder="(optional)" />
     </div>
+    {% set kronos_keys = ("kronos_gate", "kronos_rank") %}
     {% set unsupported = ("kronos_gate", "kronos_rank", "collect_first") %}
     {% for p in params %}
-    {% if p.key not in ("mode", "timeframe") %}
+    {% if p.key not in ("mode", "timeframe") and (kronos_enabled or p.key not in kronos_keys) %}
     <div class="param{% if p.key in unsupported %} dimmed{% endif %}" data-key="{{ p.key }}">
       <label for="pat-{{ p.key }}"><strong>{{ p.label }}</strong></label>
       <p class="muted small">
