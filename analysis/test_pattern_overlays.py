@@ -34,8 +34,10 @@ def test_saved_reversal_pivots_become_yellow_outlines(parts):
         {"time": str(df.index[i].date()), "value": price} for i, price, _ in parts
     ]
     assert all(s["color"] == ANN_PATTERN for s in payload["segments"])
+    pivots = [m for m in payload["markers"] if not str(m["text"]).startswith("Pattern start")]
     assert all(m["color"] == ANN_PATTERN and m["price"] == price
-               for m, (_, price, _) in zip(payload["markers"], parts))
+               for m, (_, price, _) in zip(pivots, parts))
+    assert any(str(m["text"]).startswith("Pattern start") for m in payload["markers"])
     assert any("First" in m["text"] or "Left shoulder" == m["text"] for m in payload["markers"])
     upgraded = pattern_annotations(anns)
     assert pattern_annotations(upgraded) == upgraded
@@ -140,6 +142,37 @@ def test_detected_pennant_saves_both_converging_rails():
     payload = build_trade_viewer_payload(df, symbol="TEST", pattern=signal.pattern, annotations=signal.chart_annotations)
     assert {s["label"] for s in payload["segments"]} == {"Pole", "Upper pennant fit", "Lower pennant fit"}
     assert all(s["color"] == ANN_PATTERN for s in payload["segments"])
+
+
+def test_flat_pole_after_a_crash_is_not_a_pennant():
+    """RKDA: the drop is over before the drawn pole, which then drifts flat."""
+    import importlib
+    module = importlib.import_module("patterns.010_pennant")
+    df = frame(50)
+    df.loc[:, ["open", "close"]] = 1.0
+    df.loc[:, "high"], df.loc[:, "low"] = 1.02, 0.98
+    df.loc[:, "volume"] = 1000
+    # Prior close 0.70, then a 10-bar "pole" from 0.57 to 0.515 with the
+    # trough in the middle. Old gate counted 0.70 -> 0.515 and kept it.
+    pole = df.index[25:35]
+    df.loc[df.index[24], ["open", "high", "low", "close", "volume"]] = [0.72, 0.75, 0.68, 0.70, 4000]
+    df.loc[pole, "close"] = np.linspace(0.57, 0.515, len(pole))
+    df.loc[pole, "open"] = df.loc[pole, "close"]
+    df.loc[pole, "high"] = df.loc[pole, "close"] + 0.04
+    df.loc[pole, "low"] = df.loc[pole, "close"] - 0.03
+    df.loc[pole[2], ["low", "close"]] = [0.38, 0.42]
+    df.loc[pole, "volume"] = 4000
+    coil = df.index[35:45]
+    df.loc[coil, "high"] = np.linspace(0.55, 0.47, len(coil))
+    df.loc[coil, "low"] = np.linspace(0.49, 0.45, len(coil))
+    df.loc[coil, "close"] = 0.50
+    df.loc[coil, "volume"] = 400
+    df.loc[df.index[45], ["open", "high", "low", "close", "volume"]] = [0.46, 0.46, 0.40, 0.41, 2000]
+    signal = module.PennantPattern().analyze(
+        SimpleNamespace(symbol="RKDA", timeframe="1d"),
+        SimpleNamespace(get_df=lambda *a, **kw: df),
+    )
+    assert signal is None
 
 
 def test_viewer_payload_carries_part_reasons(published_pattern_catalog, monkeypatch):

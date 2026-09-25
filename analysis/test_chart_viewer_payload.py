@@ -93,6 +93,55 @@ def test_viewer_payload_dedupes_duplicate_session_bars() -> None:
     assert closes_by_time["2024-07-02"] == 11.0
 
 
+def test_action_marker_stays_on_its_session_date() -> None:
+    """13:30 UTC is closer to the next midnight than to its own session open."""
+    ts = pd.DatetimeIndex([
+        datetime(2026, 9, 14, 13, 30, tzinfo=timezone.utc),
+        datetime(2026, 9, 15, 13, 30, tzinfo=timezone.utc),
+        datetime(2026, 9, 16, 13, 30, tzinfo=timezone.utc),
+    ])
+    closes = [1.725, 1.17, 1.24]
+    df = pd.DataFrame({
+        "open": closes, "high": [c + 0.1 for c in closes],
+        "low": [c - 0.1 for c in closes], "close": closes,
+        "volume": [1_000_000] * 3,
+    }, index=ts)
+    payload = build_trade_viewer_payload(
+        df, symbol="CNTB", action="SELL", session_tz="America/New_York",
+        entry=1.725, entry_time="2026-09-14T13:30:00+00:00",
+        exit_price=1.2285, exit_time="2026-09-16T13:30:00+00:00",
+        exit_reason="trailing_stop",
+    )
+    texts = {m["text"]: m["time"] for m in payload["markers"]}
+    assert texts["SELL"] == "2026-09-14"
+    assert texts["trailing_stop"] == "2026-09-16"
+
+
+def test_pattern_start_is_a_yellow_marker_on_the_first_anchor() -> None:
+    from patterns.base_pattern import ann_marker, ann_segment
+    idx = pd.bdate_range("2024-01-02", periods=30)
+    df = pd.DataFrame({
+        "open": 10.0, "high": 11.0, "low": 9.0, "close": 10.0, "volume": 1000,
+    }, index=idx)
+    start = str(idx[4].date())
+    payload = build_trade_viewer_payload(
+        df, symbol="TEST", pattern="pattern_010_pennant", action="SELL",
+        annotations=[
+            ann_marker(start, 10.0, "pole start", "#ffeb3b"),
+            ann_marker(str(idx[8].date()), 12.0, "pole", "#ffeb3b"),
+            ann_segment(start, str(idx[8].date()), 10.0, 12.0, "#ffeb3b", label="Pole"),
+            ann_marker(str(idx[14].date()), 9.0, "entry", "#ffeb3b"),
+        ],
+        entry_time=idx[14],
+    )
+    starts = [m for m in payload["markers"] if str(m["text"]).startswith("Pattern start")]
+    assert len(starts) == 1
+    assert starts[0]["time"] == start
+    assert starts[0]["color"] == "#ffeb3b"
+    assert starts[0]["price"] == 10.0
+    assert payload["pattern_note"] == f"Yellow: detected pattern · started {start}"
+
+
 def test_pattern_geometry_keeps_old_trade_in_view():
     from patterns.base_pattern import ann_segment, ann_marker, ann_hline
     idx = pd.bdate_range("2020-01-01", periods=800)

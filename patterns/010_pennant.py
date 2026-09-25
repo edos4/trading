@@ -97,13 +97,21 @@ class PennantPattern(BasePattern):
                 start_idx = end_idx - flag_len + 1
                 if start_idx - 21 < 0:
                     continue
-                pre, post = close[start_idx - 1], close[end_idx]
-                if pre <= 0:
+                post = close[end_idx]
+                start_px = close[start_idx]
+                if start_px <= 0:
                     continue
-                ret = (post - pre) / pre
+                # The drawn pole is close[start] -> close[end]. A drop that
+                # already happened on the prior bar must not leave a flat line.
+                ret = (post - start_px) / start_px
                 if abs(ret) < FLAG_MIN_RET:
                     continue
                 direction = "bull" if ret > 0 else "bear"
+                # Coil starts the next bar, so the extreme is the last 1-2 pole bars.
+                span = high[start_idx:end_idx + 1] if direction == "bull" else low[start_idx:end_idx + 1]
+                extreme = int(np.argmax(span) if direction == "bull" else np.argmin(span))
+                if extreme < flag_len - 2:
+                    continue
 
                 flag_vol = vol[start_idx:end_idx + 1].mean()
                 prior_vol = vol[start_idx - 21:start_idx - 1].mean()

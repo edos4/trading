@@ -642,22 +642,55 @@ def _viewer_finite(value) -> float | None:
     return number
 
 
-def _nearest_viewer_time(index: pd.Index, when) -> str | None:
+def _nearest_viewer_time(index: pd.Index, when, session_tz: str = "America/New_York") -> str | None:
+    """Map a fill timestamp onto the session bar it belongs to.
+
+    Candle indexes are session midnights. A 13:30 UTC print is closer to the
+    next midnight than to its own, so a raw nearest-midnight lookup lands the
+    BUY/SELL arrow on the following session.
+    """
     if when is None or len(index) == 0:
         return None
     ts = pd.Timestamp(when)
-    idx_tz = getattr(index, "tz", None)
-    if idx_tz is not None and ts.tzinfo is None:
-        ts = ts.tz_localize(idx_tz)
-    elif idx_tz is None and ts.tzinfo is not None:
-        ts = ts.tz_convert("UTC").tz_localize(None)
+    if ts.tzinfo is not None:
+        ts = ts.tz_convert(session_tz).tz_localize(None)
+    session_day = ts.normalize()
     try:
-        loc = index.get_indexer([ts], method="nearest")[0]
+        loc = index.get_indexer([session_day], method="nearest")[0]
     except Exception:
         return None
     if loc < 0:
         return None
     return _viewer_bar_time(index[loc])
+
+
+def _pattern_start_point(markers: list[dict], segments: list[dict]) -> tuple[str, float] | None:
+    """Earliest saved pattern anchor — the bar the geometry begins on."""
+    points: list[tuple[str, float]] = []
+    for marker in markers:
+        text = str(marker.get("text") or "")
+        price = marker.get("price")
+        if price is None or text in {"Entry", "BUY", "SELL"} or not text:
+            continue
+        points.append((marker["time"], float(price)))
+    for segment in segments:
+        data = segment.get("data") or []
+        if data and segment.get("label"):
+            points.append((data[0]["time"], float(data[0]["value"])))
+    if not points:
+        return None
+    return min(points, key=lambda item: item[0])
+
+
+def _pattern_note(segments: list[dict], started: tuple[str, float] | None, pattern: str | None) -> str:
+    if segments or started:
+        note = "Yellow: detected pattern"
+        if started:
+            note += f" · started {started[0]}"
+        return note
+    if pattern:
+        return "Pattern geometry unavailable for this saved detection."
+    return ""
 
 
 def build_trade_viewer_payload(
@@ -749,7 +782,7 @@ def build_trade_viewer_payload(
         levels.append({"price": float(current), "title": "last", "color": TV_TEXT})
 
     markers = []
-    entry_bar = _nearest_viewer_time(df.index, entry_time)
+    entry_bar = _nearest_viewer_time(df.index, entry_time, session_tz)
     if entry_bar and action:
         is_buy = str(action).upper() == "BUY"
         markers.append({
@@ -759,7 +792,7 @@ def build_trade_viewer_payload(
             "shape": "arrowUp" if is_buy else "arrowDown",
             "text": str(action).upper(),
         })
-    exit_bar = _nearest_viewer_time(df.index, exit_time)
+    exit_bar = _nearest_viewer_time(df.index, exit_time, session_tz)
     if exit_bar and exit_price is not None:
         markers.append({
             "time": exit_bar,
@@ -812,6 +845,22 @@ def build_trade_viewer_payload(
                 if ann.get("label") == "Entry" and time == entry_bar and action:
                     continue
                 markers.append({"time": time, "price": price, "position": "belowBar" if ann.get("label_pos") == "below" else "aboveBar", "color": color, "shape": {"^": "arrowUp", "v": "arrowDown"}.get(ann.get("marker"), "circle"), "text": ann.get("label", ""), "reason": ann.get("reason", "")})
+    started = _pattern_start_point(markers, segments)
+    if started and not any(str(m.get("text", "")).startswith("Pattern start") for m in markers):
+        start_time, start_price = started
+        above = any(
+            m.get("time") == start_time and m.get("position") == "aboveBar" and m.get("price") is not None
+            for m in markers
+        )
+        markers.append({
+            "time": start_time,
+            "price": start_price,
+            "position": "belowBar" if above else "aboveBar",
+            "color": "#ffeb3b",
+            "shape": "circle",
+            "text": f"Pattern start {start_time}",
+            "reason": "",
+        })
     markers.sort(key=lambda marker: marker["time"])
     title = f"{symbol} {renderer._tv_timeframe_label(timeframe)}"
     if pattern:
@@ -839,10 +888,7 @@ def build_trade_viewer_payload(
         "levels": levels,
         "markers": markers,
         "segments": segments,
-        "pattern_note": (
-            "Yellow: detected pattern" if segments else
-            "Pattern geometry unavailable for this saved detection." if pattern else ""
-        ),
+        "pattern_note": _pattern_note(segments, started, pattern),
     }
 
 
