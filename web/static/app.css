@@ -433,6 +433,10 @@ progress::-moz-progress-bar { background: var(--accent); border-radius: 999px; }
   margin: 0;
   padding: 0 0.9rem 0.35rem;
 }
+#paper-chart-status.pattern-note,
+#replay-chart-status.pattern-note {
+  color: #ffeb3b;
+}
 
 .session-strip {
   display: flex;

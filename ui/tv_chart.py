@@ -82,10 +82,11 @@ class TradingViewChart(tk.Frame):
             font=("Trebuchet MS", 10), anchor="w",
         )
         self._ohlc_label.pack(fill=tk.X)
-        tk.Label(
+        self._legend_label = tk.Label(
             self._header, textvariable=self._legend_var, fg=TV_DIM, bg=TV_BG,
             font=("Trebuchet MS", 9), anchor="w",
-        ).pack(fill=tk.X)
+        )
+        self._legend_label.pack(fill=tk.X)
 
         tools = tk.Frame(self._header, bg=TV_BG)
         tools.pack(fill=tk.X, pady=(4, 0))
@@ -156,10 +157,15 @@ class TradingViewChart(tk.Frame):
             )
         else:
             self._legend_var.set(self._default_legend)
-        if payload.get("segments"):
+        note = payload.get("pattern_note") or ""
+        if note:
+            self._legend_var.set(note + "    " + self._legend_var.get())
+            self._legend_label.configure(fg="#ffeb3b" if note.startswith("Yellow:") else TV_DIM)
+        elif payload.get("segments"):
             self._legend_var.set("Yellow: detected pattern    " + self._legend_var.get())
-        elif payload.get("pattern_note"):
-            self._legend_var.set(payload["pattern_note"] + "    " + self._legend_var.get())
+            self._legend_label.configure(fg="#ffeb3b")
+        else:
+            self._legend_label.configure(fg=TV_DIM)
         self._set_ohlc_label(self._candles[-1] if self._candles else None, from_last=True)
         self._redraw()
 

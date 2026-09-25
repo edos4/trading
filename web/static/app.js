@@ -929,6 +929,7 @@ function initPaper() {
     if (chartOhlc) chartOhlc.textContent = "";
     if (chartStatus) {
       chartStatus.hidden = false;
+      chartStatus.classList.remove("pattern-note");
       chartStatus.textContent = "Loading…";
     }
     const params = new URLSearchParams({ side, market: market || "" });
@@ -972,10 +973,12 @@ function initPaper() {
       if (chartStatus) {
         chartStatus.textContent = data.pattern_note || "";
         chartStatus.hidden = !data.pattern_note;
+        chartStatus.classList.toggle("pattern-note", Boolean(data.pattern_note));
       }
     } catch (e) {
       if (chartStatus) {
         chartStatus.hidden = false;
+        chartStatus.classList.remove("pattern-note");
         chartStatus.textContent = String(e.message || e);
       }
     }
@@ -1629,12 +1632,14 @@ function initReplay() {
     if (chartOhlc) chartOhlc.textContent = "";
     if (chartStatus) {
       chartStatus.hidden = false;
+      chartStatus.classList.remove("pattern-note");
       chartStatus.textContent = "Loading…";
     }
   }
   function showChartError(e) {
     if (chartStatus) {
       chartStatus.hidden = false;
+      chartStatus.classList.remove("pattern-note");
       chartStatus.textContent = String(e.message || e);
     }
   }
@@ -1673,6 +1678,7 @@ function initReplay() {
     if (chartStatus) {
       chartStatus.textContent = data.pattern_note || "";
       chartStatus.hidden = !data.pattern_note;
+      chartStatus.classList.toggle("pattern-note", Boolean(data.pattern_note));
     }
   }
   // Exported `opened`/`closed` are wall-clock fill times when the replay ran,
