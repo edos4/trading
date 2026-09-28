@@ -222,17 +222,43 @@ class BacktestRequest(Contract):
         return self
 
 
+class ChartCandle(Contract):
+    time: str
+    open: float
+    high: float
+    low: float
+    close: float
+
+
+class ChartEditContext(BaseModel):
+    """Only actual chart data goes to the provider; forecasts are excluded."""
+    model_config = ConfigDict(allow_inf_nan=False)
+    symbol: Identifier
+    pattern: Identifier
+    pattern_version_id: Identifier | None = None
+    market: Literal["us", "ph"]
+    timeframe: Identifier = "1d"
+    candles: Annotated[list[ChartCandle], Field(min_length=2, max_length=10000)]
+    volume: Annotated[list[dict], Field(max_length=10000)] = []
+    segments: Annotated[list[dict], Field(max_length=1000)] = []
+    markers: Annotated[list[dict], Field(max_length=1000)] = []
+    levels: Annotated[list[dict], Field(max_length=1000)] = []
+
+
 class EditRequest(Contract):
     idempotency_key: Identifier
     pattern_id: Identifier
     base_version_id: Identifier
     instruction: Annotated[str, Field(min_length=1, max_length=16000)]
     preset: BacktestPreset
+    chart_context: ChartEditContext | None = None
 
     @model_validator(mode="after")
     def usable_edit(self):
         if not self.instruction.strip():
             raise ValueError("Instruction is blank")
+        if self.chart_context and self.chart_context.pattern != self.pattern_id:
+            raise ValueError("Chart pattern does not match the selected pattern")
         if self.preset.settings.mode != "historical-stream":
             raise ValueError("Automatic edits require a historical-stream preset")
         return self

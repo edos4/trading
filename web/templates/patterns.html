@@ -42,8 +42,8 @@
   </div>
   <div class="toolbar version-actions">
     <button class="btn" id="pat-editfrom" type="button">Edit from this version</button>
-    <button class="btn" id="pat-default" type="button">Set default</button>
-    <button class="btn ghost" id="pat-delete" type="button">Delete version</button>
+    <button class="btn" id="pat-default" type="button">Save / use version</button>
+    <button class="btn ghost" id="pat-delete" type="button">Reject / archive</button>
     <select id="pat-replacement" hidden></select>
   </div>
   <details class="details-collapse">
@@ -74,6 +74,7 @@
     <div>
       <h2>2 · Describe the change</h2>
       <p class="muted small">What should the AI change about this pattern?</p>
+      <p class="muted small" id="pat-context"></p>
     </div>
     <span id="pat-base" class="chip">No base version selected</span>
   </div>
@@ -99,7 +100,7 @@
     </div>
   </div>
   <details class="details-collapse" id="pat-settings">
-    <summary>Backtest settings — used when saving a new preset</summary>
+    <summary>Backtest dates and symbols — used for new presets and Backtest again</summary>
     <div class="param-grid">
       <div class="param">
         <label for="pat-market"><strong>Market</strong></label>
@@ -137,7 +138,7 @@
           {% for c in p.choices %}<option value="{{ c }}" {% if c == p.default %}selected{% endif %}>{{ c }}</option>{% endfor %}
         </select>
         {% else %}
-        <input id="pat-{{ p.key }}" type="text" value="{{ p.default or '' }}"
+        <input id="pat-{{ p.key }}" type="{{ 'date' if p.key in ('start_date', 'end_date') else 'text' }}" value="{{ p.default or '' }}"
                {% if p.key in unsupported %}disabled{% endif %} />
         {% endif %}
       </div>
@@ -157,7 +158,7 @@
   </div>
   <p class="muted small" id="pat-submit-hint">
     Submit needs a base version, an instruction, and a backtest preset: pick a
-    saved one, or name a new one and fill in symbols plus an end date or session count.
+    saved one, or name a new one and choose dates. Blank Symbols scans the universe.
   </p>
   <pre id="pat-error" class="summary error" hidden></pre>
 </section>
@@ -201,6 +202,13 @@
     </div>
   </section>
 </section>
+<section class="panel">
+  <h3>Version detections across symbols</h3>
+  <p id="pat-detection-status" class="muted small">Run a backtest to inspect detections.</p>
+  <div id="pat-detections" class="toolbar" style="max-height:220px;overflow:auto"></div>
+  <p id="pat-chart-title"></p>
+  <div id="pat-chart" style="height:600px" hidden></div>
+</section>
 {% endblock %}
 {% block scripts %}
 <script>
@@ -209,5 +217,9 @@
   window.TB_DEFAULT_MARKET = {{ default_market | tojson }};
   window.TB_STREAM_START = {{ stream_start_default | tojson }};
 </script>
-<script src="/static/patterns.js?v=5"></script>
+<script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+<script src="/static/pattern_notes.js"></script>
+<script src="/static/chart_draw.js"></script>
+<script src="/static/tv_chart.js"></script>
+<script src="/static/patterns.js?v=6"></script>
 {% endblock %}

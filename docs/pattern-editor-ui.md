@@ -95,3 +95,19 @@ frontend resolves patterns, validates presets, or decides eligibility itself.
 - Live DeepSeek calls and a real candidate sandbox remain unconfigured here.
 - Full integration/release rehearsal (backup/restore, restart, concurrency,
   cutover) is P11.
+
+## Editing from a trade chart
+
+Double-click an open or closed trade, then right-click its chart and choose
+**Edit pattern…**. The editor attaches the chart's symbol, actual OHLCV history,
+pattern annotations, and version identity. Enter the change and choose the
+backtest start/end dates. Leave Symbols blank to scan the universe plus the
+chart symbol (PH uses symbols from PH history); enter symbols to limit the scan.
+
+After generation, inspect the new version and its detections. Select a detection
+(double-click on desktop) to open that version's chart. **Backtest again** uses
+the current dates and symbols without another AI call. **Save / use version**
+makes it the default; **Reject / archive** keeps it out of future selection.
+Switching versions restores the latest completed run and clears unrelated charts.
+Desktop installations with `PATTERN_API_URL` use the same remote editor endpoints
+as the web page.

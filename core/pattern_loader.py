@@ -13,8 +13,12 @@ def active_versions(store=None):
     return PatternVersions(store).resolve()
 
 
-def trusted_baseline(store, version):
-    """Private snapshot modules for trusted baselines; shared interface identity."""
+def trusted_baseline(store, version, *, check_runtime=True):
+    """Private snapshot modules for trusted baselines; shared interface identity.
+
+    check_runtime verifies execution dependencies; chart presentation skips it.
+    Application settings remain live in both cases.
+    """
     import builtins
     import types
     import sys
@@ -76,7 +80,8 @@ def trusted_baseline(store, version):
             return package
         # Shared runtime dependencies are checked, never silently substituted.
         relative = name.replace('.', '/') + '.py'
-        if relative in version['files']:
+        # Settings remain live, just like their environment-variable values.
+        if check_runtime and relative != 'config.py' and relative in version['files']:
             from core.pattern_edit_store import digest
             current = store.root / relative
             if not current.exists() or digest(current.read_bytes()) != version['files'][relative]['sha256']:
@@ -94,9 +99,9 @@ def trusted_baseline(store, version):
 
 
 class VersionPattern(BasePattern):
-    def __init__(self, version_id, store=None):
+    def __init__(self, version_id, store=None, *, runtime=True):
         self.store = store or open_pattern_store()
-        self.version = PatternVersions(self.store).verify(version_id,runtime=True)
+        self.version = PatternVersions(self.store).verify(version_id,runtime=runtime)
         self.pattern_version_id = version_id
         self.metadata = self.version.get('metadata')
         if self.version.get('provenance') in ('file-import', 'trusted-snapshot'):
@@ -104,7 +109,8 @@ class VersionPattern(BasePattern):
             # source. Baselines are not activated edits, and use ordinary imports.
             if self.version['parent_version_id'] is not None:
                 raise ValueError('Validated version metadata is missing')
-            self._baseline, self._baseline_modules = trusted_baseline(self.store,self.version)
+            self._baseline, self._baseline_modules = trusted_baseline(
+                self.store, self.version, check_runtime=runtime)
             self.metadata = {'name':self._baseline.name,'timeframes':self._baseline.timeframes,
                              'skipped':self._baseline.skipped, 'chart_description':self._baseline.chart_description,
                              **{k:getattr(self._baseline,k,d) for k,d in

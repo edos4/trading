@@ -16,6 +16,9 @@ def check(name, outcome, detail, required=True):
 
 
 def candle_rows(frame, session_timezone):
+    # The store exposes session dates; refreshes can repeat a session. Keep
+    # the last supplied update without changing the version-pinned store.
+    frame = frame[~frame.index.duplicated(keep="last")].sort_index()
     rows = []
     for ts,row in frame.iterrows():
         import pandas as pd

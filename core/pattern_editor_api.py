@@ -79,6 +79,8 @@ def run_payload(service: BacktestService, run_id: str) -> dict:
             payload["result"] = {
                 "metrics": metrics.model_dump(mode="json"),
                 "trades": stored["trades"].get("trades", []),
+                "detections": [e for e in stored["signals"].get("events", [])
+                               if e.get("status") == "detected"],
                 "open_positions": stored["open_positions"],
                 "equity": stored["equity"],
                 "zero_trades": metrics.trade_count == 0,
@@ -103,6 +105,7 @@ def edit_request_from_values(editor: "PatternEditor", values: dict, *,
                              pattern_id: str, base_version_id: str,
                              instruction: str, preset_id: str | None = None,
                              preset_name: str | None = None,
+                             chart_context: dict | None = None,
                              idempotency_key: str | None = None) -> EditRequest:
     """Build one durable edit request, mirroring ``request_from_values``.
 
@@ -127,6 +130,7 @@ def edit_request_from_values(editor: "PatternEditor", values: dict, *,
         pattern_id=pattern_id,
         base_version_id=base_version_id,
         instruction=instruction,
+        chart_context=chart_context,
         preset=preset,
     )
 
@@ -337,6 +341,50 @@ class PatternEditor:
             expected_generation=expected_generation).model_dump(mode="json")
 
     # ── edit jobs ────────────────────────────────────────────────────────
+    def backtest_version(self, version_id: str, values: dict) -> dict:
+        from core.backtest_service import request_from_values
+
+        version = self.store.get("versions", version_id)
+        request = request_from_values(
+            self.backtests, {**values, "mode": "historical-stream", "timeframe": "1d"},
+            versions={version["pattern_id"]: version_id})
+        job = self.backtests.submit(request)
+        threading.Thread(target=self.backtests.execute, args=(job["id"],),
+                         daemon=True, name="pattern-backtest").start()
+        return {"run_id": job["id"], "state": job["state"]}
+
+    def run_chart(self, run_id: str, detection: int) -> dict:
+        """Render the saved detection against this run's immutable daily tape."""
+        import pandas as pd
+        from analysis.chart_renderer import build_trade_viewer_payload
+        from core.market import get_market
+
+        stored = self.backtests.result(run_id)
+        if not stored:
+            raise EditError("Backtest results are not available yet")
+        detections = [e for e in stored["signals"].get("events", [])
+                      if e.get("status") == "detected"]
+        if detection < 0 or detection >= len(detections):
+            raise EditError("Detection is not available")
+        event = detections[detection]
+        inputs = stored["inputs"]
+        settings = inputs.request.preset.settings
+        rows = self.backtests._read_json(inputs.dataset).get(event["symbol"], [])
+        df = pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
+        df.index = pd.to_datetime(df.pop("Date"), utc=True)
+        # A detection chart stops at its signal, just as the detector's input did.
+        df = df.loc[df.index <= pd.Timestamp(event["session"])]
+        return build_trade_viewer_payload(
+            df, symbol=event["symbol"], market=settings.market,
+            pattern=event["pattern"], pattern_version_id=event.get("pattern_version_id"),
+            timeframe=settings.timeframe, session_tz=get_market(settings.market).session_tz,
+            action=event.get("action"), entry=event.get("entry"), stop=event.get("stop"),
+            target=event.get("target"), entry_time=event["session"],
+            annotations=event.get("chart_annotations") or [])
+
+    def submit_from_values(self, values: dict, **kwargs) -> dict:
+        return self.submit_edit(edit_request_from_values(self, values, **kwargs))
+
     def submit_edit(self, request: EditRequest) -> dict:
         job = self.service.submit(request)
         if job["state"] == "queued":

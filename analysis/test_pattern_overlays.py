@@ -329,3 +329,23 @@ def pin_annotations(monkeypatch, store, pattern):
     version_id = store.active_set()[pattern]
     monkeypatch.setattr(renderer, 'pattern_annotations', lambda annotations, df=None, pattern=None:
                         versioned([dict(a, pattern_version_id=version_id) for a in annotations], df, pattern))
+
+
+@pytest.mark.parametrize("parts", [
+    [(10, 90, "L1"), (20, 105, "neckline"), (30, 92, "L2"), (40, 106, "entry")],
+    [(10, 110, "H1"), (20, 95, "valley"), (30, 108, "H2"), (40, 94, "entry")],
+])
+def test_generated_version_connects_saved_pivots_without_executing_detector(monkeypatch, parts):
+    monkeypatch.setattr("core.pattern_loader.VersionPattern",
+                        lambda *args, **kwargs: SimpleNamespace(_baseline=None))
+    df = frame()
+    annotations = [dict(ann_marker(str(df.index[i].date()), price, label, ANN_PATTERN),
+                        pattern_version_id="generated-version")
+                   for i, price, label in parts]
+    original = deepcopy(annotations)
+    payload = build_trade_viewer_payload(
+        df, symbol="ENSG", pattern_version_id="generated-version", annotations=annotations)
+    assert payload["segments"][0]["data"] == [
+        {"time": str(df.index[i].date()), "value": price} for i, price, _ in parts]
+    assert payload["segments"][0]["color"] == ANN_PATTERN
+    assert annotations == original

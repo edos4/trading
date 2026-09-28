@@ -14,6 +14,7 @@
     patterns: [], versions: [], presets: [], versionId: null,
     defaultVersionId: null, generation: 0, jobId: null, timer: null,
     runs: null,
+    chartContext: null, runId: null, runTimer: null,
   };
   const SPIN_KEYS = new Set([
     "session_count", "warmup_bars", "initial_capital", "position_notional",
@@ -42,8 +43,7 @@
 
   function setStatus(text) { $("pat-action-status").textContent = text; }
 
-  // The backtest settings only apply when saving a new preset, so they stay
-  // folded (and hidden) while a saved preset is selected.
+  // Reruns always use these fields; AI edits may instead reuse a saved preset.
   function openSettings() {
     const box = $("pat-settings");
     if (box) box.open = true;
@@ -54,7 +54,7 @@
     const preset = $("pat-preset");
     if (!box || !preset) return;
     const usingSaved = !!preset.value;
-    box.hidden = usingSaved;
+    box.hidden = false;
     if (usingSaved) box.open = false;
   }
 
@@ -110,7 +110,7 @@
   // Keep the job buttons in sync wherever the durable job id is set — including
   // the ?job= reload path, where no version row is re-selected afterwards.
   function setJobButtons() {
-    $("pat-again").disabled = !state.jobId;
+    $("pat-again").disabled = !state.versionId;
     $("pat-cancel").disabled = !state.jobId;
   }
 
@@ -120,11 +120,6 @@
     if (presetId) return null;  // a saved preset already carries its settings
     if (!presetName) {
       return "Select a saved preset, or name a new one to save the settings below.";
-    }
-    const symbols = String($("pat-symbols").value || "").trim();
-    const universe = String($("pat-universe").value || "").trim();
-    if (!symbols && !universe) {
-      return "Enter at least one symbol (or a universe) for the new preset.";
     }
     if (!$("pat-start_date").value.trim()) {
       return "Set a start date for the historical-stream preset.";
@@ -170,6 +165,7 @@
     const include = $("pat-include-archived").checked ? "?include_archived=true" : "";
     try {
       const data = await api("/api/patterns/" + encodeURIComponent(patternId) + "/versions" + include);
+      if ($("pat-pattern").value !== patternId) return;
       state.versions = data.versions || [];
       const current = state.patterns.find((p) => p.pattern_id === patternId);
       state.defaultVersionId = current ? current.default_version_id : null;
@@ -214,9 +210,10 @@
 
   async function selectVersion(versionId) {
     state.versionId = versionId;
+    renderComparison(null, null);
     renderVersions();
     const version = state.versions.find((v) => v.version_id === versionId) || {};
-    state.jobId = version.edit_job_id || state.jobId;
+    state.jobId = version.edit_job_id || null;
     updateActionButtons(version);
     await Promise.all([loadSource(versionId), loadDetail(versionId)]);
   }
@@ -225,7 +222,7 @@
     const archived = !!(version && version.archived);
     const isDefault = version && version.version_id === state.defaultVersionId;
     $("pat-default").disabled = archived || isDefault;
-    $("pat-again").disabled = !state.jobId;
+    $("pat-again").disabled = archived;
     $("pat-delete").disabled = archived;
     $("pat-editfrom").disabled = archived;
     const replacement = $("pat-replacement");
@@ -248,6 +245,7 @@
   async function loadSource(versionId) {
     try {
       const data = await api("/api/patterns/versions/" + encodeURIComponent(versionId) + "/source");
+      if (state.versionId !== versionId) return;
       const files = data.files || {};
       $("pat-source").textContent = files[data.source_path] || "—";
       $("pat-doc").textContent = files[data.documentation_path] || "—";
@@ -263,7 +261,13 @@
         api("/api/patterns/versions/" + encodeURIComponent(versionId)),
         api("/api/patterns/versions/" + encodeURIComponent(versionId) + "/diff"),
       ]);
+      if (state.versionId !== versionId) return;
       renderDetail(detail, diff);
+      const run = (detail.backtests || []).find((r) => r.state === "completed");
+      if (run) {
+        const payload = await api("/api/patterns/runs/" + encodeURIComponent(run.run_id));
+        if (state.versionId === versionId) renderComparison(payload, null);
+      }
     } catch (err) {
       $("pat-detail").textContent = "Unavailable: " + err.message;
     }
@@ -370,6 +374,7 @@
     out.market = $("pat-market").value || window.TB_DEFAULT_MARKET || "us";
     out.symbols = String($("pat-symbols").value || "").replace(/,/g, " ").trim();
     out.universe = ($("pat-universe").value || "").trim() || null;
+    out.chart_symbol = state.chartContext && state.chartContext.symbol;
     if (!out.start_date) out.start_date = window.TB_STREAM_START || null;
     return out;
   }
@@ -403,6 +408,7 @@
           pattern_id: $("pat-pattern").value,
           base_version_id: state.versionId,
           instruction: instruction,
+          chart_context: state.chartContext,
           preset_id: presetId || null,
           preset_name: presetName || null,
           settings: presetId ? null : replayValues(),
@@ -440,6 +446,7 @@
         $("pat-cancel").disabled = true;
         setJobButtons();
         loadBalance();  // a generation consumes credit; refresh the displayed balance
+        if (detail.generated_version_id) await loadVersions(detail.generated_version_id);
         if (detail.runs) { state.runs = detail.runs; await loadComparison(); }
       }
     } catch (err) {
@@ -525,6 +532,7 @@
         + (candidate.result.zero_trades ? "yes (a valid result, not a failure)" : "no"));
     }
     $("pat-comparison").textContent = lines.join("\n");
+    renderDetections(candidate);
     const tbody = $("pat-trades").querySelector("tbody");
     tbody.innerHTML = "";
     const trades = (candidate && candidate.result && candidate.result.trades) || [];
@@ -572,12 +580,57 @@
 
   function backtestAgain() {
     return guard(async () => {
-      const data = await api("/api/patterns/edits/" + encodeURIComponent(state.jobId) + "/retry",
-        { method: "POST" });
-      state.jobId = data.job_id;
-      jobUrl();
-      setJobButtons();
-      startPolling();
+      openSettings();
+      const data = await api("/api/patterns/versions/" + encodeURIComponent(state.versionId) + "/backtest", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(replayValues()),
+      });
+      state.runId = data.run_id;
+      $("pat-again").disabled = true;
+      if (state.runTimer) clearTimeout(state.runTimer);
+      pollBacktest();
+    });
+  }
+
+  async function pollBacktest() {
+    try {
+      const run = await api("/api/patterns/runs/" + encodeURIComponent(state.runId));
+      setStatus("Backtest: " + run.state);
+      if (TERMINAL.includes(run.state)) {
+        $("pat-again").disabled = false;
+        renderComparison(run, null);
+        if (run.error) setStatus(run.error.message || JSON.stringify(run.error));
+      } else state.runTimer = setTimeout(pollBacktest, 1000);
+    } catch (err) {
+      $("pat-again").disabled = false;
+      setStatus("Backtest unavailable: " + err.message);
+    }
+  }
+
+  function renderDetections(candidate) {
+    const host = $("pat-detections");
+    host.replaceChildren();
+    window.TVChart.unmount();
+    $("pat-chart").hidden = true;
+    $("pat-chart-title").textContent = "";
+    $("pat-detection-status").textContent = "No completed backtest for this version.";
+    if (!candidate || !candidate.result) return;
+    const detections = candidate.result.detections || [];
+    $("pat-detection-status").textContent = detections.length
+      ? "Select a detection to see this version's chart."
+      : "No detections recorded for this run. Try other dates or symbols.";
+    detections.forEach((event, index) => {
+      const button = document.createElement("button");
+      button.className = "btn ghost";
+      button.textContent = event.symbol + " · " + event.session.slice(0, 10) + " · " + event.action;
+      button.onclick = () => guard(async () => {
+        const data = await api("/api/patterns/runs/" + encodeURIComponent(candidate.run_id)
+          + "/chart?detection=" + index);
+        $("pat-chart-title").textContent = data.title;
+        $("pat-chart").hidden = false;
+        window.TVChart.mount($("pat-chart"), data);
+      });
+      host.appendChild(button);
     });
   }
 
@@ -635,9 +688,13 @@
       const chosen = state.presets.find((p) => p.preset_id === preset.value);
       if (!chosen) return;
       const s = chosen.settings;
-      if ($("pat-market")) $("pat-market").value = s.market;
-      if ($("pat-end_policy")) $("pat-end_policy").value = s.execution.end_policy;
-      if ($("pat-initial_capital")) $("pat-initial_capital").value = s.execution.initial_capital;
+      const fields = Object.assign({}, s, s.execution, s.window || {}, {symbols: (s.symbols || []).join(" ")});
+      Object.entries(fields).forEach(([key, value]) => {
+        const el = $("pat-" + key);
+        if (!el) return;
+        if (CHECK_KEYS.includes(key)) el.checked = !!value;
+        else el.value = value == null ? "" : value;
+      });
       $("pat-preset-name").value = chosen.name;
     });
     initResultsTabs();
@@ -645,8 +702,38 @@
     $("pat-start_date").value = $("pat-start_date").value || window.TB_STREAM_START || "";
     await loadCatalog();
     await loadPresets();
-    await loadBalance();
+    loadBalance();
     const params = new URLSearchParams(window.location.search);
+    const chartKey = params.get("chart");
+    if (chartKey) {
+      try {
+        const context = JSON.parse(sessionStorage.getItem(chartKey));
+        if (!context) throw new Error("Chart context has expired. Open the trade chart again.");
+        state.chartContext = context;
+        const pattern = state.patterns.find((p) => p.pattern_id === context.pattern);
+        if (!pattern) throw new Error("Chart pattern is unavailable in the catalog.");
+        $("pat-pattern").value = pattern.pattern_id;
+        state.versionId = null;
+        await loadVersions();
+        if (context.pattern_version_id) {
+          if (!state.versions.some((v) => v.version_id === context.pattern_version_id)) {
+            state.versionId = null;
+            throw new Error("Chart version is unavailable; select a base version explicitly.");
+          }
+          await selectVersion(context.pattern_version_id);
+        }
+        $("pat-market").value = context.market || window.TB_DEFAULT_MARKET;
+        $("pat-start_date").value = context.candles[0].time;
+        $("pat-end_date").value = context.candles[context.candles.length - 1].time;
+        $("pat-pattern_only").checked = true;
+        $("pat-preset-name").value = "Chart pattern edit";
+        $("pat-context").textContent = context.symbol + " · " + context.pattern + " · "
+          + context.candles.length + " bars attached. Leave Symbols blank to scan the universe."
+          + (context.pattern_version_id ? "" : " Legacy trade: review the selected base version.");
+        openSettings();
+        $("pat-instruction").focus();
+      } catch (err) { formError(err.message); }
+    }
     const jobId = params.get("job");
     if (jobId) {
       state.jobId = jobId;

@@ -48,6 +48,20 @@ WEB_UI_PORT=8080
 `PATTERN_EDITOR_TEST_DATABASE_URL` is for tests only and never supplies runtime
 configuration. Keep credentials out of examples, logs, and evidence.
 
+## Run every edit stage locally
+
+Set `PATTERN_API_URL=` in `.env` and point `PATTERN_EDITOR_DATABASE_URL` at
+local PostgreSQL, with `PATTERN_EDITOR_SCHEMA` selecting its editor schema.
+An empty API URL disables the registry proxy: generation, validation, and both
+automatic backtests run in the local web process. Generation still calls the
+configured AI provider; historical bars may still come from the history API.
+
+Start the database with `scripts/pg18.sh start` when it is stopped, prepare the
+candidate sandbox with `scripts/sandbox.sh` after each reboot, and restart
+`python main.py --web` after changing `.env`. Existing remote job links require
+those database records to be copied locally first; changing the URL alone does
+not move jobs or versions. Preserve existing databases when importing a copy.
+
 ## Historical data for backtests
 
 Each run freezes its daily bars into PostgreSQL, so the run stays reproducible

@@ -11,7 +11,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pandas as pd
 
@@ -370,6 +370,37 @@ def test_port_open_works_inside_running_event_loop() -> None:
         return PaperBook._port_open(host, port)
 
     assert asyncio.run(_closed()) is False
+
+
+def test_local_chart_ignores_scanner_tape() -> None:
+    """Local double-click must read 33ai history, not the scanner's memory."""
+    from core.paper_books import PaperBook
+
+    api = pd.DataFrame(
+        {
+            "open": [1.0, 2.0],
+            "high": [1.0, 2.0],
+            "low": [1.0, 2.0],
+            "close": [1.0, 2.0],
+            "volume": [1.0, 1.0],
+        },
+        index=pd.date_range("2026-01-01", periods=2, tz="UTC"),
+    )
+    scanner = Mock()
+    scanner.ohlcv_frame.return_value = api * 1000
+    with patch("core.paper_books.PaperAccount.save"):
+        book = PaperBook("us")
+        book.scanner = scanner
+        book.account.positions["AAPL"] = [_open_trade("AAPL", 10.0)]
+        with patch("data.history.owns_local_stocks_history", return_value=False), \
+             patch("data.history.load_daily_ohlcv_df", return_value=api) as load, \
+             patch("analysis.chart_renderer.build_trade_viewer_payload", return_value={"ok": True}):
+            assert book.render_trade_chart(side="open", symbol="AAPL") == {"ok": True}
+    scanner.ohlcv_frame.assert_not_called()
+    load.assert_called_once()
+    assert load.call_args.args[0] == "AAPL"
+    assert load.call_args.kwargs["market"] == "us"
+    assert load.call_args.kwargs["tv_fallback"] is False
 
 
 def test_ensure_stream_server_passes_history_url() -> None:

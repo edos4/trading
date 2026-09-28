@@ -222,3 +222,68 @@ def upload_run(payload: dict) -> dict:
 def fetch_run(run_id: str) -> dict:
     """Status and result of a run recorded on the owning host."""
     return _call_json("GET", f"/api/backtest/runs/{quote(run_id, safe='')}")
+
+
+class RemotePatternEditor:
+    """Desktop editor calls the same endpoints as the web Patterns page."""
+
+    def catalog(self):
+        return _call_json("GET", "/api/patterns")["patterns"]
+
+    def versions_for(self, pattern_id, *, include_archived=False):
+        return _call_json("GET", f"/api/patterns/{quote(pattern_id, safe='')}/versions",
+                          {"include_archived": str(include_archived).lower()})["versions"]
+
+    def version_detail(self, version_id):
+        return _call_json("GET", f"/api/patterns/versions/{quote(version_id, safe='')}")
+
+    def source(self, version_id):
+        return _call_json("GET", f"/api/patterns/versions/{quote(version_id, safe='')}/source")
+
+    def diff(self, version_id):
+        return _call_json("GET", f"/api/patterns/versions/{quote(version_id, safe='')}/diff")
+
+    def presets(self):
+        return _call_json("GET", "/api/backtest/presets")["presets"]
+
+    def balance(self):
+        return _call_json("GET", "/api/patterns/provider")
+
+    def submit_from_values(self, values, **kwargs):
+        from core.pattern_edit_store import uid
+
+        body = {**kwargs, "settings": values,
+                "idempotency_key": kwargs.get("idempotency_key") or f"edit-{uid()}"}
+        job = _call_json("POST", "/api/patterns/edits", json_body=body)
+        return {**job, "id": job["job_id"]}
+
+    def job_detail(self, job_id):
+        return _call_json("GET", f"/api/patterns/edits/{quote(job_id, safe='')}")
+
+    def cancel_job(self, job_id):
+        return _call_json("POST", f"/api/patterns/edits/{quote(job_id, safe='')}/cancel")
+
+    def backtest_version(self, version_id, values):
+        from core.pattern_edit_store import uid
+
+        return _call_json("POST", f"/api/patterns/versions/{quote(version_id, safe='')}/backtest",
+                          json_body={**values, "idempotency_key": f"backtest-{uid()}"})
+
+    def run_payload(self, run_id):
+        return _call_json("GET", f"/api/patterns/runs/{quote(run_id, safe='')}")
+
+    def run_chart(self, run_id, detection):
+        return _call_json("GET", f"/api/patterns/runs/{quote(run_id, safe='')}/chart",
+                          {"detection": detection})
+
+    def set_default(self, *, pattern_id, version_id, **values):
+        from core.pattern_edit_store import uid
+
+        return _call_json("POST", f"/api/patterns/versions/{quote(version_id, safe='')}/default",
+                          json_body={**values, "idempotency_key": f"default-{uid()}"})
+
+    def archive(self, *, pattern_id, version_id, **values):
+        from core.pattern_edit_store import uid
+
+        return _call_json("POST", f"/api/patterns/versions/{quote(version_id, safe='')}/archive",
+                          json_body={**values, "idempotency_key": f"archive-{uid()}"})

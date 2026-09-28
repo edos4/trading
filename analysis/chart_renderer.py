@@ -653,7 +653,12 @@ def _nearest_viewer_time(index: pd.Index, when, session_tz: str = "America/New_Y
         return None
     ts = pd.Timestamp(when)
     if ts.tzinfo is not None:
-        ts = ts.tz_convert(session_tz).tz_localize(None)
+        # Replay exports also carry date-only sessions as midnight UTC.
+        # Preserve those labels; real intraday fills use the market timezone.
+        if ts == ts.normalize() and ts.utcoffset().total_seconds() == 0:
+            ts = ts.tz_localize(None)
+        else:
+            ts = ts.tz_convert(session_tz).tz_localize(None)
     session_day = ts.normalize()
     try:
         loc = index.get_indexer([session_day], method="nearest")[0]
@@ -699,6 +704,8 @@ def build_trade_viewer_payload(
     symbol: str,
     timeframe: str = "1d",
     pattern: str | None = None,
+    pattern_version_id: str | None = None,
+    market: str | None = None,
     action: str | None = None,
     session_tz: str = "America/New_York",
     entry: float | None = None,
@@ -715,7 +722,8 @@ def build_trade_viewer_payload(
     renderer = ChartRenderer(save_to_disk=False, session_tz=session_tz)
     df = renderer._prepare_df(ohlcv_df, timeframe)
     # Recover old ledger geometry only at the entry event, never from a newer setup.
-    annotations = pattern_annotations(annotations or [], df, pattern)
+    annotations = (pattern_annotations(annotations or [], df, pattern)
+                   if annotations or not pattern_version_id else [])
     anchor_dates = [a.get(k) for a in annotations for k in ("date", "start_date", "end_date") if a.get(k)]
     anchor_dates.extend(p["date"] for a in annotations for p in a.get("points", []) if p.get("date"))
     if entry_time:
@@ -867,12 +875,16 @@ def build_trade_viewer_payload(
         title = f"{title} · {pattern}"
     if action:
         title = f"{title} · {action}"
+    if pattern_version_id:
+        title = f"{title} · version {pattern_version_id[:8]}"
     return {
         "title": title,
         "symbol": symbol,
         "timeframe": timeframe,
         "timeframe_label": renderer._tv_timeframe_label(timeframe),
         "pattern": pattern,
+        "pattern_version_id": pattern_version_id,
+        "market": market,
         "action": action,
         "ohlc": {
             "open": last["open"],

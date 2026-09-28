@@ -93,6 +93,57 @@ def test_desktop_and_web_build_the_same_edit_request(desktop_editor):
 
 # ── offscreen workflow ───────────────────────────────────────────────────
 @requires_display
+def test_chart_right_click_attaches_history_and_selects_version(desktop_editor, monkeypatch):
+    import tkinter as tk
+    import ui.patterns_dialog as dialogs
+    from ui.tv_chart import TradingViewChart
+
+    editor, _service, _provider, store = desktop_editor
+    root = tk.Tk()
+    opened = []
+    original = dialogs.PatternsDialog
+    def open_editor(parent, **kwargs):
+        dialog = original(parent, editor=editor, **kwargs)
+        opened.append(dialog)
+        return dialog
+    monkeypatch.setattr(dialogs, "PatternsDialog", open_editor)
+    payload = {
+        "symbol": SYMBOL, "pattern": PATTERN, "market": "us",
+        "pattern_version_id": base_version(store),
+        "candles": [dict(zip(("time", "open", "high", "low", "close"),
+                             [r[0][:10], *r[1:5]])) for r in rows()[:70]],
+    }
+    try:
+        chart = TradingViewChart(root)
+        chart.pack(fill=tk.BOTH, expand=True)
+        chart.set_payload(payload)
+        root.update()
+        chart._canvas.event_generate("<Button-3>", x=40, y=40)
+        menu = next(child for child in chart.winfo_children() if isinstance(child, tk.Menu))
+        menu.invoke(0)
+        dialog = opened[0]
+        assert pump(root, lambda: dialog._version_id == payload["pattern_version_id"])
+        assert dialog._pattern_id == PATTERN
+        assert dialog._chart_context == payload
+        assert dialog._vars["start_date"].get() == payload["candles"][0]["time"]
+        assert dialog._vars["end_date"].get() == payload["candles"][-1]["time"]
+        assert dialog._collect_values()["chart_symbol"] == SYMBOL
+        dialog._job_id = "pending-edit"
+        dialog._on_version_select()  # Tk also emits a queued duplicate selection event.
+        assert dialog._job_id == "pending-edit"
+        dialog._detections.insert("", tk.END, iid="stale", values=("OLD", "2020-01-01", PATTERN))
+        dialog._run_id = "old-run"
+        dialog._version_id = None
+        dialog._on_version_select()
+        assert not dialog._detections.get_children()
+        assert dialog._run_id is None
+    finally:
+        for dialog in opened:
+            dialog._on_close()
+        root.destroy()
+
+
+@requires_display
 def test_desktop_dialog_submits_and_renders_results(desktop_editor):
     import tkinter as tk
     from ui.patterns_dialog import PatternsDialog
@@ -125,7 +176,7 @@ def test_desktop_dialog_submits_and_renders_results(desktop_editor):
         assert pump(root, lambda: service.status(job_id)["state"] in (
             "completed", "failed", "cancelled", "blocked", "interrupted"))
         assert service.status(job_id)["state"] == "completed"
-        assert pump(root, lambda: "Candidate:" in dialog._comparison_text.get("1.0", tk.END))
+        assert pump(root, lambda: "Candidate: completed" in dialog._comparison_text.get("1.0", tk.END))
         detail = service.detail(job_id)
         assert detail["explanation"] == "Tightened the entry rule."
         # the dialog never auto-promotes a generated version

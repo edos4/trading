@@ -1703,6 +1703,7 @@ function initReplay() {
       side,
       action: trade.action,
       pattern: trade.pattern,
+      pattern_version_id: trade.pattern_version_id,
       chart_annotations: trade.chart_annotations,
       timeframe: trade.timeframe || "1d",
       entry: trade.entry,

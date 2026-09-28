@@ -36,10 +36,14 @@ class PatternsDialog:
     """Pattern/version selection, AI edit submission, and result inspection."""
 
     def __init__(self, parent: tk.Misc, *, editor=None,
+                 chart_context: dict | None = None,
                  start_job_id: Optional[str] = None,
                  on_job: Optional[Callable[[str], None]] = None):
         self._closed = False
         self._editor = editor
+        self._chart_context = chart_context
+        self._preferred_version = (chart_context or {}).get("pattern_version_id")
+        self._run_id = None
         self._on_job = on_job
         self._pattern_id: Optional[str] = None
         self._version_id: Optional[str] = None
@@ -61,9 +65,27 @@ class PatternsDialog:
         self._top.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._build_selector()
+        self._tabs = ttk.Notebook(self._top)
+        self._edit_tab = ttk.Frame(self._tabs)
+        self._results_tab = ttk.Frame(self._tabs)
+        self._detail_tab = ttk.Frame(self._tabs)
+        for page, label in ((self._edit_tab, "Edit / backtest settings"),
+                            (self._results_tab, "Results"), (self._detail_tab, "Source / history")):
+            self._tabs.add(page, text=label)
         self._build_detail()
+        self._tabs.pack(fill=tk.BOTH, expand=True)
         self._build_edit_form()
         self._build_results()
+        if chart_context:
+            self._top.title(f"Edit pattern — {chart_context['symbol']}")
+            self._preset_name.insert(0, "Chart pattern edit")
+            self._vars["market"].set(chart_context.get("market") or default_market().id)
+            self._vars["pattern_only"].set(True)
+            candles = chart_context.get("candles") or []
+            if candles:
+                self._vars["start_date"].set(candles[0]["time"])
+                self._vars["end_date"].set(candles[-1]["time"])
+            self._instruction.focus_set()
         self._top.after(50, self._drain_queue)
         self._load_presets()
         self._refresh_balance()
@@ -111,8 +133,10 @@ class PatternsDialog:
     def editor(self):
         if self._editor is None:
             from core.pattern_editor_api import PatternEditor
+            from core.remote_pattern_store import remote_patterns_enabled
+            from data.pattern_client import RemotePatternEditor
 
-            self._editor = PatternEditor()
+            self._editor = RemotePatternEditor() if remote_patterns_enabled() else PatternEditor()
         return self._editor
 
     def _show_error(self, exc: Exception) -> None:
@@ -152,7 +176,13 @@ class PatternsDialog:
         self._pattern_values = {f"{row['display_name']} ({row['pattern_id']})": row["pattern_id"]
                                 for row in catalog}
         if catalog and not self._pattern_combo.get():
-            self._pattern_combo.current(0)
+            pattern = (self._chart_context or {}).get("pattern")
+            index = next((i for i, row in enumerate(catalog)
+                          if row["pattern_id"] == pattern), None)
+            if pattern and index is None:
+                self._status_var.set("Chart pattern is unavailable in the pattern catalog.")
+                return
+            self._pattern_combo.current(index or 0)
             self._on_pattern_change()
 
     def _selected_pattern(self) -> Optional[str]:
@@ -163,7 +193,10 @@ class PatternsDialog:
         self._pattern_id = self._selected_pattern()
         self._version_id = None
         self._job_id = None
+        self._versions = []
+        self._tree.delete(*self._tree.get_children())
         self._runs = {}
+        self._render_comparison((None, None))
         self._load_versions()
 
     def _load_versions(self) -> None:
@@ -173,7 +206,8 @@ class PatternsDialog:
         include = bool(self._include_archived.get())
         self._run_async(
             lambda: self.editor().versions_for(pattern_id, include_archived=include),
-            on_done=self._populate_versions)
+            on_done=lambda versions: self._populate_versions(versions)
+            if pattern_id == self._selected_pattern() else None)
 
     def _populate_versions(self, versions: list[dict]) -> None:
         self._versions = versions
@@ -192,7 +226,14 @@ class PatternsDialog:
                 "default" if version["version_id"] == default_id else "",
                 "archived" if version["archived"] else ""))
         if versions:
-            self._tree.selection_set("0")
+            wanted = self._preferred_version or self._version_id or default_id
+            index = next((i for i, v in enumerate(versions) if v["version_id"] == wanted), None)
+            if self._preferred_version and index is None:
+                self._status_var.set("Chart version is unavailable; select a base version explicitly.")
+                self._preferred_version = None
+                return
+            self._preferred_version = None
+            self._tree.selection_set(str(index or 0))
             self._on_version_select()
 
     def _selected_version(self) -> Optional[dict]:
@@ -206,11 +247,11 @@ class PatternsDialog:
 
     def _on_version_select(self) -> None:
         version = self._selected_version()
-        if version is None:
+        if version is None or version["version_id"] == self._version_id:
             return
         self._version_id = version["version_id"]
-        if version.get("edit_job_id"):
-            self._adopt_job(version["edit_job_id"], resume=False)
+        self._render_comparison((None, None))
+        self._job_id = version.get("edit_job_id")
         self._load_detail(self._version_id)
         self._update_actions(version)
 
@@ -219,7 +260,7 @@ class PatternsDialog:
         is_default = version["version_id"] == pattern.get("default_version_id")
         state = tk.DISABLED if version["archived"] or is_default else tk.NORMAL
         self._default_btn.config(state=state)
-        self._again_btn.config(state=tk.NORMAL if self._job_id else tk.DISABLED)
+        self._again_btn.config(state=tk.DISABLED if version["archived"] else tk.NORMAL)
         self._delete_btn.config(state=tk.DISABLED if version["archived"] else tk.NORMAL)
         others = [v for v in self._versions
                   if v["version_id"] != version["version_id"] and not v["archived"]
@@ -227,11 +268,11 @@ class PatternsDialog:
         self._replacement["values"] = [v["version_id"][:8] for v in others]
         self._replacement_map = {v["version_id"][:8]: v["version_id"] for v in others}
         if is_default and others:
-            self._replacement_label.grid()
-            self._replacement.grid()
+            self._replacement_label.pack(side=tk.LEFT)
+            self._replacement.pack(side=tk.LEFT)
         else:
-            self._replacement_label.grid_remove()
-            self._replacement.grid_remove()
+            self._replacement_label.pack_forget()
+            self._replacement.pack_forget()
 
     def _load_detail(self, version_id: str) -> None:
         def work():
@@ -241,6 +282,8 @@ class PatternsDialog:
         self._run_async(work, on_done=lambda pair: self._render_detail(*pair))
 
     def _render_detail(self, detail, source, diff) -> None:
+        if detail["version_id"] != self._version_id:
+            return
         self._detail_text.config(state=tk.NORMAL)
         self._detail_text.delete("1.0", tk.END)
         lines = [
@@ -269,6 +312,11 @@ class PatternsDialog:
         self._set_text(self._doc_text, files.get(source.get("documentation_path"), ""))
         diff_files = diff.get("files", {})
         self._set_text(self._diff_text, "\n".join(diff_files.get(name, "") for name in diff_files))
+        run = next((r for r in detail.get("backtests", []) if r["state"] == "completed"), None)
+        if run:
+            self._run_async(lambda: self.editor().run_payload(run["run_id"]),
+                            on_done=lambda payload: self._render_comparison((payload, None))
+                            if self._version_id == detail["version_id"] else None)
 
     def _set_text(self, widget: tk.Text, value: str) -> None:
         widget.config(state=tk.NORMAL)
@@ -278,7 +326,7 @@ class PatternsDialog:
 
     # ── edit form ────────────────────────────────────────────────────────
     def _build_edit_form(self) -> None:
-        frame = ttk.LabelFrame(self._top, text="AI edit", padding=8)
+        frame = ttk.LabelFrame(self._edit_tab, text="AI edit", padding=8)
         frame.pack(side=tk.TOP, fill=tk.X, padx=8, pady=(4, 4))
         for column in range(6):
             frame.columnconfigure(column, weight=1 if column % 2 else 0, pad=6)
@@ -322,6 +370,15 @@ class PatternsDialog:
         ttk.Label(frame, text="Instruction").grid(row=row, column=0, sticky=tk.NW)
         self._instruction = tk.Text(frame, height=4, width=70, wrap=tk.WORD)
         self._instruction.grid(row=row, column=1, columnspan=5, sticky="ew")
+        if self._chart_context:
+            row += 1
+            context = self._chart_context
+            ttk.Label(frame, text=f"{context['symbol']} · {context['pattern']} · "
+                      f"{len(context.get('candles', []))} bars attached. "
+                      "Blank Symbols scans the universe plus this symbol."
+                      + ("" if context.get("pattern_version_id") else
+                         " Legacy trade: review the selected base version.")).grid(
+                          row=row, column=0, columnspan=6, sticky=tk.W)
 
         row += 1
         controls = ttk.Frame(frame)
@@ -410,7 +467,11 @@ class PatternsDialog:
             if not preset:
                 return
             settings = preset["settings"]
-            self._vars["market"].set(settings["market"])
+            values = {**settings, **settings["execution"], **(settings.get("window") or {}),
+                      "symbols": " ".join(settings.get("symbols") or [])}
+            for key, value in values.items():
+                if key in self._vars:
+                    self._vars[key].set(value if value is not None else "")
             self._preset_name.delete(0, tk.END)
             self._preset_name.insert(0, preset["name"])
 
@@ -438,6 +499,7 @@ class PatternsDialog:
         values["market"] = self._vars["market"].get() or default_market().id
         values["symbols"] = parse_extra_symbols(self._vars["symbols"].get())
         values["universe"] = (self._vars["universe"].get() or "").strip() or None
+        values["chart_symbol"] = (self._chart_context or {}).get("symbol")
         return values
 
     def _submit(self) -> None:
@@ -461,14 +523,11 @@ class PatternsDialog:
         self._status_var.set("Submitting…")
 
         def work():
-            from core.pattern_editor_api import edit_request_from_values
-
-            editor = self.editor()
-            request = edit_request_from_values(
-                editor, values, pattern_id=pattern_id, base_version_id=version_id,
+            return self.editor().submit_from_values(
+                values, pattern_id=pattern_id, base_version_id=version_id,
                 instruction=instruction, preset_id=preset_id,
+                chart_context=self._chart_context,
                 preset_name=preset_name or None)
-            return editor.submit_edit(request)
 
         self._run_async(work, on_done=self._on_submitted, on_error=self._on_submit_error)
 
@@ -535,8 +594,12 @@ class PatternsDialog:
         if detail["state"] in TERMINAL_STATES:
             self._finish_job()
             self._refresh_balance()  # a generation consumes credit
+            if detail.get("generated_version_id"):
+                self._preferred_version = detail["generated_version_id"]
+                self._load_versions()
             if self._runs:
                 self._load_comparison()
+                self._tabs.select(self._results_tab)
         else:
             self._top.after(1000, self._poll)
 
@@ -554,13 +617,21 @@ class PatternsDialog:
 
     # ── results ──────────────────────────────────────────────────────────
     def _build_results(self) -> None:
-        frame = ttk.LabelFrame(self._top, text="Results", padding=8)
+        frame = ttk.LabelFrame(self._results_tab, text="Results", padding=8)
         frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=8, pady=(4, 8))
 
         left = ttk.Frame(frame)
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self._comparison_text = tk.Text(left, height=12, width=52, wrap=tk.WORD, state=tk.DISABLED)
         self._comparison_text.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(left, text="Detections — double-click for the version's chart").pack(anchor=tk.W)
+        self._detections = ttk.Treeview(left, columns=("symbol", "date", "pattern"),
+                                        show="headings", height=5)
+        for col in ("symbol", "date", "pattern"):
+            self._detections.heading(col, text=col.capitalize())
+            self._detections.column(col, width=110)
+        self._detections.pack(fill=tk.BOTH, expand=True)
+        self._detections.bind("<Double-1>", self._open_detection)
 
         right = ttk.Frame(frame)
         right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(8, 0))
@@ -573,7 +644,7 @@ class PatternsDialog:
             setattr(self, attr, widget)
 
     def _build_detail(self) -> None:
-        frame = ttk.LabelFrame(self._top, text="Source / documentation / diff", padding=8)
+        frame = ttk.LabelFrame(self._detail_tab, text="Source / documentation / diff", padding=8)
         frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=8, pady=(4, 4))
 
         columns = ttk.Frame(frame)
@@ -583,7 +654,9 @@ class PatternsDialog:
         self._diff_text = self._text_column(columns, "Diff vs parent", 2)
         self._detail_text = self._text_column(columns, "History / reports", 3)
 
-        self._default_btn = ttk.Button(frame, text="Set default", command=self._set_default)
+        frame = ttk.Frame(self._top, padding=8)
+        frame.pack(fill=tk.X)
+        self._default_btn = ttk.Button(frame, text="Save / use version", command=self._set_default)
         self._default_btn.pack(side=tk.LEFT, pady=(6, 0))
         self._again_btn = ttk.Button(frame, text="Backtest again", command=self._backtest_again,
                                      state=tk.DISABLED)
@@ -591,7 +664,7 @@ class PatternsDialog:
         self._editfrom_btn = ttk.Button(frame, text="Edit from this version",
                                         command=lambda: self._instruction.focus_set())
         self._editfrom_btn.pack(side=tk.LEFT, padx=(6, 0), pady=(6, 0))
-        self._delete_btn = ttk.Button(frame, text="Delete version", command=self._delete)
+        self._delete_btn = ttk.Button(frame, text="Reject / archive", command=self._delete)
         self._delete_btn.pack(side=tk.LEFT, padx=(6, 0), pady=(6, 0))
         self._replacement_label = ttk.Label(frame, text="Replacement")
         self._replacement_label.pack(side=tk.LEFT, padx=(6, 2), pady=(6, 0))
@@ -628,14 +701,43 @@ class PatternsDialog:
                         on_error=self._on_mutation_error)
 
     def _backtest_again(self) -> None:
-        if not self._job_id:
+        if not self._version_id:
             return
-        job_id = self._job_id
+        version_id, values = self._version_id, self._collect_values()
+        self._again_btn.config(state=tk.DISABLED)
+        self._status_var.set("Starting backtest with the dates and symbols in the form…")
+        def started(job):
+            self._run_id = job["run_id"]
+            self._poll_backtest()
+        def failed(exc):
+            self._again_btn.config(state=tk.NORMAL)
+            self._show_error(exc)
+        self._run_async(lambda: self.editor().backtest_version(version_id, values),
+                        on_done=started, on_error=failed)
 
-        def work():
-            return self.editor().retry_backtest(job_id)
+    def _poll_backtest(self) -> None:
+        if self._closed:
+            return
+        def rendered(payload):
+            self._status_var.set("Backtest: " + payload["state"])
+            if payload["state"] in TERMINAL_STATES:
+                self._again_btn.config(state=tk.NORMAL)
+                self._render_comparison((payload, None))
+                self._tabs.select(self._results_tab)
+                if payload.get("error"):
+                    self._status_var.set(str(payload["error"]))
+            else:
+                self._top.after(1000, self._poll_backtest)
+        self._run_async(lambda: self.editor().run_payload(self._run_id), on_done=rendered)
 
-        self._run_async(work, on_done=self._on_submitted, on_error=self._on_mutation_error)
+    def _open_detection(self, _event) -> None:
+        selected = self._detections.selection()
+        if not selected or not self._run_id:
+            return
+        from ui.tv_chart import open_trade_viewer
+        run_id, index = self._run_id, int(selected[0])
+        self._run_async(lambda: self.editor().run_chart(run_id, index),
+                        on_done=lambda data: open_trade_viewer(self._top, data))
 
     def _delete(self) -> None:
         version = self._selected_version()
@@ -680,6 +782,13 @@ class PatternsDialog:
 
     def _render_comparison(self, payloads) -> None:
         candidate, base = payloads
+        self._detections.delete(*self._detections.get_children())
+        self._run_id = None
+        if candidate:
+            self._run_id = candidate["run_id"]
+            for index, event in enumerate((candidate.get("result") or {}).get("detections", [])):
+                self._detections.insert("", tk.END, iid=str(index), values=(
+                    event["symbol"], event["session"][:10], event["pattern"]))
         keys = ("trade_count", "win_rate", "realized_pnl", "unrealized_pnl",
                 "net_pnl", "fees", "max_drawdown_pct", "open_position_count")
         lines = [
@@ -704,6 +813,7 @@ class PatternsDialog:
             lines.append("Zero trades: " + (
                 "yes (a valid result, not a failure)"
                 if candidate["result"]["zero_trades"] else "no"))
+            lines.append(f"Detections: {len(candidate['result'].get('detections', []))}")
         self._set_text(self._comparison_text, "\n".join(lines))
 
     # ── lifecycle ────────────────────────────────────────────────────────

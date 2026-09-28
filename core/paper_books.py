@@ -48,6 +48,24 @@ from core.scanner import MarketScanner
 from core.signal_log_store import load_signal_log, reset_signal_log
 from data.edgar_client import set_skip_edgar
 from data.stream_client import StreamClient
+
+
+def _chart_history_frame(scanner, symbol: str, timeframe: str, *, market: str):
+    """Bars for a double-clicked row.
+
+    A laptop reads GET /api/history on https://33ai.edos.uk. The scanner's
+    in-memory tape is not a substitute: it can be a partial replay or a
+    different scale than the saved detection. The VPS that owns Postgres
+    may still use the live scanner frame, then its local history.
+    """
+    from data.history import load_daily_ohlcv_df, owns_local_stocks_history
+
+    if not owns_local_stocks_history():
+        return load_daily_ohlcv_df(symbol, tv_fallback=False, market=market)
+    df = scanner.ohlcv_frame(symbol, timeframe, min_bars=2) if scanner is not None else None
+    if df is None or len(df) < 2:
+        df = load_daily_ohlcv_df(symbol, tv_fallback=False, market=market)
+    return df
 from data.tv_client import TVClient
 from utils.logger import log
 
@@ -329,15 +347,10 @@ class PaperBook:
             return {"error": "side must be open, closed, or log"}
 
         timeframe = trade.timeframe or "1d"
-        df = None
         session_tz = get_market(account.market).session_tz
-        if scanner is not None:
-            df = scanner.ohlcv_frame(trade.symbol, timeframe, min_bars=2)
-        if df is None or len(df) < 2:
-            from data.history import load_daily_ohlcv_df
-            df = load_daily_ohlcv_df(
-                trade.symbol, tv_fallback=False, market=account.market,
-            )
+        df = _chart_history_frame(
+            scanner, trade.symbol, timeframe, market=account.market,
+        )
         if df is None or len(df) < 2:
             return {"error": f"no OHLCV for {trade.symbol} {timeframe}"}
 
@@ -348,6 +361,8 @@ class PaperBook:
                 timeframe=timeframe,
                 annotations=trade.chart_annotations,
                 pattern=trade.pattern,
+                pattern_version_id=trade.pattern_version_id,
+                market=account.market,
                 action=trade.action,
                 session_tz=session_tz,
                 entry=trade.entry_price,
@@ -386,15 +401,10 @@ class PaperBook:
             return {"error": "This signal is no longer in the log. Refresh the table."}
         ticker = str(log_row.get("symbol") or symbol)
         timeframe = str(log_row.get("timeframe") or "1d")
-        df = None
         session_tz = get_market(account.market).session_tz
-        if scanner is not None:
-            df = scanner.ohlcv_frame(ticker, timeframe, min_bars=2)
-        if df is None or len(df) < 2:
-            from data.history import load_daily_ohlcv_df
-            df = load_daily_ohlcv_df(
-                ticker, tv_fallback=False, market=account.market,
-            )
+        df = _chart_history_frame(
+            scanner, ticker, timeframe, market=account.market,
+        )
         if df is None or len(df) < 2:
             return {"error": f"no OHLCV for {ticker} {timeframe}"}
         price = log_row.get("price")
@@ -543,7 +553,12 @@ class PaperBook:
             cmd.extend(["--papertrade-stream-start", start_date])
         env = os.environ.copy()
         env["MARKET"] = self.market
+        from data.history import DEFAULT_STOCKS_HISTORY_URL, owns_local_stocks_history
+
         url = (settings.stocks_history_url or "").strip()
+        if not owns_local_stocks_history():
+            # Laptop stream child must not fall through to local Postgres.
+            url = url or DEFAULT_STOCKS_HISTORY_URL
         if url:
             env["STOCKS_HISTORY_URL"] = url
         self._stream_proc = subprocess.Popen(cmd, cwd=str(REPO_ROOT), env=env)

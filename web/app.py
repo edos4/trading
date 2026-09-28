@@ -134,6 +134,7 @@ class PatternEditRequest(BaseModel):
     preset_name: Optional[str] = None
     settings: Optional[dict[str, Any]] = None
     idempotency_key: Optional[str] = None
+    chart_context: Optional[dict[str, Any]] = None
 
 
 class PatternDefaultRequest(BaseModel):
@@ -183,6 +184,7 @@ class ReplayChartRequest(BaseModel):
     side: str = "open"
     action: Optional[str] = None
     pattern: Optional[str] = None
+    pattern_version_id: Optional[str] = None
     timeframe: str = "1d"
     entry: Optional[float] = None
     stop: Optional[float] = None
@@ -709,6 +711,25 @@ def create_app() -> FastAPI:
         except Exception as exc:  # noqa: BLE001
             return patterns_error(exc)
 
+    @app.post("/api/patterns/versions/{version_id}/backtest")
+    async def api_pattern_backtest(version_id: str, request: Request,
+                                   _user: str = Depends(require_login)):
+        try:
+            values = await _json_body(request)
+            return await asyncio.to_thread(pattern_edits.editor().backtest_version,
+                                           version_id, values)
+        except Exception as exc:
+            return patterns_error(exc)
+
+    @app.get("/api/patterns/runs/{run_id}/chart")
+    async def api_pattern_run_chart(run_id: str, detection: int,
+                                    _user: str = Depends(require_login)):
+        try:
+            return await asyncio.to_thread(pattern_edits.editor().run_chart,
+                                           run_id, detection)
+        except Exception as exc:
+            return patterns_error(exc)
+
     @app.post("/api/patterns/edits")
     async def api_pattern_edit_submit(request: Request,
                                       _user: str = Depends(require_login)):
@@ -724,6 +745,7 @@ def create_app() -> FastAPI:
                 edit_request_from_values, editor, body.settings or {},
                 pattern_id=body.pattern_id, base_version_id=body.base_version_id,
                 instruction=body.instruction, preset_id=body.preset_id,
+                chart_context=body.chart_context,
                 preset_name=body.preset_name, idempotency_key=body.idempotency_key)
             job = await asyncio.to_thread(editor.submit_edit, built)
         except Exception as exc:  # noqa: BLE001
@@ -1041,6 +1063,8 @@ def create_app() -> FastAPI:
                 timeframe=body.timeframe or "1d",
                 annotations=body.chart_annotations,
                 pattern=body.pattern,
+                pattern_version_id=body.pattern_version_id,
+                market=market,
                 action=body.action,
                 session_tz=get_market(market).session_tz,
                 entry=body.entry,

@@ -271,6 +271,14 @@ class StreamReplay:
                     if _dedup.any_used(key):
                         break
                     self.total_signals += 1
+                    self.events.append({
+                        "status": "detected", "symbol": series.symbol,
+                        "session": candle.timestamp.isoformat(), "pattern": signal.pattern,
+                        "pattern_version_id": signal.pattern_version_id,
+                        "action": signal.action, "entry": signal.price or candle.close,
+                        "stop": signal.stop_loss, "target": signal.take_profit,
+                        "chart_annotations": signal.chart_annotations,
+                    })
                     if getattr(signal, "blocked_reason", None):
                         _dedup.mark(*key)
                         series.used.update(key)

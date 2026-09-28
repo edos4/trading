@@ -106,6 +106,9 @@ class PatternVersions:
             self.store.read_blob(ref)
         if runtime and version.get('provenance') == 'file-import':
             for name, ref in version['files'].items():
+                # Application settings are live inputs, not frozen detector code.
+                if name == 'config.py':
+                    continue
                 if name.startswith('patterns/') and name != 'patterns/base_pattern.py':
                     continue
                 path = self.store.root / name
@@ -195,7 +198,7 @@ class PatternVersions:
             runs = con.execute('''SELECT v.run AS run_id, b.payload, j.state, r.payload AS result
                 FROM run_versions v
                 JOIN backtest_runs b ON b.id=v.run JOIN jobs j ON j.id=b.job
-                LEFT JOIN results r ON r.run=b.id WHERE v.version=%s ORDER BY b.created_at''', (version_id,)).fetchall()
+                LEFT JOIN results r ON r.run=b.id WHERE v.version=%s ORDER BY b.created_at DESC''', (version_id,)).fetchall()
         return dict(version=version, created_at=created_at, lifecycle=lifecycle,
                     reports=[r['payload'] for r in reports], backtests=runs)
 

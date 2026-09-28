@@ -550,14 +550,15 @@ def test_edit_pipeline_cancellation_and_backtest_only_retry(published_pattern_ca
     provider = FakeProvider()
     service = _service(store, provider, runner=InProcessRunner(store.root))
     base = _base_version(store)
+    preset = _short_preset(service.backtests, _rows(), sessions=2)
 
-    cancelled_job = service.submit(_request(service, base))
+    cancelled_job = service.submit(_request(service, base, preset=preset))
     event = threading.Event()
     event.set()
     service.execute(cancelled_job["id"], cancel_event=event)
     assert service.status(cancelled_job["id"])["state"] == "cancelled"
 
-    job = service.submit(_request(service, base))
+    job = service.submit(_request(service, base, preset=preset))
     service.execute(job["id"])
     assert service.status(job["id"])["state"] == "completed"
     calls_before = provider.calls
@@ -566,6 +567,12 @@ def test_edit_pipeline_cancellation_and_backtest_only_retry(published_pattern_ca
     assert retry["retry_of"] == job["id"]
     assert retry["attempt"] == 2
     assert retry["generated_version_id"] == service.status(job["id"])["generated_version_id"]
+    service.cancel(retry["id"])
+    retry = service.retry_backtest(retry["id"])
+    assert retry["attempt"] == 3
+    assert not retry["cancel_requested"]
+    assert retry["error"] is None
+    assert service.detail(retry["id"])["runs"] is None
     service.execute(retry["id"])
     assert service.status(retry["id"])["state"] == "completed"
     # no further provider call: the stored version was re-backtested

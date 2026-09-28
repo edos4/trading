@@ -44,10 +44,19 @@ def pattern_annotations(annotations, df=None, pattern=None):
     if len(ids) != 1 or None in ids:
         return deepcopy(annotations)
     from core.pattern_loader import VersionPattern
-    pinned = VersionPattern(next(iter(ids)))
-    if pinned._baseline is None:
-        # Generated code and its helpers may execute only inside the sandbox.
+    # Presentation only. Execution still refuses a drifted config.py; a chart
+    # of an already saved detection must not.
+    try:
+        pinned = VersionPattern(next(iter(ids)), runtime=False)
+    except Exception:
+        from utils.logger import log
+        log.exception("Pinned chart geometry unavailable; showing saved annotations")
         return deepcopy(annotations)
+    if pinned._baseline is None:
+        # Only connect saved anchors with trusted presentation code. Never run
+        # generated helpers or infer a new setup from the price history here.
+        from patterns._annotations import pattern_annotations as saved_geometry
+        return saved_geometry(annotations)
     module = pinned._baseline_modules['patterns.' + pinned.version['source_path'].split('/')[-1][:-3]]
     helper = module.__builtins__['__import__']('patterns._annotations', fromlist=['pattern_annotations'])
     return helper.pattern_annotations(annotations, df, pattern or pinned.name)

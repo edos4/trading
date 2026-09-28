@@ -117,6 +117,60 @@ def submit(client, store, **overrides):
     return client.post("/api/patterns/edits", json=body)
 
 
+def test_chart_edit_context_candidate_and_dated_detection_charts(patterns_web, monkeypatch):
+    client, service, editor, provider, store = patterns_web
+    captured = []
+    generate = provider.generate
+    def record(request):
+        captured.append(request)
+        return generate(request)
+    monkeypatch.setattr(provider, "generate", record)
+    tape = rows()
+    context = {
+        "symbol": SYMBOL, "pattern": PATTERN, "market": "us",
+        "pattern_version_id": base_version(store), "timeframe": "1d",
+        "candles": [dict(zip(("time", "open", "high", "low", "close"),
+                             [r[0][:10], *r[1:5]])) for r in tape[:70]],
+        "volume": [{"time": r[0][:10], "value": r[5]} for r in tape[:70]],
+    }
+    response = submit(client, store, chart_context=context, settings=settings_values(sessions=1))
+    assert response.status_code == 200, response.text
+    detail = await_job(client, response.json()["job_id"])
+    assert detail["state"] == "completed", json.dumps({"error": detail["error"], "report": detail["report"]})
+    from ai.providers.deepseek import _user_prompt
+    prompt = _user_prompt(captured[0])
+    assert SYMBOL in prompt and PATTERN in prompt and captured[0].source in prompt
+    assert json.loads(captured[0].context[0][1])["candles"] == context["candles"]
+    candidate = detail["generated_version_id"]
+    assert candidate != base_version(store)  # no automatic publication
+    monkeypatch.setattr(service.backtests, "_load_frozen_rows",
+                        lambda settings, symbols: {s: tape for s in symbols})
+    values = {**settings_values(), "symbols": [SYMBOL, "OTHER"],
+              "start_date": "2025-12-29", "end_date": "2025-12-29", "warmup_bars": 200}
+    run = client.post(f"/api/patterns/versions/{candidate}/backtest", json=values)
+    assert run.status_code == 200, run.text
+    run_id = run.json()["run_id"]
+    for _ in range(240):
+        result = client.get(f"/api/patterns/runs/{run_id}").json()
+        if result["state"] in ("completed", "failed"):
+            break
+        time.sleep(0.25)
+    assert result["state"] == "completed", result
+    saved = client.get(f"/api/patterns/versions/{candidate}").json()
+    assert saved["backtests"][0]["run_id"] == run_id
+    detections = result["result"]["detections"]
+    assert {d["symbol"] for d in detections} == {SYMBOL, "OTHER"}
+    assert all(d["pattern_version_id"] == candidate for d in detections)
+    chart = client.get(f"/api/patterns/runs/{run_id}/chart?detection=0")
+    assert chart.status_code == 200, chart.text
+    payload = chart.json()
+    assert payload["pattern_version_id"] == candidate and payload["markers"]
+    assert payload["candles"][-1]["time"] <= detections[0]["session"][:10]
+    assert client.get(f"/api/patterns/runs/{run_id}/chart?detection=-1").status_code == 400
+    assert client.post(f"/api/patterns/versions/{candidate}/backtest",
+                       json={**values, "end_date": "1900-01-01"}).status_code == 400
+
+
 # ── navigation and auth ──────────────────────────────────────────────────
 def test_patterns_endpoints_require_auth():
     patches = [patch("web.auth.settings"), patch("web.app.settings")]
