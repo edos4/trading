@@ -77,6 +77,38 @@ window.TVChart = (function () {
       throw new Error("not enough bars to chart");
     }
     const rsi = data.rsi14 || [];
+    if (data.pattern) {
+      const menu = document.createElement("button");
+      menu.type = "button";
+      menu.textContent = "Edit pattern…";
+      menu.className = "btn";
+      menu.style.cssText = "position:fixed;z-index:10000";
+      menu.hidden = true;
+      document.body.appendChild(menu);
+      const hide = () => { menu.hidden = true; };
+      const context = (event) => {
+        event.preventDefault();
+        menu.style.left = Math.min(event.clientX, window.innerWidth - 160) + "px";
+        menu.style.top = Math.min(event.clientY, window.innerHeight - 45) + "px";
+        menu.hidden = false;
+        menu.focus();
+      };
+      menu.onclick = () => {
+        try {
+          const key = "pattern-chart-" + Date.now();
+          sessionStorage.setItem(key, JSON.stringify(data));
+          window.location.href = "/patterns?chart=" + encodeURIComponent(key);
+        } catch (err) { window.alert("Could not open pattern editor: " + err.message); }
+      };
+      el.addEventListener("contextmenu", context);
+      document.addEventListener("click", hide);
+      menu.onkeydown = (event) => { if (event.key === "Escape") hide(); };
+      cleanup.push(() => {
+        el.removeEventListener("contextmenu", context);
+        document.removeEventListener("click", hide);
+        menu.remove();
+      });
+    }
     /* Lightweight Charts v4 has no sub-panes, so an RSI series needs its own
      * chart under the price chart. Only split the host when there is RSI data. */
     let priceEl = el;

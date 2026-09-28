@@ -279,3 +279,18 @@ def test_retry_is_traceable_and_does_not_duplicate_results(published_pattern_cat
     queued = service.submit(request_for(service))
     with pytest.raises(EditError, match="finished"):
         service.retry(queued["id"])
+
+
+def test_chart_edit_universe_uses_ph_history_and_keeps_chart_symbol(monkeypatch):
+    import data.history
+    import data.universes
+
+    monkeypatch.setattr(data.history, "list_history_symbols",
+                        lambda market: [{"symbol": "ALI.PH"}, {"symbol": "SM.PH"}]
+                        if market == "ph" else [])
+    monkeypatch.setattr(data.universes, "load", lambda name: ["AAPL", "MSFT"])
+    common = {"mode": "historical-stream", "start_date": "2026-01-01",
+              "end_date": "2026-02-01", "chart_symbol": "SM"}
+    assert settings_from_values({**common, "market": "ph"}).symbols == ("ALI", "SM")
+    assert settings_from_values({**common, "market": "us"}).symbols == ("AAPL", "MSFT", "SM")
+    assert settings_from_values({**common, "market": "ph", "symbols": "BDO"}).symbols == ("BDO",)

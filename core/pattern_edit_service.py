@@ -116,6 +116,8 @@ class PatternEditService:
             if not generated:
                 raise EditError("This job has no validated version to re-backtest")
             payload = dict(prior["payload"])
+            for key in ("cancel_requested", "cancelled_by", "error", "run_ids"):
+                payload.pop(key, None)
             payload["backtest_only"] = True
             payload["version_id"] = generated
             payload["progress"] = {}
@@ -216,6 +218,8 @@ class PatternEditService:
             source=self.store.read_blob(base["files"][source_path]).decode("utf-8"),
             documentation=self._read_documentation(base, documentation_path),
             interface=self._interface(base),
+            context=(("trade-chart.json", request.chart_context.model_dump_json()),)
+            if request.chart_context else (),
         ))
         self._check_cancel(job_id, event)
         self.jobs.touch(job_id, owner, state="validating",

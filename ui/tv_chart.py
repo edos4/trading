@@ -114,6 +114,7 @@ class TradingViewChart(tk.Frame):
         self._canvas.bind("<ButtonPress-1>", self._on_press)
         self._canvas.bind("<B1-Motion>", self._on_drag)
         self._canvas.bind("<ButtonRelease-1>", self._on_release)
+        self._canvas.bind("<Button-3>", self._pattern_menu)
         self._canvas.bind("<MouseWheel>", self._on_wheel)
         self._canvas.bind("<Button-4>", lambda e: self._zoom_at(e.x, 0.85))
         self._canvas.bind("<Button-5>", lambda e: self._zoom_at(e.x, 1.18))
@@ -122,6 +123,19 @@ class TradingViewChart(tk.Frame):
         self._canvas.focus_set()
         self._canvas.bind("<Left>", lambda _e: self._pan(-max(1, self._visible // 12)))
         self._canvas.bind("<Right>", lambda _e: self._pan(max(1, self._visible // 12)))
+
+    def _pattern_menu(self, event) -> None:
+        if not self._payload.get("pattern"):
+            return
+        from ui.patterns_dialog import PatternsDialog
+
+        menu = tk.Menu(self, tearoff=False)
+        menu.add_command(label="Edit pattern…", command=lambda: PatternsDialog(
+            self, chart_context=self._payload))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
 
     def set_payload(self, payload: dict[str, Any]) -> None:
         self._payload = payload

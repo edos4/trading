@@ -229,6 +229,18 @@ def settings_from_values(values: dict[str, Any]) -> BacktestSettings:
     universe = values.get("universe") or None
     if universe is not None:
         universe = str(universe).strip() or None
+    if not symbols and values.get("chart_symbol"):
+        from data.universes import load as load_universe
+
+        if values.get("market") == "ph" and not universe:
+            from data.history import list_history_symbols
+
+            candidates = [row["symbol"].removesuffix(".PH")
+                          for row in list_history_symbols(market="ph")]
+        else:
+            candidates = load_universe(universe or "default")
+        symbols = tuple(dict.fromkeys([
+            *candidates, str(values["chart_symbol"]).strip().upper()]))
 
     window = None
     if mode == "historical-stream":

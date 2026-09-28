@@ -150,3 +150,46 @@ def test_pattern_api_auth_requires_an_explicit_password():
         stocks_history_username="", pattern_api_username="admin",
         pattern_api_password="")
     assert s.pattern_api_auth == ("admin", "")
+
+
+def test_remote_desktop_editor_uses_existing_web_endpoints(monkeypatch):
+    from data import pattern_client
+    from ui.patterns_dialog import PatternsDialog
+
+    calls = []
+    def call(method, path, params=None, json_body=None):
+        calls.append((method, path, params, json_body))
+        if path == "/api/patterns":
+            return {"patterns": [{"pattern_id": "pattern_003_double_bottom"}]}
+        if path.endswith("/versions"):
+            return {"versions": [{"version_id": "v1"}]}
+        if path.endswith("/presets"):
+            return {"presets": []}
+        if path.endswith("/edits"):
+            return {"job_id": "job1", "state": "queued"}
+        return {"run_id": "run1"}
+    monkeypatch.setattr(pattern_client, "_call_json", call)
+    monkeypatch.setattr("core.remote_pattern_store.remote_patterns_enabled", lambda: True)
+    dialog = PatternsDialog.__new__(PatternsDialog)
+    dialog._editor = None
+    editor = dialog.editor()
+    assert isinstance(editor, pattern_client.RemotePatternEditor)
+    assert editor.catalog()[0]["pattern_id"] == "pattern_003_double_bottom"
+    assert editor.versions_for("pattern_003_double_bottom")[0]["version_id"] == "v1"
+    assert editor.presets() == []
+    context = {"symbol": "SM", "candles": [{"time": "2026-01-01"}]}
+    job = editor.submit_from_values(
+        {"start_date": "2026-01-01", "end_date": "2026-02-01"},
+        pattern_id="pattern_003_double_bottom", base_version_id="v1",
+        instruction="Require a higher second bottom", chart_context=context)
+    assert job["id"] == "job1"
+    assert calls[-1][3]["chart_context"] == context
+    assert calls[-1][3]["idempotency_key"]
+    assert editor.backtest_version("v1", {"start_date": "2026-01-01"})["run_id"] == "run1"
+    assert calls[-1][1] == "/api/patterns/versions/v1/backtest"
+    editor.run_chart("run1", 2)
+    assert calls[-1][:3] == ("GET", "/api/patterns/runs/run1/chart", {"detection": 2})
+    editor.set_default(pattern_id="p", version_id="v1", expected_generation=2)
+    assert calls[-1][1].endswith("/v1/default") and calls[-1][3]["expected_generation"] == 2
+    editor.archive(pattern_id="p", version_id="v1", expected_generation=3)
+    assert calls[-1][1].endswith("/v1/archive") and calls[-1][3]["idempotency_key"]

@@ -3,15 +3,18 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 class Element {
-  constructor() { this.events = {}; this.children = []; this.value = ''; this.hidden = true; this.dataset = {}; this.classList = {add(){}, toggle(){}, remove(){}}; }
+  constructor() { this.events = {}; this.children = []; this.style = {}; this.value = ''; this.hidden = true; this.dataset = {}; this.classList = {add(){}, toggle(){}, remove(){}}; }
   addEventListener(name, fn) { this.events[name] = fn; }
+  removeEventListener(name) { delete this.events[name]; }
+  remove() { this.removed = true; }
+  focus() {}
   appendChild(child) { this.children.push(child); }
   set innerHTML(value) { this.children = []; this.html = value; }
   get innerHTML() { return this.html; }
 }
 const elements = new Map();
 const get = key => { if (!elements.has(key)) elements.set(key, new Element()); return elements.get(key); };
-const document = {getElementById: get, querySelector: get, querySelectorAll: () => [], createElement: () => new Element(), addEventListener(){}};
+const document = {body:new Element(), getElementById: get, querySelector: get, querySelectorAll: () => [], createElement: () => new Element(), addEventListener(){}, removeEventListener(){}};
 const annotation = {type:'segment', start_date:'2024-01-02', end_date:'2024-01-12', start_price:10, end_price:12, color:'#ff9800'};
 const row = {symbol:'TEST', action:'BUY', pattern:'test', entry:12, current:13, exit:14, sim_opened:'2024-01-12T00:00:00+00:00', sim_closed:'2024-01-19T00:00:00+00:00', chart_annotations:[annotation]};
 const exported = {books:[{market:'ph', open_positions:[row], closed_trades:[row]}]};
@@ -19,8 +22,10 @@ let saved = null;
 const requests = [], lines = [];
 const series = () => ({setData(data){this.data=data;}, priceScale(){return {applyOptions(){}};}, createPriceLine(){}, setMarkers(markers){this.markers=markers;}});
 const chart = {addCandlestickSeries:series, addHistogramSeries:series, addLineSeries(options){const s=series();s.options=options;lines.push(s);return s;}, subscribeCrosshairMove(){}, timeScale(){return {fitContent(){}};}, remove(){}};
-const window = {TB_PAGE:'replay'};
-const context = vm.createContext({window, document, console, FormData, LightweightCharts:{createChart:()=>chart,CrosshairMode:{Normal:0},LineStyle:{Dashed:2,Solid:0}}, fetch: async (url, opts) => {
+const window = {TB_PAGE:'replay', location:{}, innerWidth:1200, innerHeight:800};
+const stored = new Map();
+const sessionStorage = {setItem:(key, value)=>stored.set(key,value)};
+const context = vm.createContext({window, document, sessionStorage, console, FormData, LightweightCharts:{createChart:()=>chart,CrosshairMode:{Normal:0},LineStyle:{Dashed:2,Solid:0}}, fetch: async (url, opts) => {
   let data = {};
   if (url.endsWith('/load')) data = {replay:saved};
   if (url.endsWith('/upload')) saved = JSON.parse(opts.body);
@@ -31,6 +36,7 @@ const context = vm.createContext({window, document, console, FormData, Lightweig
     assert.equal(body.entry_time,row.sim_opened);
     data={candles:[{time:'2024-01-02',open:10,high:11,low:9,close:10},{time:'2024-01-08',open:10,high:11,low:9,close:10},{time:'2024-01-12',open:11,high:13,low:10,close:12}],markers:[{time:'2024-01-08',price:9.5,position:'belowBar',shape:'circle',color:'#ffeb3b',text:'Bottom'}],segments:[{data:[{time:'2024-01-02',value:10},{time:'2024-01-08',value:9.5},{time:'2024-01-12',value:12}],color:'#ffeb3b',label:'Rounding bottom fit'}]};
   }
+  if (url.endsWith('/chart')) Object.assign(data, {symbol:'TEST', pattern:'test', market:'ph', pattern_version_id:'version-1'});
   return {status:200,ok:true,headers:{get:()=> 'application/json'},json:async()=>data};
 }});
 vm.runInContext(fs.readFileSync('web/static/tv_chart.js','utf8'),context);
@@ -52,6 +58,14 @@ vm.runInContext(fs.readFileSync('web/static/app.js','utf8'),context);
     assert.equal(lines.at(-1).markers[0].time,'2024-01-08');
     assert.equal(lines.at(-2).data[0].value,9.5);
     assert.equal(lines.at(-2).markers[0].text,'Bottom');
+    get('replay-chart-host').events.contextmenu?.({preventDefault(){},clientX:50,clientY:50});
+    const menu = document.body.children.at(-1);
+    menu.onclick();
+    assert.match(window.location.href, /^\/patterns\?chart=/);
+    const attached = JSON.parse(stored.get(decodeURIComponent(window.location.href.split('=')[1])));
+    assert.equal(attached.pattern_version_id, 'version-1');
+    assert.equal(attached.symbol, 'TEST');
+    assert.equal(attached.candles.length, 3);
     get('replay-chart-close').events.click();
     assert.equal(get('replay-chart-modal').hidden,true);
   }
