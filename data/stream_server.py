@@ -387,7 +387,7 @@ class StreamServer:
         if not cold:
             return cache_hits, bulk_n
         try:
-            from data.history import load_daily_tape_rows_bulk
+            from data.history_bulk import load_daily_tape_rows_bulk
 
             filled = load_daily_tape_rows_bulk(
                 cold, after_ts=after_ts, limit=limit, market=self._market,

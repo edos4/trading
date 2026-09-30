@@ -41,10 +41,10 @@ def test_bulk_tape_rows_uses_one_http_call_when_remote() -> None:
     bars = [{"ts": 10, "open": 1, "high": 1, "low": 1, "close": 2, "volume": 3}]
     with patch("data.history.local_history_backfill_enabled", return_value=False), \
          patch(
-             "data.history_client.fetch_history_bars_bulk",
+             "data.history_bulk.fetch_history_bars_bulk",
              return_value={"AAPL": bars, "MSFT": []},
          ) as fetch:
-        from data.history import load_daily_tape_rows_bulk
+        from data.history_bulk import load_daily_tape_rows_bulk
 
         out = load_daily_tape_rows_bulk(
             ["AAPL", "MSFT"], after_ts=1, limit=420, market="us",
@@ -66,8 +66,8 @@ def test_bulk_http_missing_route_returns_none() -> None:
         def json(self):
             return {}
 
-    with patch("data.history_client._post", return_value=_Resp()):
-        from data.history_client import fetch_history_bars_bulk
+    with patch("data.history_bulk._post", return_value=_Resp()):
+        from data.history_bulk import fetch_history_bars_bulk
 
         assert fetch_history_bars_bulk(["AAPL"], after_ts=1, limit=10) is None
 

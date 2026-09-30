@@ -130,7 +130,7 @@ class HistoryApiTests(unittest.TestCase):
             }],
             "MSFT": [],
         }
-        with patch("data.db.load_daily_ohlcv_rows_bulk", return_value=bars) as load:
+        with patch("data.history_bulk.load_daily_ohlcv_rows_bulk", return_value=bars) as load:
             r = self.client.post(
                 "/api/history/bulk",
                 json={"symbols": ["AAPL", "MSFT"], "after_ts": 10, "limit": 420, "market": "us"},

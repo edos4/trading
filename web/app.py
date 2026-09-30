@@ -413,7 +413,7 @@ def create_app() -> FastAPI:
         body: HistoryBulkRequest,
         _user: str = Depends(require_history),
     ):
-        from data.db import load_daily_ohlcv_rows_bulk
+        from data.history_bulk import load_daily_ohlcv_rows_bulk
 
         try:
             results = load_daily_ohlcv_rows_bulk(
