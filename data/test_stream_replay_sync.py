@@ -286,7 +286,7 @@ def test_preload_symbols_fetches_missing_tapes():
     server = StreamServer()
     rows = [{"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "timestamp": 1}]
     with patch("data.stream_server._load_symbol_db", return_value=rows) as load, \
-         patch("data.history.load_daily_tape_rows_bulk", return_value=None):
+         patch("data.history_bulk.load_daily_tape_rows_bulk", return_value=None):
         summary = server.preload_symbols(["aaa", "AAA", "bbb"])
     assert summary["loaded"] == 2
     assert summary["symbols"] == 2
@@ -351,7 +351,7 @@ def test_preload_uses_bulk_then_disk_cache(tmp_path, monkeypatch):
     rows = [{"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "timestamp": 1}]
     server = StreamServer(market="us")
     with patch(
-        "data.history.load_daily_tape_rows_bulk",
+        "data.history_bulk.load_daily_tape_rows_bulk",
         return_value={"AAA": rows, "BBB": []},
     ) as bulk, patch("data.history.load_daily_tape_rows") as single:
         summary = server.preload_symbols(["AAA", "BBB"])
@@ -361,7 +361,7 @@ def test_preload_uses_bulk_then_disk_cache(tmp_path, monkeypatch):
     single.assert_not_called()
 
     again = StreamServer(market="us")
-    with patch("data.history.load_daily_tape_rows_bulk") as bulk2, \
+    with patch("data.history_bulk.load_daily_tape_rows_bulk") as bulk2, \
          patch("data.history.load_daily_tape_rows") as single2:
         summary2 = again.preload_symbols(["AAA", "BBB"])
     assert summary2["loaded"] == 1

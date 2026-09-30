@@ -244,23 +244,6 @@ def load_daily_ohlcv_df(
     return candles_to_df(tv_candles) if tv_candles else None
 
 
-def _bars_to_tape_rows(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for bar in bars:
-        ts = bar.get("ts")
-        if ts is None:
-            continue
-        rows.append({
-            "open": float(bar["open"]),
-            "high": float(bar["high"]),
-            "low": float(bar["low"]),
-            "close": float(bar["close"]),
-            "volume": float(bar.get("volume") or 0),
-            "timestamp": int(ts),
-        })
-    return rows
-
-
 def load_daily_tape_rows(
     symbol: str,
     *,
@@ -275,47 +258,20 @@ def load_daily_tape_rows(
     bars = load_daily_bars(symbol, after_ts=after_ts, limit=limit, market=market)
     if bars is None:
         return None
-    return _bars_to_tape_rows(bars)
-
-
-def load_daily_tape_rows_bulk(
-    symbols: list[str],
-    *,
-    after_ts: int | None = None,
-    limit: int | None = None,
-    market: str | None = None,
-) -> dict[str, list[dict[str, Any]]] | None:
-    """Tape rows for many symbols in one query or one bulk HTTP call.
-
-    None means the bulk path is unavailable (old history server, or the
-    database is down). The caller then falls back to per-symbol fetches.
-    A present key with [] is a symbol that has no bars.
-    """
-    uniq: list[str] = []
-    seen: set[str] = set()
-    for raw in symbols:
-        symbol = str(raw or "").upper().strip()
-        if not symbol or symbol in seen:
+    rows: list[dict[str, Any]] = []
+    for bar in bars:
+        ts = bar.get("ts")
+        if ts is None:
             continue
-        seen.add(symbol)
-        uniq.append(symbol)
-    if not uniq:
-        return {}
-    if local_history_backfill_enabled():
-        from data.db import load_daily_ohlcv_rows_bulk
-
-        grouped = load_daily_ohlcv_rows_bulk(
-            uniq, after_ts=after_ts, limit=limit, market=market,
-        )
-    else:
-        from data.history_client import fetch_history_bars_bulk
-
-        grouped = fetch_history_bars_bulk(
-            uniq, after_ts=after_ts, limit=limit, market=market,
-        )
-    if grouped is None:
-        return None
-    return {symbol: _bars_to_tape_rows(bars) for symbol, bars in grouped.items()}
+        rows.append({
+            "open": float(bar["open"]),
+            "high": float(bar["high"]),
+            "low": float(bar["low"]),
+            "close": float(bar["close"]),
+            "volume": float(bar.get("volume") or 0),
+            "timestamp": int(ts),
+        })
+    return rows
 
 
 def fetch_ohlcv_candles(

@@ -353,89 +353,23 @@ def load_daily_ohlcv_rows(
         with conn.cursor() as cur:
             cur.execute(sql, params)
             rows = cur.fetchall()
-        return [_bar_dict(ts, bar_date, o, h, l, c, v) for ts, bar_date, o, h, l, c, v in rows]
+        out: list[dict[str, Any]] = []
+        for ts, bar_date, o, h, l, c, v in rows:
+            out.append({
+                "ts": int(ts),
+                "date": bar_date.isoformat() if hasattr(bar_date, "isoformat") else str(bar_date),
+                "open": float(o),
+                "high": float(h),
+                "low": float(l),
+                "close": float(c),
+                "volume": int(v) if v is not None else 0,
+            })
+        return out
     except Exception:
         log.exception(f"DB | load_daily_ohlcv_rows failed for {symbol}")
         return []
     finally:
         conn.close()
-
-
-def _bar_dict(ts, bar_date, o, h, l, c, v) -> dict[str, Any]:
-    return {
-        "ts": int(ts),
-        "date": bar_date.isoformat() if hasattr(bar_date, "isoformat") else str(bar_date),
-        "open": float(o),
-        "high": float(h),
-        "low": float(l),
-        "close": float(c),
-        "volume": int(v) if v is not None else 0,
-    }
-
-
-def load_daily_ohlcv_rows_bulk(
-    symbols: list[str],
-    after_ts: int | None = None,
-    limit: int | None = None,
-    *,
-    market: str | None = None,
-) -> dict[str, list[dict[str, Any]]] | None:
-    """Bars for many symbols in one query. None when Postgres is unavailable.
-
-    Keys are the caller's symbols (BDO stays BDO when market=ph; the lookup
-    uses BDO.PS). A symbol with no rows is present with [].
-    """
-    callers: list[str] = []
-    seen: set[str] = set()
-    for raw in symbols:
-        symbol = (raw or "").upper().strip()
-        if not symbol or symbol in seen:
-            continue
-        seen.add(symbol)
-        callers.append(symbol)
-    if not callers:
-        return {}
-    storage_for = {symbol: _history_symbol(symbol, market) for symbol in callers}
-    wanted = sorted({storage for storage in storage_for.values() if storage})
-    if not wanted:
-        return {symbol: [] for symbol in callers}
-    try:
-        conn = get_conn()
-    except Exception:
-        return None
-    try:
-        sql = (
-            "SELECT symbol, ts, bar_date, open, high, low, close, volume FROM ("
-            "SELECT symbol, ts, bar_date, open, high, low, close, volume, "
-            "ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY ts DESC) AS rn "
-            "FROM daily_bars WHERE symbol = ANY(%s)"
-        )
-        params: list[Any] = [wanted]
-        if after_ts is not None:
-            sql += " AND ts > %s"
-            params.append(int(after_ts))
-        sql += ") q"
-        if limit is not None:
-            sql += " WHERE rn <= %s"
-            params.append(max(1, int(limit)))
-        sql += " ORDER BY symbol, ts"
-        with conn.cursor() as cur:
-            cur.execute(sql, params)
-            fetched = cur.fetchall()
-    except Exception:
-        log.exception("DB | load_daily_ohlcv_rows_bulk failed")
-        return None
-    finally:
-        conn.close()
-    by_storage: dict[str, list[dict[str, Any]]] = {storage: [] for storage in wanted}
-    for symbol, ts, bar_date, o, h, l, c, v in fetched:
-        by_storage.setdefault(symbol, []).append(
-            _bar_dict(ts, bar_date, o, h, l, c, v)
-        )
-    return {
-        caller: by_storage.get(storage_for[caller], [])
-        for caller in callers
-    }
 
 
 def load_symbol_meta(symbol: str, *, market: str | None = None) -> dict[str, Any] | None:
