@@ -55,9 +55,12 @@ def test_pinned_asof_skips_future_ipo_tape():
 
 def test_load_symbol_db_uses_history_api_not_local_postgres():
     from config import settings
+    from data.stream_tape_cache import CACHE_MISS
 
     rows = [{"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "timestamp": 1}]
     with patch("data.history.load_daily_tape_rows", return_value=rows) as load, \
+         patch("data.stream_server.cache_get", return_value=CACHE_MISS), \
+         patch("data.stream_server.cache_put"), \
          patch("data.db.get_conn") as get_conn:
         out = _load_symbol_db("AAPL")
     assert out == rows
@@ -69,9 +72,14 @@ def test_load_symbol_db_uses_history_api_not_local_postgres():
 
 
 def test_load_symbol_db_skips_postgres_when_api_empty():
+    from data.stream_tape_cache import CACHE_MISS
+
     with patch("data.history.load_daily_tape_rows", return_value=None), \
+         patch("data.stream_server.cache_get", return_value=CACHE_MISS), \
+         patch("data.stream_server.cache_put") as put, \
          patch("data.db.get_conn") as get_conn:
         out = _load_symbol_db("ZZZZ")
+    put.assert_not_called()
     assert out is None
     get_conn.assert_not_called()
 
@@ -80,8 +88,12 @@ def test_load_symbol_db_uses_after_ts_when_start_set():
     from config import settings
 
     start_ts = 1_700_000_000
+    from data.stream_tape_cache import CACHE_MISS
+
     rows = [{"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "timestamp": start_ts}]
     with patch("data.history.load_daily_tape_rows", return_value=rows) as load, \
+         patch("data.stream_server.cache_get", return_value=CACHE_MISS), \
+         patch("data.stream_server.cache_put"), \
          patch("data.db.get_conn") as get_conn:
         out = _load_symbol_db("AAPL", start_ts=start_ts)
     assert out == rows
@@ -96,8 +108,12 @@ def test_load_symbol_db_uses_after_ts_when_start_set():
 def test_load_symbol_db_passes_ph_market():
     from config import settings
 
+    from data.stream_tape_cache import CACHE_MISS
+
     rows = [{"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "timestamp": 1}]
-    with patch("data.history.load_daily_tape_rows", return_value=rows) as load:
+    with patch("data.history.load_daily_tape_rows", return_value=rows) as load, \
+         patch("data.stream_server.cache_get", return_value=CACHE_MISS), \
+         patch("data.stream_server.cache_put"):
         out = _load_symbol_db("BDO", market="ph")
     assert out == rows
     load.assert_called_once_with(
@@ -269,7 +285,8 @@ def test_batch_snapshots_history_for_subset():
 def test_preload_symbols_fetches_missing_tapes():
     server = StreamServer()
     rows = [{"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "timestamp": 1}]
-    with patch("data.stream_server._load_symbol_db", return_value=rows) as load:
+    with patch("data.stream_server._load_symbol_db", return_value=rows) as load, \
+         patch("data.history.load_daily_tape_rows_bulk", return_value=None):
         summary = server.preload_symbols(["aaa", "AAA", "bbb"])
     assert summary["loaded"] == 2
     assert summary["symbols"] == 2
@@ -327,4 +344,39 @@ def test_client_delta_hydrates_store_without_rewriting_history():
     assert store.available("AAPL", "1d") == 2
     assert ("AAPL", "1d") in client._warm
     assert client._needs_history("AAPL", "1d", store) is False
+
+
+def test_preload_uses_bulk_then_disk_cache(tmp_path, monkeypatch):
+    monkeypatch.setenv("STREAM_TAPE_CACHE_DIR", str(tmp_path))
+    rows = [{"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "timestamp": 1}]
+    server = StreamServer(market="us")
+    with patch(
+        "data.history.load_daily_tape_rows_bulk",
+        return_value={"AAA": rows, "BBB": []},
+    ) as bulk, patch("data.history.load_daily_tape_rows") as single:
+        summary = server.preload_symbols(["AAA", "BBB"])
+    assert summary["loaded"] == 1
+    assert summary["empty"] == 1
+    bulk.assert_called_once()
+    single.assert_not_called()
+
+    again = StreamServer(market="us")
+    with patch("data.history.load_daily_tape_rows_bulk") as bulk2, \
+         patch("data.history.load_daily_tape_rows") as single2:
+        summary2 = again.preload_symbols(["AAA", "BBB"])
+    assert summary2["loaded"] == 1
+    assert summary2["empty"] == 1
+    bulk2.assert_not_called()
+    single2.assert_not_called()
+
+
+def test_status_payload_reports_market_start_and_asof():
+    server = StreamServer(start_date="2026-08-31", market="us")
+    payload = server.status_payload()
+    assert payload["market"] == "us"
+    assert payload["start_date"] == "2026-08-31"
+    assert payload["asof_day"] == ""
+    assert payload["loaded"] == 0
+    server._asof_ts = server._start_ts
+    assert server.status_payload()["asof_day"] == "2026-08-31"
 

@@ -73,6 +73,35 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 BOOK_IDS = (MARKET_US, MARKET_PH)
 
 
+def stream_server_reusable(
+    status: dict,
+    *,
+    market: str,
+    start_date: str | None,
+    resume: bool,
+) -> bool:
+    """True when the live stream process already holds the tapes this Start needs.
+
+    A fresh book (no saved sim clock) reuses only a server that was started on
+    the same date and has not advanced. A resume reuses a server whose cursor
+    is already on that saved session or later, so Stop/Start does not refetch.
+    """
+    if str(status.get("market") or "") != market:
+        return False
+    server_start = str(status.get("start_date") or "")
+    requested = (start_date or "").strip()
+    asof = str(status.get("asof_day") or "")
+    if not resume:
+        return server_start == requested and not asof
+    if server_start and requested and server_start > requested:
+        return False
+    if not asof:
+        return server_start == requested
+    if not requested:
+        return True
+    return asof >= requested
+
+
 class PaperBook:
     """One market's paper session: own thread, asyncio loop, scanner, ledger."""
 
@@ -535,8 +564,61 @@ class PaperBook:
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
 
-    def _ensure_stream_server(self, start_date: Optional[str] = None) -> Optional[str]:
+    def _probe_stream_status(self) -> dict | None:
+        """Ask the process on the stream port who it is. None if nobody answers."""
+        import json as _json
+
+        import websockets
+
+        from data.stream_client import LOCAL_STREAM_WS
+
         host, port = settings.papertrade_stream_host, settings.papertrade_stream_port
+        uri = f"ws://{host}:{port}"
+
+        async def _once() -> dict | None:
+            async with websockets.connect(
+                uri, open_timeout=1.0, **LOCAL_STREAM_WS,
+            ) as ws:
+                await ws.send(_json.dumps({"action": "status"}))
+                raw = await asyncio.wait_for(ws.recv(), timeout=2.0)
+            payload = _json.loads(raw)
+            if isinstance(payload, dict) and payload.get("market"):
+                return payload
+            return None
+
+        try:
+            return asyncio.run(_once())
+        except Exception:
+            log.info("PaperBook | stream status probe failed — starting a new server")
+            return None
+
+    def _ensure_stream_server(
+        self,
+        start_date: Optional[str] = None,
+        *,
+        resume: bool = False,
+    ) -> Optional[str]:
+        host, port = settings.papertrade_stream_host, settings.papertrade_stream_port
+        if self._port_open(host, port):
+            status = self._probe_stream_status()
+            if status and stream_server_reusable(
+                status,
+                market=self.market,
+                start_date=start_date,
+                resume=resume,
+            ):
+                loaded = status.get("loaded", 0)
+                asof = status.get("asof_day") or "not pinned"
+                log.info(
+                    f"PaperBook | reusing paper trade stream "
+                    f"market={self.market} start={start_date or 'near-end'} "
+                    f"asof={asof} tapes={loaded}"
+                )
+                with self.lock:
+                    self.status = (
+                        f"Reusing paper trade stream ({loaded} tapes, asof {asof})..."
+                    )
+                return None
         self._kill_whatever_is_on(port)
         time.sleep(0.3)
         with self.lock:
@@ -607,8 +689,17 @@ class PaperBook:
                 if configured_date is None or configured_date <= resume_date:
                     effective_stream_start = resume_date.isoformat()
 
+        resuming = False
+        sim_now = self.account.sim_now()
+        if sim_now is not None and effective_stream_start:
+            saved = sim_now.astimezone(ZoneInfo(profile.session_tz)).date().isoformat()
+            resuming = effective_stream_start == saved
+
         if use_stream:
-            error = self._ensure_stream_server(start_date=effective_stream_start)
+            error = self._ensure_stream_server(
+                start_date=effective_stream_start,
+                resume=resuming,
+            )
             if error:
                 with self.lock:
                     self.running = False
@@ -697,9 +788,14 @@ class PaperBook:
                 self.task = None
                 self.error = error_msg
                 self.status = error_msg or "Stopped."
+                # The stream process keeps its tapes. The next Start reuses it
+                # when the market and replay clock still match; a mismatch
+                # kills the port from _ensure_stream_server.
                 if self._stream_proc is not None and self._stream_proc.poll() is None:
-                    self._stream_proc.terminate()
-                self._stream_proc = None
+                    log.info(
+                        "PaperBook | leaving paper trade stream server up "
+                        "for the next Start"
+                    )
 
 
 class PaperBookManager:

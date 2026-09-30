@@ -37,6 +37,41 @@ def test_bars_to_candles_and_weekly() -> None:
     assert weekly[-1].high >= weekly[-1].low
 
 
+def test_bulk_tape_rows_uses_one_http_call_when_remote() -> None:
+    bars = [{"ts": 10, "open": 1, "high": 1, "low": 1, "close": 2, "volume": 3}]
+    with patch("data.history.local_history_backfill_enabled", return_value=False), \
+         patch(
+             "data.history_client.fetch_history_bars_bulk",
+             return_value={"AAPL": bars, "MSFT": []},
+         ) as fetch:
+        from data.history import load_daily_tape_rows_bulk
+
+        out = load_daily_tape_rows_bulk(
+            ["AAPL", "MSFT"], after_ts=1, limit=420, market="us",
+        )
+    assert out is not None
+    assert out["AAPL"][0]["timestamp"] == 10
+    assert out["AAPL"][0]["close"] == 2
+    assert out["MSFT"] == []
+    fetch.assert_called_once()
+
+
+def test_bulk_http_missing_route_returns_none() -> None:
+    class _Resp:
+        status_code = 404
+
+        def raise_for_status(self):
+            raise AssertionError("404 must not raise into per-symbol fallback")
+
+        def json(self):
+            return {}
+
+    with patch("data.history_client._post", return_value=_Resp()):
+        from data.history_client import fetch_history_bars_bulk
+
+        assert fetch_history_bars_bulk(["AAPL"], after_ts=1, limit=10) is None
+
+
 def test_fetch_uses_api_bars_without_tv() -> None:
     bars = [_bar(1704456000 + i * 86400, 50.0) for i in range(5)]
 

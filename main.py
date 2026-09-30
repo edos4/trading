@@ -303,8 +303,18 @@ async def run_paper(
             from data.stream_client import StreamClient
 
             stream_book = PaperBook(profile.id)
+            saved_sim = account.sim_now()
+            resuming = False
+            if saved_sim is not None and effective_stream_start:
+                from zoneinfo import ZoneInfo
+
+                saved_day = saved_sim.astimezone(
+                    ZoneInfo(profile.session_tz)
+                ).date().isoformat()
+                resuming = effective_stream_start == saved_day
             error = stream_book._ensure_stream_server(
                 start_date=effective_stream_start,
+                resume=resuming,
             )
             if error:
                 log.error(error)
@@ -355,8 +365,9 @@ async def run_paper(
             and stream_book._stream_proc is not None
             and stream_book._stream_proc.poll() is None
         ):
-            stream_book._stream_proc.terminate()
-            stream_book._stream_proc = None
+            log.info(
+                "Paper | leaving paper trade stream server up for the next Start"
+            )
         if export_trades_log:
             stats = scanner.stats if scanner is not None else None
             try:

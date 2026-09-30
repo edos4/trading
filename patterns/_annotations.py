@@ -67,7 +67,7 @@ def pattern_annotations(annotations: list[dict], df=None, pattern: str | None = 
             elif "pole start" in markers:
                 label = "Pole"
         ann["label"] = PART_LABELS.get(label, label)
-        reason = reasons.get(label) or reasons.get(ann["label"])
+        reason = ann.get("reason") or reasons.get(label) or reasons.get(ann["label"])
         if reason:
             ann["reason"] = reason
     return result

@@ -122,6 +122,31 @@ class HistoryApiTests(unittest.TestCase):
         self.assertEqual(all_sym.call_args.kwargs.get("market"), "ph")
         self.assertEqual(r.json()["symbols"][0]["symbol"], "BDO.PS")
 
+    def test_history_bulk_one_query(self) -> None:
+        bars = {
+            "AAPL": [{
+                "ts": 1704456000, "date": "2024-01-05",
+                "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "volume": 100,
+            }],
+            "MSFT": [],
+        }
+        with patch("data.db.load_daily_ohlcv_rows_bulk", return_value=bars) as load:
+            r = self.client.post(
+                "/api/history/bulk",
+                json={"symbols": ["AAPL", "MSFT"], "after_ts": 10, "limit": 420, "market": "us"},
+                auth=("admin", "admin"),
+            )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["results"]["AAPL"][0]["close"], 1.5)
+        self.assertEqual(r.json()["results"]["MSFT"], [])
+        load.assert_called_once()
+        self.assertEqual(load.call_args.args[0], ["AAPL", "MSFT"])
+        self.assertEqual(load.call_args.kwargs.get("market"), "us")
+
+    def test_history_bulk_requires_auth(self) -> None:
+        r = self.client.post("/api/history/bulk", json={"symbols": ["AAPL"]})
+        self.assertEqual(r.status_code, 401)
+
     def test_history_rejects_dashboard_password(self) -> None:
         r = self.client.get("/api/history/AAPL", auth=("admin", "correct-horse"))
         self.assertEqual(r.status_code, 401)

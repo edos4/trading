@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
 
 import numpy as np
 
@@ -9,6 +8,7 @@ from analysis.indicator_engine import IndicatorEngine
 from data.ohlcv_store import OHLCVStore
 from data.tv_client import MarketSnapshot
 from patterns import _dedup
+from patterns._rationale import pattern_reasons
 from patterns.base_pattern import (
     ANN_ENTRY,
     ANN_LINE,
@@ -21,7 +21,7 @@ from patterns.base_pattern import (
     ann_segment,
 )
 
-# `.cjs` pennant_find_historical.cjs (LOCKED 2026-07-03) + backtest_pennant_200.cjs
+# Based on pennant_find_historical.cjs + backtest_pennant_200.cjs; geometry tightened.
 FLAG_MIN_LEN, FLAG_MAX_LEN = 3, 10
 FLAG_MIN_RET = 0.10
 FLAG_MIN_VOLX = 1.3
@@ -95,7 +95,7 @@ class PennantPattern(BasePattern):
             for flag_len in range(FLAG_MIN_LEN, FLAG_MAX_LEN + 1):
                 end_idx = consol_start - 1
                 start_idx = end_idx - flag_len + 1
-                if start_idx - 21 < 0:
+                if start_idx - 20 < 0:
                     continue
                 post = close[end_idx]
                 start_px = close[start_idx]
@@ -114,7 +114,7 @@ class PennantPattern(BasePattern):
                     continue
 
                 flag_vol = vol[start_idx:end_idx + 1].mean()
-                prior_vol = vol[start_idx - 21:start_idx - 1].mean()
+                prior_vol = vol[start_idx - 20:start_idx].mean()
                 if prior_vol <= 0 or flag_vol < FLAG_MIN_VOLX * prior_vol:
                     continue
                 flag_range = high[start_idx:end_idx + 1].max() - low[start_idx:end_idx + 1].min()
@@ -127,15 +127,22 @@ class PennantPattern(BasePattern):
                 slope_h = _linreg_slope(ch) / post
                 slope_l = _linreg_slope(cl) / post
                 contraction = (ch[-1] - cl[-1]) < (ch[0] - cl[0]) * 0.7
-                convergence = (slope_h - slope_l) < -0.0005
+                # A pennant coils inward; two rising/falling rails are a wedge.
+                convergence = slope_h <= 0 <= slope_l and (slope_h - slope_l) < -0.0005
+                x = np.arange(consol_len) - (consol_len - 1) / 2
+                upper = ch.mean() + slope_h * post * x
+                lower = cl.mean() + slope_l * post * x
+                coil_close = close[consol_start:consol_end + 1]
+                contained = np.all((lower < upper) & (coil_close >= lower)
+                                   & (coil_close <= upper))
                 if direction == "bull":
                     retrace = (post - cl.min()) / flag_range
                 else:
                     retrace = (ch.max() - post) / flag_range
                 consol_vol = cv.mean()
                 vol_contraction = flag_vol > 0 and consol_vol <= CONSOL_MAX_VOLX * flag_vol
-                if not (contraction and convergence and retrace <= CONSOL_MAX_RETRACE
-                        and vol_contraction):
+                if not (contraction and convergence and 0 <= retrace <= CONSOL_MAX_RETRACE
+                        and contained and vol_contraction):
                     continue
 
                 b_close = close[current]
@@ -167,7 +174,7 @@ class PennantPattern(BasePattern):
                 self.bar_date(df, best.consol_start), self.bar_date(df, best.consol_end),
                 intercept, intercept + slope * (len(coil) - 1), ANN_LINE, label=label,
             ))
-        return TradeSignal(
+        signal = TradeSignal(
             symbol=snapshot.symbol,
             action="BUY" if bull else "SELL",
             pattern=self.name,
@@ -192,3 +199,10 @@ class PennantPattern(BasePattern):
                 ann_marker(self.bar_date(df, current), price, "entry", ANN_ENTRY, "o", "below" if bull else "above"),
             ],
         )
+        # Save measurements with the geometry, before history can be revised.
+        reasons = pattern_reasons(self.name, signal.chart_annotations, df)
+        for annotation in signal.chart_annotations:
+            reason = reasons.get(annotation.get("label") or "Pole")
+            if reason:
+                annotation["reason"] = reason
+        return signal
