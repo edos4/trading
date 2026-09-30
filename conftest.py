@@ -193,7 +193,7 @@ def sandbox_double(monkeypatch):
     from core.pattern_edit_validation import Validator as RealValidator
 
     def factory(store=None, runner=None):
-        return RealValidator(store, runner=InProcessEditRunner(store.root))
+        return RealValidator(store, runner=runner if runner is not None else InProcessEditRunner(store.root))
 
     monkeypatch.setattr("core.pattern_edit_validation.Validator", factory)
     return factory

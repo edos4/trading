@@ -7,6 +7,8 @@ produced the signal.
 
 from pathlib import Path
 
+from datetime import datetime, timedelta, timezone
+
 import pandas as pd
 import pytest
 
@@ -112,3 +114,102 @@ class Detector(BasePattern):
         (tmp_path / 'patterns/base_pattern.py').write_text('# incompatible interface\n')
         with pytest.raises(EditError, match='base_pattern.py'):
             VersionPattern('test', store)
+
+
+GENERATED_SOURCE = b"""from patterns.base_pattern import BasePattern, TradeSignal
+class Detector(BasePattern):
+    name = 'pattern_001_test'
+    timeframes = ['1d']
+    skipped = False
+    def analyze(self, snapshot, store):
+        return TradeSignal(symbol=snapshot.symbol, action='BUY', pattern=self.name,
+                           timeframe=snapshot.timeframe, confidence=1.0,
+                           price=snapshot.candle.close, qty=1)
+"""
+
+
+def generated_version(tmp_path):
+    """An applied edit plus a store double that serves its version and blobs."""
+    from types import SimpleNamespace
+    from core.pattern_edit_store import digest
+    from core.pattern_versions import runtime_manifest
+
+    files = {'patterns/001_test.py': GENERATED_SOURCE,
+             'patterns/base_pattern.py': (ROOT / 'patterns/base_pattern.py').read_bytes()}
+    for name, data in files.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    blobs = {digest(data): data for data in files.values()}
+    version = dict(
+        version_id='generated-1', pattern_id='pattern_001_test',
+        parent_version_id='base-1', provenance='generated',
+        source_path='patterns/001_test.py',
+        files={name: {'sha256': digest(data)} for name, data in files.items()},
+        runtime=runtime_manifest(tmp_path),
+        metadata={'name': 'pattern_001_test', 'timeframes': ['1d'], 'skipped': False,
+                  'chart_description': 'x', 'MIN_BARS': 2, 'HORIZON_BARS': 5,
+                  'MAX_OPEN_PER_SYMBOL': None})
+    store = SimpleNamespace(root=tmp_path, get=lambda *args: version,
+                            read_blob=lambda ref: blobs[ref['sha256']])
+    return store, version
+
+
+def generated_bars(count=8):
+    start = datetime(2026, 1, 5, tzinfo=timezone.utc)
+    return [OHLCVCandle(open=10.0, high=11.0, low=9.0, close=10.0, volume=100.0,
+                        timestamp=start + timedelta(days=i))
+            for i in range(count)]
+
+
+def test_generated_version_preloads_in_process(tmp_path, monkeypatch):
+    """An approved edit runs its own source here, not a sandbox process per symbol."""
+    store, _ = generated_version(tmp_path)
+
+    def _never(*args, **kwargs):
+        raise AssertionError('a preloaded version must not enter the sandbox')
+
+    monkeypatch.setattr('core.pattern_edit_worker.CandidateRunner.run', _never)
+    pattern = VersionPattern('generated-1', store, in_process=True)
+    assert pattern._baseline is not None
+    bars = generated_bars()
+    ohlcv = OHLCVStore(window=64, session_tz='America/New_York')
+    ohlcv.replace_all('FIXTURE', '1d', bars)
+    _dedup.reset()
+    try:
+        signal = pattern.analyze(_snapshot('FIXTURE', '1d', bars[-1]), ohlcv)
+    finally:
+        _dedup.reset()
+    assert signal.symbol == 'FIXTURE'
+    assert signal.pattern_version_id == 'generated-1'
+    assert signal.provenance == 'versioned'
+
+
+def test_sandboxed_version_batches_every_symbol_into_one_worker(tmp_path, monkeypatch):
+    store, _ = generated_version(tmp_path)
+    batches: list[int] = []
+
+    class _Validator:
+        def __init__(self, _store):
+            pass
+
+        def execute_many(self, version, files, datasets, cancel=None):
+            batches.append(len(datasets))
+            return [{'signals': [], 'metadata': {}} for _ in datasets]
+
+        def execute(self, *args, **kwargs):
+            raise AssertionError('a batch must not fall back to per-symbol calls')
+
+    monkeypatch.setattr('core.pattern_edit_validation.Validator', _Validator)
+    pattern = VersionPattern('generated-1', store)
+    assert pattern._baseline is None
+    bars = generated_bars()
+    symbols = ['AAA', 'BBB', 'CCC']
+    ohlcv = OHLCVStore(window=64, session_tz='America/New_York')
+    for symbol in symbols:
+        ohlcv.replace_all(symbol, '1d', bars)
+    _dedup.reset()
+    signals = pattern.analyze_many(
+        [_snapshot(symbol, '1d', bars[-1]) for symbol in symbols], ohlcv)
+    assert signals == [None, None, None]
+    assert batches == [3]

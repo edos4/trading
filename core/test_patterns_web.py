@@ -133,6 +133,8 @@ def test_chart_edit_context_candidate_and_dated_detection_charts(patterns_web, m
                              [r[0][:10], *r[1:5]])) for r in tape[:70]],
         "volume": [{"time": r[0][:10], "value": r[5]} for r in tape[:70]],
     }
+    context["manual_corrections"] = [{"id": "drawn", "kind": "pattern", "label": "correct peaks", "points": [
+        {"time": context["candles"][i]["time"], "value": 100.0 + i, "pane": "price"} for i in (1, 5, 10)]}]
     response = submit(client, store, chart_context=context, settings=settings_values(sessions=1))
     assert response.status_code == 200, response.text
     detail = await_job(client, response.json()["job_id"])
@@ -141,6 +143,9 @@ def test_chart_edit_context_candidate_and_dated_detection_charts(patterns_web, m
     prompt = _user_prompt(captured[0])
     assert SYMBOL in prompt and PATTERN in prompt and captured[0].source in prompt
     assert json.loads(captured[0].context[0][1])["candles"] == context["candles"]
+    assert json.loads(captured[0].context[0][1])["manual_corrections"] == context["manual_corrections"]
+    stored = service.jobs.find(response.json()["job_id"])
+    assert stored["payload"]["request"]["chart_context"]["manual_corrections"] == context["manual_corrections"]
     candidate = detail["generated_version_id"]
     assert candidate != base_version(store)  # no automatic publication
     monkeypatch.setattr(service.backtests, "_load_frozen_rows",

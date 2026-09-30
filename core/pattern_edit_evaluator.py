@@ -12,6 +12,9 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 
 
 def evaluate(request):
+    if 'datasets' in request:
+        # One process, one import of the candidate: the whole batch runs here.
+        return {'results':[evaluate(dataset) for dataset in request['datasets']]}
     from data.ohlcv_store import OHLCVStore
     from data.tv_client import OHLCVCandle
     from patterns.base_pattern import BasePattern, TradeSignal

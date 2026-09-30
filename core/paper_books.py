@@ -406,6 +406,7 @@ class PaperBook:
                     else (trade.sim_exit_date or trade.exit_date)
                 ),
             )
+            payload["trade_id"] = trade.trade_id
             return payload
         except Exception as exc:
             log.exception("PaperBook | trade chart payload failed")
@@ -442,17 +443,22 @@ class PaperBook:
         except (TypeError, ValueError):
             entry = None
         try:
-            return build_trade_viewer_payload(
+            payload = build_trade_viewer_payload(
                 df,
                 symbol=ticker,
                 timeframe=timeframe,
                 pattern=log_row.get("pattern"),
+                market=account.market,
+                pattern_version_id=log_row.get("pattern_version_id"),
                 annotations=log_row.get("chart_annotations"),
                 action=log_row.get("action"),
                 session_tz=session_tz,
                 entry=entry,
                 entry_time=log_row.get("sim_bar") or log_row.get("ts"),
             )
+            if log_row.get("ts"):
+                payload["trade_id"] = f"log:{log_row['ts']}:{ticker}"
+            return payload
         except Exception as exc:
             log.exception("PaperBook | trade chart payload failed")
             return {"error": f"chart data failed: {exc}"}

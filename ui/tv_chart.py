@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import tkinter as tk
+from tkinter import messagebox, simpledialog
+from copy import deepcopy
+from uuid import uuid4
 from typing import Any, Optional
 
 TV_BG = "#131722"
@@ -21,24 +24,39 @@ TV_TOOL = "#1e222d"      # toolbar button face
 
 # Reason text sits under a part label; wrap it so a note stays a narrow caption.
 NOTE_WRAP_PX = 190
+# ponytail: drafts last for this process; use shared storage for cross-device resume.
+_DRAFTS: dict[tuple, list[dict]] = {}
 
 
-def open_trade_viewer(parent: tk.Misc, payload: dict[str, Any]) -> tk.Toplevel:
+def open_trade_viewer(parent: tk.Misc, payload: dict[str, Any], *, read_only: bool = False) -> tk.Toplevel:
     win = tk.Toplevel(parent)
     win.title(payload.get("title") or payload.get("symbol") or "Chart")
     win.geometry("1120x700")
     win.minsize(720, 460)
     win.configure(bg=TV_BG)
-    chart = TradingViewChart(win)
+    chart = TradingViewChart(win, read_only=read_only)
     chart.pack(fill=tk.BOTH, expand=True)
     chart.set_payload(payload)
+    def close():
+        if chart._draft is not None and not messagebox.askyesno(
+                "Unfinished drawing", "Discard the unfinished drawing? Completed corrections are kept.", parent=win):
+            return
+        if chart._drawings and not chart._draft_key and not read_only and not messagebox.askyesno(
+                "Unsaved corrections", "This chart has no stable identity. Discard its corrections?", parent=win):
+            return
+        win.destroy()
+    win.protocol("WM_DELETE_WINDOW", close)
     win.focus_set()
     return win
 
 
 class TradingViewChart(tk.Frame):
-    def __init__(self, master: tk.Misc, **kwargs):
+    def __init__(self, master: tk.Misc, *, read_only: bool = False, **kwargs):
         super().__init__(master, bg=TV_BG, **kwargs)
+        self._read_only = read_only
+        self._draft_key = None
+        self._selected = None
+        self._editing = None
         self._payload: dict[str, Any] = {}
         self._candles: list[dict] = []
         self._volume: dict[str, dict] = {}
@@ -91,13 +109,16 @@ class TradingViewChart(tk.Frame):
         tools = tk.Frame(self._header, bg=TV_BG)
         tools.pack(fill=tk.X, pady=(4, 0))
         for name, label, command in (
+            ("select", "Select", lambda: self._set_tool("select")),
+            ("pattern", "Draw pattern", lambda: self._set_tool("pattern")),
+            (None, "Finish", self._finish_pattern),
             ("trend", "Trend", lambda: self._set_tool("trend")),
             ("vert", "VLine", lambda: self._set_tool("vert")),
             (None, "Undo", self._undo_drawing),
             (None, "Clear", self._clear_drawings),
         ):
             button = tk.Button(
-                tools, text=label, command=command, bg=TV_TOOL, fg=TV_TEXT,
+                tools, text=label, command=self._refocus(command), bg=TV_TOOL, fg=TV_TEXT,
                 activebackground=TV_DRAW, activeforeground=TV_BG, relief=tk.FLAT,
                 font=("Trebuchet MS", 9), padx=8,
             )
@@ -105,6 +126,17 @@ class TradingViewChart(tk.Frame):
             if name:
                 self._tool_buttons[name] = button
 
+        actions = tk.Frame(self._header, bg=TV_BG)
+        actions.pack(fill=tk.X, pady=(3, 0))
+        for label, command in (("Label", self._label_drawing), ("Delete", self._delete_drawing),
+                               ("Correct pattern…", self._correct_pattern)):
+            tk.Button(actions, text=label, command=self._refocus(command), bg=TV_TOOL, fg=TV_TEXT,
+                      relief=tk.FLAT, font=("Trebuchet MS", 9)).pack(side=tk.LEFT, padx=(0, 4))
+        tk.Label(actions, text="Blue: your corrections · Enter: finish · Escape: cancel",
+                 bg=TV_BG, fg=TV_DRAW, font=("Trebuchet MS", 9)).pack(side=tk.LEFT)
+        if read_only:
+            tools.pack_forget()
+            actions.pack_forget()
         self._canvas = tk.Canvas(self, bg=TV_BG, highlightthickness=0, cursor="crosshair")
         self._canvas.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
@@ -119,26 +151,94 @@ class TradingViewChart(tk.Frame):
         self._canvas.bind("<Button-4>", lambda e: self._zoom_at(e.x, 0.85))
         self._canvas.bind("<Button-5>", lambda e: self._zoom_at(e.x, 1.18))
         self._canvas.bind("<Control-z>", lambda _e: self._undo_drawing())
-        self._canvas.bind("<Escape>", lambda _e: self._set_tool(None))
+        self._canvas.bind("<Escape>", self._cancel_drawing)
+        self._canvas.bind("<Return>", lambda _e: self._finish_pattern())
+        self.winfo_toplevel().bind("<Escape>", self._cancel_drawing, add="+")
+        self._canvas.bind("<Delete>", lambda _e: self._delete_drawing())
         self._canvas.focus_set()
         self._canvas.bind("<Left>", lambda _e: self._pan(-max(1, self._visible // 12)))
         self._canvas.bind("<Right>", lambda _e: self._pan(max(1, self._visible // 12)))
 
-    def _pattern_menu(self, event) -> None:
-        if not self._payload.get("pattern"):
-            return
-        from ui.patterns_dialog import PatternsDialog
+    def correction_snapshot(self) -> dict:
+        shapes = []
+        for shape in self._drawings:
+            result = {"id": shape["id"], "kind": shape["kind"], "label": shape.get("label", "")}
+            if shape["kind"] == "vert":
+                result["time"] = self._candles[shape["i"]]["time"]
+            else:
+                points = shape["points"] if shape["kind"] == "pattern" else [
+                    {"i": shape[f"i{n}"], "p": shape[f"p{n}"], "pane": shape.get(f"pane{n}", "price")}
+                    for n in (1, 2)]
+                result["points"] = [{"time": self._candles[p["i"]]["time"],
+                                     "value": p["p"], "pane": p["pane"]} for p in points]
+            shapes.append(result)
+        return deepcopy({**self._payload, "manual_corrections": shapes})
 
+    def _load_corrections(self, shapes) -> None:
+        indexes = {c["time"]: i for i, c in enumerate(self._candles)}
+        self._drawings = []
+        for source in shapes:
+            shape = {"id": source["id"], "kind": source["kind"], "label": source.get("label", "")}
+            if shape["kind"] == "vert":
+                if source["time"] not in indexes:
+                    raise ValueError("A saved correction is outside the chart history")
+                shape["i"] = indexes[source["time"]]
+            else:
+                points = [{"i": indexes[p["time"]], "p": p["value"], "pane": p["pane"]}
+                          for p in source["points"]]
+                if shape["kind"] == "pattern":
+                    shape["points"] = points
+                else:
+                    for n, point in enumerate(points, 1):
+                        shape.update({f"i{n}": point["i"], f"p{n}": point["p"], f"pane{n}": point["pane"]})
+            self._drawings.append(shape)
+
+    def _remember(self) -> None:
+        self._draw_history.append(deepcopy(self._drawings))
+        self._draw_history = self._draw_history[-50:]
+
+    def _drawing_changed(self) -> None:
+        if self._draft_key and not self._read_only:
+            _DRAFTS[self._draft_key] = self.correction_snapshot()["manual_corrections"]
+        self._redraw()
+
+    def _correct_pattern(self) -> None:
+        if self._read_only:
+            return
+        if not self._payload.get("pattern"):
+            messagebox.showinfo("Correction", "This chart needs a target pattern before submitting corrections.", parent=self)
+            return
+        if self._draft is not None or self._editing is not None:
+            messagebox.showinfo("Correction", "Finish or cancel the current drawing first.", parent=self)
+            return
+        from core.pattern_editor_contracts import ChartEditContext
+        from ui.patterns_dialog import PatternsDialog
+        context = self.correction_snapshot()
+        try:
+            ChartEditContext.model_validate(context)
+        except ValueError as exc:
+            messagebox.showerror("Correction", str(exc), parent=self)
+            return
+        PatternsDialog(self, chart_context=context)
+
+    def _pattern_menu(self, event) -> None:
+        if self._read_only:
+            return
         menu = tk.Menu(self, tearoff=False)
-        menu.add_command(label="Edit pattern…", command=lambda: PatternsDialog(
-            self, chart_context=self._payload))
+        menu.add_command(label="Correct pattern…", command=self._correct_pattern)
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
 
     def set_payload(self, payload: dict[str, Any]) -> None:
-        self._payload = payload
+        self._payload = deepcopy(payload)
+        identity = payload.get("trade_id") or payload.get("entry_time")
+        self._draft_key = ((payload.get("replay_id") or "paper", payload.get("market"),
+                           payload.get("symbol"), payload.get("timeframe"), payload.get("pattern"),
+                           payload.get("pattern_version_id"), identity) if identity else None)
+        self._drawings, self._draw_history = [], []
+        self._draft = self._editing = self._selected = self._tool = None
         self._candles = list(payload.get("candles") or [])
         seen = {row["time"] for row in self._candles}
         for row in payload.get("pred_candles") or []:
@@ -146,6 +246,15 @@ class TradingViewChart(tk.Frame):
                 continue
             self._candles.append({**row, "predicted": True})
             seen.add(row["time"])
+        shapes = payload.get("manual_corrections", [])
+        if self._draft_key and not self._read_only:
+            shapes = _DRAFTS.get(self._draft_key, shapes)
+        try:
+            self._load_corrections(shapes)
+        except (KeyError, ValueError):
+            messagebox.showerror("Corrections", "Saved correction anchors are missing from this chart. The draft is retained.", parent=self)
+            self._drawings = []
+            self._draft_key = None  # Do not overwrite the retained draft with missing anchors.
         self._volume = {row["time"]: row for row in payload.get("volume") or []}
         self._rsi = {row["time"]: row["value"] for row in payload.get("rsi14") or []}
         self._levels = list(payload.get("levels") or [])
@@ -271,7 +380,29 @@ class TradingViewChart(tk.Frame):
             self._draw_crosshair(self._hover)
 
     # ── manual annotations ────────────────────────────────────────────────────
+    def _refocus(self, command):
+        def wrapped():
+            command()
+            try:
+                self._canvas.focus_set()
+            except tk.TclError:
+                pass
+        return wrapped
+
+    def _cancel_drawing(self, _event=None):
+        if self._read_only:
+            return None
+        if self._tool or self._draft is not None or self._editing is not None:
+            self._set_tool(None)
+            return "break"
+        return None
+
     def _set_tool(self, tool: Optional[str]) -> None:
+        if self._read_only:
+            return
+        if self._editing:
+            self._drawings = self._editing[2]
+            self._editing = None
         self._tool = None if self._tool == tool else tool
         self._draft = None
         for name, button in self._tool_buttons.items():
@@ -281,16 +412,80 @@ class TradingViewChart(tk.Frame):
         self._redraw()
 
     def _undo_drawing(self) -> None:
+        if self._editing:
+            self._drawings = self._editing[2]
+            self._editing = None
+        self._draft = None
         if self._draw_history:
             self._drawings = self._draw_history.pop()
             self._draft = None
+            self._drawing_changed()
+        else:
             self._redraw()
 
     def _clear_drawings(self) -> None:
+        if self._editing:
+            self._drawings = self._editing[2]
+            self._editing = None
+        self._draft = None
         if self._drawings:
-            self._draw_history.append(list(self._drawings))
+            self._remember()
             self._drawings = []
+            self._draft = None
+            self._drawing_changed()
+        else:
             self._redraw()
+
+    def _finish_pattern(self) -> None:
+        if self._draft and self._draft["kind"] == "pattern" and len(self._draft["points"]) >= 2:
+            self._remember()
+            self._drawings.append(self._draft)
+            self._selected = self._draft["id"]
+            self._draft = None
+            self._drawing_changed()
+
+    def _delete_drawing(self) -> None:
+        if self._read_only or not any(s["id"] == self._selected for s in self._drawings):
+            return
+        self._remember()
+        self._drawings = [s for s in self._drawings if s["id"] != self._selected]
+        self._selected = None
+        self._drawing_changed()
+
+    def _label_drawing(self) -> None:
+        shape = next((s for s in self._drawings if s["id"] == self._selected), None)
+        if not shape:
+            messagebox.showinfo("Label", "Use Select and click a correction first.", parent=self)
+            return
+        label = simpledialog.askstring("Correction label", "Label (up to 200 characters)",
+                                       initialvalue=shape.get("label", ""), parent=self)
+        if label is not None:
+            if len(label) > 200:
+                messagebox.showerror("Label", "Maximum 200 characters.", parent=self)
+                return
+            self._remember()
+            shape["label"] = label
+            self._drawing_changed()
+
+    def _hit_drawing(self, event):
+        for shape in reversed(self._drawings):
+            if shape["kind"] == "vert":
+                if abs(self._x_for(shape["i"] - self._start) - event.x) < 8:
+                    return shape, 0
+                continue
+            if shape["kind"] == "pattern":
+                pts = [(self._x_for(p["i"] - self._start), self._y_price(p["p"])) for p in shape["points"]]
+            else:
+                pts = self._shape_points(shape)
+            for i, (x, y) in enumerate(pts):
+                if (x-event.x)**2 + (y-event.y)**2 < 81:
+                    return shape, i
+            for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+                dx, dy = bx-ax, by-ay
+                t = max(0, min(1, ((event.x-ax)*dx+(event.y-ay)*dy)/(dx*dx+dy*dy or 1)))
+                if (event.x-ax-t*dx)**2 + (event.y-ay-t*dy)**2 < 49:
+                    return shape, None
+        return None, None
 
     def _y_to_price(self, y: float) -> float:
         _, y0, _, y1 = self._plot
@@ -316,11 +511,30 @@ class TradingViewChart(tk.Frame):
 
     def _draw_drawings(self) -> None:
         for shape in self._drawings:
-            self._paint_shape(shape, TV_DRAW)
+            self._paint_shape(shape, "#90caf9" if shape.get("id") == self._selected else TV_DRAW)
         if self._draft is not None:
             self._paint_shape(self._draft, TV_DRAW)
 
     def _paint_shape(self, shape: dict, color: str) -> None:
+        if shape.get("label"):
+            if shape["kind"] == "vert":
+                x, y = self._x_for(shape["i"] - self._start), self._plot[1]
+            elif shape["kind"] == "pattern":
+                p = shape["points"][0]
+                x, y = self._x_for(p["i"] - self._start), self._y_price(p["p"])
+            else:
+                (x, y), _ = self._shape_points(shape)
+            if self._plot[0] <= x <= self._plot[2]:
+                self._canvas.create_text(x+6, y+15, text=shape["label"], fill=color, anchor="w")
+        if shape["kind"] == "pattern":
+            for a, b in zip(shape["points"], shape["points"][1:]):
+                self._paint_shape({"kind": "trend", "i1": a["i"], "p1": a["p"],
+                                   "i2": b["i"], "p2": b["p"]}, color)
+            for p in shape["points"]:
+                x, y = self._x_for(p["i"] - self._start), self._y_price(p["p"])
+                if self._plot[0] <= x <= self._plot[2]:
+                    self._canvas.create_oval(x-3, y-3, x+3, y+3, fill=color, outline=color)
+            return
         if shape["kind"] == "vert":
             x = self._x_for(shape["i"] - self._start)
             if self._plot[0] <= x <= self._plot[2]:
@@ -663,24 +877,65 @@ class TradingViewChart(tk.Frame):
 
     def _on_press(self, event) -> None:
         self._canvas.focus_set()
+        if self._tool == "select":
+            shape, index = self._hit_drawing(event)
+            self._selected = shape["id"] if shape else None
+            self._editing = (shape, index, deepcopy(self._drawings)) if shape and index is not None else None
+            self._redraw()
+            return
         if self._tool:
             point = self._locate_point(event)
-            if point is not None:
-                index, value, pane = point
-                self._draft = (
-                    {"kind": "trend", "pane1": pane, "pane2": pane, "i1": index,
-                     "p1": value, "i2": index, "p2": value}
-                    if self._tool == "trend" else {"kind": "vert", "i": index}
-                )
-                self._redraw()
+            if point is None:
+                return
+            index, value, pane = point
+            if self._candles[index].get("predicted"):
+                messagebox.showinfo("Correction", "Use actual candles, not forecast points.", parent=self)
+                return
+            if self._draft is None and len(self._drawings) >= 100:
+                messagebox.showinfo("Correction", "Maximum 100 corrections.", parent=self)
+                return
+            if self._tool == "pattern":
+                if pane != "price":
+                    return
+                if self._draft and (len(self._draft["points"]) >= 100 or index <= self._draft["points"][-1]["i"]):
+                    messagebox.showinfo("Pattern", "Use increasing bar times (maximum 100 points).", parent=self)
+                    return
+                if self._draft is None:
+                    self._draft = {"kind": "pattern", "id": uuid4().hex, "label": "", "points": []}
+                self._draft["points"].append({"i": index, "p": value, "pane": pane})
+            else:
+                self._draft = ({"kind": "trend", "pane1": pane, "pane2": pane, "i1": index,
+                                "p1": value, "i2": index, "p2": value}
+                               if self._tool == "trend" else {"kind": "vert", "i": index})
+                self._draft.update(id=uuid4().hex, label="")
+            self._redraw()
             return
         self._drag_x = event.x
         self._drag_start = self._start
 
     def _on_drag(self, event) -> None:
+        if self._editing:
+            point = self._locate_point(event)
+            if point is None or self._candles[point[0]].get("predicted"):
+                return
+            shape, n, _ = self._editing
+            i, p, pane = point
+            if shape["kind"] == "vert":
+                shape["i"] = i
+            elif shape["kind"] == "trend":
+                shape.update({f"i{n+1}": i, f"p{n+1}": p, f"pane{n+1}": pane})
+            else:
+                pts = shape["points"]
+                if pane != "price" or (n > 0 and i <= pts[n-1]["i"]) or (n+1 < len(pts) and i >= pts[n+1]["i"]):
+                    return
+                pts[n] = {"i": i, "p": p, "pane": pane}
+            self._redraw()
+            return
+        if self._tool == "pattern":
+            return
         if self._draft is not None:
             point = self._locate_point(event)
-            if point is not None:
+            if point is not None and not self._candles[point[0]].get("predicted"):
                 if self._draft["kind"] == "trend":
                     # The moving end follows the pane under the cursor, so a
                     # line can be dragged between the price and RSI panels.
@@ -699,13 +954,22 @@ class TradingViewChart(tk.Frame):
         self._redraw()
 
     def _on_release(self, _event) -> None:
+        if self._editing:
+            self._draw_history.append(self._editing[2])
+            self._draw_history = self._draw_history[-50:]
+            self._editing = None
+            self._drawing_changed()
+            return
+        if self._tool == "pattern":
+            return
         if self._draft is not None:
             draft, self._draft = self._draft, None
             # A click with the trend tool selected is not a line.
             if draft["kind"] == "vert" or draft["i2"] != draft["i1"]:
-                self._draw_history.append(list(self._drawings))
+                self._remember()
                 self._drawings.append(draft)
-            self._redraw()
+                self._selected = draft["id"]
+            self._drawing_changed()
             return
         self._drag_x = None
 

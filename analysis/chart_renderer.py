@@ -882,6 +882,8 @@ def build_trade_viewer_payload(
         "symbol": symbol,
         "timeframe": timeframe,
         "timeframe_label": renderer._tv_timeframe_label(timeframe),
+        "entry_time": str(entry_time) if entry_time else None,
+        "exit_time": str(exit_time) if exit_time else None,
         "pattern": pattern,
         "pattern_version_id": pattern_version_id,
         "market": market,

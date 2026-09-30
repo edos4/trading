@@ -63,7 +63,7 @@ class Snapshot:
 def freeze(root, disabled=None):
     """Include skipped/disabled detectors, actual bytes, and explicit dynamic edges."""
     from config import DISABLED_PATTERNS
-    from core.pattern_loader import trusted_baseline
+    from core.pattern_loader import load_version_source
     root = Path(root).resolve()
     disabled = sorted(DISABLED_PATTERNS if disabled is None else disabled)
     runtime = runtime_manifest(root)
@@ -93,7 +93,7 @@ def freeze(root, disabled=None):
                     raise EditError('Unresolved dynamic import: ' + path)
     entries = []
     for source in sources:
-        pattern, modules = trusted_baseline(FrozenFiles(root, files), frozen_version(source, files))
+        pattern, modules = load_version_source(FrozenFiles(root, files), frozen_version(source, files))
         expected = 'pattern_' + Path(source).stem
         if pattern.name != expected:
             raise EditError('Detector identity does not match source: ' + source)

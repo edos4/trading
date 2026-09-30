@@ -299,6 +299,26 @@ def test_desktop_trendline_can_span_price_and_rsi_panes():
     assert chart._clip_trend(shape) == (20.0, 0.0, 380.0, 300.0)
 
 
+def test_desktop_pattern_refuses_forecast_bars(monkeypatch):
+    from ui import tv_chart
+    chart = object.__new__(tv_chart.TradingViewChart)
+    chart._tool = "pattern"
+    chart._draft = None
+    chart._drawings = []
+    chart._editing = None
+    chart._canvas = Mock()
+    chart._plot = (0, 0, 400, 200)
+    chart._rsi_plot = (0, 300, 400, 400)
+    chart._price_lo, chart._price_hi = 0.0, 100.0
+    chart._start, chart._visible = 0, 2
+    chart._candles = [{"time": "2026-01-01"}, {"time": "2026-01-02", "predicted": True}]
+    notes = []
+    monkeypatch.setattr(tv_chart.messagebox, "showinfo", lambda *args, **kwargs: notes.append(args))
+    chart._on_press(SimpleNamespace(x=300, y=100))
+    assert chart._draft is None
+    assert notes and "forecast" in notes[0][1].lower()
+
+
 def test_desktop_drawings_use_the_pane_under_the_cursor():
     from types import SimpleNamespace
     from ui.tv_chart import TradingViewChart

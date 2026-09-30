@@ -210,7 +210,8 @@ def test_selected_log_chart_preserves_its_own_detection():
             "analysis.chart_renderer.build_trade_viewer_payload", return_value={"ok": True},
         ) as builder:
             result = mgr.chart("us", side="log", symbol="AAPL", log_time=rows[0]["ts"])
-            assert result == {"ok": True}
+            assert result == {"ok": True, "trade_id": f"log:{rows[0]['ts']}:AAPL"}
+            assert builder.call_args.kwargs["market"] == "us"
             assert builder.call_args.kwargs["entry"] == 10
             assert builder.call_args.kwargs["pattern"] == "old_pattern"
             assert builder.call_args.kwargs["entry_time"] == "2024-01-02"
@@ -395,7 +396,8 @@ def test_local_chart_ignores_scanner_tape() -> None:
         with patch("data.history.owns_local_stocks_history", return_value=False), \
              patch("data.history.load_daily_ohlcv_df", return_value=api) as load, \
              patch("analysis.chart_renderer.build_trade_viewer_payload", return_value={"ok": True}):
-            assert book.render_trade_chart(side="open", symbol="AAPL") == {"ok": True}
+            assert book.render_trade_chart(side="open", symbol="AAPL") == {
+                "ok": True, "trade_id": book.account.positions["AAPL"][0].trade_id}
     scanner.ohlcv_frame.assert_not_called()
     load.assert_called_once()
     assert load.call_args.args[0] == "AAPL"

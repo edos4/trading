@@ -43,6 +43,29 @@ class _OnceBuy(BasePattern):
             take_profit=snapshot.candle.close * 1.20,
         )
 
+    def analyze_many(self, snapshots, store):
+        return [self.analyze(snapshot, store) for snapshot in snapshots]
+
+
+class _BatchRecorder(BasePattern):
+    """Records how many snapshots each analyze_many call receives."""
+
+    name = "test_pattern_batch"
+
+    def __init__(self):
+        self.batches: list[int] = []
+
+    @property
+    def timeframes(self):
+        return ["1d"]
+
+    def analyze(self, snapshot, store):
+        return None
+
+    def analyze_many(self, snapshots, store):
+        self.batches.append(len(snapshots))
+        return [None] * len(snapshots)
+
 
 def test_analyze_worker_count_inline_and_auto():
     assert pj.analyze_worker_count(1) == 1
@@ -78,6 +101,30 @@ def test_analyze_batch_private_store_emits_signal():
         assert len(hits) == 1
         assert hits[0].symbol == "TEST"
         assert hits[0].pattern == "test_pattern"
+    finally:
+        pj._worker_patterns = prev_p
+        pj._worker_store = prev_s
+        pj._worker_skip_edgar = prev_e
+
+
+def test_analyze_batch_groups_every_symbol_into_one_pattern_call():
+    prev_p, prev_s, prev_e = pj._worker_patterns, pj._worker_store, pj._worker_skip_edgar
+    try:
+        recorder = _BatchRecorder()
+        pj._worker_patterns = [recorder]
+        pj._worker_store = OHLCVStore(window=64)
+        pj._worker_skip_edgar = True
+        tz = timezone.utc
+        jobs = []
+        for symbol in ("AAA", "BBB", "CCC"):
+            candles = [
+                _candle(90.0, datetime(2023, 11, 20, tzinfo=tz) + timedelta(days=i))
+                for i in range(PATTERN_SCAN_HISTORY_BARS)
+            ]
+            jobs.append((_snapshot(symbol, candles), candles))
+        results = pj.analyze_batch(jobs)
+        assert recorder.batches == [3]
+        assert [n_eval for n_eval, _hits in results] == [1, 1, 1]
     finally:
         pj._worker_patterns = prev_p
         pj._worker_store = prev_s

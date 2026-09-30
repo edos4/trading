@@ -14,9 +14,10 @@ durable job cancelled or completed.
 from __future__ import annotations
 
 import queue
+from copy import deepcopy
 import threading
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 from typing import Any, Callable, Optional
 
 from core.backtest_params import REPLAY_PARAMS
@@ -190,7 +191,17 @@ class PatternsDialog:
         return getattr(self, "_pattern_values", {}).get(label)
 
     def _on_pattern_change(self) -> None:
-        self._pattern_id = self._selected_pattern()
+        selected = self._selected_pattern()
+        if self._chart_context and selected != self._chart_context.get("pattern"):
+            if not messagebox.askyesno("Detach corrections", "Detach the chart and its corrections to edit another pattern?", parent=self._top):
+                label = next((k for k, v in self._pattern_values.items() if v == self._chart_context["pattern"]), "")
+                self._pattern_combo.set(label)
+                return
+            self._chart_context = None
+            self._preferred_version = None
+            self._context_label.grid_remove()
+            self._preview_corrections.grid_remove()
+        self._pattern_id = selected
         self._version_id = None
         self._job_id = None
         self._versions = []
@@ -226,7 +237,10 @@ class PatternsDialog:
                 "default" if version["version_id"] == default_id else "",
                 "archived" if version["archived"] else ""))
         if versions:
-            wanted = self._preferred_version or self._version_id or default_id
+            wanted = self._preferred_version or self._version_id or (default_id if not self._chart_context else None)
+            if self._chart_context and not wanted:
+                self._status_var.set("Select a base version explicitly for this chart.")
+                return
             index = next((i for i, v in enumerate(versions) if v["version_id"] == wanted), None)
             if self._preferred_version and index is None:
                 self._status_var.set("Chart version is unavailable; select a base version explicitly.")
@@ -373,12 +387,19 @@ class PatternsDialog:
         if self._chart_context:
             row += 1
             context = self._chart_context
-            ttk.Label(frame, text=f"{context['symbol']} · {context['pattern']} · "
+            self._context_label = ttk.Label(frame, text=f"{context['symbol']} · {context['pattern']} · "
                       f"{len(context.get('candles', []))} bars attached. "
                       "Blank Symbols scans the universe plus this symbol."
                       + ("" if context.get("pattern_version_id") else
-                         " Legacy trade: review the selected base version.")).grid(
-                          row=row, column=0, columnspan=6, sticky=tk.W)
+                         " Legacy trade: select a base version explicitly."))
+            self._context_label.grid(row=row, column=0, columnspan=6, sticky=tk.W)
+            row += 1
+            corrections = context.get("manual_corrections", [])
+            labels = ", ".join(s.get("label") or s["kind"] for s in corrections)
+            self._preview_corrections = ttk.Button(
+                frame, text=f"Preview {len(corrections)} corrections: {labels[:120]}",
+                command=self._show_correction_preview)
+            self._preview_corrections.grid(row=row, column=0, columnspan=6, sticky=tk.W)
 
         row += 1
         controls = ttk.Frame(frame)
@@ -397,6 +418,11 @@ class PatternsDialog:
         self._balance_var = tk.StringVar(value="Provider balance: loading…")
         self._balance_label = ttk.Label(frame, textvariable=self._balance_var)
         self._balance_label.grid(row=row, column=0, columnspan=6, sticky=tk.W, pady=(4, 0))
+
+    def _show_correction_preview(self) -> None:
+        if self._chart_context:
+            from ui.tv_chart import open_trade_viewer
+            open_trade_viewer(self._top, self._chart_context, read_only=True)
 
     def _make_widget(self, parent, key, ptype, default, choices, column, row) -> None:
         if ptype == "spin":
@@ -519,6 +545,7 @@ class PatternsDialog:
         pattern_id = self._pattern_id
         version_id = version["version_id"]
         values = self._collect_values()
+        chart_context = deepcopy(self._chart_context)
         self._submit_btn.config(state=tk.DISABLED)
         self._status_var.set("Submitting…")
 
@@ -526,7 +553,7 @@ class PatternsDialog:
             return self.editor().submit_from_values(
                 values, pattern_id=pattern_id, base_version_id=version_id,
                 instruction=instruction, preset_id=preset_id,
-                chart_context=self._chart_context,
+                chart_context=chart_context,
                 preset_name=preset_name or None)
 
         self._run_async(work, on_done=self._on_submitted, on_error=self._on_submit_error)

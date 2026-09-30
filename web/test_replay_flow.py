@@ -33,7 +33,12 @@ def test_export_replay_roundtrip_and_chart(monkeypatch, tmp_path):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
             assert (await client.post('/api/replay/upload', json=export)).status_code == 200
             loaded = (await client.get('/api/replay/load')).json()['replay']
+            replay_id = loaded.pop('correction_replay_id')
+            assert replay_id
             assert loaded == json.loads(json.dumps(export))
+            assert (await client.get('/api/replay/load')).json()['replay']['correction_replay_id'] == replay_id
+            uploaded = await client.post('/api/replay/upload', json=export)
+            assert uploaded.json()['replay_id'] != replay_id
             for side, key in [('open', 'open_positions'), ('closed', 'closed_trades')]:
                 row = loaded['books'][0][key][0]
                 response = await client.post('/api/replay/chart', json={
@@ -46,6 +51,8 @@ def test_export_replay_roundtrip_and_chart(monkeypatch, tmp_path):
                 assert response.status_code == 200, response.text
                 payload = response.json()
                 assert len(payload['candles']) > 2
+                assert payload['replay_cutoff'] == row['sim_opened']
+                assert payload['candles'][-1]['time'] > row['sim_opened'][:10]
                 assert payload['segments'][0]['data'] == [{'time': '2024-01-02', 'value': 10.}, {'time': '2024-01-12', 'value': 12.}]
                 assert any(m['time'] == '2024-01-12' and m['text'] == 'BUY' for m in payload['markers'])
     asyncio.run(run())

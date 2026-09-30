@@ -916,7 +916,8 @@ function initPaper() {
   }
 
   function closeTradeChart() {
-    if (!chartModal) return;
+    if (!chartModal || chartModal.hidden) return;
+    if (window.TVChart?.canClose && !window.TVChart.canClose()) return;
     chartModal.hidden = true;
     if (window.TVChart) window.TVChart.unmount();
     if (chartOhlc) chartOhlc.textContent = "";
@@ -1221,6 +1222,7 @@ function initReplay() {
   let closedRows = [];
   let closedSort = { col: "closed", desc: true };
   let envelope = { books: {} };
+  let correctionReplayId = null;
 
   function fmtQty(q) {
     const n = Number(q);
@@ -1621,10 +1623,17 @@ function initReplay() {
     );
   }
   function closeTradeChart() {
-    if (!chartModal) return;
+    if (!chartModal || chartModal.hidden) return;
+    if (window.TVChart?.canClose && !window.TVChart.canClose()) return;
     chartModal.hidden = true;
     if (window.TVChart) window.TVChart.unmount();
     if (chartOhlc) chartOhlc.textContent = "";
+  }
+  function replayTradeIdentity(side, trade) {
+    if (trade.trade_id) return String(trade.trade_id);
+    const fields = ["symbol", "opened", "sim_opened", "closed", "sim_closed", "pattern", "action", "entry", "stop", "target"];
+    if (!fields.some((key) => trade[key] != null && trade[key] !== "")) return null;
+    return JSON.stringify([side, ...fields.map((key) => trade[key] ?? null)]);
   }
   function openChartLoading(label) {
     chartModal.hidden = false;
@@ -1723,6 +1732,10 @@ function initReplay() {
         method: "POST",
         body: JSON.stringify(body),
       });
+      data.replay_id = correctionReplayId;
+      data.trade_id = replayTradeIdentity(side, trade);
+      data.entry_time = data.entry_time || body.entry_time;
+      data.replay_cutoff = body.entry_time || data.replay_cutoff || null;
       renderTradeChartData(data);
     } catch (e) {
       showChartError(e);
@@ -1801,6 +1814,7 @@ function initReplay() {
     setReplayStatus("No replay loaded. Upload a trades JSON to inspect a past run.");
   }
   function applyReplay(payload) {
+    correctionReplayId = payload.correction_replay_id || null;
     const env = toStatusEnvelope(payload);
     const count = Object.keys(env.books).length;
     if (!count) {
@@ -1823,7 +1837,8 @@ function initReplay() {
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-      await api("/api/replay/upload", { method: "POST", body: JSON.stringify(data) });
+      const uploaded = await api("/api/replay/upload", { method: "POST", body: JSON.stringify(data) });
+      data.correction_replay_id = uploaded.replay_id;
       applyReplay(data);
     } catch (e) {
       setReplayStatus(String(e.message || e));

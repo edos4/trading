@@ -25,9 +25,15 @@ window.TVChart = (function () {
   let chart = null;
   let rsiChart = null;
   let cleanup = [];
+  let tools = null;
+  let currentDraftKey = null;
+  let preview = false;
+  const drafts = new Map();
 
   function unmount() {
     cleanup.forEach(fn => fn()); cleanup = [];
+    tools = null;
+    preview = false;
     if (rsiChart) {
       rsiChart.remove();
       rsiChart = null;
@@ -76,11 +82,30 @@ window.TVChart = (function () {
     if (candles.length < 2) {
       throw new Error("not enough bars to chart");
     }
+    el.innerHTML = "";
+    el.style.display = "";
+    el.style.flexDirection = "";
     const rsi = data.rsi14 || [];
-    if (data.pattern) {
+    const identity = data.trade_id || data.entry_time;
+    const draftKey = identity ? 'pattern-draft-' + JSON.stringify([
+      data.replay_id || 'paper', data.market, data.symbol, data.timeframe,
+      data.pattern, data.pattern_version_id, identity,
+    ]) : null;
+    currentDraftKey = draftKey;
+    preview = !!hooks?.readOnly;
+    function correct() {
+      if (!data.pattern) { window.alert('Select a chart with a target pattern to submit corrections.'); return; }
+      if (tools?.pending()) { window.alert('Finish or cancel the current drawing first.'); return; }
+      try {
+        const key = 'pattern-chart-' + Date.now();
+        sessionStorage.setItem(key, JSON.stringify({...data, manual_corrections: tools?.snapshot() || []}));
+        window.location.href = '/patterns?chart=' + encodeURIComponent(key);
+      } catch (err) { window.alert('Could not open pattern editor: ' + err.message); }
+    }
+    if (!hooks?.readOnly) {
       const menu = document.createElement("button");
       menu.type = "button";
-      menu.textContent = "Edit pattern…";
+      menu.textContent = "Correct pattern…";
       menu.className = "btn";
       menu.style.cssText = "position:fixed;z-index:10000";
       menu.hidden = true;
@@ -93,13 +118,7 @@ window.TVChart = (function () {
         menu.hidden = false;
         menu.focus();
       };
-      menu.onclick = () => {
-        try {
-          const key = "pattern-chart-" + Date.now();
-          sessionStorage.setItem(key, JSON.stringify(data));
-          window.location.href = "/patterns?chart=" + encodeURIComponent(key);
-        } catch (err) { window.alert("Could not open pattern editor: " + err.message); }
-      };
+      menu.onclick = correct;
       el.addEventListener("contextmenu", context);
       document.addEventListener("click", hide);
       menu.onkeydown = (event) => { if (event.key === "Escape") hide(); };
@@ -358,12 +377,32 @@ window.TVChart = (function () {
     if (window.ChartDraw) {
       const panes = [{ el: priceEl, chart, series: candleSeries, pane: "price" }];
       if (rsiSeries) panes.push({ el: rsiEl, chart: rsiChart, series: rsiSeries, pane: "rsi" });
-      const tools = window.ChartDraw.attach({
+      let saved = data.manual_corrections || [];
+      if (!hooks?.readOnly && draftKey) {
+        try { saved = JSON.parse(sessionStorage.getItem(draftKey)) || drafts.get(draftKey) || saved; }
+        catch (_) { saved = drafts.get(draftKey) || saved; }
+      }
+      tools = window.ChartDraw.attach({
         host: el,
         panes,
-        times: rsiData.map((row) => row.time),
+        times: candles.map((row) => row.time),
+        shapes: saved, readOnly: !!hooks?.readOnly, onCorrect: correct,
+        onChange(shapes) {
+          if (!draftKey || hooks?.readOnly) return;
+          drafts.set(draftKey, shapes);
+          try { sessionStorage.setItem(draftKey, JSON.stringify(shapes)); }
+          catch (_) { /* In-memory drafts still survive modal close/reopen. */ }
+        },
       });
-      cleanup.push(() => tools.destroy());
+      const drawingTools = tools;
+      cleanup.push(() => drawingTools.destroy());
+      if (!draftKey && !hooks?.readOnly) {
+        const warn = event => {
+          if (drawingTools.snapshot().length) { event.preventDefault(); event.returnValue = ''; }
+        };
+        window.addEventListener('beforeunload', warn);
+        cleanup.push(() => window.removeEventListener('beforeunload', warn));
+      }
     }
   }
 
@@ -381,5 +420,12 @@ window.TVChart = (function () {
     return out.toDataURL("image/png");
   }
 
-  return { mount, unmount, capture };
+  function canClose() {
+    if (preview) return true;
+    const count = tools ? tools.snapshot().length : 0;
+    if (tools && tools.pending() && !window.confirm('Discard the unfinished drawing? Completed corrections are kept.')) return false;
+    if (currentDraftKey || !count) return true;
+    return window.confirm('This chart has no stable identity. Discard its corrections?');
+  }
+  return { mount, unmount, capture, canClose };
 })();

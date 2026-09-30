@@ -1405,5 +1405,10 @@ class MarketScanner:
         from core.pattern_loader import discover
         from core.pattern_versions import PatternVersions
         self._version_set = PatternVersions().resolve(disabled=self._disabled_patterns)
-        self._patterns = discover(self._disabled_patterns, self._version_set)
+        # Preload each pinned version's own source once, here. Without it an
+        # applied edit re-enters the candidate sandbox for every (symbol,
+        # pattern) analysis, which is one fresh interpreter per bar.
+        self._patterns = discover(
+            self._disabled_patterns, self._version_set, in_process=True,
+        )
         self._pattern_files = {p.name: "version:" + p.pattern_version_id for p in self._patterns}

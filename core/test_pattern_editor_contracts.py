@@ -99,3 +99,63 @@ def test_edit_requires_instruction_and_stream_preset():
                             settings=BacktestSettings.model_validate(offline))
     with pytest.raises(ValidationError, match="historical-stream"):
         EditRequest(**{**payload, "preset": preset})
+
+
+def correction_context():
+    from core.pattern_editor_contracts import ChartEditContext
+    return ChartEditContext(
+        symbol="TEST", pattern="pattern_test", market="us",
+        candles=[dict(time=f"2026-01-{d:02}", open=10, high=12, low=9, close=11)
+                 for d in range(1, 5)])
+
+
+def test_corrections_round_trip_without_forecasts_or_mutating_original():
+    from core.pattern_editor_contracts import ChartEditContext
+    original = correction_context().model_dump()
+    assert original["manual_corrections"] == []
+    shapes = [
+        {"kind": "pattern", "id": "p", "label": "correct neckline", "points": [
+            {"time": "2026-01-01", "value": 10, "pane": "price"},
+            {"time": "2026-01-03", "value": 11, "pane": "price"}]},
+        {"kind": "trend", "id": "t", "points": [
+            {"time": "2026-01-01", "value": 10, "pane": "price"},
+            {"time": "2026-01-03", "value": 70, "pane": "rsi"}]},
+        {"kind": "vert", "id": "v", "time": "2026-01-02"},
+    ]
+    model = ChartEditContext.model_validate({**original, "manual_corrections": shapes,
+                                            "pred_candles": [{"time": "2099-01-01"}]})
+    restored = ChartEditContext.model_validate_json(model.model_dump_json())
+    assert restored == model
+    assert restored.manual_corrections[0].label == "correct neckline"
+    assert "pred_candles" not in restored.model_dump()
+    assert original["manual_corrections"] == []
+
+
+@pytest.mark.parametrize("shape", [
+    {"kind": "unknown", "id": "x"},
+    {"kind": "vert", "id": "x", "time": "2099-01-01"},
+    {"kind": "vert", "id": "x", "time": "2026-01-01", "label": "x"*201},
+    {"kind": "trend", "id": "x", "points": []},
+    *[{"kind": "pattern", "id": "x", "points": points} for points in [
+        [{"time": "2026-01-01", "value": 10, "pane": "price"}],
+        [{"time": "2026-01-01", "value": float("inf")}, {"time": "2026-01-02", "value": 10}],
+        [{"time": "2026-01-01", "value": float("nan")}, {"time": "2026-01-02", "value": 10}],
+        [{"time": "2026-01-02", "value": 10}, {"time": "2026-01-01", "value": 10}],
+        [{"time": "2026-01-01", "value": 10}, {"time": "2026-01-01", "value": 10}],
+        [{"time": "2026-01-01", "value": 10, "pane": "rsi"}, {"time": "2026-01-02", "value": 10}],
+        [{"time": "2026-01-01", "value": 10, "pane": "volume"}, {"time": "2026-01-02", "value": 10}],
+        [{"time": "2026-01-01", "value": 10}]*101,
+    ]],
+])
+def test_rejects_invalid_correction_geometry(shape):
+    from core.pattern_editor_contracts import ChartEditContext
+    with pytest.raises(ValidationError):
+        ChartEditContext.model_validate({**correction_context().model_dump(), "manual_corrections": [shape]})
+
+
+def test_rejects_duplicate_ids_and_too_many_corrections():
+    from core.pattern_editor_contracts import ChartEditContext
+    shape = {"kind": "vert", "id": "v", "time": "2026-01-01"}
+    for shapes in ([shape, shape], [{**shape, "id": str(n)} for n in range(101)]):
+        with pytest.raises(ValidationError):
+            ChartEditContext.model_validate({**correction_context().model_dump(), "manual_corrections": shapes})

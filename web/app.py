@@ -10,6 +10,7 @@ Run:
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Literal, Optional
@@ -1036,17 +1037,23 @@ def create_app() -> FastAPI:
                 status_code=400,
             )
         try:
+            from uuid import uuid4
+            payload["correction_replay_id"] = str(uuid4())
             replay_store.save(payload)
         except OSError:
             log.exception("Web | replay upload failed to persist")
             return JSONResponse({"detail": "Failed to persist replay."}, status_code=500)
-        return {"ok": True}
+        return {"ok": True, "replay_id": payload["correction_replay_id"]}
 
     @app.get("/api/replay/load")
     async def api_replay_load(_user: str = Depends(require_login)):
         payload = await asyncio.to_thread(replay_store.load)
         if payload is None:
             return {"replay": None}
+        if not payload.get("correction_replay_id"):
+            import hashlib
+            payload["correction_replay_id"] = hashlib.sha256(
+                json.dumps(payload, sort_keys=True).encode()).hexdigest()
         return {"replay": payload}
 
     @app.post("/api/replay/clear")
@@ -1110,6 +1117,7 @@ def create_app() -> FastAPI:
             )
         except ValueError as exc:
             return JSONResponse({"detail": str(exc)}, status_code=400)
+        payload["replay_cutoff"] = body.entry_time
         return payload
 
     @app.post("/api/kronos/predict")

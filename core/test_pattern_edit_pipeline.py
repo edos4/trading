@@ -400,20 +400,34 @@ def _base_version(store) -> str:
                 if p["id"] == PATTERN)
 
 
-def test_edit_pipeline_end_to_end_with_sandbox_double(published_pattern_catalog, sandbox_double):
+def test_edit_pipeline_end_to_end_with_sandbox_double(published_pattern_catalog, sandbox_double, monkeypatch):
     store = published_pattern_catalog
     provider = FakeProvider()
     service = _service(store, provider, runner=InProcessRunner(store.root))
     base = _base_version(store)
-    request = _request(service, base)
+    tape = _rows()
+    context = {"symbol": SYMBOL, "pattern": PATTERN, "pattern_version_id": base, "market": "us",
+               "candles": [dict(zip(("time", "open", "high", "low", "close"), [r[0][:10], *r[1:5]]))
+                           for r in tape[:10]],
+               "manual_corrections": [{"id": "v", "kind": "vert", "time": tape[3][0][:10], "label": "breakout"}]}
+    request = _request(service, base, chart_context=context)
+    generated = []
+    original_generate = provider.generate
+    def generate(value):
+        generated.append(value)
+        return original_generate(value)
+    monkeypatch.setattr(provider, "generate", generate)
 
     job = service.submit(request)
     assert job["state"] == "queued"
+    saved = service.jobs.find(job["id"])["payload"]["request"]
+    assert EditRequest.model_validate(saved).chart_context == request.chart_context
     assert service.submit(request)["id"] == job["id"]  # duplicate Submit is idempotent
 
     service.execute(job["id"])
     status = service.status(job["id"])
     assert status["state"] == "completed", status
+    assert json.loads(generated[0].context[0][1])["manual_corrections"] == context["manual_corrections"]
     detail = service.detail(job["id"])
     version_id = status["generated_version_id"]
     assert version_id and version_id != base

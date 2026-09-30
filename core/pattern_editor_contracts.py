@@ -230,6 +230,42 @@ class ChartCandle(Contract):
     close: float
 
 
+class CorrectionPoint(Contract):
+    time: Identifier
+    value: StrictFloat
+    pane: Literal["price", "rsi"] = "price"
+
+
+class CorrectionShape(Contract):
+    id: Identifier
+    label: Annotated[str, Field(max_length=200)] = ""
+
+
+class CorrectionTrend(CorrectionShape):
+    kind: Literal["trend"]
+    points: Annotated[list[CorrectionPoint], Field(min_length=2, max_length=2)]
+
+
+class CorrectionPattern(CorrectionShape):
+    kind: Literal["pattern"]
+    points: Annotated[list[CorrectionPoint], Field(min_length=2, max_length=100)]
+
+    @model_validator(mode="after")
+    def price_points(self):
+        if any(p.pane != "price" for p in self.points):
+            raise ValueError("Pattern vertices must use the price pane")
+        return self
+
+
+class CorrectionVertical(CorrectionShape):
+    kind: Literal["vert"]
+    time: Identifier
+
+
+ManualCorrection = Annotated[
+    CorrectionTrend | CorrectionPattern | CorrectionVertical, Field(discriminator="kind")]
+
+
 class ChartEditContext(BaseModel):
     """Only actual chart data goes to the provider; forecasts are excluded."""
     model_config = ConfigDict(allow_inf_nan=False)
@@ -243,6 +279,27 @@ class ChartEditContext(BaseModel):
     segments: Annotated[list[dict], Field(max_length=1000)] = []
     markers: Annotated[list[dict], Field(max_length=1000)] = []
     levels: Annotated[list[dict], Field(max_length=1000)] = []
+    manual_corrections: Annotated[list[ManualCorrection], Field(max_length=100)] = []
+    entry_time: str | None = None
+    exit_time: str | None = None
+    replay_cutoff: str | None = None
+    replay_id: Annotated[str, Field(max_length=200)] | None = None
+
+    @model_validator(mode="after")
+    def correction_anchors(self):
+        times = {c.time: i for i, c in enumerate(self.candles)}
+        ids = [shape.id for shape in self.manual_corrections]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Correction IDs must be unique")
+        for shape in self.manual_corrections:
+            anchors = [shape.time] if shape.kind == "vert" else [p.time for p in shape.points]
+            if any(t not in times for t in anchors):
+                raise ValueError("Corrections must anchor to actual candles, not forecast or unknown times")
+            if shape.kind == "pattern" and any(
+                    times[a] >= times[b] for a, b in zip(anchors, anchors[1:])):
+                raise ValueError("Pattern vertices must use increasing bar times")
+        return self
+
 
 
 class EditRequest(Contract):
