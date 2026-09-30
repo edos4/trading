@@ -124,7 +124,7 @@ def test_chart_right_click_attaches_history_and_selects_version(desktop_editor, 
         dialog = opened[0]
         assert pump(root, lambda: dialog._version_id == payload["pattern_version_id"])
         assert dialog._pattern_id == PATTERN
-        assert dialog._chart_context == payload
+        assert dialog._chart_context == {**payload, "manual_corrections": []}
         assert dialog._vars["start_date"].get() == payload["candles"][0]["time"]
         assert dialog._vars["end_date"].get() == payload["candles"][-1]["time"]
         assert dialog._collect_values()["chart_symbol"] == SYMBOL
@@ -313,6 +313,103 @@ def test_desktop_generation_conflict_when_default_changed_elsewhere(desktop_edit
 
         dialog._set_default()
         assert pump(root, lambda: dialog._status_var.get().startswith("Conflict"))
+    finally:
+        dialog._on_close()
+        root.destroy()
+
+
+@requires_display
+def test_drawn_pattern_edit_undo_snapshot_and_reopen(monkeypatch):
+    import tkinter as tk
+    from types import SimpleNamespace
+    from ui.tv_chart import TradingViewChart, _DRAFTS
+    import ui.patterns_dialog as dialogs
+    from core.pattern_editor_contracts import ChartEditContext
+
+    _DRAFTS.clear()
+    root = tk.Tk()
+    root.geometry("1120x700")
+    payload = {
+        "symbol": "TEST", "pattern": PATTERN, "market": "us", "timeframe": "1d",
+        "pattern_version_id": "base", "trade_id": "first",
+        "candles": [dict(time=f"2026-01-{d:02}", open=10, high=12, low=9, close=11)
+                    for d in range(1, 21)],
+    }
+    captured = []
+    monkeypatch.setattr(dialogs, "PatternsDialog", lambda _parent, **kw: captured.append(kw["chart_context"]))
+    try:
+        chart = TradingViewChart(root)
+        chart.pack(fill=tk.BOTH, expand=True)
+        chart.set_payload(payload)
+        root.update()
+        def event(index, price=10):
+            return SimpleNamespace(x=chart._x_for(index), y=chart._y_price(price))
+        chart._set_tool("pattern")
+        for index, price in [(2, 10), (6, 11), (10, 10)]:
+            chart._on_press(event(index, price))
+            chart._on_release(event(index, price))
+        assert len(chart._draft["points"]) == 3
+        chart._finish_pattern()
+        first = chart.correction_snapshot()
+        assert [p["time"] for p in first["manual_corrections"][0]["points"]] == ["2026-01-03", "2026-01-07", "2026-01-11"]
+        ChartEditContext.model_validate(first)
+        chart._set_tool("select")
+        chart._on_press(event(6, 11))
+        chart._on_drag(event(7, 11.5))
+        chart._on_release(event(7, 11.5))
+        assert chart.correction_snapshot()["manual_corrections"][0]["points"][1]["time"] == "2026-01-08"
+        assert first["manual_corrections"][0]["points"][1]["time"] == "2026-01-07"
+        chart._undo_drawing()
+        assert chart.correction_snapshot() == first
+        monkeypatch.setattr("ui.tv_chart.simpledialog.askstring", lambda *a, **kw: "correct shoulder")
+        chart._label_drawing()
+        chart._correct_pattern()
+        assert captured[0]["manual_corrections"][0]["label"] == "correct shoulder"
+        assert "manual_corrections" not in payload
+        chart.set_payload({**payload, "trade_id": "second"})
+        assert not chart._drawings
+        chart.set_payload(payload)
+        assert chart.correction_snapshot() == captured[0]
+        chart._selected = chart._drawings[0]["id"]
+        chart._delete_drawing()
+        assert not chart._drawings
+        chart._undo_drawing()
+        assert len(chart._drawings) == 1
+        chart._set_tool("pattern")
+        chart._on_press(event(2, 10))
+        assert chart._cancel_drawing() == "break"
+        assert chart._tool is None and chart._draft is None
+        assert chart._cancel_drawing() is None
+        preview = TradingViewChart(root, read_only=True)
+        preview.set_payload(captured[0])
+        assert preview.correction_snapshot() == captured[0]
+        preview.destroy()
+    finally:
+        root.destroy()
+        _DRAFTS.clear()
+
+
+@requires_display
+@pytest.mark.parametrize("chart_version", [None, "unavailable-version"])
+def test_chart_correction_requires_explicit_base_when_unpinned(desktop_editor, chart_version):
+    import tkinter as tk
+    from ui.patterns_dialog import PatternsDialog
+    editor, _service, _provider, _store = desktop_editor
+    context = {"symbol": SYMBOL, "pattern": PATTERN, "market": "us",
+               "pattern_version_id": chart_version,
+               "candles": [dict(time=f"2026-01-0{d}", open=10, high=12, low=9, close=11) for d in (1, 2)],
+               "manual_corrections": [{"id": "v", "kind": "vert", "time": "2026-01-01", "label": "breakout"}]}
+    root = tk.Tk()
+    root.withdraw()
+    dialog = PatternsDialog(root, editor=editor, chart_context=context)
+    try:
+        assert pump(root, lambda: bool(dialog._versions))
+        assert dialog._selected_version() is None
+        assert dialog._version_id is None
+        dialog._tree.selection_set("0")
+        dialog._on_version_select()
+        assert dialog._version_id == dialog._versions[0]["version_id"]
+        assert dialog._chart_context == context
     finally:
         dialog._on_close()
         root.destroy()

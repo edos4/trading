@@ -1,285 +1,254 @@
-/* Manual chart annotations: trendlines and dotted vertical lines, with undo.
- *
- * Shapes are stored by (time, value) plus the pane they belong to, so they stay
- * anchored to their bars while the chart is panned or zoomed. A trendline drawn
- * on the RSI pane is anchored to RSI values and drawn by that pane's primitive;
- * a vertical line spans every pane. Rendering goes through series primitives,
- * which keeps drawings on the chart canvas instead of an HTML overlay.
- */
+/* Manual corrections use actual candle times and pane values, never pixels. */
 window.ChartDraw = (function () {
-  const LINE = "rgba(66,165,245,0.95)";
-  const DRAFT = "rgba(66,165,245,0.55)";
-  const VERT = "rgba(66,165,245,0.8)";
-  const HANDLE = "rgba(144,202,249,0.95)";
-  const MIN_DRAG = 4;      // px a trendline must span to count as a drawing
-  const MAX_HISTORY = 50;
+  const BLUE = '#42a5f5', SELECTED = '#90caf9';
+  const copy = value => JSON.parse(JSON.stringify(value));
 
-  const BTN = "padding:3px 8px;border:1px solid #2a2e39;border-radius:4px;"
-    + "font:11px 'Trebuchet MS',Roboto,sans-serif;color:#d1d4dc;background:#1e222d;"
-    + "cursor:pointer;user-select:none;line-height:1.4;";
-  const BTN_ON = "padding:3px 8px;border:1px solid #42a5f5;border-radius:4px;"
-    + "font:11px 'Trebuchet MS',Roboto,sans-serif;color:#0b0e14;background:#42a5f5;"
-    + "cursor:pointer;user-select:none;line-height:1.4;";
-
-  /* One primitive per pane; `painter.request` is filled in from attached().
-   * Each end of a trendline names its own pane, so a line can run from the
-   * price pane into the RSI pane. Endpoints are solved in a stacked coordinate
-   * space (pane offset + local y) and every pane draws the same line; each
-   * canvas clips it to itself, which is what joins the two panes seamlessly. */
-  function createPrimitive(state, painter, panes, myPane) {
-    let series = null;
-    let chart = null;
-
-    function paneOf(name) {
-      return panes.find((entry) => entry.pane === name) || panes[0];
+  function attach({host, panes, times = [], shapes = [], onChange = () => {}, onCorrect,
+                   readOnly = false}) {
+    let drawings = copy(shapes), draft = null, selected = null, tool = null, drag = null;
+    const history = [], cleanup = [], painters = [];
+    const originalScroll = panes.map(p => ({...(p.chart.options?.().handleScroll || {})}));
+    const paneOf = name => panes.find(p => p.pane === name) || panes[0];
+    const redraw = () => painters.forEach(p => p.request());
+    const remember = () => { history.push(copy(drawings)); if (history.length > 50) history.shift(); };
+    const snapshot = () => copy(drawings);
+    const changed = () => { onChange(snapshot()); redraw(); };
+    const fresh = kind => ({id: window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`, kind, label: ''});
+    function point(p) {
+      const pane = paneOf(p.pane);
+      const x = pane.chart.timeScale().timeToCoordinate(p.time);
+      const y = pane.series.priceToCoordinate(p.value);
+      return x == null || y == null ? null : {x, y: pane.el.offsetTop + y};
     }
-
-    function point(time, value, paneName) {
-      const entry = paneOf(paneName);
-      const x = chart.timeScale().timeToCoordinate(time);
-      const y = entry.series.priceToCoordinate(value);
-      return x == null || y == null ? null : { x, y: entry.el.offsetTop + y };
-    }
-
-    function dot(context, at) {
-      context.fillStyle = HANDLE;
-      context.beginPath();
-      context.arc(at.x, at.y, 2.5, 0, Math.PI * 2);
-      context.fill();
-    }
-
-    function paint(context, height, shape, draft) {
-      context.save();
-      if (shape.kind === "vert") {
-        // A time marker belongs to every pane.
-        const x = chart.timeScale().timeToCoordinate(shape.time);
-        if (x != null) {
-          context.strokeStyle = draft ? DRAFT : VERT;
-          context.lineWidth = 1;
-          context.setLineDash([4, 4]);
-          context.beginPath();
-          context.moveTo(x, 0);
-          context.lineTo(x, height);
-          context.stroke();
-        }
-        context.restore();
-        return;
+    function coordinates(shape) {
+      if (shape.kind === 'vert') {
+        const x = panes[0].chart.timeScale().timeToCoordinate(shape.time);
+        return x == null ? [] : [{x, y: panes[0].el.offsetTop},
+          {x, y: panes.at(-1).el.offsetTop + panes.at(-1).el.clientHeight}];
       }
-      const a = point(shape.t1, shape.p1, shape.pane1);
-      const b = point(shape.t2, shape.p2, shape.pane2);
-      if (a && b) {
-        const top = paneOf(myPane).el.offsetTop;
-        context.strokeStyle = draft ? DRAFT : LINE;
-        context.lineWidth = 1.5;
-        context.beginPath();
-        context.moveTo(a.x, a.y - top);
-        context.lineTo(b.x, b.y - top);
-        context.stroke();
-        if (!draft) {
-          dot(context, { x: a.x, y: a.y - top });
-          dot(context, { x: b.x, y: b.y - top });
-        }
+      return shape.points.map(point);
+    }
+    function paint(context, shape, top) {
+      const pts = coordinates(shape);
+      if (!pts.length || pts.some(p => !p)) return;
+      context.save();
+      context.strokeStyle = shape.id === selected ? SELECTED : BLUE;
+      context.fillStyle = context.strokeStyle;
+      context.lineWidth = 2;
+      context.setLineDash(shape.kind === 'vert' ? [4, 4] : []);
+      context.beginPath();
+      pts.forEach((p, i) => context[i ? 'lineTo' : 'moveTo'](p.x, p.y - top));
+      context.stroke();
+      if (shape.kind !== 'vert') for (const p of pts) {
+        context.beginPath(); context.arc(p.x, p.y - top, 3, 0, Math.PI * 2); context.fill();
+      }
+      if (shape.label) {
+        context.font = '12px sans-serif';
+        context.fillText(shape.label, pts[0].x + 6, pts[0].y - top + 15);
       }
       context.restore();
     }
-
-    return {
-      attached(param) {
-        series = param.series;
-        chart = param.chart;
-        painter.request = param.requestUpdate;
-      },
-      detached() {
-        series = null;
-        chart = null;
-        painter.request = () => {};
-      },
-      updateAllViews() {},
-      paneViews() {
-        return [{
-          renderer: () => ({
-            draw: (target) => {
-              if (!series || !chart) return;
-              target.useMediaCoordinateSpace(({ context, mediaSize }) => {
-                for (const shape of state.shapes) paint(context, mediaSize.height, shape, false);
-                if (state.draft) paint(context, mediaSize.height, state.draft, true);
-              });
-            },
-          }),
-        }];
-      },
-    };
-  }
-
-  /* panes: [{el, chart, series, pane}] — top pane first. */
-  function attach(opts) {
-    const { host, panes } = opts;
-    const times = opts.times || [];
-    const state = { shapes: [], draft: null };
-    const history = [];
-    const painters = panes.map(() => ({ request: () => {} }));
-    let tool = null;
-
-    const redraw = () => { for (const painter of painters) painter.request(); };
-    const remember = () => {
-      history.push(state.shapes.slice());
-      if (history.length > MAX_HISTORY) history.shift();
-    };
-
-    /* ── toolbar ────────────────────────────────────────────────────────── */
-    host.style.position = "relative";
-    const bar = document.createElement("div");
-    bar.style.cssText = "position:absolute;top:6px;left:6px;z-index:5;display:flex;"
-      + "gap:4px;align-items:center;font:11px 'Trebuchet MS',Roboto,sans-serif;";
+    for (const pane of panes) {
+      const painter = {request: () => {}};
+      painters.push(painter);
+      const primitive = {
+        attached(p) { painter.request = p.requestUpdate; },
+        detached() { painter.request = () => {}; },
+        updateAllViews() {},
+        paneViews() { return [{renderer: () => ({draw(target) {
+          target.useMediaCoordinateSpace(({context}) => {
+            drawings.forEach(s => paint(context, s, pane.el.offsetTop));
+            if (draft) paint(context, draft, pane.el.offsetTop);
+          });
+        }})}]; },
+      };
+      pane.series.attachPrimitive(primitive);
+      cleanup.push(() => pane.series.detachPrimitive(primitive));
+    }
+    const bar = document.createElement('div');
+    bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;align-items:center;position:absolute;top:3px;left:6px;z-index:5;max-width:95%;background:#131722';
+    host.style.position = 'relative';
     const buttons = {};
-    function addButton(key, label, title, action) {
-      const el = document.createElement("button");
-      el.type = "button";
-      el.textContent = label;
-      el.title = title;
-      el.style.cssText = BTN;
-      el.addEventListener("pointerdown", (event) => event.stopPropagation());
-      el.addEventListener("click", action);
+    function button(label, action, key) {
+      const el = document.createElement('button');
+      el.type = 'button'; el.textContent = label; el.className = 'btn';
+      el.style.cssText = 'font:11px sans-serif;padding:3px 6px';
+      el.addEventListener('click', action);
       bar.appendChild(el);
       if (key) buttons[key] = el;
       return el;
     }
-    addButton("trend", "Trend", "Trendline: drag between two points (RSI pane too)",
-              () => setTool("trend"));
-    addButton("vert", "VLine", "Dotted vertical line: drag or click a bar", () => setTool("vert"));
-    addButton(null, "Undo", "Undo the last drawing (Ctrl+Z)", undo);
-    addButton(null, "Clear", "Remove every drawing", clear);
-    host.appendChild(bar);
-
-    function paintButtons() {
-      buttons.trend.style.cssText = tool === "trend" ? BTN_ON : BTN;
-      buttons.vert.style.cssText = tool === "vert" ? BTN_ON : BTN;
-    }
-
-    /* ── tools ──────────────────────────────────────────────────────────── */
-    function setTool(next) {
-      tool = tool === next ? null : next;
-      // Drawing drags must not pan the chart underneath, in any pane.
-      for (const entry of panes) {
-        entry.chart.applyOptions({
-          handleScroll: { mouseWheel: true, pressedMouseMove: !tool, horzTouchDrag: !tool },
-        });
-      }
-      state.draft = null;
-      paintButtons();
-      redraw();
-    }
-
-    function undo() {
-      if (!history.length) return;
-      state.shapes = history.pop();
-      state.draft = null;
-      redraw();
-    }
-
-    function clear() {
-      if (!state.shapes.length) return;
-      remember();
-      state.shapes = [];
-      state.draft = null;
-      redraw();
-    }
-
-    /* ── pointer → (time, value, pane) ──────────────────────────────────── */
-    function locate(event, entry) {
-      const bounds = entry.el.getBoundingClientRect();
-      const x = event.clientX - bounds.left;
-      const y = event.clientY - bounds.top;
-      const value = entry.series.coordinateToPrice(y);
-      const logical = entry.chart.timeScale().coordinateToLogical(x);
-      if (value == null || logical == null) return null;
-      const index = Math.max(0, Math.min(times.length - 1, Math.round(logical)));
-      return { time: times[index], price: Number(value), pane: entry.pane };
-    }
-
-    let start = null;
-    let startX = 0;
-
-    function onDown(event, entry) {
-      if (!tool || event.button !== 0) return;
-      const at = locate(event, entry);
-      if (!at) return;
-      event.preventDefault();
-      event.stopPropagation();
-      start = at;
-      startX = event.clientX;
-      state.draft = tool === "trend"
-        ? { kind: "trend", pane1: at.pane, pane2: at.pane, t1: at.time, p1: at.price,
-            t2: at.time, p2: at.price }
-        : { kind: "vert", time: at.time };
-      redraw();
-    }
-
-    function onMove(event, entry) {
-      if (!start) return;
-      const at = locate(event, entry);
-      if (!at) return;
-      // The moving end follows the pane under the cursor, so a trendline can
-      // be dragged from the price pane into the RSI pane and back.
-      state.draft = state.draft.kind === "trend"
-        ? { kind: "trend", pane1: start.pane, pane2: at.pane, t1: start.time,
-            p1: start.price, t2: at.time, p2: at.price }
-        : { kind: "vert", time: at.time };
-      redraw();
-    }
-
-    function onUp(event) {
-      if (!start) return;
-      const draft = state.draft;
-      start = null;
-      state.draft = null;
-      if (draft) {
-        const moved = Math.abs(event.clientX - startX) >= MIN_DRAG;
-        if (draft.kind === "vert" || moved) {
-          remember();
-          state.shapes.push(draft);
-        }
-      }
-      redraw();
-    }
-
-    function onKey(event) {
-      const tag = (event.target && event.target.tagName) || "";
-      if (/INPUT|TEXTAREA|SELECT/.test(tag)) return;
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
-        event.preventDefault();
-        undo();
-      } else if (event.key === "Escape" && tool) {
-        setTool(null);
-      }
-    }
-
-    const detach = [];
-    panes.forEach((entry, index) => {
-      const down = (event) => onDown(event, entry);
-      const move = (event) => onMove(event, entry);
-      entry.el.addEventListener("pointerdown", down, true);
-      entry.el.addEventListener("pointermove", move, true);
-      entry.el.addEventListener("pointerup", onUp, true);
-      detach.push(() => {
-        entry.el.removeEventListener("pointerdown", down, true);
-        entry.el.removeEventListener("pointermove", move, true);
-        entry.el.removeEventListener("pointerup", onUp, true);
+    const status = document.createElement('span');
+    status.style.cssText = 'color:#90caf9;font:11px sans-serif';
+    status.setAttribute('role', 'status');
+    status.textContent = 'Blue: your corrections.';
+    function applyScroll() {
+      panes.forEach((p, i) => {
+        const base = {...(originalScroll[i] || {mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true})};
+        if (tool) { base.pressedMouseMove = false; base.horzTouchDrag = false; }
+        p.chart.applyOptions({handleScroll: base});
       });
-      entry.series.attachPrimitive(createPrimitive(state, painters[index], panes, entry.pane));
-    });
-    document.addEventListener("keydown", onKey);
-
+    }
+    function setTool(next) {
+      cancel(); tool = tool === next ? null : next;
+      applyScroll();
+      Object.entries(buttons).forEach(([key, b]) => {
+        b.setAttribute('aria-pressed', String(key === tool));
+        b.style.backgroundColor = key === tool ? BLUE : '';
+        b.style.color = key === tool ? '#131722' : '';
+      });
+      status.textContent = tool === 'pattern' ? 'Click price pivots left to right; Enter to finish.' : 'Blue: your corrections.';
+    }
+    function cancel() {
+      if (drag?.before) drawings = drag.before;
+      drag = null; draft = null; redraw();
+    }
+    function finish() {
+      if (!draft || draft.kind !== 'pattern') return;
+      if (draft.points.length < 2) { status.textContent = 'Add at least two points.'; return; }
+      remember(); drawings.push(draft); selected = draft.id; draft = null; changed();
+    }
+    function undo() {
+      cancel(); if (!history.length) return;
+      drawings = history.pop();
+      if (!drawings.some(s => s.id === selected)) selected = null;
+      changed();
+    }
+    function remove() {
+      if (!drawings.some(s => s.id === selected)) return;
+      remember(); drawings = drawings.filter(s => s.id !== selected); selected = null; changed();
+    }
+    if (!readOnly) {
+      button('Select', () => setTool('select'), 'select');
+      button('Draw pattern', () => setTool('pattern'), 'pattern');
+      button('Finish', finish);
+      button('Trend', () => setTool('trend'), 'trend');
+      button('VLine', () => setTool('vert'), 'vert');
+      button('Undo', undo);
+      button('Clear', () => { cancel(); if (drawings.length) { remember(); drawings = []; selected = null; changed(); } });
+      button('Delete', remove);
+      const label = document.createElement('input');
+      label.type = 'text'; label.maxLength = 200; label.placeholder = 'Selected shape label';
+      label.setAttribute('aria-label', 'Selected correction label'); label.style.width = '135px';
+      label.addEventListener('change', () => {
+        const shape = drawings.find(s => s.id === selected);
+        if (shape) { remember(); shape.label = label.value; changed(); }
+        else status.textContent = 'Use Select and click a correction to label it.';
+      });
+      bar.appendChild(label);
+      if (onCorrect) button('Correct pattern…', () => {
+        if (draft || drag) { status.textContent = 'Finish or cancel the current drawing first.'; return; }
+        onCorrect();
+      });
+      bar.appendChild(status); host.appendChild(bar);
+      function locate(event) {
+        const pane = panes.find(p => {
+          const b = p.el.getBoundingClientRect(); return event.clientY >= b.top && event.clientY <= b.bottom;
+        });
+        if (!pane) return null;
+        const b = pane.el.getBoundingClientRect(), x = event.clientX - b.left;
+        const time = pane.chart.timeScale().coordinateToTime(x);
+        const normalized = typeof time === 'object' && time ?
+          `${time.year}-${String(time.month).padStart(2,'0')}-${String(time.day).padStart(2,'0')}` :
+          typeof time === 'number' ? new Date(time * 1000).toISOString().slice(0,10) : time;
+        const value = pane.series.coordinateToPrice(event.clientY - b.top);
+        if (!times.includes(normalized) || value == null || !Number.isFinite(value)) return null;
+        return {time: normalized, value, pane: pane.pane};
+      }
+      function hit(event) {
+        const b = panes[0].el.getBoundingClientRect();
+        const cursor = {x: event.clientX - b.left, y: event.clientY - b.top + panes[0].el.offsetTop};
+        for (const shape of [...drawings].reverse()) {
+          const pts = coordinates(shape);
+          for (let i = 0; i < pts.length; i++) {
+            const p = pts[i]; if (!p) continue;
+            if (Math.hypot(p.x-cursor.x, p.y-cursor.y) < 9) return {shape, index: i};
+          }
+          for (let i = 1; i < pts.length; i++) {
+            const a = pts[i-1], b = pts[i]; if (!a || !b) continue;
+            const dx=b.x-a.x, dy=b.y-a.y;
+            const t=Math.max(0,Math.min(1,((cursor.x-a.x)*dx+(cursor.y-a.y)*dy)/(dx*dx+dy*dy || 1)));
+            if (Math.hypot(cursor.x-a.x-t*dx,cursor.y-a.y-t*dy) < 7)
+              return {shape, index: shape.kind === 'vert' ? 0 : null};
+          }
+        }
+        return null;
+      }
+      function down(event) {
+        if (!tool || event.button !== 0 || bar.contains(event.target)) return;
+        host.focus(); event.preventDefault(); event.stopPropagation();
+        if (tool === 'select') {
+          const found = hit(event); selected = found?.shape.id || null;
+          label.value = found?.shape.label || '';
+          if (found && found.index !== null) drag = {id: selected, index: found.index, before: snapshot()};
+          redraw(); return;
+        }
+        const at = locate(event);
+        if (!at) { status.textContent = 'Use an actual candle, not forecast or empty space.'; return; }
+        if (!draft && drawings.length >= 100) { status.textContent = 'Maximum 100 corrections.'; return; }
+        if (tool === 'pattern') {
+          if (at.pane !== 'price') { status.textContent = 'Pattern pivots belong on price candles.'; return; }
+          if (draft && (draft.points.length >= 100 || times.indexOf(at.time) <= times.indexOf(draft.points.at(-1).time))) {
+            status.textContent = 'Use increasing bar times (maximum 100 points).'; return;
+          }
+          if (!draft) draft = {...fresh('pattern'), points: []};
+          draft.points.push(at); redraw(); return;
+        }
+        draft = tool === 'vert' ? {...fresh('vert'), time: at.time} : {...fresh('trend'), points: [at, copy(at)]};
+        drag = {startX: event.clientX, startY: event.clientY}; redraw();
+      }
+      function move(event) {
+        if (!drag) return;
+        const at = locate(event); if (!at) return;
+        if (drag.id) {
+          const shape = drawings.find(s => s.id === drag.id);
+          if (shape.kind === 'vert') shape.time = at.time;
+          else {
+            if (shape.kind === 'pattern' && (at.pane !== 'price' ||
+                (drag.index > 0 && times.indexOf(at.time) <= times.indexOf(shape.points[drag.index-1].time)) ||
+                (drag.index < shape.points.length-1 && times.indexOf(at.time) >= times.indexOf(shape.points[drag.index+1].time)))) return;
+            shape.points[drag.index] = at;
+          }
+        } else if (draft.kind === 'vert') draft.time = at.time;
+        else draft.points[1] = at;
+        redraw();
+      }
+      function up(event) {
+        if (!drag) return;
+        if (drag.id) { history.push(drag.before); if (history.length > 50) history.shift(); }
+        else if (draft && (draft.kind === 'vert' || Math.hypot(event.clientX-drag.startX,event.clientY-drag.startY) >= 4)) {
+          remember(); drawings.push(draft); selected = draft.id;
+        }
+        drag = null; draft = null; changed();
+      }
+      function key(event) {
+        const typing = /INPUT|TEXTAREA|SELECT/.test(event.target?.tagName || '');
+        if (typing && !host.contains(event.target)) return;
+        if (event.key === 'Escape' && (tool || draft || drag) && !typing) {
+          event.preventDefault(); event.stopImmediatePropagation(); setTool(null); return;
+        }
+        if (typing || !host.contains(event.target)) return;
+        if (event.key === 'Enter') { event.preventDefault(); event.stopImmediatePropagation(); finish(); }
+        else if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); remove(); }
+        else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); undo(); }
+      }
+      host.tabIndex = 0;
+      function listen(el, name, fn, capture = false) {
+        el.addEventListener(name, fn, capture); cleanup.push(() => el.removeEventListener(name, fn, capture));
+      }
+      panes.forEach(p => listen(p.el, 'pointerdown', down, true));
+      listen(document, 'pointermove', move, true); listen(document, 'pointerup', up, true);
+      listen(document, 'pointercancel', cancel, true); listen(document, 'keydown', key, true);
+    }
     return {
+      snapshot,
+      pending: () => !!(draft || drag),
+      load(shapes) { cancel(); drawings = copy(shapes); history.length = 0; selected = null; changed(); },
       destroy() {
-        detach.forEach((fn) => fn());
-        document.removeEventListener("keydown", onKey);
-        if (bar.parentNode) bar.parentNode.removeChild(bar);
-        state.shapes = [];
-        state.draft = null;
+        cancel(); cleanup.forEach(fn => fn()); bar.remove();
+        panes.forEach((p, i) => { if (originalScroll[i]) p.chart.applyOptions({handleScroll: originalScroll[i]}); });
       },
     };
   }
-
-  return { attach };
+  return {attach};
 })();

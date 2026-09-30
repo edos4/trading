@@ -174,9 +174,10 @@
       const choose = selectVersionId
         || (state.versionId && state.versions.some((v) => v.version_id === state.versionId)
             ? state.versionId : null)
-        || state.defaultVersionId
-        || (state.versions[0] && state.versions[0].version_id);
+        || (!state.chartContext && (state.defaultVersionId
+        || (state.versions[0] && state.versions[0].version_id)));
       if (choose) await selectVersion(choose);
+      else setBaseChip(false);
     } catch (err) {
       setStatus("Versions unavailable: " + err.message);
     }
@@ -658,9 +659,60 @@
     await loadVersions(state.versionId || undefined);
   }
 
+  async function applyChartHandoff(context) {
+    state.chartContext = context;
+    const corrections = context.manual_corrections || [];
+    $("pat-correction-preview").hidden = false;
+    $("pat-correction-summary").textContent = corrections.length + " corrections: " +
+      corrections.map((shape) => shape.label || shape.kind).join(", ");
+    $("pat-market").value = context.market || window.TB_DEFAULT_MARKET || "us";
+    const candles = context.candles || [];
+    if (candles.length) {
+      $("pat-start_date").value = candles[0].time;
+      $("pat-end_date").value = candles[candles.length - 1].time;
+    }
+    $("pat-pattern_only").checked = true;
+    $("pat-preset-name").value = "Chart pattern edit";
+    $("pat-context").textContent = context.symbol + " · " + context.pattern + " · "
+      + candles.length + " bars attached. Leave Symbols blank to scan the universe."
+      + (context.pattern_version_id ? "" : " Legacy trade: review the selected base version.");
+    const pattern = state.patterns.find((p) => p.pattern_id === context.pattern);
+    if (!pattern) throw new Error("Chart pattern is unavailable in the catalog.");
+    $("pat-pattern").value = pattern.pattern_id;
+    state.versionId = null;
+    await loadVersions();
+    if (context.pattern_version_id &&
+        state.versions.some((v) => v.version_id === context.pattern_version_id)) {
+      await selectVersion(context.pattern_version_id);
+    } else {
+      state.versionId = null;
+      setBaseChip(false);
+      setStatus(context.pattern_version_id
+        ? "Chart version is unavailable; select a base version explicitly."
+        : "Legacy chart: select a base version explicitly.");
+    }
+    openSettings();
+    $("pat-instruction").focus?.();
+  }
+
   async function init() {
     if (!$("pat-submit")) return;
+    $('pat-preview-corrections')?.addEventListener('click', () => {
+      const host = $('pat-correction-chart');
+      host.hidden = !host.hidden;
+      if (!host.hidden && state.chartContext) window.TVChart.mount(host, state.chartContext, {readOnly: true});
+      else window.TVChart.unmount();
+    });
     $("pat-pattern").addEventListener("change", () => {
+      if (state.chartContext && $('pat-pattern').value !== state.chartContext.pattern) {
+        if (!window.confirm('Detach the chart and its corrections to edit another pattern?')) {
+          $('pat-pattern').value = state.chartContext.pattern; return;
+        }
+        state.chartContext = null;
+        $('pat-context').textContent = '';
+        $('pat-correction-preview').hidden = true;
+        window.TVChart.unmount();
+      }
       state.versionId = null; state.jobId = null; state.runs = null;
       loadVersions();
     });
@@ -707,31 +759,9 @@
     const chartKey = params.get("chart");
     if (chartKey) {
       try {
-        const context = JSON.parse(sessionStorage.getItem(chartKey));
+        const context = JSON.parse(sessionStorage.getItem(chartKey) || "null");
         if (!context) throw new Error("Chart context has expired. Open the trade chart again.");
-        state.chartContext = context;
-        const pattern = state.patterns.find((p) => p.pattern_id === context.pattern);
-        if (!pattern) throw new Error("Chart pattern is unavailable in the catalog.");
-        $("pat-pattern").value = pattern.pattern_id;
-        state.versionId = null;
-        await loadVersions();
-        if (context.pattern_version_id) {
-          if (!state.versions.some((v) => v.version_id === context.pattern_version_id)) {
-            state.versionId = null;
-            throw new Error("Chart version is unavailable; select a base version explicitly.");
-          }
-          await selectVersion(context.pattern_version_id);
-        }
-        $("pat-market").value = context.market || window.TB_DEFAULT_MARKET;
-        $("pat-start_date").value = context.candles[0].time;
-        $("pat-end_date").value = context.candles[context.candles.length - 1].time;
-        $("pat-pattern_only").checked = true;
-        $("pat-preset-name").value = "Chart pattern edit";
-        $("pat-context").textContent = context.symbol + " · " + context.pattern + " · "
-          + context.candles.length + " bars attached. Leave Symbols blank to scan the universe."
-          + (context.pattern_version_id ? "" : " Legacy trade: review the selected base version.");
-        openSettings();
-        $("pat-instruction").focus();
+        await applyChartHandoff(context);
       } catch (err) { formError(err.message); }
     }
     const jobId = params.get("job");

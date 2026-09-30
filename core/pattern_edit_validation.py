@@ -78,10 +78,8 @@ class Validator:
             inputs.setdefault(name, data)
         return inputs
 
-    def execute(self, version, files, dataset, cancel=None):
-        validate_candles(dataset['candles'])
-        request = {**dataset,'source_path':version['source_path'],'pattern_id':version['pattern_id']}
-        result = self.runner.run(self.inputs(version,files),request,cancel)
+    def _checked(self, version, result):
+        """A worker reply that satisfies the signal contract."""
         if not isinstance(result,dict) or not isinstance(result.get('signals'),list):
             raise EditError('Worker returned malformed preview')
         if len(result['signals'])>8:
@@ -92,6 +90,41 @@ class Validator:
                 raise EditError('Worker returned an incompatible signal')
             canonical(signal)
         return result
+
+    def _request(self, version, dataset):
+        return {**dataset,'source_path':version['source_path'],'pattern_id':version['pattern_id']}
+
+    def execute(self, version, files, dataset, cancel=None):
+        validate_candles(dataset['candles'])
+        result = self.runner.run(self.inputs(version,files),self._request(version,dataset),cancel)
+        return self._checked(version,result)
+
+    def execute_many(self, version, files, datasets, cancel=None):
+        """Many datasets in one sandbox process, aligned to `datasets`.
+
+        A version that still needs the sandbox pays one interpreter start for
+        the whole batch instead of one per snapshot. A dataset whose candles are
+        unusable is reported with an ``error`` rather than failing the batch.
+        """
+        requests, slots = [], []
+        for index, dataset in enumerate(datasets):
+            try:
+                validate_candles(dataset['candles'])
+            except EditError as exc:
+                slots.append((index, None, str(exc)))
+                continue
+            slots.append((index, len(requests), None))
+            requests.append(self._request(version, dataset))
+        executed: list[dict] = []
+        if requests:
+            payload = self.runner.run(self.inputs(version,files),{'datasets':requests},cancel)
+            results = payload.get('results') if isinstance(payload,dict) else None
+            if not isinstance(results,list) or len(results)!=len(requests):
+                raise EditError('Worker returned a malformed batch preview')
+            executed = [self._checked(version,result) for result in results]
+        return [executed[slot] if slot is not None
+                else {'signals':[],'metadata':None,'error':error}
+                for _index, slot, error in slots]
 
     def validate(self, version, revision, dataset, anchors, cancel=None):
         files = {name:self.store.read_blob(ref) for name,ref in revision['files'].items()}

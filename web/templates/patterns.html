@@ -75,9 +75,14 @@
       <h2>2 · Describe the change</h2>
       <p class="muted small">What should the AI change about this pattern?</p>
       <p class="muted small" id="pat-context"></p>
+      <div id="pat-correction-preview" hidden>
+        <p id="pat-correction-summary"></p>
+        <button type="button" class="btn" id="pat-preview-corrections">Preview corrections</button>
+      </div>
     </div>
     <span id="pat-base" class="chip">No base version selected</span>
   </div>
+  <div id="pat-correction-chart" style="height:460px" hidden></div>
   <div class="param-grid">
     <div class="param param-wide">
       <label for="pat-instruction"><strong>Instruction</strong></label>
@@ -219,7 +224,7 @@
 </script>
 <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
 <script src="/static/pattern_notes.js"></script>
-<script src="/static/chart_draw.js"></script>
-<script src="/static/tv_chart.js"></script>
-<script src="/static/patterns.js?v=6"></script>
+<script src="/static/chart_draw.js?v=5"></script>
+<script src="/static/tv_chart.js?v=15"></script>
+<script src="/static/patterns.js?v=7"></script>
 {% endblock %}

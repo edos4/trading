@@ -23,15 +23,24 @@ class FakeRunner:
         self.tests = tests
         self.malformed = malformed
         self.unavailable = unavailable
+        self.calls: list[dict] = []
 
     def run(self, files, request, cancel=None):
+        self.calls.append(request)
         if self.unavailable:
             raise SandboxUnavailable('No delegated cgroup subtree configured')
+        if 'datasets' in request:
+            return {'results': [self._reply(dataset) for dataset in request['datasets']]}
+        return self._reply(request)
+
+    def _reply(self, request):
         if request.get('operation') == 'tests':
             return {'tests_passed': self.tests, 'exit_code': 0 if self.tests else 1}
         if self.malformed:
             return {'signals': 'not-a-list'}
-        return {'signals': self.signals, 'metadata': {}}
+        return {'signals': [{**signal, 'symbol': request.get('symbol', signal['symbol'])}
+                            for signal in self.signals],
+                'metadata': {}}
 
 
 def dataset():
@@ -124,6 +133,37 @@ def test_execute_rejects_unknown_fields_and_wrong_pattern(tmp_path, editor_store
     wrong['pattern'] = 'other'
     with pytest.raises(EditError, match='incompatible'):
         Validator(store, FakeRunner([wrong])).execute(version, {}, dataset())
+
+
+def test_execute_many_uses_one_worker_for_the_whole_batch(tmp_path, editor_store_factory):
+    store, version, _ = validators(tmp_path, None, editor_store_factory)
+    runner = FakeRunner([candidate_signal()])
+    datasets = [dict(dataset(), symbol=name) for name in ('AAA', 'BBB', 'CCC')]
+    results = Validator(store, runner).execute_many(version, {}, datasets)
+    assert len(runner.calls) == 1
+    assert [d['symbol'] for d in runner.calls[0]['datasets']] == ['AAA', 'BBB', 'CCC']
+    assert [r['signals'][0]['symbol'] for r in results] == ['AAA', 'BBB', 'CCC']
+
+
+def test_execute_many_reports_a_rejected_dataset_without_failing_the_batch(tmp_path, editor_store_factory):
+    store, version, _ = validators(tmp_path, None, editor_store_factory)
+    runner = FakeRunner([candidate_signal()])
+    good = dict(dataset(), symbol='AAA')
+    reversed_rows = dict(dataset(), symbol='BBB',
+                         candles=list(reversed(dataset()['candles'])))
+    results = Validator(store, runner).execute_many(version, {}, [good, reversed_rows, good])
+    assert len(runner.calls) == 1
+    assert [d['symbol'] for d in runner.calls[0]['datasets']] == ['AAA', 'AAA']
+    assert 'error' not in results[0]
+    assert results[1]['error'] and results[1]['signals'] == []
+    assert 'error' not in results[2]
+
+
+def test_execute_many_fails_closed_on_a_malformed_batch(tmp_path, editor_store_factory):
+    store, version, _ = validators(tmp_path, None, editor_store_factory)
+    runner = FakeRunner([candidate_signal()], malformed=True)
+    with pytest.raises(EditError, match='malformed'):
+        Validator(store, runner).execute_many(version, {}, [dataset(), dataset()])
 
 
 def test_candle_validation_rejects_unsorted_and_non_finite():
