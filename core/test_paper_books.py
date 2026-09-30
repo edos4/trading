@@ -403,6 +403,47 @@ def test_local_chart_ignores_scanner_tape() -> None:
     assert load.call_args.kwargs["tv_fallback"] is False
 
 
+def test_stream_server_reusable_fresh_and_resume() -> None:
+    from core.paper_books import stream_server_reusable
+
+    fresh = {
+        "market": "us", "start_date": "2026-08-31", "asof_day": "", "loaded": 500,
+    }
+    assert stream_server_reusable(
+        fresh, market="us", start_date="2026-08-31", resume=False,
+    )
+    advanced = {**fresh, "asof_day": "2026-09-15"}
+    assert not stream_server_reusable(
+        advanced, market="us", start_date="2026-08-31", resume=False,
+    )
+    assert stream_server_reusable(
+        advanced, market="us", start_date="2026-09-14", resume=True,
+    )
+    assert not stream_server_reusable(
+        advanced, market="ph", start_date="2026-09-14", resume=True,
+    )
+    assert not stream_server_reusable(
+        advanced, market="us", start_date="2026-09-20", resume=True,
+    )
+
+
+def test_ensure_stream_server_reuses_matching_process() -> None:
+    from core.paper_books import PaperBook
+
+    book = PaperBook("us")
+    status = {
+        "market": "us", "start_date": "2026-08-31", "asof_day": "", "loaded": 1000,
+    }
+    with patch.object(book, "_port_open", return_value=True), \
+         patch.object(book, "_probe_stream_status", return_value=status), \
+         patch.object(book, "_kill_whatever_is_on") as kill, \
+         patch("core.paper_books.subprocess.Popen") as popen:
+        err = book._ensure_stream_server("2026-08-31", resume=False)
+    assert err is None
+    kill.assert_not_called()
+    popen.assert_not_called()
+
+
 def test_ensure_stream_server_passes_history_url() -> None:
     from config import settings
     from core.paper_books import PaperBook
@@ -414,6 +455,7 @@ def test_ensure_stream_server_passes_history_url() -> None:
         with patch("core.paper_books.subprocess.Popen") as popen, \
              patch("core.paper_books.time.sleep"), \
              patch.object(book, "_kill_whatever_is_on"), \
+             patch.object(book, "_probe_stream_status", return_value=None), \
              patch.object(book, "_port_open", return_value=True):
             err = book._ensure_stream_server("2025-01-02")
         assert err is None
@@ -436,6 +478,7 @@ def test_ensure_stream_server_passes_ph_market() -> None:
     with patch("core.paper_books.subprocess.Popen") as popen, \
          patch("core.paper_books.time.sleep"), \
          patch.object(book, "_kill_whatever_is_on"), \
+         patch.object(book, "_probe_stream_status", return_value=None), \
          patch.object(book, "_port_open", return_value=True):
         err = book._ensure_stream_server("2026-01-01")
     assert err is None

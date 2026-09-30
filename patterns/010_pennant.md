@@ -1,10 +1,18 @@
-# Pennant Continuation Pattern — LOCKED CONDITIONS (2026-07-05)
+# Pennant Continuation Pattern — Conditions
+
+Geometry checks tightened: the detected pole and its drawing use the same closes;
+wedges, negative retracement, crossed rails, and pre-breakout closes outside the
+fitted rails are rejected. Chart explanations are saved at detection time.
+
+Runs execute immutable catalog versions. These file changes must be published as
+a new validated version, backtested, and selected as the default before restarting
+the scanner; editing this file does not change an existing catalog version.
 
 ## Gate — Flagpole (the impulse move)
 
 | # | Condition | Detail |
 |---|-----------|--------|
-| G1 | Sharp move **≥10%** | Over ≤10 trading days, either direction (bullish or bearish pennant) |
+| G1 | Sharp move **≥10%** | Close-to-close over 3–10 bars, either direction; the same endpoints are drawn |
 | G2 | Volume ≥1.3x prior avg | Flagpole avg volume ≥1.3x the 20-day average preceding it |
 
 ## Consolidation (the pennant itself) — C1-C6
@@ -13,27 +21,30 @@
 |---|-----------|--------|
 | C1 | Starts within 1-2 bars of flagpole extreme | Peak (bullish) or trough (bearish) |
 | C2 | Duration 5-**10** trading days | Short-and-sharp is the real "tell" — losers dragged on ~1.3 bars longer on average |
-| C3 | Converging trendlines | Upper (swing highs) and lower (swing lows) slope toward each other — true convergence, not parallel (parallel = flag, not pennant) |
-| C4 | No close outside trendlines | Until the breakout bar |
-| C5 | Retrace **≤30%** of flagpole range | Shallower pullback = stronger continuation thesis — losers retraced ~27% on average vs ~24% for winners |
+| C3 | Converging trendlines | Linear fits of coil highs/lows: upper slope ≤0, lower slope ≥0, normalized slope difference <−0.0005; upper stays above lower. Final candle range <70% of first coil candle range. |
+| C4 | No close outside trendlines | Every coil close lies between the same fitted rails drawn on the chart |
+| C5 | Retrace **0–30%** of flagpole range | Shallower pullback = stronger continuation thesis — losers retraced ~27% on average vs ~24% for winners |
 | C6 | Volume contraction ≤70% of flagpole avg | The "coiling" tell |
 
 ## Breakout / Entry — C7-C8 (C9 dropped)
 
 | # | Condition | Detail |
 |---|-----------|--------|
-| C7 | Close beyond trendline | Same direction as flagpole |
+| C7 | Close beyond coil extreme | Above all coil highs for bulls; below all coil lows for bears |
 | C8 | Breakout volume ≥1.5x consolidation avg | Rules out low-conviction fakeouts |
 | ~~C9~~ | ~~RSI confirms direction~~ | **REJECTED** — RSI at breakout showed no separation between winners (72.9 direction-adjusted) and losers (71.8). Not enforced. |
 
 ## Exit Rule — 5% close-based trailing stop
 
 Entry: breakout-bar close (C7-C8 confirmed).
-Exit: trailing stop 5% from the extreme close since entry (highest close for bullish/long, lowest close for bearish/short); exit on close breaching the stop. No fixed target, no time stop.
+Exit: trailing stop 5% from the extreme close since entry (highest close for bullish/long, lowest close for bearish/short); exit on close breaching the stop. No fixed target; a 60-bar maximum hold remains enforced.
 
 Chosen over 3%/7% trailing, measured-move (20d/40d cap), and hybrid fixed→trail variants — 3% churns out on normal post-breakout noise; measured-move and hybrid variants either didn't generalize past a small sample or were outlier-driven.
 
-## Backtest Results (253-ticker verified NASDAQ+NYSE universe, $10,000/trade)
+## Historical Backtest Results (before the geometry checks above)
+
+These figures describe the prior rules; they do not validate the tightened detector.
+253-ticker verified NASDAQ+NYSE universe, $10,000/trade.
 
 | Metric | Value |
 |--------|-------|

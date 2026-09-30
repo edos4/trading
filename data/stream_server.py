@@ -30,6 +30,13 @@ Batch:
 Preload (fetch all tapes before the first scan):
     {"action": "preload", "symbols": ["AAPL", ...]}
     → {"loaded": N, "empty": N, "unavailable": N, "symbols": N}
+    Disk cache hits and POST /api/history/bulk fill this. Per-symbol GETs
+    run only for names the bulk call did not return.
+
+Status (so a later Start can keep this process instead of refetching):
+    {"action": "status"}
+    → {"market": "us", "start_date": "2026-08-31"|"" ,
+       "asof_day": "2026-09-04"|"", "loaded": N}
 
 Replay control:
     {"action": "pin_asof", "symbol": "AAPL"}  # pin control date to that tape
@@ -49,6 +56,7 @@ import websockets
 
 from config import PATTERN_SCAN_HISTORY_BARS, settings
 from data.stream_client import LOCAL_STREAM_WS
+from data.stream_tape_cache import CACHE_MISS, cache_get, cache_put
 from utils.logger import log
 
 # Real daily bars are unix seconds (~1.7e9 in 2026). Unit tests use tiny
@@ -188,36 +196,48 @@ class _SymbolTape:
         return None
 
 
+def tape_query(start_ts: int | None) -> tuple[int | None, int]:
+    """(after_ts, limit) for one tape. Limit stays bounded so history cannot dump the full series."""
+    lookback = _stream_history_bars()
+    if start_ts is None:
+        return None, lookback
+    after_ts = int(start_ts) - lookback * 86400 * 2
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    from_start = max(0, now_ts - int(start_ts)) // 86400
+    return after_ts, lookback + from_start + 40
+
+
 def _load_symbol_db(
     symbol: str,
     start_ts: int | None = None,
     market: str | None = None,
 ) -> list[dict] | None:
-    """Load a symbol's daily history from GET /api/history.
+    """Load a symbol's daily history from the disk cache, else GET /api/history.
 
     Near-end replay fetches only lookback bars; a start date uses after_ts.
     `market=ph` maps BDO → BDO.PS so the stream does not 404 / hit US SM.
+    A cache hit (including a cached empty tape) skips the network. Transport
+    failures are not cached, so the next scan retries them.
     """
-    lookback = _stream_history_bars()
-    after_ts = None
-    if start_ts is not None:
-        after_ts = int(start_ts) - lookback * 86400 * 2
-        now_ts = int(datetime.now(timezone.utc).timestamp())
-        from_start = max(0, now_ts - int(start_ts)) // 86400
-        # Always send a LIMIT so 33ai does an index-bounded fetch instead of
-        # dumping every bar after after_ts (that stalled uvicorn + swap).
-        limit = lookback + from_start + 40
-    else:
-        limit = lookback
+    after_ts, limit = tape_query(start_ts)
+    cached = cache_get(market, symbol, after_ts, limit)
+    if cached is not CACHE_MISS:
+        return cached
     try:
         from data.history import load_daily_tape_rows
 
-        return load_daily_tape_rows(
+        rows = load_daily_tape_rows(
             symbol, after_ts=after_ts, limit=limit, market=market,
         )
     except Exception as exc:
         log.warning(f"StreamServer | history facade failed for {symbol}: {exc}")
         return None
+    if rows is not None:
+        try:
+            cache_put(market, symbol, after_ts, limit, rows)
+        except OSError as exc:
+            log.warning(f"StreamServer | tape cache write failed for {symbol}: {exc}")
+    return rows
 
 
 class StreamServer:
@@ -225,10 +245,12 @@ class StreamServer:
         from core.market import resolve_market_id
 
         self._market = resolve_market_id(market)
-        self._start_ts = _parse_start_ts(
-            start_date if start_date is not None else settings.papertrade_stream_start_date,
-            market=self._market,
+        resolved = (
+            start_date if start_date is not None
+            else settings.papertrade_stream_start_date
         )
+        self._start_date = (resolved or "").strip()
+        self._start_ts = _parse_start_ts(resolved, market=self._market)
         self._tapes: dict[str, _SymbolTape] = {}
         self._known_empty: set[str] = set()
         self._asof_ts: int | None = None
@@ -337,8 +359,65 @@ class StreamServer:
             )
         return {"results": results}
 
+    def status_payload(self) -> dict:
+        asof = ""
+        if self._asof_ts is not None:
+            asof = str(asof_key(self._asof_ts))
+        return {
+            "market": self._market,
+            "start_date": self._start_date,
+            "asof_day": asof,
+            "loaded": len(self._tapes),
+        }
+
+    def _cache_cold_symbols(self, symbols: list[str]) -> tuple[int, int]:
+        """Fill the disk cache for symbols not already stored. Returns (cache_hits, bulk_rows)."""
+        after_ts, limit = tape_query(self._start_ts)
+        cold: list[str] = []
+        cache_hits = 0
+        for symbol in symbols:
+            with self._tape_lock:
+                if symbol in self._tapes or symbol in self._known_empty:
+                    continue
+            if cache_get(self._market, symbol, after_ts, limit) is not CACHE_MISS:
+                cache_hits += 1
+                continue
+            cold.append(symbol)
+        bulk_n = 0
+        if not cold:
+            return cache_hits, bulk_n
+        try:
+            from data.history import load_daily_tape_rows_bulk
+
+            filled = load_daily_tape_rows_bulk(
+                cold, after_ts=after_ts, limit=limit, market=self._market,
+            )
+        except Exception as exc:
+            log.warning(f"StreamServer | bulk history failed: {exc}")
+            filled = None
+        if filled is None:
+            log.info(
+                f"StreamServer | bulk history unavailable for {len(cold)} symbols "
+                "— per-symbol fetch"
+            )
+            return cache_hits, bulk_n
+        for symbol, rows in filled.items():
+            if rows is None:
+                continue
+            try:
+                cache_put(self._market, symbol, after_ts, limit, rows)
+            except OSError as exc:
+                log.warning(f"StreamServer | tape cache write failed for {symbol}: {exc}")
+                continue
+            bulk_n += 1
+        return cache_hits, bulk_n
+
     def preload_symbols(self, symbols: list[str]) -> dict:
-        """Fetch every tape up front so the first scan is in-memory."""
+        """Fetch every tape up front so the first scan is in-memory.
+
+        Order: in-memory tapes, then the disk cache, then one bulk history
+        call, then per-symbol GETs for whatever the bulk call did not cover.
+        """
         from data.history_client import inflight_slots
 
         uniq: list[str] = []
@@ -349,6 +428,7 @@ class StreamServer:
                 continue
             seen.add(symbol)
             uniq.append(symbol)
+        cache_hits, bulk_n = self._cache_cold_symbols(uniq)
         workers = max(4, int(settings.papertrade_stream_preload_workers))
         with inflight_slots(workers):
             with ThreadPoolExecutor(
@@ -365,6 +445,7 @@ class StreamServer:
                 unavailable += 1
         log.info(
             f"StreamServer | preload {len(uniq)} symbols: "
+            f"cache={cache_hits} bulk={bulk_n} "
             f"loaded={loaded} empty={empty} unavailable={unavailable}"
         )
         return {
@@ -552,6 +633,10 @@ class StreamServer:
                             "asof": ts,
                             "asof_day": asof_key(ts),
                         }))
+                    continue
+
+                if req.get("action") == "status":
+                    await ws.send(json.dumps(self.status_payload()))
                     continue
 
                 if req.get("action") == "preload":

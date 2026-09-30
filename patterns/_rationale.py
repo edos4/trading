@@ -557,11 +557,12 @@ def _pennant(c: _Ctx) -> dict[str, str]:
     pole_start, pole_end = c.bar("pole start"), c.bar("pole")
     if pole_start is None or pole_end is None:
         return {}
-    start_price, end_price = c.close(pole_start), c.close(pole_end)
+    start_price = float(c.anchors["pole start"]["price"])
+    end_price = float(c.anchors["pole"]["price"])
     pole_return = _move(end_price, start_price)
     span = max(1, pole_end - pole_start + 1)
     pole_volume = c.mean_volume(pole_start, pole_end)
-    baseline = c.mean_volume(max(0, pole_start - 21), pole_start - 1)
+    baseline = c.mean_volume(max(0, pole_start - 20), pole_start - 1)
     volume_x = (pole_volume / baseline) if pole_volume and baseline else None
     bull = end_price >= start_price
     notes = {

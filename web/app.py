@@ -50,6 +50,13 @@ ROOT = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(ROOT / "templates"))
 
 
+class HistoryBulkRequest(BaseModel):
+    symbols: list[str] = Field(default_factory=list, max_length=500)
+    after_ts: Optional[int] = None
+    limit: Optional[int] = Field(None, ge=1, le=2000)
+    market: Optional[Literal["us", "ph"]] = None
+
+
 class SymbolRequest(BaseModel):
     symbol: str
     exchange: str
@@ -400,6 +407,31 @@ def create_app() -> FastAPI:
                 for r in rows
             ]
         }
+
+    @app.post("/api/history/bulk")
+    def api_history_bulk(
+        body: HistoryBulkRequest,
+        _user: str = Depends(require_history),
+    ):
+        from data.db import load_daily_ohlcv_rows_bulk
+
+        try:
+            results = load_daily_ohlcv_rows_bulk(
+                body.symbols,
+                after_ts=body.after_ts,
+                limit=body.limit,
+                market=body.market,
+            )
+        except Exception:
+            log.exception("History API | bulk load failed")
+            return JSONResponse(
+                {"detail": "History database unavailable."}, status_code=503,
+            )
+        if results is None:
+            return JSONResponse(
+                {"detail": "History database unavailable."}, status_code=503,
+            )
+        return {"results": results}
 
     @app.get("/api/history/{symbol}/meta")
     def api_history_meta(
