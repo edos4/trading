@@ -63,6 +63,7 @@ class SymbolRequest(BaseModel):
     exchange: str
     timeframe: str = "1d"
     run_patterns: bool = True
+    indicators_only: bool = False
     kronos_gate: Optional[bool] = None
     kronos_batch: Optional[bool] = None
     volume_gate: Optional[bool] = None
@@ -78,6 +79,7 @@ class PaperStartRequest(BaseModel):
     kronos_batch: bool = False
     volume_gate: bool = True
     pattern_only: bool = False
+    indicators_only: bool = False
     collect_first: bool = False
     collect_first_top_n: int = 4
     stream_start: Optional[str] = None
@@ -488,6 +490,7 @@ def create_app() -> FastAPI:
                 payload.exchange.upper().strip(),
                 payload.timeframe,
                 run_patterns=payload.run_patterns,
+                indicators_only=payload.indicators_only,
                 kronos_gate=payload.kronos_gate if kronos else False,
                 kronos_batch=payload.kronos_batch if kronos else False,
                 volume_gate=payload.volume_gate,
@@ -892,7 +895,8 @@ def create_app() -> FastAPI:
             kronos_rank=payload.kronos_rank and kronos,
             kronos_batch=payload.kronos_batch and kronos,
             volume_gate=payload.volume_gate,
-            pattern_only=payload.pattern_only,
+            pattern_only=payload.pattern_only and not payload.indicators_only,
+            indicators_only=payload.indicators_only,
             collect_first=payload.collect_first,
             collect_first_top_n=payload.collect_first_top_n,
             stream_start=payload.stream_start,

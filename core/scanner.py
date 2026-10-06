@@ -25,6 +25,7 @@ scan progress on the CLI.
 
 from __future__ import annotations
 import asyncio
+import math
 import threading
 import time
 from copy import deepcopy
@@ -127,6 +128,22 @@ PATTERNS_DETECTED_FILE = Path("patterns_detected.md")
 EXCLUDED_PATTERNS: set[str] = set()
 
 
+def _protective_stop(stop, action: str, price: float) -> bool:
+    """True when the indicator line still sits on the protective side of price."""
+    try:
+        stop_f = float(stop)
+        price_f = float(price)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(stop_f) or stop_f <= 0 or not math.isfinite(price_f):
+        return False
+    if action == "BUY":
+        return stop_f < price_f
+    if action == "SELL":
+        return stop_f > price_f
+    return False
+
+
 class MarketScanner:
     def __init__(
         self,
@@ -142,6 +159,7 @@ class MarketScanner:
         kronos_batch: bool | None = None,
         market: str | None = None,
         pattern_only: bool = False,
+        indicators_only: bool = False,
         collect_first: bool | None = None,
         collect_first_top_n: int | None = None,
         duration_days: int | None = None,
@@ -166,7 +184,8 @@ class MarketScanner:
         self._volume_gate = False
         self._kronos_rank = False
         self._kronos_batch = False
-        self._pattern_only = bool(pattern_only)
+        self._indicators_only = bool(indicators_only)
+        self._pattern_only = bool(pattern_only) and not self._indicators_only
         self._collect_first = False
         self._collect_first_top_n = (
             settings.collect_first_top_n
@@ -193,6 +212,7 @@ class MarketScanner:
         self._paper = paper_account
         if self._paper is not None:
             self._paper.pattern_only = self._pattern_only
+            self._paper.indicators_only = self._indicators_only
         self._patterns: list[BasePattern] = []
         self._pattern_files: dict[str, str] = {}
         self._analyze_pool = None
@@ -381,14 +401,13 @@ class MarketScanner:
         )
 
     def stop(self) -> None:
-        from core.pattern_loader import acknowledge_worker
         from core.pattern_editor_db import DatabaseUnavailable
         self._running = False
         self._close_analyze_pool()
         for p in self._patterns:
             p.on_stop()
         try:
-            acknowledge_worker(self, stopped=True)
+            self._note_worker(stopped=True)
         except DatabaseUnavailable:
             # Worker bookkeeping must not turn a stop into a crash.
             log.warning(
@@ -396,6 +415,13 @@ class MarketScanner:
             )
         # self._client.disconnect()
         log.info("Scanner stopped")
+
+    def _note_worker(self, *, stopped: bool = False) -> None:
+        """Publish the pinned pattern set. Indicators are not pattern versions."""
+        if getattr(self, "_indicators_only", False):
+            return
+        from core.pattern_loader import acknowledge_worker
+        acknowledge_worker(self, stopped=stopped)
 
     def _stop_if_duration_reached(self) -> bool:
         """End the scan loop after N unique market sessions (sim_days)."""
@@ -414,6 +440,11 @@ class MarketScanner:
         from core.pattern_jobs import analyze_worker_count, make_analyze_pool
 
         self._close_analyze_pool()
+        if self._indicators_only:
+            # Indicators are in-process detectors, not pinned pattern versions.
+            self._analyze_workers = 1
+            self._analyze_pool = None
+            return
         n = analyze_worker_count()
         self._analyze_workers = n
         self._analyze_pool = make_analyze_pool(
@@ -612,8 +643,7 @@ class MarketScanner:
 
     # ── Scan cycle ─────────────────────────────────────────────────────────────
     async def _scan_all(self, feed_sessions: list | None = None) -> None:
-        from core.pattern_loader import acknowledge_worker
-        acknowledge_worker(self)
+        self._note_worker()
         """Run one full scan across all symbols x timeframes x patterns.
 
         Symbols are processed concurrently with a progress bar. Each worker
@@ -861,6 +891,8 @@ class MarketScanner:
                 self._cooldown_tracker[
                     (closed.symbol, closed.pattern)
                 ] = (bar_idx, closed.pnl < 0)
+            if is_new_bar:
+                self._trail_indicators(symbol, timeframe, snapshot.candle)
 
         if not is_new_bar:
             return new_closed_daily, None
@@ -868,6 +900,47 @@ class MarketScanner:
         if self._has_ready_pattern(symbol, timeframe):
             return new_closed_daily, snapshot
         return new_closed_daily, None
+
+    def _trail_indicators(self, symbol: str, timeframe: str, candle) -> None:
+        """Move open indicator stops to each indicator's own line.
+
+        Runs only for an Indicators-only scan, after the bar's exit check, so
+        this bar is judged on yesterday's line and tomorrow uses today's.
+        Pattern scans never call this.
+        """
+        if not self._indicators_only or self._paper is None or not self._paper.indicators_only:
+            return
+        by_name = {pattern.name: pattern for pattern in self._patterns}
+        for position in list(self._paper.positions.get(symbol, [])):
+            if position.timeframe != timeframe:
+                continue
+            indicator = by_name.get(position.pattern)
+            if indicator is None or not getattr(indicator, "trails", False):
+                continue
+            min_bars = int(getattr(indicator, "MIN_BARS", 2) or 2)
+            df = self._store.get_df(symbol, timeframe, min_bars=min_bars)
+            if df is None:
+                continue
+            try:
+                state = indicator.trail(df)
+            except Exception:
+                log.exception(
+                    f"Scanner | {symbol} {timeframe} {position.pattern} trail failed"
+                )
+                continue
+            if (
+                state is None
+                or state[0] != position.action
+                or not _protective_stop(state[1], position.action, candle.close)
+            ):
+                closed = self._paper.exit_indicator(symbol, position, candle)
+                if closed is not None:
+                    bar_idx = self._paper.bar_count(closed.symbol, closed.timeframe)
+                    self._cooldown_tracker[(closed.symbol, closed.pattern)] = (
+                        bar_idx, closed.pnl < 0,
+                    )
+                continue
+            self._paper.ratchet_indicator_stop(position, float(state[1]))
 
     def _has_ready_pattern(self, symbol: str, timeframe: str) -> bool:
         n_bars = self._store.available(symbol, timeframe)
@@ -1402,6 +1475,12 @@ class MarketScanner:
             f.write(row)
 
     def _discover_patterns(self) -> None:
+        if self._indicators_only:
+            from indicators import discover as discover_indicators
+            self._version_set = {}
+            self._patterns = discover_indicators()
+            self._pattern_files = {p.name: "indicator" for p in self._patterns}
+            return
         from core.pattern_loader import discover
         from core.pattern_versions import PatternVersions
         self._version_set = PatternVersions().resolve(disabled=self._disabled_patterns)

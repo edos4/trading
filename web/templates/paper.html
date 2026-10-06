@@ -46,6 +46,7 @@
     </div>
     <div class="book-flags">
       <label class="check"><input type="checkbox" id="{{ book.id }}-pattern-only" /> Pattern-only</label>
+      <label class="check"><input type="checkbox" id="{{ book.id }}-indicators-only" /> Indicators only</label>
       {% if kronos_enabled %}
       <label class="check"><input type="checkbox" id="{{ book.id }}-kronos" {% if book.kronos_gate %}checked{% endif %} /> Kronos 3d gate</label>
       <label class="check"><input type="checkbox" id="{{ book.id }}-kronos-rank" {% if book.kronos_rank %}checked{% endif %} /> Kronos rank</label>

@@ -50,6 +50,11 @@ def discover_patterns():
     return discover()
 
 
+def discover_indicators():
+    from indicators import discover
+    return discover()
+
+
 class TradingBotUI:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -71,6 +76,7 @@ class TradingBotUI:
         )
         self._renderer = ChartRenderer(save_to_disk=False, session_tz=profile.session_tz)
         self._patterns = discover_patterns()
+        self._indicators = discover_indicators()
         self._store = OHLCVStore(
             window=max(DEFAULT_WINDOW, settings.tv_history_days),
             session_tz=profile.session_tz,
@@ -138,7 +144,15 @@ class TradingBotUI:
         self.filter_var.trace_add("write", lambda *_: self._apply_filter())
         ttk.Entry(toolbar, textvariable=self.filter_var, width=10).pack(side=tk.LEFT)
         self.run_patterns_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(toolbar, text="Run patterns", variable=self.run_patterns_var).pack(side=tk.LEFT, padx=(12, 0))
+        self._run_patterns_cb = ttk.Checkbutton(
+            toolbar, text="Run patterns", variable=self.run_patterns_var,
+        )
+        self._run_patterns_cb.pack(side=tk.LEFT, padx=(12, 0))
+        self.indicators_only_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            toolbar, text="Indicators only", variable=self.indicators_only_var,
+            command=self._sync_indicators_only,
+        ).pack(side=tk.LEFT, padx=(12, 0))
         self.kronos_gate_var = tk.BooleanVar(
             value=self._kronos_enabled and default_market().kronos_gate_default
         )
@@ -207,7 +221,8 @@ class TradingBotUI:
         # Pattern info
         info_outer = ttk.Frame(right)
         info_outer.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
-        ttk.Label(info_outer, text="Detected patterns", font=("TkDefaultFont", 10, "bold")).pack(anchor=tk.W)
+        self.detected_heading = tk.StringVar(value="Detected patterns")
+        ttk.Label(info_outer, textvariable=self.detected_heading, font=("TkDefaultFont", 10, "bold")).pack(anchor=tk.W)
         cols = ("pattern", "action", "tf", "conf", "price", "notes")
         self.tree = ttk.Treeview(info_outer, columns=cols, show="headings", height=6)
         for c, w in zip(cols, (160, 60, 50, 60, 90, 320)):
@@ -269,6 +284,15 @@ class TradingBotUI:
             self._filtered_rows.append((sym, exch))
 
     # Symbol selection -> load chart + patterns
+    def _sync_indicators_only(self) -> None:
+        """Indicators only scans indicators and leaves patterns unchecked."""
+        if self.indicators_only_var.get():
+            self.run_patterns_var.set(False)
+            self._run_patterns_cb.state(["disabled"])
+        else:
+            self._run_patterns_cb.state(["!disabled"])
+            self.run_patterns_var.set(True)
+
     def _sync_batch_kronos(self) -> None:
         if self._batch_kronos_cb is None:
             return
@@ -326,11 +350,14 @@ class TradingBotUI:
         if not candles:
             self._safe_after(lambda: self._fail(f"No history available for {symbol} {timeframe}."))
             return
-        if self.run_patterns_var.get() and len(candles) < PATTERN_SCAN_HISTORY_BARS:
+        indicators_only = bool(self.indicators_only_var.get())
+        run_patterns = bool(self.run_patterns_var.get()) and not indicators_only
+        if (run_patterns or indicators_only) and len(candles) < PATTERN_SCAN_HISTORY_BARS:
+            kind = "indicator" if indicators_only else "pattern"
             self._safe_after(lambda: self._fail(
                 f"{symbol} {timeframe} has {len(candles)} bars; "
                 f"need {PATTERN_SCAN_HISTORY_BARS} days of back history "
-                f"for pattern scan."
+                f"for {kind} scan."
             ))
             return
 
@@ -341,12 +368,13 @@ class TradingBotUI:
             return
 
         signals: list[TradeSignal] = []
-        if self.run_patterns_var.get():
+        if run_patterns or indicators_only:
             use_kronos = self.kronos_gate_var.get()
             use_batch = use_kronos and self.kronos_batch_var.get()
             use_volume = self.volume_gate_var.get()
             raw = latest_signals_over_lookback(
-                self._patterns, symbol, timeframe, candles,
+                self._indicators if indicators_only else self._patterns,
+                symbol, timeframe, candles,
                 session_tz=self._store._session_tz,
             )
             cheap: list[TradeSignal] = []
@@ -401,9 +429,12 @@ class TradingBotUI:
             self._safe_after(lambda: self._fail(msg))
             return
 
-        self._safe_after(lambda: self._render_result(symbol, timeframe, exchange, df, signals, png))
+        kind = "indicator" if indicators_only else "pattern"
+        self._safe_after(lambda: self._render_result(
+            symbol, timeframe, exchange, df, signals, png, kind,
+        ))
 
-    def _render_result(self, symbol, timeframe, exchange, df, signals, png) -> None:
+    def _render_result(self, symbol, timeframe, exchange, df, signals, png, kind="pattern") -> None:
         self._current_df = df
         self._current_signals = signals
         last = df.iloc[-1]
@@ -425,7 +456,10 @@ class TradingBotUI:
         self._photo = ImageTk.PhotoImage(scaled)
         self._chart_label.config(image=self._photo, text="")
 
-        # pattern table
+        self.detected_heading.set(
+            "Detected indicators" if kind == "indicator" else "Detected patterns"
+        )
+        self.tree.heading("pattern", text="Indicator" if kind == "indicator" else "Pattern")
         self.tree.delete(*self.tree.get_children())
         for s in signals:
             self.tree.insert(
@@ -436,7 +470,7 @@ class TradingBotUI:
                 ),
             )
         self.status_var.set(
-            f"{symbol} {timeframe}: {len(df)} bars, {len(signals)} pattern(s) detected."
+            f"{symbol} {timeframe}: {len(df)} bars, {len(signals)} {kind}(s) detected."
         )
         self.progress.stop()
         self._busy = False

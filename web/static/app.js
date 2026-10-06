@@ -99,6 +99,19 @@ function initExplorer() {
   const chart = document.getElementById("chart");
   const placeholder = document.getElementById("chart-placeholder");
   const tbody = document.querySelector("#signals tbody");
+  const indicatorsOnly = document.getElementById("indicators-only");
+  const runPatterns = document.getElementById("run-patterns");
+  if (indicatorsOnly && runPatterns) {
+    indicatorsOnly.addEventListener("change", () => {
+      if (indicatorsOnly.checked) {
+        runPatterns.checked = false;
+        runPatterns.disabled = true;
+      } else {
+        runPatterns.disabled = false;
+        runPatterns.checked = true;
+      }
+    });
+  }
   const savePng = document.getElementById("save-png");
   const saveCsv = document.getElementById("save-csv");
   let rows = [];
@@ -139,7 +152,8 @@ function initExplorer() {
       symbol: row.symbol,
       exchange: row.exchange,
       timeframe: document.getElementById("timeframe").value,
-      run_patterns: document.getElementById("run-patterns").checked,
+      run_patterns: !!(runPatterns && runPatterns.checked && !(indicatorsOnly && indicatorsOnly.checked)),
+      indicators_only: !!(indicatorsOnly && indicatorsOnly.checked),
       kronos_gate: !!(kronosGate && kronosGate.checked),
       kronos_batch: !!(kronosGate && kronosGate.checked && kronosBatch && kronosBatch.checked),
       volume_gate: document.getElementById("volume-gate").checked,
@@ -170,7 +184,13 @@ function initExplorer() {
       }
       savePng.disabled = false;
       saveCsv.disabled = false;
-      status.textContent = `${data.symbol}: ${data.bars} bars, ${data.signals.length} pattern(s).`;
+      const indicatorScan = data.scan === "indicators";
+      const heading = document.getElementById("signals-heading");
+      const col = document.getElementById("signals-col");
+      if (heading) heading.textContent = indicatorScan ? "Detected indicators" : "Detected patterns";
+      if (col) col.textContent = indicatorScan ? "Indicator" : "Pattern";
+      const noun = indicatorScan ? "indicator" : "pattern";
+      status.textContent = `${data.symbol}: ${data.bars} bars, ${data.signals.length} ${noun}(s).`;
     } catch (err) {
       status.textContent = String(err.message || err);
       header.textContent = "Error";
@@ -418,6 +438,18 @@ function initPaper() {
     if (gate) gate.addEventListener("change", () => syncBookBatchKronos(id));
     if (rank) rank.addEventListener("change", () => syncBookBatchKronos(id));
     syncBookBatchKronos(id);
+    const indicatorsOnly = document.getElementById(`${id}-indicators-only`);
+    const patternOnly = document.getElementById(`${id}-pattern-only`);
+    if (indicatorsOnly && patternOnly) {
+      indicatorsOnly.addEventListener("change", () => {
+        if (indicatorsOnly.checked) {
+          patternOnly.checked = false;
+          patternOnly.disabled = true;
+        } else {
+          patternOnly.disabled = false;
+        }
+      });
+    }
   });
 
   document.querySelectorAll(".tabs .tab").forEach((btn) => {
@@ -544,7 +576,9 @@ function initPaper() {
         || !!(document.getElementById(`${id}-kronos-rank`) || {}).checked
       ) && !!(document.getElementById(`${id}-kronos-batch`) || {}).checked,
       volume_gate: !!(document.getElementById(`${id}-volume`) || {}).checked,
-      pattern_only: !!(document.getElementById(`${id}-pattern-only`) || {}).checked,
+      indicators_only: !!(document.getElementById(`${id}-indicators-only`) || {}).checked,
+      pattern_only: !!(document.getElementById(`${id}-pattern-only`) || {}).checked
+        && !(document.getElementById(`${id}-indicators-only`) || {}).checked,
       collect_first: !!(document.getElementById(`${id}-collect-first`) || {}).checked,
       collect_first_top_n: Number(
         (document.getElementById(`${id}-collect-first-top-n`) || {}).value || 4

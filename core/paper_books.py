@@ -474,6 +474,7 @@ class PaperBook:
         kronos_batch: bool = False,
         volume_gate: bool,
         pattern_only: bool = False,
+        indicators_only: bool = False,
         collect_first: bool = False,
         collect_first_top_n: int = 4,
         stream_start: Optional[str] = None,
@@ -489,8 +490,8 @@ class PaperBook:
             target=self._run_thread,
             args=(
                 n_symbols, extra_symbols, use_stream, kronos_gate, kronos_rank,
-                kronos_batch, volume_gate, pattern_only, collect_first,
-                collect_first_top_n, stream_start,
+                kronos_batch, volume_gate, pattern_only, indicators_only,
+                collect_first, collect_first_top_n, stream_start,
             ),
             name=f"paper-{self.market}",
             daemon=True,
@@ -668,6 +669,7 @@ class PaperBook:
         kronos_batch: bool,
         volume_gate: bool,
         pattern_only: bool,
+        indicators_only: bool,
         collect_first: bool,
         collect_first_top_n: int,
         stream_start: Optional[str],
@@ -745,7 +747,8 @@ class PaperBook:
                 kronos_rank=kronos_rank,
                 kronos_batch=kronos_batch,
                 volume_gate=volume_gate,
-                pattern_only=pattern_only,
+                pattern_only=pattern_only and not indicators_only,
+                indicators_only=indicators_only,
                 collect_first=collect_first,
                 collect_first_top_n=collect_first_top_n,
                 market=profile.id,
@@ -772,7 +775,8 @@ class PaperBook:
                 f", Kronos rank={'ON' if kronos_rank else 'OFF'}"
                 f", Kronos batch={'ON' if kronos_batch else 'OFF'}"
                 f", Volume gate={'ON' if volume_gate else 'OFF'}"
-                f", Pattern-only={'ON' if pattern_only else 'OFF'}"
+                f", Pattern-only={'ON' if pattern_only and not indicators_only else 'OFF'}"
+                f", Indicators-only={'ON' if indicators_only else 'OFF'}"
                 f", Collect-first={'ON' if collect_first else 'OFF'}"
                 f", session={session_label(profile.id)}"
             )
@@ -871,6 +875,7 @@ class PaperBookManager:
         kronos_batch: bool = False,
         volume_gate: bool,
         pattern_only: bool = False,
+        indicators_only: bool = False,
         collect_first: bool = False,
         collect_first_top_n: int = 4,
         stream_start: Optional[str] = None,
@@ -892,6 +897,7 @@ class PaperBookManager:
             kronos_batch=kronos_batch,
             volume_gate=volume_gate,
             pattern_only=pattern_only,
+            indicators_only=indicators_only,
             collect_first=collect_first,
             collect_first_top_n=collect_first_top_n,
             stream_start=stream_start,
@@ -914,6 +920,7 @@ class PaperBookManager:
                 kronos_batch=bool(payload.get("kronos_batch")),
                 volume_gate=bool(payload.get("volume_gate")),
                 pattern_only=bool(payload.get("pattern_only")),
+                indicators_only=bool(payload.get("indicators_only")),
                 collect_first=bool(payload.get("collect_first")),
                 collect_first_top_n=int(payload.get("collect_first_top_n") or 4),
                 stream_start=payload.get("stream_start"),
