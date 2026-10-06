@@ -132,9 +132,15 @@ class MarketBookFrame(ttk.LabelFrame):
         flags = ttk.Frame(self)
         flags.pack(fill=tk.X, padx=8, pady=(2, 8))
         self.pattern_only_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
+        self._pattern_only_cb = ttk.Checkbutton(
             flags, text="Pattern-only", variable=self.pattern_only_var,
-        ).pack(side=tk.LEFT)
+        )
+        self._pattern_only_cb.pack(side=tk.LEFT)
+        self.indicators_only_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            flags, text="Indicators only", variable=self.indicators_only_var,
+            command=self._sync_indicators_only,
+        ).pack(side=tk.LEFT, padx=(8, 0))
         self._batch_kronos_cb: Optional[ttk.Checkbutton] = None
         if settings.enable_kronos:
             ttk.Checkbutton(
@@ -173,6 +179,13 @@ class MarketBookFrame(ttk.LabelFrame):
         )
         self.stream_start_picker.pack(side=tk.LEFT)
         self._sync_batch_kronos()
+
+    def _sync_indicators_only(self) -> None:
+        if self.indicators_only_var.get():
+            self.pattern_only_var.set(False)
+            self._pattern_only_cb.state(["disabled"])
+        else:
+            self._pattern_only_cb.state(["!disabled"])
 
     def _sync_batch_kronos(self) -> None:
         if self._batch_kronos_cb is None:
@@ -222,7 +235,8 @@ class MarketBookFrame(ttk.LabelFrame):
                 and self.kronos_batch_var.get()
             ),
             "volume_gate": bool(self.volume_gate_var.get()),
-            "pattern_only": bool(self.pattern_only_var.get()),
+            "pattern_only": bool(self.pattern_only_var.get()) and not self.indicators_only_var.get(),
+            "indicators_only": bool(self.indicators_only_var.get()),
             "collect_first": bool(self.collect_first_var.get()),
             "collect_first_top_n": int(self.collect_first_top_n_var.get()),
             "stream_start": stream_start,

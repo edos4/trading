@@ -26,11 +26,17 @@ def discover_patterns(disabled_patterns=None):
     return discover(DISABLED_PATTERNS if disabled_patterns is None else disabled_patterns)
 
 
+def discover_indicators():
+    from indicators import discover
+    return discover()
+
+
 class ExplorerService:
     def __init__(self) -> None:
         profile = get_market()
         self._bind_market(profile)
         self._patterns: Optional[list] = None
+        self._indicators: Optional[list] = None
 
     @property
     def patterns(self) -> list:
@@ -42,6 +48,12 @@ class ExplorerService:
         if self._patterns is None:
             self._patterns = discover_patterns()
         return self._patterns
+
+    @property
+    def indicators(self) -> list:
+        if self._indicators is None:
+            self._indicators = discover_indicators()
+        return self._indicators
 
     def _bind_market(self, profile) -> None:
         self._market = profile.id
@@ -70,6 +82,7 @@ class ExplorerService:
         timeframe: str,
         *,
         run_patterns: bool = True,
+        indicators_only: bool = False,
         kronos_gate: bool | None = None,
         kronos_batch: bool | None = None,
         volume_gate: bool | None = None,
@@ -93,11 +106,17 @@ class ExplorerService:
         )
         if not candles:
             raise ValueError(f"No history available for {symbol} {timeframe}.")
-        if run_patterns and len(candles) < PATTERN_SCAN_HISTORY_BARS:
+        # Indicators-only replaces the pattern scan. A client that leaves
+        # both boxes set still must not run patterns.
+        if indicators_only:
+            run_patterns = False
+        scanning = run_patterns or indicators_only
+        if scanning and len(candles) < PATTERN_SCAN_HISTORY_BARS:
+            kind = "indicator" if indicators_only else "pattern"
             raise ValueError(
                 f"{symbol} {timeframe} has {len(candles)} bars; "
                 f"need {PATTERN_SCAN_HISTORY_BARS} days of back history "
-                f"for pattern scan."
+                f"for {kind} scan."
             )
 
         self._store.replace_all(symbol, timeframe, candles)
@@ -112,9 +131,10 @@ class ExplorerService:
         use_volume = settings.volume_gate_enabled if volume_gate is None else volume_gate
 
         signals: list[TradeSignal] = []
-        if run_patterns:
+        if scanning:
+            detectors = self.indicators if indicators_only else self.patterns
             raw = latest_signals_over_lookback(
-                self.patterns, symbol, timeframe, candles,
+                detectors, symbol, timeframe, candles,
                 session_tz=profile.session_tz,
             )
             cheap: list[TradeSignal] = []
@@ -167,6 +187,7 @@ class ExplorerService:
                 "change": change,
                 "change_pct": pct,
             },
+            "scan": "indicators" if indicators_only else ("patterns" if run_patterns else "none"),
             "signals": [
                 {
                     "pattern": s.pattern,

@@ -119,6 +119,23 @@ class WebPaperApiTests(unittest.TestCase):
         self.assertEqual([c.args[0] for c in start.call_args_list], ["us", "ph"])
         for call in start.call_args_list:
             self.assertTrue(call.kwargs.get("pattern_only"))
+            self.assertFalse(call.kwargs.get("indicators_only"))
+
+    def test_indicators_only_replaces_pattern_only(self) -> None:
+        self._login()
+        body = {
+            "market": "us",
+            "n_symbols": 10,
+            "use_stream": False,
+            "kronos_gate": False,
+            "pattern_only": True,
+            "indicators_only": True,
+        }
+        with patch("web.app.paper_books.start", return_value=None) as start:
+            r = self.client.post("/api/paper/start", json=body)
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(start.call_args.kwargs.get("indicators_only"))
+        self.assertFalse(start.call_args.kwargs.get("pattern_only"))
 
     def test_export_envelope(self) -> None:
         self._login()

@@ -1,0 +1,4918 @@
+{
+  "purpose": "paper_trade_evaluation",
+  "exported_at": "2026-10-02T06:41:49.247732+00:00",
+  "filter": "all",
+  "notes": [
+    "Open and closed paper trades from the operator desk.",
+    "Each book is a separate ledger. Do not mix $ and ₱.",
+    "Identity is (market, symbol), not ticker alone."
+  ],
+  "books": [
+    {
+      "market": "us",
+      "label": "US (NASDAQ/NYSE)",
+      "currency": "USD",
+      "currency_symbol": "$",
+      "long_only": false,
+      "session": "AM",
+      "running": false,
+      "cash": 63840.1,
+      "equity": 92851.72,
+      "open_count": 9,
+      "closed_count": 5,
+      "exposure": {
+        "long_pct": 63.96016921090413,
+        "short_pct": 32.71506311537606,
+        "net_pct": 31.245106095528065,
+        "gross_pct": 96.6752323262802
+      },
+      "metrics": {
+        "total_pnl_dollars": -7148.275675472774,
+        "total_pnl_pct": -7.1482756754727745,
+        "realized_pnl_dollars": -6234.466371235407,
+        "unrealized_pnl_dollars": -913.8093042373657,
+        "win_rate_pct": 0,
+        "avg_pnl_pct": -12.47,
+        "total_usd": -6234.47,
+        "worst_usd": -2793.77,
+        "profit_factor": 0,
+        "avg_hold_bars": 4,
+        "exit_reason_breakdown": {
+          "stop_loss": 5
+        }
+      },
+      "summary": "==================================================================\n  PATTERN BACKTEST  -  paper/us\n  $10,000 per trade  -  14 signals\n==================================================================\n  -- combined --------------------------------------------\n  Trades:    5 (0W/5L)\n  Win rate:  0.0%\n  Avg P&L:   -12.47%\n  Total:     $-6,234\n  Worst:     $-2,794    Best: $-639\n  Profit factor: 0.00   Avg hold: 0.0d\n  Exits:     stop_loss=5\n  -- by pattern -----------------------------------------------\n  indicator_ut_bot_dema              n=2   win=0% avg=-8.56% total=$-1,712 pf=0.00\n  indicator_pivot_points             n=3   win=0% avg=-15.08% total=$-4,523 pf=0.00\n==================================================================",
+      "scan_stats": {
+        "last_scan_at": "2026-10-02T06:40:00.690281+00:00",
+        "patterns_found": 0,
+        "trades_opened": 0,
+        "signals_rejected": 0,
+        "scan_duration_s": 14.18,
+        "sim_days": 12,
+        "rejection_by_gate": {}
+      },
+      "open_positions": [
+        {
+          "market": "us",
+          "symbol": "CWBK",
+          "status": "OPEN",
+          "action": "SELL",
+          "pattern": "indicator_ut_bot_dema",
+          "trade_id": "c9dc2765ebb04d139221af2d4e927a23",
+          "signal_id": null,
+          "pattern_version_id": null,
+          "provenance": "legacy_unknown",
+          "requested_rules": {
+            "schema_version": 1,
+            "stage": "signal",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 42.7975,
+            "stop_loss_on_close": false,
+            "take_profit": 40.4049,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "SELL",
+            "qty": 238,
+            "price": 42
+          },
+          "resolved_rules": {
+            "schema_version": 1,
+            "stage": "fill",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 42.7975,
+            "stop_loss_on_close": false,
+            "take_profit": 40.4049,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "SELL",
+            "qty": 238,
+            "price": 42
+          },
+          "chart_annotations": [
+            {
+              "type": "marker",
+              "date": "2026-08-03",
+              "price": 42,
+              "label": "entry",
+              "color": "#ffeb3b",
+              "marker": "v",
+              "label_pos": "above"
+            },
+            {
+              "type": "hline",
+              "price": 42.7975,
+              "label": "stop",
+              "color": "#ef5350",
+              "style": "--"
+            },
+            {
+              "type": "hline",
+              "price": 40.4049,
+              "label": "target",
+              "color": "#26a69a",
+              "style": "--"
+            },
+            {
+              "type": "path",
+              "points": [
+                {
+                  "date": "2026-05-12",
+                  "price": 37.975638070220555
+                },
+                {
+                  "date": "2026-05-13",
+                  "price": 37.983941091918574
+                },
+                {
+                  "date": "2026-05-14",
+                  "price": 38.01172414107585
+                },
+                {
+                  "date": "2026-05-15",
+                  "price": 37.827834222841496
+                },
+                {
+                  "date": "2026-05-18",
+                  "price": 37.819365999176604
+                },
+                {
+                  "date": "2026-05-19",
+                  "price": 37.811301024257666
+                },
+                {
+                  "date": "2026-05-20",
+                  "price": 37.81519155701046
+                },
+                {
+                  "date": "2026-05-21",
+                  "price": 37.82827877052289
+                },
+                {
+                  "date": "2026-05-22",
+                  "price": 37.83597986137736
+                },
+                {
+                  "date": "2026-05-26",
+                  "price": 37.98073403574296
+                },
+                {
+                  "date": "2026-05-27",
+                  "price": 37.87013347056869
+                },
+                {
+                  "date": "2026-05-28",
+                  "price": 37.87013347056869
+                },
+                {
+                  "date": "2026-05-29",
+                  "price": 37.87013347056869
+                },
+                {
+                  "date": "2026-06-01",
+                  "price": 38.33080124206595
+                },
+                {
+                  "date": "2026-06-01",
+                  "price": 38.13971370224676
+                },
+                {
+                  "date": "2026-06-02",
+                  "price": 38.02829836440958
+                },
+                {
+                  "date": "2026-06-03",
+                  "price": 38.01504606134245
+                },
+                {
+                  "date": "2026-06-04",
+                  "price": 37.80352825090478
+                },
+                {
+                  "date": "2026-06-05",
+                  "price": 37.89145627632208
+                },
+                {
+                  "date": "2026-06-08",
+                  "price": 37.90376795487241
+                },
+                {
+                  "date": "2026-06-09",
+                  "price": 37.90376795487241
+                },
+                {
+                  "date": "2026-06-10",
+                  "price": 38.0179523606837
+                },
+                {
+                  "date": "2026-06-11",
+                  "price": 38.03090705377149
+                },
+                {
+                  "date": "2026-06-12",
+                  "price": 38.03090705377149
+                },
+                {
+                  "date": "2026-06-15",
+                  "price": 38.252352755786184
+                },
+                {
+                  "date": "2026-06-16",
+                  "price": 38.2403359578916
+                },
+                {
+                  "date": "2026-06-17",
+                  "price": 38.3646803198477
+                },
+                {
+                  "date": "2026-06-18",
+                  "price": 38.72683972954943
+                },
+                {
+                  "date": "2026-06-22",
+                  "price": 38.92984453496663
+                },
+                {
+                  "date": "2026-06-23",
+                  "price": 38.942232825049594
+                },
+                {
+                  "date": "2026-06-24",
+                  "price": 39.33498503072757
+                },
+                {
+                  "date": "2026-06-25",
+                  "price": 39.347128607959014
+                },
+                {
+                  "date": "2026-06-26",
+                  "price": 39.35869391960801
+                },
+                {
+                  "date": "2026-06-29",
+                  "price": 39.36970850213086
+                },
+                {
+                  "date": "2026-06-30",
+                  "price": 39.28551513823521
+                },
+                {
+                  "date": "2026-07-01",
+                  "price": 40.56296096838985
+                },
+                {
+                  "date": "2026-07-01",
+                  "price": 39.62813172077873
+                },
+                {
+                  "date": "2026-07-02",
+                  "price": 39.39463729200156
+                },
+                {
+                  "date": "2026-07-06",
+                  "price": 39.43251018805534
+                },
+                {
+                  "date": "2026-07-07",
+                  "price": 39.45953351243366
+                },
+                {
+                  "date": "2026-07-08",
+                  "price": 41.38050970561948
+                },
+                {
+                  "date": "2026-07-09",
+                  "price": 42.80953066242731
+                },
+                {
+                  "date": "2026-07-10",
+                  "price": 42.840505349191375
+                },
+                {
+                  "date": "2026-07-13",
+                  "price": 43.37476942610395
+                },
+                {
+                  "date": "2026-07-14",
+                  "price": 43.404066200025994
+                },
+                {
+                  "date": "2026-07-15",
+                  "price": 43.43196788947556
+                },
+                {
+                  "date": "2026-07-16",
+                  "price": 43.45854092704656
+                },
+                {
+                  "date": "2026-07-17",
+                  "price": 43.4838485818761
+                },
+                {
+                  "date": "2026-07-20",
+                  "price": 43.507951110285184
+                },
+                {
+                  "date": "2026-07-21",
+                  "price": 43.530905899246214
+                },
+                {
+                  "date": "2026-07-22",
+                  "price": 43.55276760301862
+                },
+                {
+                  "date": "2026-07-23",
+                  "price": 43.573588273278055
+                },
+                {
+                  "date": "2026-07-24",
+                  "price": 43.59341748304895
+                },
+                {
+                  "date": "2026-07-27",
+                  "price": 43.61230244473551
+                },
+                {
+                  "date": "2026-07-28",
+                  "price": 43.63028812253224
+                },
+                {
+                  "date": "2026-07-29",
+                  "price": 43.64741733948151
+                },
+                {
+                  "date": "2026-07-30",
+                  "price": 42.48865301571423
+                },
+                {
+                  "date": "2026-07-31",
+                  "price": 42.136335122794705
+                },
+                {
+                  "date": "2026-08-01",
+                  "price": 42.05158561732012
+                },
+                {
+                  "date": "2026-08-03",
+                  "price": 42.79753744918545
+                }
+              ],
+              "color": "#ffeb3b",
+              "style": "-",
+              "width": 2,
+              "label": "indicator_ut_bot_dema"
+            }
+          ],
+          "timeframe": "1d",
+          "qty": 238,
+          "entry": 42,
+          "current": 42,
+          "stop": 42.7975,
+          "target": 40.4049,
+          "unrealized_pct": 0,
+          "mtm": 0,
+          "r": 0,
+          "hold_days": 15,
+          "hold_bars": 0,
+          "value": 9996,
+          "port_pct": 10.7656,
+          "risk": 189.805,
+          "opened": "2026-10-02T06:38:08.012683+00:00",
+          "sim_opened": "2026-08-03T13:30:00+00:00",
+          "daily_marks": [
+            {
+              "date": "2026-08-03",
+              "sim_bar": "2026-08-03T13:30:00+00:00",
+              "close": 42,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9996,
+              "status": "OPEN",
+              "bars": 0,
+              "stop": 42.7975,
+              "target": 40.4049
+            },
+            {
+              "date": "2026-08-04",
+              "sim_bar": "2026-08-04T13:30:00+00:00",
+              "close": 42,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9996,
+              "status": "OPEN",
+              "bars": 1,
+              "stop": 42.7975,
+              "target": 40.4049
+            },
+            {
+              "date": "2026-08-05",
+              "sim_bar": "2026-08-05T13:30:00+00:00",
+              "close": 42,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9996,
+              "status": "OPEN",
+              "bars": 2,
+              "stop": 42.7975,
+              "target": 40.4049
+            },
+            {
+              "date": "2026-08-06",
+              "sim_bar": "2026-08-06T13:30:00+00:00",
+              "close": 42,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9996,
+              "status": "OPEN",
+              "bars": 3,
+              "stop": 42.7975,
+              "target": 40.4049
+            },
+            {
+              "date": "2026-08-07",
+              "sim_bar": "2026-08-07T13:30:00+00:00",
+              "close": 42,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9996,
+              "status": "OPEN",
+              "bars": 4,
+              "stop": 42.7975,
+              "target": 40.4049
+            },
+            {
+              "date": "2026-08-10",
+              "sim_bar": "2026-08-10T13:30:00+00:00",
+              "close": 42,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9996,
+              "status": "OPEN",
+              "bars": 5,
+              "stop": 42.7975,
+              "target": 40.4049
+            },
+            {
+              "date": "2026-08-11",
+              "sim_bar": "2026-08-11T13:30:00+00:00",
+              "close": 42,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9996,
+              "status": "OPEN",
+              "bars": 6,
+              "stop": 42.7975,
+              "target": 40.4049
+            },
+            {
+              "date": "2026-08-12",
+              "sim_bar": "2026-08-12T13:30:00+00:00",
+              "close": 42,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9996,
+              "status": "OPEN",
+              "bars": 7,
+              "stop": 42.7975,
+              "target": 40.4049
+            },
+            {
+              "date": "2026-08-13",
+              "sim_bar": "2026-08-13T13:30:00+00:00",
+              "close": 42,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9996,
+              "status": "OPEN",
+              "bars": 8,
+              "stop": 42.7975,
+              "target": 40.4049
+            },
+            {
+              "date": "2026-08-14",
+              "sim_bar": "2026-08-14T13:30:00+00:00",
+              "close": 42,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9996,
+              "status": "OPEN",
+              "bars": 9,
+              "stop": 42.7975,
+              "target": 40.4049
+            }
+          ]
+        },
+        {
+          "market": "us",
+          "symbol": "RMR",
+          "status": "OPEN",
+          "action": "SELL",
+          "pattern": "indicator_dema_supertrend",
+          "trade_id": "2d40e257254b4af88a0757b5989bfa3f",
+          "signal_id": null,
+          "pattern_version_id": null,
+          "provenance": "legacy_unknown",
+          "requested_rules": {
+            "schema_version": 1,
+            "stage": "signal",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 20.6044,
+            "stop_loss_on_close": false,
+            "take_profit": 15.3413,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "SELL",
+            "qty": 530,
+            "price": 18.850000381469727
+          },
+          "resolved_rules": {
+            "schema_version": 1,
+            "stage": "fill",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 20.6044,
+            "stop_loss_on_close": false,
+            "take_profit": 15.3413,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "SELL",
+            "qty": 530,
+            "price": 18.850000381469727
+          },
+          "chart_annotations": [
+            {
+              "type": "marker",
+              "date": "2026-08-03",
+              "price": 18.850000381469727,
+              "label": "entry",
+              "color": "#ffeb3b",
+              "marker": "v",
+              "label_pos": "above"
+            },
+            {
+              "type": "hline",
+              "price": 20.6044,
+              "label": "stop",
+              "color": "#ef5350",
+              "style": "--"
+            },
+            {
+              "type": "hline",
+              "price": 15.3413,
+              "label": "target",
+              "color": "#26a69a",
+              "style": "--"
+            },
+            {
+              "type": "path",
+              "points": [
+                {
+                  "date": "2026-05-07",
+                  "price": 18.080686116759217
+                },
+                {
+                  "date": "2026-05-08",
+                  "price": 18.080686116759217
+                },
+                {
+                  "date": "2026-05-11",
+                  "price": 18.080686116759217
+                },
+                {
+                  "date": "2026-05-12",
+                  "price": 18.080686116759217
+                },
+                {
+                  "date": "2026-05-13",
+                  "price": 18.080686116759217
+                },
+                {
+                  "date": "2026-05-14",
+                  "price": 18.080686116759217
+                },
+                {
+                  "date": "2026-05-15",
+                  "price": 18.080686116759217
+                },
+                {
+                  "date": "2026-05-18",
+                  "price": 18.080686116759217
+                },
+                {
+                  "date": "2026-05-19",
+                  "price": 18.080686116759217
+                },
+                {
+                  "date": "2026-05-20",
+                  "price": 18.080686116759217
+                },
+                {
+                  "date": "2026-05-21",
+                  "price": 18.18052485949335
+                },
+                {
+                  "date": "2026-05-22",
+                  "price": 18.634972125588693
+                },
+                {
+                  "date": "2026-05-26",
+                  "price": 18.73297489014164
+                },
+                {
+                  "date": "2026-05-27",
+                  "price": 18.73297489014164
+                },
+                {
+                  "date": "2026-05-28",
+                  "price": 18.862210570820025
+                },
+                {
+                  "date": "2026-05-29",
+                  "price": 18.862210570820025
+                },
+                {
+                  "date": "2026-06-01",
+                  "price": 18.862210570820025
+                },
+                {
+                  "date": "2026-06-02",
+                  "price": 18.862210570820025
+                },
+                {
+                  "date": "2026-06-03",
+                  "price": 18.862210570820025
+                },
+                {
+                  "date": "2026-06-04",
+                  "price": 18.862210570820025
+                },
+                {
+                  "date": "2026-06-05",
+                  "price": 19.094007661067216
+                },
+                {
+                  "date": "2026-06-08",
+                  "price": 19.16410680722246
+                },
+                {
+                  "date": "2026-06-09",
+                  "price": 19.428195966282928
+                },
+                {
+                  "date": "2026-06-10",
+                  "price": 19.428195966282928
+                },
+                {
+                  "date": "2026-06-11",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-06-12",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-06-15",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-06-16",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-06-17",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-06-18",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-06-22",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-06-23",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-06-24",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-06-25",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-06-26",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-06-29",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-06-30",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-07-01",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-07-02",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-07-06",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-07-07",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-07-08",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-07-09",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-07-10",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-07-13",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-07-14",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-07-15",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-07-16",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-07-17",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-07-20",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-07-21",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-07-22",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-07-23",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-07-24",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-07-27",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-07-28",
+                  "price": 19.631938982933313
+                },
+                {
+                  "date": "2026-07-29",
+                  "price": 21.218254960167293
+                },
+                {
+                  "date": "2026-07-30",
+                  "price": 20.92041065297234
+                },
+                {
+                  "date": "2026-07-31",
+                  "price": 20.819468754545223
+                },
+                {
+                  "date": "2026-08-03",
+                  "price": 20.60437273205701
+                }
+              ],
+              "color": "#ffeb3b",
+              "style": "-",
+              "width": 2,
+              "label": "indicator_dema_supertrend"
+            }
+          ],
+          "timeframe": "1d",
+          "qty": 530,
+          "entry": 18.85,
+          "current": 19.85,
+          "stop": 20.6044,
+          "target": 15.3413,
+          "unrealized_pct": -5.305,
+          "mtm": -530,
+          "r": -0.57,
+          "hold_days": 15,
+          "hold_bars": 0,
+          "value": 10520.5002,
+          "port_pct": 11.3304,
+          "risk": 929.8318,
+          "opened": "2026-10-02T06:38:08.221478+00:00",
+          "sim_opened": "2026-08-03T13:30:00+00:00",
+          "daily_marks": [
+            {
+              "date": "2026-08-03",
+              "sim_bar": "2026-08-03T13:30:00+00:00",
+              "close": 18.85,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9990.5,
+              "status": "OPEN",
+              "bars": 0,
+              "stop": 20.6044,
+              "target": 15.3413
+            },
+            {
+              "date": "2026-08-04",
+              "sim_bar": "2026-08-04T13:30:00+00:00",
+              "close": 18.99,
+              "unrl_pct": -0.7427,
+              "mtm": -74.2,
+              "r": -0.0798,
+              "value": 10064.7,
+              "status": "OPEN",
+              "bars": 1,
+              "stop": 20.6044,
+              "target": 15.3413
+            },
+            {
+              "date": "2026-08-05",
+              "sim_bar": "2026-08-05T13:30:00+00:00",
+              "close": 18.95,
+              "unrl_pct": -0.5305,
+              "mtm": -53,
+              "r": -0.057,
+              "value": 10043.5,
+              "status": "OPEN",
+              "bars": 2,
+              "stop": 20.6044,
+              "target": 15.3413
+            },
+            {
+              "date": "2026-08-06",
+              "sim_bar": "2026-08-06T13:30:00+00:00",
+              "close": 18.8,
+              "unrl_pct": 0.2653,
+              "mtm": 26.5,
+              "r": 0.0285,
+              "value": 9964,
+              "status": "OPEN",
+              "bars": 3,
+              "stop": 20.6044,
+              "target": 15.3413
+            },
+            {
+              "date": "2026-08-07",
+              "sim_bar": "2026-08-07T13:30:00+00:00",
+              "close": 19.45,
+              "unrl_pct": -3.183,
+              "mtm": -318,
+              "r": -0.342,
+              "value": 10308.5,
+              "status": "OPEN",
+              "bars": 4,
+              "stop": 20.6044,
+              "target": 15.3413
+            },
+            {
+              "date": "2026-08-10",
+              "sim_bar": "2026-08-10T13:30:00+00:00",
+              "close": 19.59,
+              "unrl_pct": -3.9257,
+              "mtm": -392.2,
+              "r": -0.4218,
+              "value": 10382.7,
+              "status": "OPEN",
+              "bars": 5,
+              "stop": 20.6044,
+              "target": 15.3413
+            },
+            {
+              "date": "2026-08-11",
+              "sim_bar": "2026-08-11T13:30:00+00:00",
+              "close": 19.72,
+              "unrl_pct": -4.6154,
+              "mtm": -461.1,
+              "r": -0.4959,
+              "value": 10451.6,
+              "status": "OPEN",
+              "bars": 6,
+              "stop": 20.6044,
+              "target": 15.3413
+            },
+            {
+              "date": "2026-08-12",
+              "sim_bar": "2026-08-12T13:30:00+00:00",
+              "close": 19.72,
+              "unrl_pct": -4.6154,
+              "mtm": -461.1,
+              "r": -0.4959,
+              "value": 10451.6,
+              "status": "OPEN",
+              "bars": 7,
+              "stop": 20.6044,
+              "target": 15.3413
+            },
+            {
+              "date": "2026-08-13",
+              "sim_bar": "2026-08-13T13:30:00+00:00",
+              "close": 20.26,
+              "unrl_pct": -7.4801,
+              "mtm": -747.3,
+              "r": -0.8037,
+              "value": 10737.8,
+              "status": "OPEN",
+              "bars": 8,
+              "stop": 20.6044,
+              "target": 15.3413
+            },
+            {
+              "date": "2026-08-14",
+              "sim_bar": "2026-08-14T13:30:00+00:00",
+              "close": 20.26,
+              "unrl_pct": -7.4801,
+              "mtm": -747.3,
+              "r": -0.8037,
+              "value": 10737.8,
+              "status": "OPEN",
+              "bars": 9,
+              "stop": 20.6044,
+              "target": 15.3413
+            },
+            {
+              "date": "2026-08-17",
+              "sim_bar": "2026-08-17T13:30:00+00:00",
+              "close": 20.38,
+              "unrl_pct": -8.1167,
+              "mtm": -810.9,
+              "r": -0.8721,
+              "value": 10801.4,
+              "status": "OPEN",
+              "bars": 10,
+              "stop": 20.6044,
+              "target": 15.3413
+            },
+            {
+              "date": "2026-08-18",
+              "sim_bar": "2026-08-18T13:30:00+00:00",
+              "close": 19.85,
+              "unrl_pct": -5.305,
+              "mtm": -530,
+              "r": -0.57,
+              "value": 10520.5,
+              "status": "OPEN",
+              "bars": 11,
+              "stop": 20.6044,
+              "target": 15.3413
+            }
+          ]
+        },
+        {
+          "market": "us",
+          "symbol": "PLAB",
+          "status": "OPEN",
+          "action": "BUY",
+          "pattern": "indicator_ut_bot_dema",
+          "trade_id": "a9bf65c55d6447698e9a462227f3ba69",
+          "signal_id": null,
+          "pattern_version_id": null,
+          "provenance": "legacy_unknown",
+          "requested_rules": {
+            "schema_version": 1,
+            "stage": "signal",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 28.5168,
+            "stop_loss_on_close": false,
+            "take_profit": 37.0465,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "BUY",
+            "qty": 318,
+            "price": 31.360000610351562
+          },
+          "resolved_rules": {
+            "schema_version": 1,
+            "stage": "fill",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 28.5168,
+            "stop_loss_on_close": false,
+            "take_profit": 37.0465,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "BUY",
+            "qty": 318,
+            "price": 31.360000610351562
+          },
+          "chart_annotations": [
+            {
+              "type": "marker",
+              "date": "2026-08-03",
+              "price": 31.360000610351562,
+              "label": "entry",
+              "color": "#ffeb3b",
+              "marker": "^",
+              "label_pos": "below"
+            },
+            {
+              "type": "hline",
+              "price": 28.5168,
+              "label": "stop",
+              "color": "#ef5350",
+              "style": "--"
+            },
+            {
+              "type": "hline",
+              "price": 37.0465,
+              "label": "target",
+              "color": "#26a69a",
+              "style": "--"
+            },
+            {
+              "type": "path",
+              "points": [
+                {
+                  "date": "2026-05-07",
+                  "price": 49.82056105594329
+                },
+                {
+                  "date": "2026-05-08",
+                  "price": 50.25098509349242
+                },
+                {
+                  "date": "2026-05-11",
+                  "price": 52.598914187652866
+                },
+                {
+                  "date": "2026-05-12",
+                  "price": 54.809961733834136
+                },
+                {
+                  "date": "2026-05-13",
+                  "price": 54.809961733834136
+                },
+                {
+                  "date": "2026-05-14",
+                  "price": 54.477744195481264
+                },
+                {
+                  "date": "2026-05-15",
+                  "price": 52.28535125143956
+                },
+                {
+                  "date": "2026-05-18",
+                  "price": 51.59200125542549
+                },
+                {
+                  "date": "2026-05-19",
+                  "price": 48.59500109210154
+                },
+                {
+                  "date": "2026-05-20",
+                  "price": 48.59500109210154
+                },
+                {
+                  "date": "2026-05-21",
+                  "price": 47.41413707028044
+                },
+                {
+                  "date": "2026-05-22",
+                  "price": 49.119654058371395
+                },
+                {
+                  "date": "2026-05-26",
+                  "price": 51.03836125320329
+                },
+                {
+                  "date": "2026-05-27",
+                  "price": 51.705819983199795
+                },
+                {
+                  "date": "2026-05-28",
+                  "price": 39.31255250231088
+                },
+                {
+                  "date": "2026-05-29",
+                  "price": 36.66528656611046
+                },
+                {
+                  "date": "2026-06-01",
+                  "price": 35.666583970701886
+                },
+                {
+                  "date": "2026-06-02",
+                  "price": 35.666583970701886
+                },
+                {
+                  "date": "2026-06-03",
+                  "price": 35.666583970701886
+                },
+                {
+                  "date": "2026-06-04",
+                  "price": 34.458018931111084
+                },
+                {
+                  "date": "2026-06-05",
+                  "price": 33.001565759485096
+                },
+                {
+                  "date": "2026-06-08",
+                  "price": 33.001565759485096
+                },
+                {
+                  "date": "2026-06-09",
+                  "price": 33.001565759485096
+                },
+                {
+                  "date": "2026-06-10",
+                  "price": 32.21831822933822
+                },
+                {
+                  "date": "2026-06-11",
+                  "price": 32.21831822933822
+                },
+                {
+                  "date": "2026-06-12",
+                  "price": 32.21831822933822
+                },
+                {
+                  "date": "2026-06-15",
+                  "price": 29.747958080499302
+                },
+                {
+                  "date": "2026-06-16",
+                  "price": 29.747958080499302
+                },
+                {
+                  "date": "2026-06-17",
+                  "price": 29.747958080499302
+                },
+                {
+                  "date": "2026-06-18",
+                  "price": 30.32643554990883
+                },
+                {
+                  "date": "2026-06-22",
+                  "price": 31.072795580165682
+                },
+                {
+                  "date": "2026-06-23",
+                  "price": 31.072795580165682
+                },
+                {
+                  "date": "2026-06-24",
+                  "price": 31.072795580165682
+                },
+                {
+                  "date": "2026-06-25",
+                  "price": 31.072795580165682
+                },
+                {
+                  "date": "2026-06-26",
+                  "price": 33.546994393700864
+                },
+                {
+                  "date": "2026-06-29",
+                  "price": 33.46737561304844
+                },
+                {
+                  "date": "2026-06-30",
+                  "price": 33.46737561304844
+                },
+                {
+                  "date": "2026-07-01",
+                  "price": 33.45663264512724
+                },
+                {
+                  "date": "2026-07-02",
+                  "price": 32.19262695993419
+                },
+                {
+                  "date": "2026-07-06",
+                  "price": 31.90309681859693
+                },
+                {
+                  "date": "2026-07-07",
+                  "price": 30.335806483002703
+                },
+                {
+                  "date": "2026-07-08",
+                  "price": 30.095291654242597
+                },
+                {
+                  "date": "2026-07-09",
+                  "price": 30.095291654242597
+                },
+                {
+                  "date": "2026-07-10",
+                  "price": 30.095291654242597
+                },
+                {
+                  "date": "2026-07-13",
+                  "price": 30.095291654242597
+                },
+                {
+                  "date": "2026-07-14",
+                  "price": 30.095291654242597
+                },
+                {
+                  "date": "2026-07-15",
+                  "price": 30.095291654242597
+                },
+                {
+                  "date": "2026-07-16",
+                  "price": 30.095291654242597
+                },
+                {
+                  "date": "2026-07-17",
+                  "price": 30.095291654242597
+                },
+                {
+                  "date": "2026-07-20",
+                  "price": 30.095291654242597
+                },
+                {
+                  "date": "2026-07-21",
+                  "price": 28.51013438399578
+                },
+                {
+                  "date": "2026-07-22",
+                  "price": 28.74096125360467
+                },
+                {
+                  "date": "2026-07-23",
+                  "price": 28.90460612656709
+                },
+                {
+                  "date": "2026-07-24",
+                  "price": 28.90460612656709
+                },
+                {
+                  "date": "2026-07-27",
+                  "price": 28.90460612656709
+                },
+                {
+                  "date": "2026-07-28",
+                  "price": 30.630466101566853
+                },
+                {
+                  "date": "2026-07-29",
+                  "price": 30.37937259484842
+                },
+                {
+                  "date": "2026-07-30",
+                  "price": 30.37937259484842
+                },
+                {
+                  "date": "2026-07-31",
+                  "price": 30.37937259484842
+                },
+                {
+                  "date": "2026-08-03",
+                  "price": 28.516756495792404
+                }
+              ],
+              "color": "#ffeb3b",
+              "style": "-",
+              "width": 2,
+              "label": "indicator_ut_bot_dema"
+            }
+          ],
+          "timeframe": "1d",
+          "qty": 318,
+          "entry": 31.36,
+          "current": 31.88,
+          "stop": 28.5168,
+          "target": 37.0465,
+          "unrealized_pct": 1.6582,
+          "mtm": 165.3595,
+          "r": 0.1829,
+          "hold_days": 15,
+          "hold_bars": 0,
+          "value": 10137.8397,
+          "port_pct": 10.9183,
+          "risk": 904.1378,
+          "opened": "2026-10-02T06:38:08.360575+00:00",
+          "sim_opened": "2026-08-03T13:30:00+00:00",
+          "daily_marks": [
+            {
+              "date": "2026-08-03",
+              "sim_bar": "2026-08-03T13:30:00+00:00",
+              "close": 31.36,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9972.48,
+              "status": "OPEN",
+              "bars": 0,
+              "stop": 28.5168,
+              "target": 37.0465
+            },
+            {
+              "date": "2026-08-04",
+              "sim_bar": "2026-08-04T13:30:00+00:00",
+              "close": 32.61,
+              "unrl_pct": 3.986,
+              "mtm": 397.5,
+              "r": 0.4396,
+              "value": 10369.98,
+              "status": "OPEN",
+              "bars": 1,
+              "stop": 28.5168,
+              "target": 37.0465
+            },
+            {
+              "date": "2026-08-05",
+              "sim_bar": "2026-08-05T13:30:00+00:00",
+              "close": 31.97,
+              "unrl_pct": 1.9451,
+              "mtm": 193.98,
+              "r": 0.2145,
+              "value": 10166.46,
+              "status": "OPEN",
+              "bars": 2,
+              "stop": 28.5168,
+              "target": 37.0465
+            },
+            {
+              "date": "2026-08-06",
+              "sim_bar": "2026-08-06T13:30:00+00:00",
+              "close": 31.9,
+              "unrl_pct": 1.7219,
+              "mtm": 171.72,
+              "r": 0.1899,
+              "value": 10144.2,
+              "status": "OPEN",
+              "bars": 3,
+              "stop": 28.5168,
+              "target": 37.0465
+            },
+            {
+              "date": "2026-08-07",
+              "sim_bar": "2026-08-07T13:30:00+00:00",
+              "close": 32.65,
+              "unrl_pct": 4.1135,
+              "mtm": 410.22,
+              "r": 0.4537,
+              "value": 10382.7,
+              "status": "OPEN",
+              "bars": 4,
+              "stop": 28.5168,
+              "target": 37.0465
+            },
+            {
+              "date": "2026-08-10",
+              "sim_bar": "2026-08-10T13:30:00+00:00",
+              "close": 32.08,
+              "unrl_pct": 2.2959,
+              "mtm": 228.96,
+              "r": 0.2532,
+              "value": 10201.44,
+              "status": "OPEN",
+              "bars": 5,
+              "stop": 28.5168,
+              "target": 37.0465
+            },
+            {
+              "date": "2026-08-11",
+              "sim_bar": "2026-08-11T13:30:00+00:00",
+              "close": 32.99,
+              "unrl_pct": 5.1977,
+              "mtm": 518.34,
+              "r": 0.5733,
+              "value": 10490.82,
+              "status": "OPEN",
+              "bars": 6,
+              "stop": 28.5168,
+              "target": 37.0465
+            },
+            {
+              "date": "2026-08-12",
+              "sim_bar": "2026-08-12T13:30:00+00:00",
+              "close": 33.49,
+              "unrl_pct": 6.7921,
+              "mtm": 677.34,
+              "r": 0.7492,
+              "value": 10649.82,
+              "status": "OPEN",
+              "bars": 7,
+              "stop": 28.5168,
+              "target": 37.0465
+            },
+            {
+              "date": "2026-08-13",
+              "sim_bar": "2026-08-13T13:30:00+00:00",
+              "close": 33.48,
+              "unrl_pct": 6.7602,
+              "mtm": 674.16,
+              "r": 0.7456,
+              "value": 10646.64,
+              "status": "OPEN",
+              "bars": 8,
+              "stop": 28.5168,
+              "target": 37.0465
+            },
+            {
+              "date": "2026-08-14",
+              "sim_bar": "2026-08-14T13:30:00+00:00",
+              "close": 33.32,
+              "unrl_pct": 6.25,
+              "mtm": 623.28,
+              "r": 0.6894,
+              "value": 10595.76,
+              "status": "OPEN",
+              "bars": 9,
+              "stop": 28.5168,
+              "target": 37.0465
+            },
+            {
+              "date": "2026-08-17",
+              "sim_bar": "2026-08-17T13:30:00+00:00",
+              "close": 33.6,
+              "unrl_pct": 7.1429,
+              "mtm": 712.32,
+              "r": 0.7878,
+              "value": 10684.8,
+              "status": "OPEN",
+              "bars": 10,
+              "stop": 28.5168,
+              "target": 37.0465
+            },
+            {
+              "date": "2026-08-18",
+              "sim_bar": "2026-08-18T13:30:00+00:00",
+              "close": 31.88,
+              "unrl_pct": 1.6582,
+              "mtm": 165.36,
+              "r": 0.1829,
+              "value": 10137.84,
+              "status": "OPEN",
+              "bars": 11,
+              "stop": 28.5168,
+              "target": 37.0465
+            }
+          ]
+        },
+        {
+          "market": "us",
+          "symbol": "DAVA",
+          "status": "OPEN",
+          "action": "BUY",
+          "pattern": "indicator_pivot_points",
+          "trade_id": "f9eaefa7fa9f49b7b0c7a78ee2d358b7",
+          "signal_id": null,
+          "pattern_version_id": null,
+          "provenance": "legacy_unknown",
+          "requested_rules": {
+            "schema_version": 1,
+            "stage": "signal",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 2.67,
+            "stop_loss_on_close": false,
+            "take_profit": 3.3,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "BUY",
+            "qty": 3246,
+            "price": 3.0799999237060547
+          },
+          "resolved_rules": {
+            "schema_version": 1,
+            "stage": "fill",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 2.67,
+            "stop_loss_on_close": false,
+            "take_profit": 3.3,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "BUY",
+            "qty": 3246,
+            "price": 3.0799999237060547
+          },
+          "chart_annotations": [
+            {
+              "type": "marker",
+              "date": "2026-08-03",
+              "price": 3.0799999237060547,
+              "label": "entry",
+              "color": "#ffeb3b",
+              "marker": "^",
+              "label_pos": "below"
+            },
+            {
+              "type": "hline",
+              "price": 2.67,
+              "label": "stop",
+              "color": "#ef5350",
+              "style": "--"
+            },
+            {
+              "type": "hline",
+              "price": 3.3,
+              "label": "target",
+              "color": "#26a69a",
+              "style": "--"
+            }
+          ],
+          "timeframe": "1d",
+          "qty": 3246,
+          "entry": 3.08,
+          "current": 3,
+          "stop": 2.67,
+          "target": 3.3,
+          "unrealized_pct": -2.5974,
+          "mtm": -259.6798,
+          "r": -0.1951,
+          "hold_days": 15,
+          "hold_bars": 0,
+          "value": 9738,
+          "port_pct": 10.4877,
+          "risk": 1330.8598,
+          "opened": "2026-10-02T06:38:08.378256+00:00",
+          "sim_opened": "2026-08-03T13:30:00+00:00",
+          "daily_marks": [
+            {
+              "date": "2026-08-03",
+              "sim_bar": "2026-08-03T13:30:00+00:00",
+              "close": 3.08,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9997.68,
+              "status": "OPEN",
+              "bars": 0,
+              "stop": 2.67,
+              "target": 3.3
+            },
+            {
+              "date": "2026-08-04",
+              "sim_bar": "2026-08-04T13:30:00+00:00",
+              "close": 3.08,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9997.68,
+              "status": "OPEN",
+              "bars": 1,
+              "stop": 2.67,
+              "target": 3.3
+            },
+            {
+              "date": "2026-08-05",
+              "sim_bar": "2026-08-05T13:30:00+00:00",
+              "close": 2.97,
+              "unrl_pct": -3.5714,
+              "mtm": -357.06,
+              "r": -0.2683,
+              "value": 9640.62,
+              "status": "OPEN",
+              "bars": 2,
+              "stop": 2.67,
+              "target": 3.3
+            },
+            {
+              "date": "2026-08-06",
+              "sim_bar": "2026-08-06T13:30:00+00:00",
+              "close": 2.91,
+              "unrl_pct": -5.5195,
+              "mtm": -551.82,
+              "r": -0.4146,
+              "value": 9445.86,
+              "status": "OPEN",
+              "bars": 3,
+              "stop": 2.67,
+              "target": 3.3
+            },
+            {
+              "date": "2026-08-07",
+              "sim_bar": "2026-08-07T13:30:00+00:00",
+              "close": 2.95,
+              "unrl_pct": -4.2208,
+              "mtm": -421.98,
+              "r": -0.3171,
+              "value": 9575.7,
+              "status": "OPEN",
+              "bars": 4,
+              "stop": 2.67,
+              "target": 3.3
+            },
+            {
+              "date": "2026-08-10",
+              "sim_bar": "2026-08-10T13:30:00+00:00",
+              "close": 3.01,
+              "unrl_pct": -2.2727,
+              "mtm": -227.22,
+              "r": -0.1707,
+              "value": 9770.46,
+              "status": "OPEN",
+              "bars": 5,
+              "stop": 2.67,
+              "target": 3.3
+            },
+            {
+              "date": "2026-08-11",
+              "sim_bar": "2026-08-11T13:30:00+00:00",
+              "close": 3.02,
+              "unrl_pct": -1.9481,
+              "mtm": -194.76,
+              "r": -0.1463,
+              "value": 9802.92,
+              "status": "OPEN",
+              "bars": 6,
+              "stop": 2.67,
+              "target": 3.3
+            },
+            {
+              "date": "2026-08-12",
+              "sim_bar": "2026-08-12T13:30:00+00:00",
+              "close": 3.06,
+              "unrl_pct": -0.6494,
+              "mtm": -64.92,
+              "r": -0.0488,
+              "value": 9932.76,
+              "status": "OPEN",
+              "bars": 7,
+              "stop": 2.67,
+              "target": 3.3
+            },
+            {
+              "date": "2026-08-13",
+              "sim_bar": "2026-08-13T13:30:00+00:00",
+              "close": 3.16,
+              "unrl_pct": 2.5974,
+              "mtm": 259.68,
+              "r": 0.1951,
+              "value": 10257.36,
+              "status": "OPEN",
+              "bars": 8,
+              "stop": 2.67,
+              "target": 3.3
+            },
+            {
+              "date": "2026-08-14",
+              "sim_bar": "2026-08-14T13:30:00+00:00",
+              "close": 3.1,
+              "unrl_pct": 0.6494,
+              "mtm": 64.92,
+              "r": 0.0488,
+              "value": 10062.6,
+              "status": "OPEN",
+              "bars": 9,
+              "stop": 2.67,
+              "target": 3.3
+            },
+            {
+              "date": "2026-08-17",
+              "sim_bar": "2026-08-17T13:30:00+00:00",
+              "close": 2.95,
+              "unrl_pct": -4.2208,
+              "mtm": -421.98,
+              "r": -0.3171,
+              "value": 9575.7,
+              "status": "OPEN",
+              "bars": 10,
+              "stop": 2.67,
+              "target": 3.3
+            },
+            {
+              "date": "2026-08-18",
+              "sim_bar": "2026-08-18T13:30:00+00:00",
+              "close": 3,
+              "unrl_pct": -2.5974,
+              "mtm": -259.68,
+              "r": -0.1951,
+              "value": 9738,
+              "status": "OPEN",
+              "bars": 11,
+              "stop": 2.67,
+              "target": 3.3
+            }
+          ]
+        },
+        {
+          "market": "us",
+          "symbol": "AVA",
+          "status": "OPEN",
+          "action": "BUY",
+          "pattern": "indicator_pivot_points",
+          "trade_id": "1773bd513e344fffa0084c5fae1363d0",
+          "signal_id": null,
+          "pattern_version_id": null,
+          "provenance": "legacy_unknown",
+          "requested_rules": {
+            "schema_version": 1,
+            "stage": "signal",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 34.53,
+            "stop_loss_on_close": false,
+            "take_profit": 42.82,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "BUY",
+            "qty": 252,
+            "price": 39.54999923706055
+          },
+          "resolved_rules": {
+            "schema_version": 1,
+            "stage": "fill",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 34.53,
+            "stop_loss_on_close": false,
+            "take_profit": 42.82,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "BUY",
+            "qty": 252,
+            "price": 39.54999923706055
+          },
+          "chart_annotations": [
+            {
+              "type": "marker",
+              "date": "2026-08-03",
+              "price": 39.54999923706055,
+              "label": "entry",
+              "color": "#ffeb3b",
+              "marker": "^",
+              "label_pos": "below"
+            },
+            {
+              "type": "hline",
+              "price": 34.53,
+              "label": "stop",
+              "color": "#ef5350",
+              "style": "--"
+            },
+            {
+              "type": "hline",
+              "price": 42.82,
+              "label": "target",
+              "color": "#26a69a",
+              "style": "--"
+            }
+          ],
+          "timeframe": "1W",
+          "qty": 252,
+          "entry": 39.55,
+          "current": 39.15,
+          "stop": 34.53,
+          "target": 42.82,
+          "unrealized_pct": -1.0114,
+          "mtm": -100.7994,
+          "r": -0.0797,
+          "hold_days": 15,
+          "hold_bars": 0,
+          "value": 9865.8004,
+          "port_pct": 10.6253,
+          "risk": 1265.0398,
+          "opened": "2026-10-02T06:38:08.875878+00:00",
+          "sim_opened": "2026-08-03T13:30:00+00:00",
+          "daily_marks": [
+            {
+              "date": "2026-08-03",
+              "sim_bar": "2026-08-03T13:30:00+00:00",
+              "close": 39.55,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9966.6,
+              "status": "OPEN",
+              "bars": 0,
+              "stop": 34.53,
+              "target": 42.82
+            },
+            {
+              "date": "2026-08-10",
+              "sim_bar": "2026-08-10T13:30:00+00:00",
+              "close": 38.21,
+              "unrl_pct": -3.3881,
+              "mtm": -337.68,
+              "r": -0.2669,
+              "value": 9628.92,
+              "status": "OPEN",
+              "bars": 1,
+              "stop": 34.53,
+              "target": 42.82
+            }
+          ]
+        },
+        {
+          "market": "us",
+          "symbol": "ADNT",
+          "status": "OPEN",
+          "action": "BUY",
+          "pattern": "indicator_pivot_points",
+          "trade_id": "44b6792fa6e84caa930c0c710a6af747",
+          "signal_id": null,
+          "pattern_version_id": null,
+          "provenance": "legacy_unknown",
+          "requested_rules": {
+            "schema_version": 1,
+            "stage": "signal",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 18.33,
+            "stop_loss_on_close": false,
+            "take_profit": 23.1,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "BUY",
+            "qty": 475,
+            "price": 21.010000228881836
+          },
+          "resolved_rules": {
+            "schema_version": 1,
+            "stage": "fill",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 18.33,
+            "stop_loss_on_close": false,
+            "take_profit": 23.1,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "BUY",
+            "qty": 475,
+            "price": 21.010000228881836
+          },
+          "chart_annotations": [
+            {
+              "type": "marker",
+              "date": "2026-08-03",
+              "price": 21.010000228881836,
+              "label": "entry",
+              "color": "#ffeb3b",
+              "marker": "^",
+              "label_pos": "below"
+            },
+            {
+              "type": "hline",
+              "price": 18.33,
+              "label": "stop",
+              "color": "#ef5350",
+              "style": "--"
+            },
+            {
+              "type": "hline",
+              "price": 23.1,
+              "label": "target",
+              "color": "#26a69a",
+              "style": "--"
+            }
+          ],
+          "timeframe": "1d",
+          "qty": 475,
+          "entry": 21.01,
+          "current": 20.38,
+          "stop": 18.33,
+          "target": 23.1,
+          "unrealized_pct": -2.9986,
+          "mtm": -299.2505,
+          "r": -0.2351,
+          "hold_days": 15,
+          "hold_bars": 0,
+          "value": 9680.4996,
+          "port_pct": 10.4258,
+          "risk": 1273.0001,
+          "opened": "2026-10-02T06:38:09.349846+00:00",
+          "sim_opened": "2026-08-03T13:30:00+00:00",
+          "daily_marks": [
+            {
+              "date": "2026-08-03",
+              "sim_bar": "2026-08-03T13:30:00+00:00",
+              "close": 21.01,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9979.75,
+              "status": "OPEN",
+              "bars": 0,
+              "stop": 18.33,
+              "target": 23.1
+            },
+            {
+              "date": "2026-08-04",
+              "sim_bar": "2026-08-04T13:30:00+00:00",
+              "close": 21.16,
+              "unrl_pct": 0.7139,
+              "mtm": 71.25,
+              "r": 0.056,
+              "value": 10051,
+              "status": "OPEN",
+              "bars": 1,
+              "stop": 18.33,
+              "target": 23.1
+            },
+            {
+              "date": "2026-08-05",
+              "sim_bar": "2026-08-05T13:30:00+00:00",
+              "close": 20.52,
+              "unrl_pct": -2.3322,
+              "mtm": -232.75,
+              "r": -0.1828,
+              "value": 9747,
+              "status": "OPEN",
+              "bars": 2,
+              "stop": 18.33,
+              "target": 23.1
+            },
+            {
+              "date": "2026-08-06",
+              "sim_bar": "2026-08-06T13:30:00+00:00",
+              "close": 18.85,
+              "unrl_pct": -10.2808,
+              "mtm": -1026,
+              "r": -0.806,
+              "value": 8953.75,
+              "status": "OPEN",
+              "bars": 3,
+              "stop": 18.33,
+              "target": 23.1
+            },
+            {
+              "date": "2026-08-07",
+              "sim_bar": "2026-08-07T13:30:00+00:00",
+              "close": 19.42,
+              "unrl_pct": -7.5678,
+              "mtm": -755.25,
+              "r": -0.5933,
+              "value": 9224.5,
+              "status": "OPEN",
+              "bars": 4,
+              "stop": 18.33,
+              "target": 23.1
+            },
+            {
+              "date": "2026-08-10",
+              "sim_bar": "2026-08-10T13:30:00+00:00",
+              "close": 18.71,
+              "unrl_pct": -10.9472,
+              "mtm": -1092.5,
+              "r": -0.8582,
+              "value": 8887.25,
+              "status": "OPEN",
+              "bars": 5,
+              "stop": 18.33,
+              "target": 23.1
+            },
+            {
+              "date": "2026-08-11",
+              "sim_bar": "2026-08-11T13:30:00+00:00",
+              "close": 19.14,
+              "unrl_pct": -8.9005,
+              "mtm": -888.25,
+              "r": -0.6978,
+              "value": 9091.5,
+              "status": "OPEN",
+              "bars": 6,
+              "stop": 18.33,
+              "target": 23.1
+            },
+            {
+              "date": "2026-08-12",
+              "sim_bar": "2026-08-12T13:30:00+00:00",
+              "close": 18.62,
+              "unrl_pct": -11.3755,
+              "mtm": -1135.25,
+              "r": -0.8918,
+              "value": 8844.5,
+              "status": "OPEN",
+              "bars": 7,
+              "stop": 18.33,
+              "target": 23.1
+            },
+            {
+              "date": "2026-08-13",
+              "sim_bar": "2026-08-13T13:30:00+00:00",
+              "close": 20.03,
+              "unrl_pct": -4.6644,
+              "mtm": -465.5,
+              "r": -0.3657,
+              "value": 9514.25,
+              "status": "OPEN",
+              "bars": 8,
+              "stop": 18.33,
+              "target": 23.1
+            },
+            {
+              "date": "2026-08-14",
+              "sim_bar": "2026-08-14T13:30:00+00:00",
+              "close": 20.38,
+              "unrl_pct": -2.9986,
+              "mtm": -299.25,
+              "r": -0.2351,
+              "value": 9680.5,
+              "status": "OPEN",
+              "bars": 9,
+              "stop": 18.33,
+              "target": 23.1
+            }
+          ]
+        },
+        {
+          "market": "us",
+          "symbol": "MSIF",
+          "status": "OPEN",
+          "action": "BUY",
+          "pattern": "indicator_vol_gated_supertrend",
+          "trade_id": "5c85f4fedfcd42e594d79fd127f2bc1c",
+          "signal_id": null,
+          "pattern_version_id": null,
+          "provenance": "legacy_unknown",
+          "requested_rules": {
+            "schema_version": 1,
+            "stage": "signal",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 10.7865,
+            "stop_loss_on_close": false,
+            "take_profit": 15.867,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "BUY",
+            "qty": 801,
+            "price": 12.479999542236328
+          },
+          "resolved_rules": {
+            "schema_version": 1,
+            "stage": "fill",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 10.7865,
+            "stop_loss_on_close": false,
+            "take_profit": 15.867,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "BUY",
+            "qty": 801,
+            "price": 12.479999542236328
+          },
+          "chart_annotations": [
+            {
+              "type": "marker",
+              "date": "2026-08-07",
+              "price": 12.479999542236328,
+              "label": "entry",
+              "color": "#ffeb3b",
+              "marker": "^",
+              "label_pos": "below"
+            },
+            {
+              "type": "hline",
+              "price": 10.7865,
+              "label": "stop",
+              "color": "#ef5350",
+              "style": "--"
+            },
+            {
+              "type": "hline",
+              "price": 15.867,
+              "label": "target",
+              "color": "#26a69a",
+              "style": "--"
+            },
+            {
+              "type": "path",
+              "points": [
+                {
+                  "date": "2026-05-13",
+                  "price": 13.789626854421366
+                },
+                {
+                  "date": "2026-05-14",
+                  "price": 13.789626854421366
+                },
+                {
+                  "date": "2026-05-15",
+                  "price": 13.789626854421366
+                },
+                {
+                  "date": "2026-05-18",
+                  "price": 13.789626854421366
+                },
+                {
+                  "date": "2026-05-19",
+                  "price": 13.789626854421366
+                },
+                {
+                  "date": "2026-05-20",
+                  "price": 13.688459701291643
+                },
+                {
+                  "date": "2026-05-21",
+                  "price": 13.688459701291643
+                },
+                {
+                  "date": "2026-05-22",
+                  "price": 13.688459701291643
+                },
+                {
+                  "date": "2026-05-26",
+                  "price": 13.688459701291643
+                },
+                {
+                  "date": "2026-05-27",
+                  "price": 13.688459701291643
+                },
+                {
+                  "date": "2026-05-28",
+                  "price": 13.688459701291643
+                },
+                {
+                  "date": "2026-05-29",
+                  "price": 13.688459701291643
+                },
+                {
+                  "date": "2026-06-01",
+                  "price": 13.688459701291643
+                },
+                {
+                  "date": "2026-06-02",
+                  "price": 13.688459701291643
+                },
+                {
+                  "date": "2026-06-03",
+                  "price": 13.503811659426752
+                },
+                {
+                  "date": "2026-06-04",
+                  "price": 13.503811659426752
+                },
+                {
+                  "date": "2026-06-05",
+                  "price": 13.476110044355085
+                },
+                {
+                  "date": "2026-06-08",
+                  "price": 13.350192016933377
+                },
+                {
+                  "date": "2026-06-09",
+                  "price": 13.330474438923494
+                },
+                {
+                  "date": "2026-06-10",
+                  "price": 13.328240565372818
+                },
+                {
+                  "date": "2026-06-11",
+                  "price": 13.255403034278752
+                },
+                {
+                  "date": "2026-06-12",
+                  "price": 13.249790885765414
+                },
+                {
+                  "date": "2026-06-15",
+                  "price": 13.249790885765414
+                },
+                {
+                  "date": "2026-06-16",
+                  "price": 13.249790885765414
+                },
+                {
+                  "date": "2026-06-17",
+                  "price": 13.249790885765414
+                },
+                {
+                  "date": "2026-06-18",
+                  "price": 13.234540058976666
+                },
+                {
+                  "date": "2026-06-22",
+                  "price": 13.154861575300792
+                },
+                {
+                  "date": "2026-06-23",
+                  "price": 12.849869593391512
+                },
+                {
+                  "date": "2026-06-24",
+                  "price": 12.849869593391512
+                },
+                {
+                  "date": "2026-06-25",
+                  "price": 12.849869593391512
+                },
+                {
+                  "date": "2026-06-26",
+                  "price": 12.849869593391512
+                },
+                {
+                  "date": "2026-06-29",
+                  "price": 12.849869593391512
+                },
+                {
+                  "date": "2026-06-30",
+                  "price": 12.849869593391512
+                },
+                {
+                  "date": "2026-07-01",
+                  "price": 12.849869593391512
+                },
+                {
+                  "date": "2026-07-02",
+                  "price": 12.849869593391512
+                },
+                {
+                  "date": "2026-07-06",
+                  "price": 12.849869593391512
+                },
+                {
+                  "date": "2026-07-07",
+                  "price": 12.849869593391512
+                },
+                {
+                  "date": "2026-07-08",
+                  "price": 12.849869593391512
+                },
+                {
+                  "date": "2026-07-09",
+                  "price": 12.849869593391512
+                },
+                {
+                  "date": "2026-07-10",
+                  "price": 12.849869593391512
+                },
+                {
+                  "date": "2026-07-13",
+                  "price": 12.849869593391512
+                },
+                {
+                  "date": "2026-07-14",
+                  "price": 12.758158883269756
+                },
+                {
+                  "date": "2026-07-15",
+                  "price": 12.724387837052868
+                },
+                {
+                  "date": "2026-07-16",
+                  "price": 12.724387837052868
+                },
+                {
+                  "date": "2026-07-17",
+                  "price": 12.724387837052868
+                },
+                {
+                  "date": "2026-07-20",
+                  "price": 12.467953611970207
+                },
+                {
+                  "date": "2026-07-21",
+                  "price": 12.467953611970207
+                },
+                {
+                  "date": "2026-07-22",
+                  "price": 12.308267429645433
+                },
+                {
+                  "date": "2026-07-23",
+                  "price": 12.178791014348711
+                },
+                {
+                  "date": "2026-07-24",
+                  "price": 12.139317835540613
+                },
+                {
+                  "date": "2026-07-27",
+                  "price": 12.139317835540613
+                },
+                {
+                  "date": "2026-07-28",
+                  "price": 12.139317835540613
+                },
+                {
+                  "date": "2026-07-29",
+                  "price": 12.139317835540613
+                },
+                {
+                  "date": "2026-07-30",
+                  "price": 12.139317835540613
+                },
+                {
+                  "date": "2026-07-31",
+                  "price": 12.139317835540613
+                },
+                {
+                  "date": "2026-08-03",
+                  "price": 12.139317835540613
+                },
+                {
+                  "date": "2026-08-04",
+                  "price": 12.139317835540613
+                },
+                {
+                  "date": "2026-08-05",
+                  "price": 12.139317835540613
+                },
+                {
+                  "date": "2026-08-06",
+                  "price": 12.139317835540613
+                },
+                {
+                  "date": "2026-08-07",
+                  "price": 10.786504703930081
+                }
+              ],
+              "color": "#ffeb3b",
+              "style": "-",
+              "width": 2,
+              "label": "indicator_vol_gated_supertrend"
+            }
+          ],
+          "timeframe": "1d",
+          "qty": 801,
+          "entry": 12.48,
+          "current": 12.42,
+          "stop": 10.7865,
+          "target": 15.867,
+          "unrealized_pct": -0.4808,
+          "mtm": -48.0596,
+          "r": -0.0354,
+          "hold_days": 11,
+          "hold_bars": 0,
+          "value": 9948.4201,
+          "port_pct": 10.7143,
+          "risk": 1356.4931,
+          "opened": "2026-10-02T06:38:47.054682+00:00",
+          "sim_opened": "2026-08-07T13:30:00+00:00",
+          "daily_marks": [
+            {
+              "date": "2026-08-07",
+              "sim_bar": "2026-08-07T13:30:00+00:00",
+              "close": 12.48,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9996.48,
+              "status": "OPEN",
+              "bars": 0,
+              "stop": 10.7865,
+              "target": 15.867
+            },
+            {
+              "date": "2026-08-10",
+              "sim_bar": "2026-08-10T13:30:00+00:00",
+              "close": 12.37,
+              "unrl_pct": -0.8814,
+              "mtm": -88.11,
+              "r": -0.065,
+              "value": 9908.37,
+              "status": "OPEN",
+              "bars": 1,
+              "stop": 10.7865,
+              "target": 15.867
+            },
+            {
+              "date": "2026-08-11",
+              "sim_bar": "2026-08-11T13:30:00+00:00",
+              "close": 12.28,
+              "unrl_pct": -1.6026,
+              "mtm": -160.2,
+              "r": -0.1181,
+              "value": 9836.28,
+              "status": "OPEN",
+              "bars": 2,
+              "stop": 10.7865,
+              "target": 15.867
+            },
+            {
+              "date": "2026-08-12",
+              "sim_bar": "2026-08-12T13:30:00+00:00",
+              "close": 12.34,
+              "unrl_pct": -1.1218,
+              "mtm": -112.14,
+              "r": -0.0827,
+              "value": 9884.34,
+              "status": "OPEN",
+              "bars": 3,
+              "stop": 10.7865,
+              "target": 15.867
+            },
+            {
+              "date": "2026-08-13",
+              "sim_bar": "2026-08-13T13:30:00+00:00",
+              "close": 12.43,
+              "unrl_pct": -0.4006,
+              "mtm": -40.05,
+              "r": -0.0295,
+              "value": 9956.43,
+              "status": "OPEN",
+              "bars": 4,
+              "stop": 10.7865,
+              "target": 15.867
+            },
+            {
+              "date": "2026-08-14",
+              "sim_bar": "2026-08-14T13:30:00+00:00",
+              "close": 12.44,
+              "unrl_pct": -0.3205,
+              "mtm": -32.04,
+              "r": -0.0236,
+              "value": 9964.44,
+              "status": "OPEN",
+              "bars": 5,
+              "stop": 10.7865,
+              "target": 15.867
+            },
+            {
+              "date": "2026-08-17",
+              "sim_bar": "2026-08-17T13:30:00+00:00",
+              "close": 12.21,
+              "unrl_pct": -2.1635,
+              "mtm": -216.27,
+              "r": -0.1594,
+              "value": 9780.21,
+              "status": "OPEN",
+              "bars": 6,
+              "stop": 10.7865,
+              "target": 15.867
+            },
+            {
+              "date": "2026-08-18",
+              "sim_bar": "2026-08-18T13:30:00+00:00",
+              "close": 12.42,
+              "unrl_pct": -0.4808,
+              "mtm": -48.06,
+              "r": -0.0354,
+              "value": 9948.42,
+              "status": "OPEN",
+              "bars": 7,
+              "stop": 10.7865,
+              "target": 15.867
+            }
+          ]
+        },
+        {
+          "market": "us",
+          "symbol": "RANG",
+          "status": "OPEN",
+          "action": "BUY",
+          "pattern": "indicator_supertrend",
+          "trade_id": "ea1e4e5a011f4a63a60220ff6f889547",
+          "signal_id": null,
+          "pattern_version_id": null,
+          "provenance": "legacy_unknown",
+          "requested_rules": {
+            "schema_version": 1,
+            "stage": "signal",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 10.6886,
+            "stop_loss_on_close": false,
+            "take_profit": 10.8428,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "BUY",
+            "qty": 931,
+            "price": 10.739999771118164
+          },
+          "resolved_rules": {
+            "schema_version": 1,
+            "stage": "fill",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 10.6886,
+            "stop_loss_on_close": false,
+            "take_profit": 10.8428,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "BUY",
+            "qty": 931,
+            "price": 10.739999771118164
+          },
+          "chart_annotations": [
+            {
+              "type": "marker",
+              "date": "2026-08-11",
+              "price": 10.739999771118164,
+              "label": "entry",
+              "color": "#ffeb3b",
+              "marker": "^",
+              "label_pos": "below"
+            },
+            {
+              "type": "hline",
+              "price": 10.6886,
+              "label": "stop",
+              "color": "#ef5350",
+              "style": "--"
+            },
+            {
+              "type": "hline",
+              "price": 10.8428,
+              "label": "target",
+              "color": "#26a69a",
+              "style": "--"
+            },
+            {
+              "type": "path",
+              "points": [
+                {
+                  "date": "2026-05-15",
+                  "price": 10.796779128212625
+                },
+                {
+                  "date": "2026-05-18",
+                  "price": 10.779509144161828
+                },
+                {
+                  "date": "2026-05-19",
+                  "price": 10.765972787620832
+                },
+                {
+                  "date": "2026-05-20",
+                  "price": 10.765972787620832
+                },
+                {
+                  "date": "2026-05-21",
+                  "price": 10.765972787620832
+                },
+                {
+                  "date": "2026-05-22",
+                  "price": 10.765972787620832
+                },
+                {
+                  "date": "2026-05-26",
+                  "price": 10.75009882173374
+                },
+                {
+                  "date": "2026-05-27",
+                  "price": 10.740091738515419
+                },
+                {
+                  "date": "2026-05-28",
+                  "price": 10.730799446955551
+                },
+                {
+                  "date": "2026-05-29",
+                  "price": 10.7221708905071
+                },
+                {
+                  "date": "2026-06-01",
+                  "price": 10.718444744375558
+                },
+                {
+                  "date": "2026-06-02",
+                  "price": 10.718444744375558
+                },
+                {
+                  "date": "2026-06-03",
+                  "price": 10.718444744375558
+                },
+                {
+                  "date": "2026-06-04",
+                  "price": 10.711891882817017
+                },
+                {
+                  "date": "2026-06-05",
+                  "price": 10.704613866664177
+                },
+                {
+                  "date": "2026-06-08",
+                  "price": 10.697855708807968
+                },
+                {
+                  "date": "2026-06-09",
+                  "price": 10.697855708807968
+                },
+                {
+                  "date": "2026-06-10",
+                  "price": 10.697743159724814
+                },
+                {
+                  "date": "2026-06-11",
+                  "price": 10.692190068712977
+                },
+                {
+                  "date": "2026-06-12",
+                  "price": 10.687033627059126
+                },
+                {
+                  "date": "2026-06-15",
+                  "price": 10.674388179973395
+                },
+                {
+                  "date": "2026-06-16",
+                  "price": 10.674388179973395
+                },
+                {
+                  "date": "2026-06-17",
+                  "price": 10.674388179973395
+                },
+                {
+                  "date": "2026-06-18",
+                  "price": 10.67340065149375
+                },
+                {
+                  "date": "2026-06-22",
+                  "price": 10.669586311069846
+                },
+                {
+                  "date": "2026-06-23",
+                  "price": 10.666044423533362
+                },
+                {
+                  "date": "2026-06-24",
+                  "price": 10.6548982052709
+                },
+                {
+                  "date": "2026-06-25",
+                  "price": 10.585451124302196
+                },
+                {
+                  "date": "2026-06-26",
+                  "price": 10.627204995530802
+                },
+                {
+                  "date": "2026-06-29",
+                  "price": 10.649904344430528
+                },
+                {
+                  "date": "2026-06-30",
+                  "price": 10.649904344430528
+                },
+                {
+                  "date": "2026-07-01",
+                  "price": 10.868909792215405
+                },
+                {
+                  "date": "2026-07-02",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-07-06",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-07-07",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-07-08",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-07-09",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-07-10",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-07-13",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-07-14",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-07-15",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-07-16",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-07-17",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-07-20",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-07-21",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-07-22",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-07-23",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-07-24",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-07-27",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-07-28",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-07-29",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-07-30",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-07-31",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-08-03",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-08-04",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-08-05",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-08-06",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-08-07",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-08-10",
+                  "price": 10.73279561482076
+                },
+                {
+                  "date": "2026-08-11",
+                  "price": 10.688621401405639
+                }
+              ],
+              "color": "#ffeb3b",
+              "style": "-",
+              "width": 2,
+              "label": "indicator_supertrend"
+            }
+          ],
+          "timeframe": "1d",
+          "qty": 931,
+          "entry": 10.74,
+          "current": 10.76,
+          "stop": 10.6886,
+          "target": 10.8428,
+          "unrealized_pct": 0.1862,
+          "mtm": 18.6204,
+          "r": 0.3891,
+          "hold_days": 7,
+          "hold_bars": 0,
+          "value": 10017.5602,
+          "port_pct": 10.7888,
+          "risk": 47.8532,
+          "opened": "2026-10-02T06:39:11.085320+00:00",
+          "sim_opened": "2026-08-11T13:30:00+00:00",
+          "daily_marks": [
+            {
+              "date": "2026-08-11",
+              "sim_bar": "2026-08-11T13:30:00+00:00",
+              "close": 10.74,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9998.94,
+              "status": "OPEN",
+              "bars": 0,
+              "stop": 10.6886,
+              "target": 10.8428
+            },
+            {
+              "date": "2026-08-12",
+              "sim_bar": "2026-08-12T13:30:00+00:00",
+              "close": 10.74,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9998.94,
+              "status": "OPEN",
+              "bars": 1,
+              "stop": 10.6886,
+              "target": 10.8428
+            },
+            {
+              "date": "2026-08-13",
+              "sim_bar": "2026-08-13T13:30:00+00:00",
+              "close": 10.75,
+              "unrl_pct": 0.0931,
+              "mtm": 9.31,
+              "r": 0.1946,
+              "value": 10008.25,
+              "status": "OPEN",
+              "bars": 2,
+              "stop": 10.6886,
+              "target": 10.8428
+            },
+            {
+              "date": "2026-08-14",
+              "sim_bar": "2026-08-14T13:30:00+00:00",
+              "close": 10.75,
+              "unrl_pct": 0.0931,
+              "mtm": 9.31,
+              "r": 0.1946,
+              "value": 10008.25,
+              "status": "OPEN",
+              "bars": 3,
+              "stop": 10.6886,
+              "target": 10.8428
+            },
+            {
+              "date": "2026-08-17",
+              "sim_bar": "2026-08-17T13:30:00+00:00",
+              "close": 10.76,
+              "unrl_pct": 0.1862,
+              "mtm": 18.62,
+              "r": 0.3891,
+              "value": 10017.56,
+              "status": "OPEN",
+              "bars": 4,
+              "stop": 10.6886,
+              "target": 10.8428
+            },
+            {
+              "date": "2026-08-18",
+              "sim_bar": "2026-08-18T13:30:00+00:00",
+              "close": 10.76,
+              "unrl_pct": 0.1862,
+              "mtm": 18.62,
+              "r": 0.3891,
+              "value": 10017.56,
+              "status": "OPEN",
+              "bars": 5,
+              "stop": 10.6886,
+              "target": 10.8428
+            }
+          ]
+        },
+        {
+          "market": "us",
+          "symbol": "SKYA",
+          "status": "OPEN",
+          "action": "SELL",
+          "pattern": "indicator_supertrend",
+          "trade_id": "22f8bbca834f4209bfa1e6e6e55cb779",
+          "signal_id": null,
+          "pattern_version_id": null,
+          "provenance": "legacy_unknown",
+          "requested_rules": {
+            "schema_version": 1,
+            "stage": "signal",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 1.4617,
+            "stop_loss_on_close": false,
+            "take_profit": 0.0765,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "SELL",
+            "qty": 10000,
+            "price": 1
+          },
+          "resolved_rules": {
+            "schema_version": 1,
+            "stage": "fill",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 1.4617,
+            "stop_loss_on_close": false,
+            "take_profit": 0.0765,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "SELL",
+            "qty": 10000,
+            "price": 1
+          },
+          "chart_annotations": [
+            {
+              "type": "marker",
+              "date": "2026-08-13",
+              "price": 1,
+              "label": "entry",
+              "color": "#ffeb3b",
+              "marker": "v",
+              "label_pos": "above"
+            },
+            {
+              "type": "hline",
+              "price": 1.4617,
+              "label": "stop",
+              "color": "#ef5350",
+              "style": "--"
+            },
+            {
+              "type": "hline",
+              "price": 0.0765,
+              "label": "target",
+              "color": "#26a69a",
+              "style": "--"
+            },
+            {
+              "type": "path",
+              "points": [
+                {
+                  "date": "2026-05-19",
+                  "price": 1.7616783387867379
+                },
+                {
+                  "date": "2026-05-20",
+                  "price": 1.7616783387867379
+                },
+                {
+                  "date": "2026-05-21",
+                  "price": 1.7616783387867379
+                },
+                {
+                  "date": "2026-05-22",
+                  "price": 1.7616783387867379
+                },
+                {
+                  "date": "2026-05-26",
+                  "price": 1.7616783387867379
+                },
+                {
+                  "date": "2026-05-27",
+                  "price": 1.7616783387867379
+                },
+                {
+                  "date": "2026-05-28",
+                  "price": 1.7616783387867379
+                },
+                {
+                  "date": "2026-05-29",
+                  "price": 1.7616783387867379
+                },
+                {
+                  "date": "2026-06-01",
+                  "price": 2.070775767054002
+                },
+                {
+                  "date": "2026-06-02",
+                  "price": 1.9151846353862911
+                },
+                {
+                  "date": "2026-06-03",
+                  "price": 1.756957215925803
+                },
+                {
+                  "date": "2026-06-04",
+                  "price": 1.635745973614692
+                },
+                {
+                  "date": "2026-06-05",
+                  "price": 1.5821569551997179
+                },
+                {
+                  "date": "2026-06-08",
+                  "price": 1.5821569551997179
+                },
+                {
+                  "date": "2026-06-09",
+                  "price": 1.5821569551997179
+                },
+                {
+                  "date": "2026-06-10",
+                  "price": 1.481050932139847
+                },
+                {
+                  "date": "2026-06-11",
+                  "price": 1.481050932139847
+                },
+                {
+                  "date": "2026-06-12",
+                  "price": 1.481050932139847
+                },
+                {
+                  "date": "2026-06-15",
+                  "price": 1.481050932139847
+                },
+                {
+                  "date": "2026-06-16",
+                  "price": 1.481050932139847
+                },
+                {
+                  "date": "2026-06-17",
+                  "price": 1.481050932139847
+                },
+                {
+                  "date": "2026-06-18",
+                  "price": 1.481050932139847
+                },
+                {
+                  "date": "2026-06-22",
+                  "price": 1.481050932139847
+                },
+                {
+                  "date": "2026-06-23",
+                  "price": 1.4208282452808685
+                },
+                {
+                  "date": "2026-06-24",
+                  "price": 1.3806619295465752
+                },
+                {
+                  "date": "2026-06-25",
+                  "price": 1.3363289338977669
+                },
+                {
+                  "date": "2026-06-26",
+                  "price": 1.3363289338977669
+                },
+                {
+                  "date": "2026-06-29",
+                  "price": 1.3363289338977669
+                },
+                {
+                  "date": "2026-06-30",
+                  "price": 1.3363289338977669
+                },
+                {
+                  "date": "2026-07-01",
+                  "price": 1.3363289338977669
+                },
+                {
+                  "date": "2026-07-02",
+                  "price": 1.3363289338977669
+                },
+                {
+                  "date": "2026-07-06",
+                  "price": 1.3363289338977669
+                },
+                {
+                  "date": "2026-07-07",
+                  "price": 1.3363289338977669
+                },
+                {
+                  "date": "2026-07-08",
+                  "price": 1.3363289338977669
+                },
+                {
+                  "date": "2026-07-09",
+                  "price": 1.3363289338977669
+                },
+                {
+                  "date": "2026-07-10",
+                  "price": 1.3363289338977669
+                },
+                {
+                  "date": "2026-07-13",
+                  "price": 1.3363289338977669
+                },
+                {
+                  "date": "2026-07-14",
+                  "price": 1.3363289338977669
+                },
+                {
+                  "date": "2026-07-15",
+                  "price": 1.3363289338977669
+                },
+                {
+                  "date": "2026-07-16",
+                  "price": 1.3363289338977669
+                },
+                {
+                  "date": "2026-07-17",
+                  "price": 1.3363289338977669
+                },
+                {
+                  "date": "2026-07-20",
+                  "price": 1.3363289338977669
+                },
+                {
+                  "date": "2026-07-21",
+                  "price": 0.9774418993128836
+                },
+                {
+                  "date": "2026-07-22",
+                  "price": 0.9971602914115892
+                },
+                {
+                  "date": "2026-07-23",
+                  "price": 1.089148869443184
+                },
+                {
+                  "date": "2026-07-24",
+                  "price": 1.089148869443184
+                },
+                {
+                  "date": "2026-07-27",
+                  "price": 1.089148869443184
+                },
+                {
+                  "date": "2026-07-28",
+                  "price": 1.089148869443184
+                },
+                {
+                  "date": "2026-07-29",
+                  "price": 1.089148869443184
+                },
+                {
+                  "date": "2026-07-30",
+                  "price": 1.089148869443184
+                },
+                {
+                  "date": "2026-07-31",
+                  "price": 1.089148869443184
+                },
+                {
+                  "date": "2026-08-03",
+                  "price": 1.089148869443184
+                },
+                {
+                  "date": "2026-08-04",
+                  "price": 1.089148869443184
+                },
+                {
+                  "date": "2026-08-05",
+                  "price": 1.089148869443184
+                },
+                {
+                  "date": "2026-08-06",
+                  "price": 1.089148869443184
+                },
+                {
+                  "date": "2026-08-07",
+                  "price": 1.089148869443184
+                },
+                {
+                  "date": "2026-08-10",
+                  "price": 1.089148869443184
+                },
+                {
+                  "date": "2026-08-11",
+                  "price": 1.089148869443184
+                },
+                {
+                  "date": "2026-08-12",
+                  "price": 1.089148869443184
+                },
+                {
+                  "date": "2026-08-13",
+                  "price": 1.461747448843473
+                }
+              ],
+              "color": "#ffeb3b",
+              "style": "-",
+              "width": 2,
+              "label": "indicator_supertrend"
+            }
+          ],
+          "timeframe": "1d",
+          "qty": 10000,
+          "entry": 1,
+          "current": 0.986,
+          "stop": 1.4617,
+          "target": 0.0765,
+          "unrealized_pct": 1.4,
+          "mtm": 140,
+          "r": 0.0303,
+          "hold_days": 5,
+          "hold_bars": 0,
+          "value": 9860,
+          "port_pct": 10.6191,
+          "risk": 4617,
+          "opened": "2026-10-02T06:39:29.240562+00:00",
+          "sim_opened": "2026-08-13T13:30:00+00:00",
+          "daily_marks": [
+            {
+              "date": "2026-08-13",
+              "sim_bar": "2026-08-13T13:30:00+00:00",
+              "close": 1,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 10000,
+              "status": "OPEN",
+              "bars": 0,
+              "stop": 1.4617,
+              "target": 0.0765
+            },
+            {
+              "date": "2026-08-14",
+              "sim_bar": "2026-08-14T13:30:00+00:00",
+              "close": 0.98,
+              "unrl_pct": 2,
+              "mtm": 200,
+              "r": 0.0433,
+              "value": 9800,
+              "status": "OPEN",
+              "bars": 1,
+              "stop": 1.4617,
+              "target": 0.0765
+            },
+            {
+              "date": "2026-08-17",
+              "sim_bar": "2026-08-17T13:30:00+00:00",
+              "close": 1,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 10000,
+              "status": "OPEN",
+              "bars": 2,
+              "stop": 1.4617,
+              "target": 0.0765
+            },
+            {
+              "date": "2026-08-18",
+              "sim_bar": "2026-08-18T13:30:00+00:00",
+              "close": 0.986,
+              "unrl_pct": 1.4,
+              "mtm": 140,
+              "r": 0.0303,
+              "value": 9860,
+              "status": "OPEN",
+              "bars": 3,
+              "stop": 1.4617,
+              "target": 0.0765
+            }
+          ]
+        }
+      ],
+      "closed_trades": [
+        {
+          "market": "us",
+          "symbol": "ABTS",
+          "action": "SELL",
+          "pattern": "indicator_pivot_points",
+          "trade_id": "d96317592e8f4df9aa3739aec4316abd",
+          "signal_id": null,
+          "pattern_version_id": null,
+          "provenance": "legacy_unknown",
+          "requested_rules": {
+            "schema_version": 1,
+            "stage": "signal",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 1.3167,
+            "stop_loss_on_close": false,
+            "take_profit": 0.8667,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "SELL",
+            "qty": 9699,
+            "price": 1.031000018119812
+          },
+          "resolved_rules": {
+            "schema_version": 1,
+            "stage": "fill",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 1.3167,
+            "stop_loss_on_close": false,
+            "take_profit": 0.8667,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "SELL",
+            "qty": 9699,
+            "price": 1.031000018119812
+          },
+          "chart_annotations": [
+            {
+              "type": "marker",
+              "date": "2026-08-03",
+              "price": 1.031000018119812,
+              "label": "entry",
+              "color": "#ffeb3b",
+              "marker": "v",
+              "label_pos": "above"
+            },
+            {
+              "type": "hline",
+              "price": 1.3167,
+              "label": "stop",
+              "color": "#ef5350",
+              "style": "--"
+            },
+            {
+              "type": "hline",
+              "price": 0.8667,
+              "label": "target",
+              "color": "#26a69a",
+              "style": "--"
+            }
+          ],
+          "timeframe": "1d",
+          "qty": 9699,
+          "entry": 1.031,
+          "exit": 1.3167,
+          "stop": 1.3167,
+          "target": 0.8667,
+          "pnl": -2793.7745,
+          "pnl_pct": -27.9387,
+          "r": -1,
+          "hold_days": 2,
+          "hold_bars": 2,
+          "exit_reason": "stop_loss",
+          "time_exit_bars_elapsed": null,
+          "time_exit_bars_configured": null,
+          "opened": "2026-10-02T06:38:08.140310+00:00",
+          "closed": "2026-10-02T06:38:29.646576+00:00",
+          "sim_opened": "2026-08-03T13:30:00+00:00",
+          "sim_closed": "2026-08-05T13:30:00+00:00",
+          "daily_marks": [
+            {
+              "date": "2026-08-03",
+              "sim_bar": "2026-08-03T13:30:00+00:00",
+              "close": 1.031,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9999.67,
+              "status": "OPEN",
+              "bars": 0,
+              "stop": 1.3167,
+              "target": 0.8667
+            },
+            {
+              "date": "2026-08-04",
+              "sim_bar": "2026-08-04T13:30:00+00:00",
+              "close": 1.26,
+              "unrl_pct": -22.2114,
+              "mtm": -2221.07,
+              "r": -0.8015,
+              "value": 12220.74,
+              "status": "OPEN",
+              "bars": 1,
+              "stop": 1.3167,
+              "target": 0.8667
+            },
+            {
+              "date": "2026-08-05",
+              "sim_bar": "2026-08-05T13:30:00+00:00",
+              "close": 1.3167,
+              "unrl_pct": -27.711,
+              "mtm": -2771,
+              "r": -1,
+              "value": 12770.67,
+              "status": "stop_loss",
+              "bars": 2,
+              "stop": 1.3167,
+              "target": 0.8667
+            }
+          ]
+        },
+        {
+          "market": "us",
+          "symbol": "AFRI",
+          "action": "SELL",
+          "pattern": "indicator_pivot_points",
+          "trade_id": "cdc475278497466cb259c1059569b01a",
+          "signal_id": null,
+          "pattern_version_id": null,
+          "provenance": "legacy_unknown",
+          "requested_rules": {
+            "schema_version": 1,
+            "stage": "signal",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 11.2133,
+            "stop_loss_on_close": false,
+            "take_profit": 10.1033,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "SELL",
+            "qty": 946,
+            "price": 10.5600004196167
+          },
+          "resolved_rules": {
+            "schema_version": 1,
+            "stage": "fill",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 11.2133,
+            "stop_loss_on_close": false,
+            "take_profit": 10.1033,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "SELL",
+            "qty": 946,
+            "price": 10.5600004196167
+          },
+          "chart_annotations": [
+            {
+              "type": "marker",
+              "date": "2026-08-03",
+              "price": 10.5600004196167,
+              "label": "entry",
+              "color": "#ffeb3b",
+              "marker": "v",
+              "label_pos": "above"
+            },
+            {
+              "type": "hline",
+              "price": 11.2133,
+              "label": "stop",
+              "color": "#ef5350",
+              "style": "--"
+            },
+            {
+              "type": "hline",
+              "price": 10.1033,
+              "label": "target",
+              "color": "#26a69a",
+              "style": "--"
+            }
+          ],
+          "timeframe": "1d",
+          "qty": 946,
+          "entry": 10.56,
+          "exit": 11.2133,
+          "stop": 11.2133,
+          "target": 10.1033,
+          "pnl": -638.6189,
+          "pnl_pct": -6.3927,
+          "r": -1,
+          "hold_days": 4,
+          "hold_bars": 4,
+          "exit_reason": "stop_loss",
+          "time_exit_bars_elapsed": null,
+          "time_exit_bars_configured": null,
+          "opened": "2026-10-02T06:38:08.172282+00:00",
+          "closed": "2026-10-02T06:38:46.284092+00:00",
+          "sim_opened": "2026-08-03T13:30:00+00:00",
+          "sim_closed": "2026-08-07T13:30:00+00:00",
+          "daily_marks": [
+            {
+              "date": "2026-08-03",
+              "sim_bar": "2026-08-03T13:30:00+00:00",
+              "close": 10.56,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9989.76,
+              "status": "OPEN",
+              "bars": 0,
+              "stop": 11.2133,
+              "target": 10.1033
+            },
+            {
+              "date": "2026-08-04",
+              "sim_bar": "2026-08-04T13:30:00+00:00",
+              "close": 10.52,
+              "unrl_pct": 0.3788,
+              "mtm": 37.84,
+              "r": 0.0612,
+              "value": 9951.92,
+              "status": "OPEN",
+              "bars": 1,
+              "stop": 11.2133,
+              "target": 10.1033
+            },
+            {
+              "date": "2026-08-05",
+              "sim_bar": "2026-08-05T13:30:00+00:00",
+              "close": 10.49,
+              "unrl_pct": 0.6629,
+              "mtm": 66.22,
+              "r": 0.1071,
+              "value": 9923.54,
+              "status": "OPEN",
+              "bars": 2,
+              "stop": 11.2133,
+              "target": 10.1033
+            },
+            {
+              "date": "2026-08-06",
+              "sim_bar": "2026-08-06T13:30:00+00:00",
+              "close": 10.52,
+              "unrl_pct": 0.3788,
+              "mtm": 37.84,
+              "r": 0.0612,
+              "value": 9951.92,
+              "status": "OPEN",
+              "bars": 3,
+              "stop": 11.2133,
+              "target": 10.1033
+            },
+            {
+              "date": "2026-08-07",
+              "sim_bar": "2026-08-07T13:30:00+00:00",
+              "close": 11.2133,
+              "unrl_pct": -6.1865,
+              "mtm": -618.02,
+              "r": -1,
+              "value": 10607.78,
+              "status": "stop_loss",
+              "bars": 4,
+              "stop": 11.2133,
+              "target": 10.1033
+            }
+          ]
+        },
+        {
+          "market": "us",
+          "symbol": "GRAN",
+          "action": "BUY",
+          "pattern": "indicator_ut_bot_dema",
+          "trade_id": "cded37e028174911918a0278513503fa",
+          "signal_id": null,
+          "pattern_version_id": null,
+          "provenance": "legacy_unknown",
+          "requested_rules": {
+            "schema_version": 1,
+            "stage": "signal",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 1.3518,
+            "stop_loss_on_close": false,
+            "take_profit": 1.7964,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "BUY",
+            "qty": 6666,
+            "price": 1.5
+          },
+          "resolved_rules": {
+            "schema_version": 1,
+            "stage": "fill",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 1.3518,
+            "stop_loss_on_close": false,
+            "take_profit": 1.7964,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "BUY",
+            "qty": 6666,
+            "price": 1.5
+          },
+          "chart_annotations": [
+            {
+              "type": "marker",
+              "date": "2026-08-03",
+              "price": 1.5,
+              "label": "entry",
+              "color": "#ffeb3b",
+              "marker": "^",
+              "label_pos": "below"
+            },
+            {
+              "type": "hline",
+              "price": 1.3518,
+              "label": "stop",
+              "color": "#ef5350",
+              "style": "--"
+            },
+            {
+              "type": "hline",
+              "price": 1.7964,
+              "label": "target",
+              "color": "#26a69a",
+              "style": "--"
+            },
+            {
+              "type": "path",
+              "points": [
+                {
+                  "date": "2026-05-07",
+                  "price": 1.1048136959535229
+                },
+                {
+                  "date": "2026-05-08",
+                  "price": 1.087756189049538
+                },
+                {
+                  "date": "2026-05-11",
+                  "price": 1.087756189049538
+                },
+                {
+                  "date": "2026-05-12",
+                  "price": 1.087756189049538
+                },
+                {
+                  "date": "2026-05-13",
+                  "price": 1.0778886346800247
+                },
+                {
+                  "date": "2026-05-14",
+                  "price": 1.0778886346800247
+                },
+                {
+                  "date": "2026-05-15",
+                  "price": 1.0778886346800247
+                },
+                {
+                  "date": "2026-05-18",
+                  "price": 1.0778886346800247
+                },
+                {
+                  "date": "2026-05-19",
+                  "price": 1.0778886346800247
+                },
+                {
+                  "date": "2026-05-20",
+                  "price": 1.0778886346800247
+                },
+                {
+                  "date": "2026-05-21",
+                  "price": 1.0778886346800247
+                },
+                {
+                  "date": "2026-05-22",
+                  "price": 1.0778886346800247
+                },
+                {
+                  "date": "2026-05-26",
+                  "price": 1.0778886346800247
+                },
+                {
+                  "date": "2026-05-27",
+                  "price": 1.0778886346800247
+                },
+                {
+                  "date": "2026-05-28",
+                  "price": 1.0778886346800247
+                },
+                {
+                  "date": "2026-05-29",
+                  "price": 1.0778886346800247
+                },
+                {
+                  "date": "2026-06-01",
+                  "price": 1.0778886346800247
+                },
+                {
+                  "date": "2026-06-02",
+                  "price": 1.0778886346800247
+                },
+                {
+                  "date": "2026-06-03",
+                  "price": 1.0778886346800247
+                },
+                {
+                  "date": "2026-06-04",
+                  "price": 1.0778886346800247
+                },
+                {
+                  "date": "2026-06-05",
+                  "price": 1.0778886346800247
+                },
+                {
+                  "date": "2026-06-08",
+                  "price": 1.2493827789261394
+                },
+                {
+                  "date": "2026-06-09",
+                  "price": 1.3031026337103666
+                },
+                {
+                  "date": "2026-06-10",
+                  "price": 1.3031026337103666
+                },
+                {
+                  "date": "2026-06-11",
+                  "price": 1.3031026337103666
+                },
+                {
+                  "date": "2026-06-12",
+                  "price": 1.3424632029051558
+                },
+                {
+                  "date": "2026-06-15",
+                  "price": 1.5377030132606837
+                },
+                {
+                  "date": "2026-06-16",
+                  "price": 1.5377030132606837
+                },
+                {
+                  "date": "2026-06-17",
+                  "price": 1.5377030132606837
+                },
+                {
+                  "date": "2026-06-18",
+                  "price": 1.5377030132606837
+                },
+                {
+                  "date": "2026-06-22",
+                  "price": 1.6619562911018406
+                },
+                {
+                  "date": "2026-06-23",
+                  "price": 1.5549583479548894
+                },
+                {
+                  "date": "2026-06-24",
+                  "price": 1.5549583479548894
+                },
+                {
+                  "date": "2026-06-25",
+                  "price": 1.5396050387576237
+                },
+                {
+                  "date": "2026-06-26",
+                  "price": 1.5396050387576237
+                },
+                {
+                  "date": "2026-06-29",
+                  "price": 1.5396050387576237
+                },
+                {
+                  "date": "2026-06-30",
+                  "price": 1.5396050387576237
+                },
+                {
+                  "date": "2026-07-01",
+                  "price": 1.5396050387576237
+                },
+                {
+                  "date": "2026-07-02",
+                  "price": 1.5396050387576237
+                },
+                {
+                  "date": "2026-07-06",
+                  "price": 1.5396050387576237
+                },
+                {
+                  "date": "2026-07-07",
+                  "price": 1.5396050387576237
+                },
+                {
+                  "date": "2026-07-08",
+                  "price": 1.5396050387576237
+                },
+                {
+                  "date": "2026-07-09",
+                  "price": 1.5396050387576237
+                },
+                {
+                  "date": "2026-07-10",
+                  "price": 1.5396050387576237
+                },
+                {
+                  "date": "2026-07-13",
+                  "price": 1.5396050387576237
+                },
+                {
+                  "date": "2026-07-14",
+                  "price": 1.5396050387576237
+                },
+                {
+                  "date": "2026-07-15",
+                  "price": 1.5396050387576237
+                },
+                {
+                  "date": "2026-07-16",
+                  "price": 1.40898554711086
+                },
+                {
+                  "date": "2026-07-17",
+                  "price": 1.578319564589834
+                },
+                {
+                  "date": "2026-07-20",
+                  "price": 1.578319564589834
+                },
+                {
+                  "date": "2026-07-21",
+                  "price": 1.740911954403486
+                },
+                {
+                  "date": "2026-07-22",
+                  "price": 1.6265828011154808
+                },
+                {
+                  "date": "2026-07-23",
+                  "price": 1.5342455206144119
+                },
+                {
+                  "date": "2026-07-24",
+                  "price": 1.4709005126714956
+                },
+                {
+                  "date": "2026-07-27",
+                  "price": 1.4709005126714956
+                },
+                {
+                  "date": "2026-07-28",
+                  "price": 1.4709005126714956
+                },
+                {
+                  "date": "2026-07-29",
+                  "price": 1.4709005126714956
+                },
+                {
+                  "date": "2026-07-30",
+                  "price": 1.4709005126714956
+                },
+                {
+                  "date": "2026-07-31",
+                  "price": 1.4709005126714956
+                },
+                {
+                  "date": "2026-08-03",
+                  "price": 1.3518063958326605
+                }
+              ],
+              "color": "#ffeb3b",
+              "style": "-",
+              "width": 2,
+              "label": "indicator_ut_bot_dema"
+            }
+          ],
+          "timeframe": "1d",
+          "qty": 6666,
+          "entry": 1.5,
+          "exit": 1.3518,
+          "stop": 1.3518,
+          "target": 1.7964,
+          "pnl": -1006.9113,
+          "pnl_pct": -10.0701,
+          "r": -1,
+          "hold_days": 4,
+          "hold_bars": 4,
+          "exit_reason": "stop_loss",
+          "time_exit_bars_elapsed": null,
+          "time_exit_bars_configured": null,
+          "opened": "2026-10-02T06:38:09.371932+00:00",
+          "closed": "2026-10-02T06:38:46.285128+00:00",
+          "sim_opened": "2026-08-03T13:30:00+00:00",
+          "sim_closed": "2026-08-07T13:30:00+00:00",
+          "daily_marks": [
+            {
+              "date": "2026-08-03",
+              "sim_bar": "2026-08-03T13:30:00+00:00",
+              "close": 1.5,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9999,
+              "status": "OPEN",
+              "bars": 0,
+              "stop": 1.3518,
+              "target": 1.7964
+            },
+            {
+              "date": "2026-08-04",
+              "sim_bar": "2026-08-04T13:30:00+00:00",
+              "close": 1.5,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9999,
+              "status": "OPEN",
+              "bars": 1,
+              "stop": 1.3518,
+              "target": 1.7964
+            },
+            {
+              "date": "2026-08-05",
+              "sim_bar": "2026-08-05T13:30:00+00:00",
+              "close": 1.5,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9999,
+              "status": "OPEN",
+              "bars": 2,
+              "stop": 1.3518,
+              "target": 1.7964
+            },
+            {
+              "date": "2026-08-06",
+              "sim_bar": "2026-08-06T13:30:00+00:00",
+              "close": 1.5,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9999,
+              "status": "OPEN",
+              "bars": 3,
+              "stop": 1.3518,
+              "target": 1.7964
+            },
+            {
+              "date": "2026-08-07",
+              "sim_bar": "2026-08-07T13:30:00+00:00",
+              "close": 1.3518,
+              "unrl_pct": -9.88,
+              "mtm": -987.9,
+              "r": -1,
+              "value": 9011.1,
+              "status": "stop_loss",
+              "bars": 4,
+              "stop": 1.3518,
+              "target": 1.7964
+            }
+          ]
+        },
+        {
+          "market": "us",
+          "symbol": "VERA",
+          "action": "BUY",
+          "pattern": "indicator_ut_bot_dema",
+          "trade_id": "8e43304923204c4cb32a048f74bf3542",
+          "signal_id": null,
+          "pattern_version_id": null,
+          "provenance": "legacy_unknown",
+          "requested_rules": {
+            "schema_version": 1,
+            "stage": "signal",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 30.6348,
+            "stop_loss_on_close": false,
+            "take_profit": 37.4004,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "BUY",
+            "qty": 304,
+            "price": 32.88999938964844
+          },
+          "resolved_rules": {
+            "schema_version": 1,
+            "stage": "fill",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 30.6348,
+            "stop_loss_on_close": false,
+            "take_profit": 37.4004,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "BUY",
+            "qty": 304,
+            "price": 32.88999938964844
+          },
+          "chart_annotations": [
+            {
+              "type": "marker",
+              "date": "2026-08-07",
+              "price": 32.88999938964844,
+              "label": "entry",
+              "color": "#ffeb3b",
+              "marker": "^",
+              "label_pos": "below"
+            },
+            {
+              "type": "hline",
+              "price": 30.6348,
+              "label": "stop",
+              "color": "#ef5350",
+              "style": "--"
+            },
+            {
+              "type": "hline",
+              "price": 37.4004,
+              "label": "target",
+              "color": "#26a69a",
+              "style": "--"
+            },
+            {
+              "type": "path",
+              "points": [
+                {
+                  "date": "2026-05-13",
+                  "price": 35.8197732060579
+                },
+                {
+                  "date": "2026-05-14",
+                  "price": 37.18561754618633
+                },
+                {
+                  "date": "2026-05-15",
+                  "price": 37.18561754618633
+                },
+                {
+                  "date": "2026-05-18",
+                  "price": 37.831888087171116
+                },
+                {
+                  "date": "2026-05-19",
+                  "price": 35.71870375396505
+                },
+                {
+                  "date": "2026-05-20",
+                  "price": 35.71870375396505
+                },
+                {
+                  "date": "2026-05-21",
+                  "price": 35.71870375396505
+                },
+                {
+                  "date": "2026-05-22",
+                  "price": 35.71870375396505
+                },
+                {
+                  "date": "2026-05-26",
+                  "price": 35.71870375396505
+                },
+                {
+                  "date": "2026-05-27",
+                  "price": 35.71870375396505
+                },
+                {
+                  "date": "2026-05-28",
+                  "price": 35.71870375396505
+                },
+                {
+                  "date": "2026-05-29",
+                  "price": 35.71870375396505
+                },
+                {
+                  "date": "2026-06-01",
+                  "price": 35.71870375396505
+                },
+                {
+                  "date": "2026-06-02",
+                  "price": 35.0695559988681
+                },
+                {
+                  "date": "2026-06-03",
+                  "price": 33.24660094676164
+                },
+                {
+                  "date": "2026-06-04",
+                  "price": 31.09043996960637
+                },
+                {
+                  "date": "2026-06-05",
+                  "price": 31.09043996960637
+                },
+                {
+                  "date": "2026-06-08",
+                  "price": 31.09043996960637
+                },
+                {
+                  "date": "2026-06-09",
+                  "price": 31.09043996960637
+                },
+                {
+                  "date": "2026-06-10",
+                  "price": 31.09043996960637
+                },
+                {
+                  "date": "2026-06-11",
+                  "price": 31.09043996960637
+                },
+                {
+                  "date": "2026-06-12",
+                  "price": 32.078011496467006
+                },
+                {
+                  "date": "2026-06-15",
+                  "price": 32.3854878588353
+                },
+                {
+                  "date": "2026-06-16",
+                  "price": 32.3854878588353
+                },
+                {
+                  "date": "2026-06-17",
+                  "price": 32.46406978560993
+                },
+                {
+                  "date": "2026-06-18",
+                  "price": 33.45078149479069
+                },
+                {
+                  "date": "2026-06-22",
+                  "price": 35.06145895701966
+                },
+                {
+                  "date": "2026-06-23",
+                  "price": 35.80894945899949
+                },
+                {
+                  "date": "2026-06-24",
+                  "price": 36.891737109520186
+                },
+                {
+                  "date": "2026-06-25",
+                  "price": 38.22552329594952
+                },
+                {
+                  "date": "2026-06-26",
+                  "price": 39.86525932091628
+                },
+                {
+                  "date": "2026-06-29",
+                  "price": 40.810843747174495
+                },
+                {
+                  "date": "2026-06-30",
+                  "price": 41.4334219006468
+                },
+                {
+                  "date": "2026-07-01",
+                  "price": 41.4334219006468
+                },
+                {
+                  "date": "2026-07-02",
+                  "price": 43.19582965280562
+                },
+                {
+                  "date": "2026-07-06",
+                  "price": 43.19582965280562
+                },
+                {
+                  "date": "2026-07-07",
+                  "price": 43.19582965280562
+                },
+                {
+                  "date": "2026-07-08",
+                  "price": 43.19582965280562
+                },
+                {
+                  "date": "2026-07-09",
+                  "price": 43.19582965280562
+                },
+                {
+                  "date": "2026-07-10",
+                  "price": 43.19582965280562
+                },
+                {
+                  "date": "2026-07-13",
+                  "price": 43.19582965280562
+                },
+                {
+                  "date": "2026-07-14",
+                  "price": 43.19582965280562
+                },
+                {
+                  "date": "2026-07-15",
+                  "price": 43.19582965280562
+                },
+                {
+                  "date": "2026-07-16",
+                  "price": 43.19582965280562
+                },
+                {
+                  "date": "2026-07-17",
+                  "price": 41.009718066588235
+                },
+                {
+                  "date": "2026-07-20",
+                  "price": 40.31675582285457
+                },
+                {
+                  "date": "2026-07-21",
+                  "price": 39.312861491344584
+                },
+                {
+                  "date": "2026-07-22",
+                  "price": 38.97516586771297
+                },
+                {
+                  "date": "2026-07-23",
+                  "price": 38.118848732451475
+                },
+                {
+                  "date": "2026-07-24",
+                  "price": 38.118848732451475
+                },
+                {
+                  "date": "2026-07-27",
+                  "price": 37.87294363681771
+                },
+                {
+                  "date": "2026-07-28",
+                  "price": 36.319826668257726
+                },
+                {
+                  "date": "2026-07-29",
+                  "price": 34.98531234241214
+                },
+                {
+                  "date": "2026-07-30",
+                  "price": 34.98531234241214
+                },
+                {
+                  "date": "2026-07-31",
+                  "price": 34.4361334709956
+                },
+                {
+                  "date": "2026-08-03",
+                  "price": 34.0162097072444
+                },
+                {
+                  "date": "2026-08-04",
+                  "price": 33.45162799016272
+                },
+                {
+                  "date": "2026-08-05",
+                  "price": 32.466789514825784
+                },
+                {
+                  "date": "2026-08-06",
+                  "price": 32.466789514825784
+                },
+                {
+                  "date": "2026-08-07",
+                  "price": 30.634785217667524
+                }
+              ],
+              "color": "#ffeb3b",
+              "style": "-",
+              "width": 2,
+              "label": "indicator_ut_bot_dema"
+            }
+          ],
+          "timeframe": "1d",
+          "qty": 304,
+          "entry": 32.89,
+          "exit": 30.6348,
+          "stop": 30.6348,
+          "target": 37.4004,
+          "pnl": -704.8922,
+          "pnl_pct": -7.0499,
+          "r": -1,
+          "hold_days": 4,
+          "hold_bars": 2,
+          "exit_reason": "stop_loss",
+          "time_exit_bars_elapsed": null,
+          "time_exit_bars_configured": null,
+          "opened": "2026-10-02T06:38:47.021855+00:00",
+          "closed": "2026-10-02T06:39:10.266445+00:00",
+          "sim_opened": "2026-08-07T13:30:00+00:00",
+          "sim_closed": "2026-08-11T13:30:00+00:00",
+          "daily_marks": [
+            {
+              "date": "2026-08-07",
+              "sim_bar": "2026-08-07T13:30:00+00:00",
+              "close": 32.89,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9998.56,
+              "status": "OPEN",
+              "bars": 0,
+              "stop": 30.6348,
+              "target": 37.4004
+            },
+            {
+              "date": "2026-08-10",
+              "sim_bar": "2026-08-10T13:30:00+00:00",
+              "close": 31.58,
+              "unrl_pct": -3.983,
+              "mtm": -398.24,
+              "r": -0.5809,
+              "value": 9600.32,
+              "status": "OPEN",
+              "bars": 1,
+              "stop": 30.6348,
+              "target": 37.4004
+            },
+            {
+              "date": "2026-08-11",
+              "sim_bar": "2026-08-11T13:30:00+00:00",
+              "close": 30.6348,
+              "unrl_pct": -6.8568,
+              "mtm": -685.58,
+              "r": -1,
+              "value": 9312.98,
+              "status": "stop_loss",
+              "bars": 2,
+              "stop": 30.6348,
+              "target": 37.4004
+            }
+          ]
+        },
+        {
+          "market": "us",
+          "symbol": "AMBP",
+          "action": "SELL",
+          "pattern": "indicator_pivot_points",
+          "trade_id": "0000524e829a4d5792966a3ede4fd348",
+          "signal_id": null,
+          "pattern_version_id": null,
+          "provenance": "legacy_unknown",
+          "requested_rules": {
+            "schema_version": 1,
+            "stage": "signal",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 5.3133,
+            "stop_loss_on_close": false,
+            "take_profit": 4.2633,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "SELL",
+            "qty": 2083,
+            "price": 4.800000190734863
+          },
+          "resolved_rules": {
+            "schema_version": 1,
+            "stage": "fill",
+            "engine_sha256": "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+            "stop_loss": 5.3133,
+            "stop_loss_on_close": false,
+            "take_profit": 4.2633,
+            "trailing_stop_pct": null,
+            "trailing_stop_mode": null,
+            "trailing_stop_on_close": false,
+            "stop_loss_pct_cap": null,
+            "reclaim_exit": false,
+            "reclaim_lower_rail": null,
+            "exit_fill_at_close": false,
+            "trailing_ref_after_check": false,
+            "exit_order": "stop_first",
+            "neckline": null,
+            "neckline_break_direction": null,
+            "exit_bars_after_neckline_break": null,
+            "exit_bars_after_entry": null,
+            "trailing_activation_pct": null,
+            "time_exit_only_unfavorable": false,
+            "time_exit_min_mfe_pct": null,
+            "action": "SELL",
+            "qty": 2083,
+            "price": 4.800000190734863
+          },
+          "chart_annotations": [
+            {
+              "type": "marker",
+              "date": "2026-08-03",
+              "price": 4.800000190734863,
+              "label": "entry",
+              "color": "#ffeb3b",
+              "marker": "v",
+              "label_pos": "above"
+            },
+            {
+              "type": "hline",
+              "price": 5.3133,
+              "label": "stop",
+              "color": "#ef5350",
+              "style": "--"
+            },
+            {
+              "type": "hline",
+              "price": 4.2633,
+              "label": "target",
+              "color": "#26a69a",
+              "style": "--"
+            }
+          ],
+          "timeframe": "1d",
+          "qty": 2083,
+          "entry": 4.8,
+          "exit": 5.3133,
+          "stop": 5.3133,
+          "target": 4.2633,
+          "pnl": -1090.2695,
+          "pnl_pct": -10.9044,
+          "r": -1,
+          "hold_days": 10,
+          "hold_bars": 8,
+          "exit_reason": "stop_loss",
+          "time_exit_bars_elapsed": null,
+          "time_exit_bars_configured": null,
+          "opened": "2026-10-02T06:38:08.614129+00:00",
+          "closed": "2026-10-02T06:39:28.334470+00:00",
+          "sim_opened": "2026-08-03T13:30:00+00:00",
+          "sim_closed": "2026-08-13T13:30:00+00:00",
+          "daily_marks": [
+            {
+              "date": "2026-08-03",
+              "sim_bar": "2026-08-03T13:30:00+00:00",
+              "close": 4.8,
+              "unrl_pct": 0,
+              "mtm": 0,
+              "r": 0,
+              "value": 9998.4,
+              "status": "OPEN",
+              "bars": 0,
+              "stop": 5.3133,
+              "target": 4.2633
+            },
+            {
+              "date": "2026-08-04",
+              "sim_bar": "2026-08-04T13:30:00+00:00",
+              "close": 4.95,
+              "unrl_pct": -3.125,
+              "mtm": -312.45,
+              "r": -0.2922,
+              "value": 10310.85,
+              "status": "OPEN",
+              "bars": 1,
+              "stop": 5.3133,
+              "target": 4.2633
+            },
+            {
+              "date": "2026-08-05",
+              "sim_bar": "2026-08-05T13:30:00+00:00",
+              "close": 5.09,
+              "unrl_pct": -6.0417,
+              "mtm": -604.07,
+              "r": -0.565,
+              "value": 10602.47,
+              "status": "OPEN",
+              "bars": 2,
+              "stop": 5.3133,
+              "target": 4.2633
+            },
+            {
+              "date": "2026-08-06",
+              "sim_bar": "2026-08-06T13:30:00+00:00",
+              "close": 5.02,
+              "unrl_pct": -4.5833,
+              "mtm": -458.26,
+              "r": -0.4286,
+              "value": 10456.66,
+              "status": "OPEN",
+              "bars": 3,
+              "stop": 5.3133,
+              "target": 4.2633
+            },
+            {
+              "date": "2026-08-07",
+              "sim_bar": "2026-08-07T13:30:00+00:00",
+              "close": 5.04,
+              "unrl_pct": -5,
+              "mtm": -499.92,
+              "r": -0.4676,
+              "value": 10498.32,
+              "status": "OPEN",
+              "bars": 4,
+              "stop": 5.3133,
+              "target": 4.2633
+            },
+            {
+              "date": "2026-08-10",
+              "sim_bar": "2026-08-10T13:30:00+00:00",
+              "close": 4.97,
+              "unrl_pct": -3.5417,
+              "mtm": -354.11,
+              "r": -0.3312,
+              "value": 10352.51,
+              "status": "OPEN",
+              "bars": 5,
+              "stop": 5.3133,
+              "target": 4.2633
+            },
+            {
+              "date": "2026-08-11",
+              "sim_bar": "2026-08-11T13:30:00+00:00",
+              "close": 5.05,
+              "unrl_pct": -5.2083,
+              "mtm": -520.75,
+              "r": -0.487,
+              "value": 10519.15,
+              "status": "OPEN",
+              "bars": 6,
+              "stop": 5.3133,
+              "target": 4.2633
+            },
+            {
+              "date": "2026-08-12",
+              "sim_bar": "2026-08-12T13:30:00+00:00",
+              "close": 5.06,
+              "unrl_pct": -5.4167,
+              "mtm": -541.58,
+              "r": -0.5065,
+              "value": 10539.98,
+              "status": "OPEN",
+              "bars": 7,
+              "stop": 5.3133,
+              "target": 4.2633
+            },
+            {
+              "date": "2026-08-13",
+              "sim_bar": "2026-08-13T13:30:00+00:00",
+              "close": 5.3133,
+              "unrl_pct": -10.6937,
+              "mtm": -1069.2,
+              "r": -1,
+              "value": 11067.6,
+              "status": "stop_loss",
+              "bars": 8,
+              "stop": 5.3133,
+              "target": 4.2633
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "market": "ph",
+      "label": "Philippines (PSE)",
+      "currency": "PHP",
+      "currency_symbol": "₱",
+      "long_only": true,
+      "session": "PM",
+      "running": false,
+      "cash": 1000000,
+      "equity": 1000000,
+      "open_count": 0,
+      "closed_count": 0,
+      "exposure": {
+        "long_pct": 0,
+        "short_pct": 0,
+        "net_pct": 0,
+        "gross_pct": 0
+      },
+      "metrics": {
+        "total_pnl_dollars": 0,
+        "total_pnl_pct": 0,
+        "realized_pnl_dollars": 0,
+        "unrealized_pnl_dollars": 0,
+        "win_rate_pct": 0,
+        "avg_pnl_pct": 0,
+        "total_usd": 0,
+        "worst_usd": 0,
+        "profit_factor": null,
+        "avg_hold_bars": 0,
+        "exit_reason_breakdown": {}
+      },
+      "summary": "No closed trades yet.",
+      "scan_stats": null,
+      "open_positions": [],
+      "closed_trades": []
+    }
+  ]
+}

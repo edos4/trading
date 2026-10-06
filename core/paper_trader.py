@@ -13,6 +13,7 @@ Persisted to a single JSON file so a session survives a restart.
 from __future__ import annotations
 
 import json
+import math
 import threading
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -248,8 +249,9 @@ class PaperAccount:
         # Historical paper stream replays closed daily bars after hours.
         # Wall-clock PSE AM/PM must not block those assumed fills.
         self.assume_session_open = False
-        # Session flag: not persisted. Scanner sets this from Pattern-only.
+        # Session flags: not persisted. Scanner sets these from the checkboxes.
         self.pattern_only = False
+        self.indicators_only = False
         # The scanner runs in a background thread with its own asyncio loop
         # (see ui/paper_dashboard.py) while the UI polls this same account
         # from the Tk main thread every second. Without a lock, the UI's
@@ -527,7 +529,14 @@ class PaperAccount:
                 f"Duplicate anchor: a position on {sym} is already open on the "
                 f"same {signal.pattern} pivots {key}."
             )
-        cap = (signal.requested_rules.get("max_open_per_symbol") if signal.pattern_version_id and signal.requested_rules else _max_open_per_symbol(signal.pattern))
+        if signal.pattern_version_id and signal.requested_rules:
+            cap = signal.requested_rules.get("max_open_per_symbol")
+        elif self.indicators_only:
+            # Indicators are not pinned pattern versions. Pattern scans still
+            # consult the catalog, including when a name starts with indicator_.
+            cap = None
+        else:
+            cap = _max_open_per_symbol(signal.pattern)
         if cap is not None and sum(
             1 for p in open_list if p.pattern == signal.pattern
         ) >= cap:
@@ -549,6 +558,19 @@ class PaperAccount:
                 f"Session {window}: paper will not assume a fill outside continuous "
                 f"AM/PM matching."
             )
+        if self.indicators_only:
+            # Eight indicators on one symbol, with no cash check, turned a
+            # $100k book into hundreds of $10k bets. Pattern scans stay uncapped.
+            if open_list:
+                return False, (
+                    f"Indicators only: {sym} already has an open position."
+                )
+            room = int(self.equity() // ENGINE.position_notional)
+            if self.open_count() >= room:
+                return False, (
+                    f"Indicators only: {self.open_count()} open positions already "
+                    f"use the account (${ENGINE.position_notional:,.0f} each)."
+                )
 
         signal.price = candle.close
         _apply_notional_sizing(
@@ -612,6 +634,73 @@ class PaperAccount:
             f"Filled signal-bar entry: {signal.action} {signal.qty:g} {signal.symbol} "
             f"@ {format_money(position.entry_price, self.market)} (pattern={signal.pattern})."
         )
+
+    def ratchet_indicator_stop(self, position, new_stop: float) -> bool:
+        """Tighten an indicators-only trailing stop. Never loosens it.
+
+        Pattern trades do not call this. The scanner calls it only when
+        Indicators only is checked.
+        """
+        if not self.indicators_only:
+            return False
+        if not math.isfinite(new_stop) or new_stop <= 0 or position.stop_loss is None:
+            return False
+        with self._lock:
+            old = position.stop_loss
+            if position.action == "BUY" and new_stop > old:
+                position.stop_loss = round(float(new_stop), 4)
+                return True
+            if position.action == "SELL" and new_stop < old:
+                position.stop_loss = round(float(new_stop), 4)
+                return True
+        return False
+
+    def exit_indicator(self, symbol: str, position, candle: OHLCVCandle, reason: str = "trailing_stop"):
+        """Close one indicators-only trade at the bar close.
+
+        Used when the indicator's own trend has flipped. Pattern exits stay
+        on the fixed ladder in ``on_bar``.
+        """
+        if not self.indicators_only:
+            return None
+        with self._lock:
+            open_list = self.positions.get(symbol) or []
+            if position not in open_list:
+                return None
+            now = candle.timestamp or datetime.now(timezone.utc)
+            bar_idx = self.bar_count(symbol, position.timeframe)
+            exit_price = candle.close
+            if self.slippage_pct:
+                exit_price = (
+                    exit_price * (1 - self.slippage_pct)
+                    if position.action == "BUY"
+                    else exit_price * (1 + self.slippage_pct)
+                )
+            self._record_position_mark(
+                symbol, position, exit_price, now, bar_idx, status=reason,
+            )
+            _close_trade(position, exit_price, reason, candle, self.txn_cost_pct)
+            position.sim_exit_date = position.exit_date
+            position.exit_date = datetime.now(timezone.utc)
+            notional_out = exit_price * position.qty
+            cost = (position.entry_price * self.txn_cost_pct + exit_price * self.txn_cost_pct) * position.qty
+            if position.action == "BUY":
+                self.cash += notional_out - cost
+            else:
+                self.cash -= notional_out + cost
+            self._daily_pnl += position.pnl * position.qty
+            try:
+                open_list.remove(position)
+            except ValueError:
+                pass
+            if not open_list:
+                self.positions.pop(symbol, None)
+            self.closed.append(position)
+            self.mark_to_market(now)
+            log.info(
+                f"Paper | CLOSE {symbol} reason={reason} pnl={position.pnl_pct:+.2f}%"
+            )
+            return position
 
     # ── Per-bar update / exit check ──────────────────────────────────────
     def on_bar(

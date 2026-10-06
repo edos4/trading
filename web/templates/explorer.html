@@ -19,6 +19,7 @@
   </label>
   <label>Filter <input type="search" id="filter" placeholder="AAPL" /></label>
   <label class="check"><input type="checkbox" id="run-patterns" checked /> Run patterns</label>
+  <label class="check"><input type="checkbox" id="indicators-only" /> Indicators only</label>
   {% if kronos_enabled %}
   <label class="check"><input type="checkbox" id="kronos-gate" {% if kronos_gate %}checked{% endif %} /> Kronos 3d gate</label>
   <label class="check" id="kronos-batch-wrap" {% if not kronos_gate %}hidden{% endif %}>
@@ -42,12 +43,12 @@
       <p class="muted" id="chart-placeholder">No chart yet</p>
       <img id="chart" alt="chart" hidden />
     </div>
-    <h3>Detected patterns</h3>
+    <h3 id="signals-heading">Detected patterns</h3>
     <div class="table-wrap">
       <table id="signals">
         <thead>
           <tr>
-            <th>Pattern</th><th>Action</th><th>TF</th><th>Conf</th><th>Price</th><th>Notes</th>
+            <th id="signals-col">Pattern</th><th>Action</th><th>TF</th><th>Conf</th><th>Price</th><th>Notes</th>
           </tr>
         </thead>
         <tbody></tbody>
