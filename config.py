@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     # ── Collect-first ─────────────────────────────────────────────────────
     # When enabled, a scan pass collects chart-pattern signals without opening
     # anything, then ranks them by reward:risk and opens only the top N
-    # (collect_first_top_n). Expensive gates (Kronos/volume/vision) run only
+    # (collect_first_top_n). Expensive gates (volume/vision) run only
     # on the selected winners. Off by default so existing runs are unchanged.
     collect_first_enabled: bool = False
     collect_first_top_n: int = 4
@@ -77,7 +77,6 @@ class Settings(BaseSettings):
     # ── Paper trade stream (replays stocks_history when markets are closed) ──
     papertrade_stream_host: str = "127.0.0.1"
     papertrade_stream_port: int = 8765
-    # Warm enough for Kronos gate LOOKBACK=400 when replaying near tape end.
     papertrade_stream_lookback_bars: int = 420
     # 0 = scan-paced: start the next simulated day as soon as the previous
     # scan finishes. >0 sleeps the leftover so live-like polling can apply.
@@ -99,8 +98,7 @@ class Settings(BaseSettings):
     tv_exchange: str
     tv_exchange_overrides: str = ""
     tv_use_ta_fallback: bool = False  # unused; kept for .env compatibility
-    # Daily bars to pull from Yahoo chart + screener overlay. Sized for Kronos
-    # gate LOOKBACK=400 (official demo) plus a little headroom; clamp ≤512.
+    # Daily bars to pull from Yahoo chart + screener overlay. Clamp ≤512.
     # Floor is PATTERN_SCAN_HISTORY_BARS so every pattern scan has a month of
     # prior closes (forming setups), not just the latest bar.
     tv_history_days: int = 450
@@ -113,7 +111,7 @@ class Settings(BaseSettings):
     # still paced by tv_screener_min_interval_seconds across all workers.
     scanner_concurrency: int = 15
     # Spawned processes for pattern.analyze(). Fetch, paper ledger, and
-    # Kronos/vision stay on the scan loop. 0 = auto (2–8 from cpu_count);
+    # vision stay on the scan loop. 0 = auto (2–8 from cpu_count);
     # 1 = inline on that loop (debug / tests that skip scanner.start()).
     scanner_analyze_workers: int = 0
     # Min gap between TradingView scanner POSTs (america/scan). Undocumented
@@ -123,60 +121,10 @@ class Settings(BaseSettings):
     tv_screener_max_retries: int = 5
     tv_screener_retry_backoff_seconds: float = 2.0
 
-    # ── Kronos feature switch ──────────────────────────────────────────────
-    # Master switch for the Kronos forecast feature. When false (the
-    # default), the desktop (--ui) and web (--web) frontends hide every
-    # Kronos control and never enable the Kronos gate/rank — a hidden gate
-    # cannot be re-enabled from either UI. Set ENABLE_KRONOS=true to expose
-    # the Kronos controls again. The CLI flags (--kronos-test/--kronos-gate)
-    # are unaffected.
-    enable_kronos: bool = False
-
-    # ── Kronos confirm gate (core/kronos_gate.py) ───────────────────────────
-    # After a chart pattern fires, require Kronos 3-trading-day forecast to agree
-    # on direction and clear 3% in those 3 days (kronos_min_move_pct). Not a
-    # standalone entry pattern — veto/confirm layer only (not the Kronos
-    # finetune top-K strategy).
-    kronos_min_move_pct: float = 0.03
-    kronos_sample_count: int = 3
-    kronos_gate_enabled: bool = True
-    # Safety default: an enabled Kronos gate must not silently disappear if
-    # its model/data path is unavailable, so it is fail-closed (rejects the
-    # signal). Set true only for research runs.
-    kronos_gate_fail_open: bool = False
-    # Load finetuned weights from ~/Kronos/finetuned when present; else base.
-    kronos_use_finetuned: bool = False
-    # Off by default: rewriting pattern TP/SL from the 3d forecast made paper
-    # and "pattern" backtests describe different strategies (paper +81% while
-    # Kronos-on formal BT printed PF 0.046). Gate still vetoes on direction;
-    # exits stay the pattern's until adjust_exits is proven to lift expectancy.
-    kronos_gate_adjust_exits: bool = False
-    # Collect pattern hits, then one KronosPredictor.predict_batch. Off by
-    # default — UI/web "Batch Kronos" checkbox opts in when Kronos is on.
-    kronos_batch_enabled: bool = False
-    # Series per predict_batch call on CUDA. GPU batch = this × sample_count.
-    # No CUDA: runtime caps at 4 (see effective_kronos_batch_size).
-    kronos_batch_size: int = 16
-
-    # ── Kronos ranked forecast sleeve (core/kronos_rank_sleeve.py) ──────────
-    # Independent entry source beside Toby patterns: cross-sectionally rank
-    # predicted 3-trading-day returns and take top_k longs / bottom_k shorts. Off by
-    # default (GPU cost per scan + needs BT validation). Does not replace
-    # kronos_gate — gate still filters chart-pattern signals only.
-    kronos_rank_enabled: bool = False
-    kronos_rank_top_k: int = 3
-    kronos_rank_bottom_k: int = 3
-    kronos_rank_long_only: bool = True
-    # None → reuse kronos_min_move_pct as the |pred| floor for sleeve entries.
-    kronos_rank_min_move_pct: float | None = None
-    # Bars between cross-sectional re-ranks in backtest (5 ≈ weekly).
-    kronos_rank_rebalance_bars: int = 5
-
     # ── Volume confirm gate (analysis/price_volume.py) ─────────────────────
     # After a chart pattern fires, require relative volume (signal bar /
     # SMA20) ≥ volume_gate_rvol_min AND OBV slope over volume_gate_obv_bars
-    # to agree with BUY/SELL. On for paper/scan after the 2026-08-17 US book
-    # (Kronos 3% already passed every 003 loser). Fail-open on short history.
+    # to agree with BUY/SELL. Fail-open on short history.
     volume_gate_enabled: bool = True
     volume_gate_rvol_min: float = 2.0
     volume_gate_obv_bars: int = 5
@@ -200,7 +148,7 @@ class Settings(BaseSettings):
     db_user: str = "r00t"
     db_password: str = ""
 
-    # ── Remote stocks_history API (local --ui / --web / Kronos) ─────────────
+    # ── Remote stocks_history API (local --ui / --web) ──────────────────────
     # Local --ui/--web auto-use https://33ai.edos.uk when this is empty (charts
     # included; no Yahoo). All OHLCV reads use this API, never local Postgres.
     # VPS --web must leave this empty and set owner so it still writes Postgres
@@ -252,7 +200,6 @@ class Settings(BaseSettings):
     @field_validator("tv_history_days")
     @classmethod
     def _clamp_history_days(cls, value: int) -> int:
-        # Kronos-base max_context is 512; more bars than that are truncated.
         return max(PATTERN_SCAN_HISTORY_BARS, min(value, 512))
 
     @field_validator("papertrade_stream_lookback_bars")
@@ -294,11 +241,6 @@ class Settings(BaseSettings):
     @classmethod
     def _clamp_screener_backoff(cls, value: float) -> float:
         return max(0.1, value)
-
-    @field_validator("kronos_batch_size")
-    @classmethod
-    def _clamp_kronos_batch_size(cls, value: int) -> int:
-        return max(1, min(int(value), 256))
 
     @field_validator("collect_first_top_n")
     @classmethod

@@ -1,5 +1,4 @@
 # Trading Bot v2 — Edwin & Toby
-### TradingView data → Pattern analysis → Kronos gate → Volume gate → Vision confirmation → IBKR execution
 
 > **Configured for swing trading**: patterns run on daily/weekly bars, the
 > scanner polls hourly (no need for minute-by-minute polling since new bars
@@ -7,7 +6,6 @@
 > larger, multi-day-to-multi-week holds rather than rapid intraday turnover.
 
 No webhooks. No external triggers. The bot polls TradingView on its own schedule,
-detects patterns autonomously, and confirms them (Kronos forecast, optional
 volume confirm, optional vision) before placing any order.
 
 ## Architecture
@@ -27,7 +25,6 @@ volume confirm, optional vision) before placing any order.
 │    analyze(snapshot, store) → TradeSignal | None            │   │
 │       │                                                      │   │
 │       ▼                                                      │   │
-│  Kronos 3d gate  (optional, default ON)                     │   │
 │    forecast agrees with BUY/SELL + |move| ≥ 3% in 3 days?    │   │
 │       │                                                      │   │
 │       │  PASS                                                │   │
@@ -52,7 +49,6 @@ volume confirm, optional vision) before placing any order.
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-Kronos and the volume gate are **confirm/veto layers** on top of chart
 patterns — they do **not** generate entries on their own. Both run in CLI
 scan/paper/backtest and in the `--ui` explorer, Backtest dialog, and Paper
 Trading dashboard.
@@ -78,8 +74,6 @@ Set `TV_HISTORY_DAYS` in `.env` to control how many daily bars the screener pull
 ```bash
 cp .env.example .env
 # Fill in: IBKR settings, ANTHROPIC_API_KEY, WATCHLIST
-# Optional Kronos gate: KRONOS_GATE_ENABLED / KRONOS_MIN_MOVE_PCT
-#   (needs ~/Kronos weights — see "Kronos Confirm Gate" below)
 # Volume gate: VOLUME_GATE_ENABLED / VOLUME_GATE_RVOL_MIN (default ON)
 ```
 
@@ -114,7 +108,6 @@ python main.py --paper --symbols=500 --pattern-only --collect-first=4 \
 |---|---|
 | `--paper` | Paper ledger + scanner (optional `N` is universe size, default 50) |
 | `--symbols=N` | Universe size; overrides the optional `N` on `--paper` / `--backtest` |
-| `--pattern-only` | Skip min share-price, SMA200 regime, min confidence, cooldown, and long-only. Kronos / volume confirm gates default OFF unless `--kronos-gate` / `--volume-gate` are passed |
 | `--collect-first=N` | Collect chart-pattern hits for the scan, rank by R:R, open only the top N (default `COLLECT_FIRST_TOP_N`). Bare `--collect-first` uses the `.env` default |
 | `--stream=DATE` | Replay daily bars from DATE. Auto-starts `main.py --papertrade-stream`. Resume a saved ledger from its last sim date when that date is later than DATE |
 | `--duration-days=N` | Stop after N unique market sessions (with `--stream`, N replayed daily bars). `--stream=01/05/2026 --duration-days=30` replays ~30 trading days then exits |
@@ -158,8 +151,6 @@ Results are saved as `backtest_results_<timestamp>.txt` (summary) and `.json`
 (full trade list) in the project root. `--volume-gate-compare` also writes
 `backtest_volume_ab_<timestamp>.json` with side-by-side OFF vs ON metrics.
 
-When `KRONOS_GATE_ENABLED=true`, the backtester applies the same Kronos 3d
-confirm gate as live/paper (see [Kronos Confirm Gate](#kronos-confirm-gate)).
 The volume gate is **off by default** — see
 [Volume Confirm Gate](#volume-confirm-gate).
 
@@ -187,192 +178,10 @@ at the top. Each row shows signals, trades, win/loss counts, equal-weighted
 and account-weighted P&L, average P&L, max drawdown, and Sharpe ratio.
 A detailed trade list follows each pattern's summary.
 
-## Kronos Confirm Gate
-
-[Kronos](https://github.com/shiyu-coder/Kronos) is an open-source foundation
-model for financial candlesticks (K-lines). This project uses
-[Kronos-base](https://huggingface.co/NeoQuasar/Kronos-base) as a **3-day
-forecast filter** on chart-pattern signals — not as a standalone trading
-pattern. The confirm gate requires **3% in 3 trading days**.
-
-### Why a gate (not an entry pattern)
-
-Toby chart patterns stay the entry source for the **confirm gate**. Kronos
-gate is only a confirm/veto layer: *"does your 3d forecast agree with this
-BUY/SELL, and is the predicted move at least 3% in 3 days?"*
-
-Separately, the **Kronos ranked forecast sleeve** (`core/kronos_rank_sleeve.py`)
-can emit its own `pattern_kronos_rank` entries by cross-sectionally ranking
-predicted 3-trading-day returns — closer to the official finetune top-K demo. Gate and
-sleeve are independent; both call the same 3% / 3d forecast (`pred_len=3`).
-
-### Kronos ranked forecast sleeve
-
-Opt-in entry source beside Toby patterns (off by default — GPU cost + needs BT):
-
-1. Forecast +3 trading-day close % for every symbol in the scan/backtest universe.
-2. Rank by that 3d return.
-3. Emit top `KRONOS_RANK_TOP_K` BUYs (and bottom `KRONOS_RANK_BOTTOM_K` SELLs
-   unless `KRONOS_RANK_LONG_ONLY=true`).
-4. Require `|pred| ≥` floor (defaults to `KRONOS_MIN_MOVE_PCT`, **3% in 3 days**).
-5. Skip Kronos gate / vision / volume on these signals (forecast *is* the thesis).
-6. Same deferred fill, regime, cooldown, and risk/sizing as other entries.
-
-```bash
-KRONOS_RANK_ENABLED=false
-KRONOS_RANK_TOP_K=3
-KRONOS_RANK_BOTTOM_K=3
-KRONOS_RANK_LONG_ONLY=true
-KRONOS_RANK_REBALANCE_BARS=5
-```
-
-Enable via `.env`, paper/backtest **Kronos rank sleeve** checkbox, or
-`MarketScanner(..., kronos_rank=True)` / `Backtester(..., kronos_rank=True)`.
-
-### What the gate does
-
-Implemented in `core/kronos_gate.py`. After a pattern emits BUY/SELL on the
-`1d` timeframe:
-
-1. Feed the last **400 daily bars** (official Kronos lookback) of OHLCV plus
-   synthetic `amount = volume * mean(OHLC)` when the feed has no turnover.
-2. Forecast the next **3 trading days** of close (`pred_len=3` — a 3d veto
-   horizon; Kronos demos often use 120 for longer charts).
-3. Average `KRONOS_SAMPLE_COUNT` sampled paths (`T=1.0`, `top_p=0.9`).
-4. **Reject** if `|pred_3d| < KRONOS_MIN_MOVE_PCT` (default **3% in 3 days**).
-5. **Reject** if the forecast direction conflicts with the signal
-   (BUY needs `pred_3d > 0`, SELL needs `pred_3d < 0`).
-6. On **PASS**, optionally overwrite take-profit / stop-loss from the
-   forecast (`KRONOS_GATE_ADJUST_EXITS=true`).
-
-**Batch Kronos** (opt-in checkbox, default off): collect pattern hits that
-already cleared cheap gates, then call `KronosPredictor.predict_batch` once
-per lookback group instead of `predict()` per signal. Same pass/fail math.
-The rank sleeve also batches its universe when this is on. Pattern-BT
-workers stay sequential. Unchecked = today's per-signal `predict()`.
-
-Fail-closed by default: if `~/Kronos` weights are missing, history is shorter
-than lookback, or `predict()` errors, the signal is rejected so a broken
-install cannot silently pass un-vetted trades. Set `KRONOS_GATE_FAIL_OPEN=true`
-to pass signals through instead (research only).
-
-Skipped: `CLOSE` actions and non-daily timeframes.
-
-### Where it runs
-
-| Entry point | How the gate is controlled |
-|---|---|
-| `python main.py` (live/paper scan) | `KRONOS_GATE_ENABLED` in `.env` |
-| `python main.py --paper` | same |
-| `python main.py --backtest` | same |
-| `python main.py --ui` → symbol explorer | toolbar **Kronos 3d gate**; **Batch Kronos** appears only when the gate is checked |
-| `python main.py --ui` → **Backtest** | form **Kronos 3d gate** / **Kronos rank**; **Batch Kronos** enabled when either is on (rank sleeve only — pattern workers stay sequential) |
-| `python main.py --ui` → **Paper Trading** | per-book **Kronos 3d gate** / **Kronos rank**; **Batch Kronos** appears when either is checked |
-
-UI checkboxes default to the `.env` value but can override for that session.
-Startup logs print `Kronos gate: ON/OFF`.
-
-### `.env` settings
-
-```bash
-# Require Kronos 3d forecast to agree with chart-pattern BUY/SELL
-KRONOS_GATE_ENABLED=true
-# Overwrite TP/SL from the 3d forecast when the gate passes (off by default)
-KRONOS_GATE_ADJUST_EXITS=false
-# Minimum |predicted 3d move| to pass (0.03 = 3% in 3 days)
-KRONOS_MIN_MOVE_PCT=0.03
-# Average N sampled forecast paths per prediction (reduces noise)
-KRONOS_SAMPLE_COUNT=3
-# Collect-then-batch GPU forecasts. Off unless the UI/web "Batch Kronos"
-# checkbox is on (only shown when Kronos gate or rank is enabled).
-KRONOS_BATCH_ENABLED=false
-# Series per predict_batch call (GPU batch = this × KRONOS_SAMPLE_COUNT).
-KRONOS_BATCH_SIZE=16
-# Prefer finetuned weights under ~/Kronos/finetuned (falls back to base)
-KRONOS_USE_FINETUNED=false
-# Pass signals through when the model/data is unavailable (research only).
-# Default false = fail-closed (reject when Kronos can't be consulted).
-KRONOS_GATE_FAIL_OPEN=false
-# Daily history pull — must be ≥400 for full official lookback (clamped ≤512)
-TV_HISTORY_DAYS=450
-```
-
-Disable anytime with `KRONOS_GATE_ENABLED=false` (or uncheck in the UI).
-
-### One-time weight setup
-
-Required for the gate (and for `--kronos-test` / `--kronos-finetune`):
-
-```bash
-git clone https://github.com/shiyu-coder/Kronos.git ~/Kronos
-```
-
-Download and cache the weights locally (avoids hitting Hugging Face on every run):
-
-```bash
-python3 -c "
-import sys; sys.path.insert(0, '$HOME/Kronos')
-from model import Kronos, KronosTokenizer
-KronosTokenizer.from_pretrained('NeoQuasar/Kronos-Tokenizer-base', token=False) \
-    .save_pretrained('$HOME/Kronos/weights/Kronos-Tokenizer-base')
-Kronos.from_pretrained('NeoQuasar/Kronos-base', token=False) \
-    .save_pretrained('$HOME/Kronos/weights/Kronos-base')
-"
-```
-
-### Forecast accuracy test (`--kronos-test` / `scripts/kronos_1wk_test.py`)
-
-Walk-forward scores of Kronos +1 day / +3 trading-day close forecasts on
-stocks_history. Useful after fine-tuning or when comparing weight sets.
-
-Metrics now include flat-0 MAE, **prior-week persistence**, **majority-sign**
-bias check, **gate-filtered** dir/MAE/signed-return using the same
-`|pred_3d| ≥ KRONOS_MIN_MOVE_PCT` floor as `kronos_gate`, and soft bootstrap
-CIs. This is still **unconditional** on chart patterns — for live-gate
-decision quality, run a formal backtest with `kronos_gate` on vs off.
-
-```bash
-# Default: 20 randomly sampled symbols, 3 walk-forward windows each
-python main.py --kronos-test
-
-# 50 symbols
-python main.py --kronos-test 50
-
-# Rank by recent dollar volume and take the top 50 (liquid large/mid-caps)
-# instead of a random sample — Kronos was trained on liquid exchange data,
-# so this is a fairer test than a random sample dominated by illiquid/
-# penny/OTC tickers by sheer count.
-python main.py --kronos-test 50 --kronos-liquid-only
-
-# After fine-tuning (see below)
-python main.py --kronos-test 50 --kronos-liquid-only --kronos-use-finetuned
-
-# Markdown report (gate metrics + raw windows) → kronos_1_wk.md
-.venv/bin/python scripts/kronos_1wk_test.py --liquid-only --symbols 30
-```
-
-CLI/`--kronos-test` prints per-horizon `n`, MAE, flat MAE, direction hit,
-plus persistence and `gate@min_move` rows when available.
-
-### Fine-tuning (`--kronos-finetune`)
-
-Adapts Kronos-base's tokenizer + predictor on liquid tickers from
-stocks_history. Saves checkpoints under `~/Kronos/finetuned/`.
-Needs a CUDA GPU to be practical. Re-score with
-`--kronos-test ... --kronos-use-finetuned` before switching the live gate
-onto fine-tuned weights (the live gate currently loads **base** weights
-by design).
-
-```bash
-python main.py --kronos-finetune
-python main.py --kronos-finetune --kronos-finetune-symbols 1500 --kronos-finetune-epochs 10
-```
-
 ## Volume Confirm Gate
 
-Price-volume confirmation for chart-pattern signals. Implemented in
-`analysis/price_volume.py`. Like Kronos, this is a **confirm/veto layer** —
-it does **not** generate entries. Flag / pennant / double top-bottom already
+
+Price-volume confirmation for chart-pattern signals, in `analysis/price_volume.py`. It does **not** generate entries. Flag / pennant / double top-bottom already
 embed their own volume rules; this gate adds a uniform RVOL + OBV check on
 top of every pattern (including those).
 
@@ -408,8 +217,6 @@ weak-volume ones.
 
 ### What the gate does (technical)
 
-After a pattern emits BUY/SELL (and after the Kronos gate when that is on):
-
 1. **RVOL** — signal-bar volume / SMA(volume, 20 of prior bars) must be
    ≥ `VOLUME_GATE_RVOL_MIN` (default **1.5**).
 2. **OBV direction** — OBV slope over the last `VOLUME_GATE_OBV_BARS` bars
@@ -442,7 +249,6 @@ Startup logs print `Volume gate: ON/OFF`. Rejects log as
 ### `.env` settings
 
 ```bash
-# On after the 2026-08-17 US paper book (Kronos 6% already passed every 003 loser)
 VOLUME_GATE_ENABLED=true
 # Signal-bar volume must be at least this multiple of the 20-bar average
 VOLUME_GATE_RVOL_MIN=1.5
@@ -453,11 +259,7 @@ VOLUME_GATE_OBV_BARS=5
 ### Measuring before enabling
 
 ```bash
-# Side-by-side OFF vs ON (same symbols/patterns). Prefer Kronos off if you
-# want to isolate the volume effect:
-KRONOS_GATE_ENABLED=false python main.py --backtest 100 --volume-gate-compare
-
-# Per-pattern isolation
+python main.py --backtest 100 --volume-gate-compare
 python main.py --backtest 100 --pattern double_bottom --volume-gate-compare
 ```
 
@@ -500,7 +302,6 @@ Auth: form login → signed HttpOnly session cookie (`tb_session`). All pages an
 **One history database (VPS).** Contabo runs Postgres `stocks_history` and
 serves `GET /api/history/symbols`, `GET /api/history/{symbol}`, and
 `GET /api/history/{symbol}/meta`. Local `--ui` / `--web` **always** read
-daily OHLCV (explorer charts, paper charts, paper trade stream, Kronos,
 backtest prefetch) from `https://33ai.edos.uk` — `STOCKS_HISTORY_URL` is
 applied automatically if empty. They do **not** use Yahoo/TV for history, and do **not** need
 `DATABASE_URL`. History API Basic auth is
@@ -508,7 +309,6 @@ applied automatically if empty. They do **not** use Yahoo/TV for history, and do
 dashboard password. On the VPS set `STOCKS_HISTORY_OWNER=true` and leave
 `STOCKS_HISTORY_URL` empty so `--web` still **writes** local Postgres via
 `--update-db` and **serves** `GET /api/history`. All OHLCV **reads**
-(scanner, explorer, paper stream, and Kronos) go through that API
 (default `https://33ai.edos.uk`), never local Postgres or CSV.
 
 What both UIs support:
@@ -522,11 +322,8 @@ What both UIs support:
   (first bottom, neckline, second bottom, entry, channel rails, …) prints the
   conditions that part satisfied directly under its label — thresholds are read
   from the detector itself, so the note always matches the live rules.
-- **Kronos 3d gate** checkbox (toolbar): when checked, explorer detections
-  must also clear the same 3% in 3 days Kronos confirm gate used by the scanner.
 - **Volume gate** checkbox (toolbar): when checked, detections must also
   clear the RVOL+OBV confirm gate (see [Volume Confirm Gate](#volume-confirm-gate)).
-- **Backtest**: parameter form (includes **Kronos 3d gate** and **Volume gate**,
   plus **Compare A/B (Volume)**) runs `Backtester` with the same engine as
   `python main.py --backtest`.
 - **Paper Trading**: dual-book desk (US + PH) that runs two `MarketScanner`
@@ -535,7 +332,6 @@ What both UIs support:
   is still one market; dual is `--ui` / `--web` only.
 - Download the selected symbol's OHLCV data as CSV / save chart PNG.
 
-The explorer reuses the same data, pattern, chart-rendering, Kronos-gate,
 and volume-gate code as the scanner. Backtest / Paper Trading are not toy
 modes — they call the real `Backtester` / `MarketScanner`.
 
@@ -583,14 +379,9 @@ trading_bot_v2/
 │   ├── paper_books.py                   # Dual-market paper manager (US thread + PH thread)
 │   ├── backtester.py                    # Historical walk-forward backtest engine
 │   ├── test_volume_gate.py              # Unit tests for analysis.price_volume
-│   ├── kronos_eval.py                   # Kronos-base forecast accuracy test (--kronos-test)
-│   ├── kronos_gate.py                   # Kronos 3d confirm gate (3% in 3 days) for chart-pattern signals
-│   ├── kronos_rank_sleeve.py            # Cross-sectional top-K forecast sleeve (beside patterns)
-│   └── kronos_finetune.py               # Fine-tune Kronos on liquid tickers (--kronos-finetune)
 │
 ├── ui/
 │   ├── app.py                           # Native tkinter symbol explorer (--ui)
-│   ├── backtest_dialog.py               # UI Backtest launcher (Kronos + Volume gates, A/B)
 │   └── paper_dashboard.py               # Dual-book Paper desk (US + PH cards)
 │
 ├── web/
@@ -613,13 +404,11 @@ Every trade can pass up to **four** gates (then risk limits):
 | Gate | What it checks | Blocks if... | Default |
 |------|----------------|--------------|---------|
 | Pattern / indicator analysis | Chart structure + indicators → `TradeSignal` | No signal / confidence below engine threshold | always on |
-| Kronos 3d confirm | Forecast direction + `|pred_3d| ≥ 3%` in 3 trading days | Forecast disagrees or move too small | `KRONOS_GATE_ENABLED=true` |
 | Volume confirm | RVOL ≥ `VOLUME_GATE_RVOL_MIN` + OBV slope agrees with BUY/SELL | Weak volume or OBV against the trade | `VOLUME_GATE_ENABLED=true` |
 | Vision confirmation | Claude looks at the chart PNG | Pattern not visually present | `VISION_CONFIRMATION_ENABLED=false` |
 
 Then risk_guard / paper sizing add hard limits before any order fires.
-Order: pattern → Kronos → Volume → vision. Kronos and volume run **before**
-vision so rejected forecasts/volume do not spend Claude tokens.
+Vision runs after the volume gate so rejected volume does not spend Claude tokens.
 
 ## Safety Rules
 - Always start with `TRADING_MODE=paper`

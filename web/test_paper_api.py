@@ -38,7 +38,6 @@ class WebPaperApiTests(unittest.TestCase):
                 s.web_ui_secret_key = "test-secret-key"
                 s.web_ui_https = False
                 s.web_ui_session_hours = 12
-                s.kronos_gate_enabled = True
                 s.volume_gate_enabled = False
 
             from web.app import create_app
@@ -106,8 +105,6 @@ class WebPaperApiTests(unittest.TestCase):
         body = {
             "n_symbols": 10,
             "use_stream": False,
-            "kronos_gate": False,
-            "kronos_rank": False,
             "volume_gate": False,
             "pattern_only": True,
         }
@@ -127,7 +124,6 @@ class WebPaperApiTests(unittest.TestCase):
             "market": "us",
             "n_symbols": 10,
             "use_stream": False,
-            "kronos_gate": False,
             "pattern_only": True,
             "indicators_only": True,
         }

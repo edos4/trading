@@ -40,7 +40,7 @@
       if (!el) return;
       out[key] = SPIN_KEYS.has(key) ? Number(el.value || 0) : el.value;
     });
-    ["pattern_only", "volume_gate", "kronos_gate", "kronos_rank"].forEach((key) => {
+    ["pattern_only", "volume_gate"].forEach((key) => {
       const el = $("sr-" + key);
       if (el) out[key] = !!el.checked;
     });

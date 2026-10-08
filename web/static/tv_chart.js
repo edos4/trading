@@ -264,7 +264,7 @@ window.TVChart = (function () {
         wickUpColor: "#ffeb3b",
         wickDownColor: "#f9a825",
         borderVisible: false,
-        title: "Kronos",
+        title: "Forecast",
       });
       predSeries.setData(
         (data.pred_candles || []).map((row) => ({
@@ -282,7 +282,7 @@ window.TVChart = (function () {
         lineWidth: 2,
         priceLineVisible: false,
         lastValueVisible: true,
-        title: "Kronos close",
+        title: "Forecast close",
       });
       forecast.setData(data.forecast);
     }

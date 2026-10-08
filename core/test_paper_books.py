@@ -24,9 +24,6 @@ from core import signal_log_store as sls
 START_KW = dict(
     extra_symbols="",
     use_stream=False,
-    kronos_gate=False,
-    kronos_rank=False,
-    kronos_batch=False,
     volume_gate=False,
     stream_start=None,
 )
@@ -312,29 +309,6 @@ def test_edgar_skip_is_thread_local():
     t_ph.join(timeout=2)
     assert us_seen == [False]
     assert ph_seen == [True]
-
-
-def test_kronos_infer_lock_does_not_overlap():
-    from core.kronos_gate import kronos_infer_lock
-
-    in_critical: list[int] = []
-    overlap: list[bool] = []
-
-    def worker() -> None:
-        with kronos_infer_lock():
-            if in_critical:
-                overlap.append(True)
-            in_critical.append(1)
-            time.sleep(0.05)
-            in_critical.pop()
-
-    t1 = threading.Thread(target=worker)
-    t2 = threading.Thread(target=worker)
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
-    assert overlap == []
 
 
 def test_port_open_works_inside_running_event_loop() -> None:

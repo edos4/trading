@@ -41,7 +41,6 @@ class WebHttpAuthTests(unittest.TestCase):
                 s.web_ui_secret_key = "test-secret-key"
                 s.web_ui_https = False
                 s.web_ui_session_hours = 12
-                s.kronos_gate_enabled = True
                 s.volume_gate_enabled = False
 
             from web.app import create_app

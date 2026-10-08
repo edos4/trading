@@ -1,6 +1,6 @@
 """Off-loop pattern.analyze() — spawn workers, private candle copies.
 
-Ledger writes, pending fills, Kronos/vision, and PaperAccount stay on the
+Ledger writes, pending fills, vision, and PaperAccount stay on the
 scanner event loop. Workers only run BasePattern.analyze() against a
 throwaway OHLCVStore built from a copied candle list.
 

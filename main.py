@@ -22,9 +22,6 @@ Usage:
                                                     # backfill missing/stale daily bars per symbol.
     python main.py --papertrade-stream              # Serve historical bars (33ai /api/history) for paper trading when markets are closed
     python main.py --papertrade-stream --papertrade-stream-start 2025-01-02  # Replay from a specific date
-    python main.py --kronos-test                    # Score Kronos-base +1d/+3d forecast accuracy (20 random symbols)
-    python main.py --kronos-test 50                  # ...on 50 randomly sampled symbols
-    python main.py --kronos-test 50 --kronos-liquid-only  # ...top 50 by $ volume instead of random
     python main.py --check-db                        # Verify US + PH freshness
     python main.py --update-db                       # Daily incremental update: Yahoo/PSE fetch for stale symbols
     python main.py --ingest-pse                      # Seed local stocks_history from PSE Edge (TICKER.PS)
@@ -38,11 +35,6 @@ Prerequisites:
   - pip install -r requirements.txt
   - Scanner/backtester only: TWS or IB Gateway running locally
     (paper: 7497, live: 7496) - not required for --ui
-  - --kronos-test / Kronos gate: https://github.com/shiyu-coder/Kronos cloned to
-    ~/Kronos with Kronos-base + Kronos-Tokenizer-base weights saved under
-    ~/Kronos/weights/ (see README "Kronos Forecast Accuracy Test").
-    When KRONOS_GATE_ENABLED=true, scanner / paper / UI backtest / UI paper
-    require a 3-trading-day Kronos forecast to agree with each chart-pattern signal.
 """
 
 import argparse
@@ -170,8 +162,6 @@ async def run_scanner(
     log.info(f"  Scan every: {profile.scan_interval_seconds}s")
     log.info(f"  History:    {settings.tv_history_days} daily bars")
     log.info(f"  Vision:     {'ON' if settings.vision_confirmation_enabled else 'OFF'}")
-    log.info(f"  Kronos gate:{'ON' if profile.kronos_gate_default else 'OFF'}")
-    log.info(f"  Kronos rank:{'ON' if profile.kronos_rank_default else 'OFF'}")
     log.info(f"  Volume gate:{'ON' if use_volume else 'OFF'}")
     log.info(f"  Long-only:  {'YES' if profile.long_only else 'no'}")
     cf_on = settings.collect_first_enabled if collect_first is None else collect_first
@@ -202,8 +192,6 @@ async def run_scanner(
         symbols=symbols,
         exchange_overrides=exchange_overrides,
         disabled_patterns=DISABLED_PATTERNS,
-        kronos_gate=profile.kronos_gate_default,
-        kronos_rank=profile.kronos_rank_default,
         volume_gate=use_volume,
         market=profile.id,
         collect_first=collect_first,
@@ -216,7 +204,6 @@ async def run_paper(
     n_symbols: int = 50,
     reset: bool = False,
     *,
-    kronos_gate: bool | None = None,
     volume_gate: bool | None = None,
     pattern_only: bool = False,
     market: str | None = None,
@@ -244,17 +231,11 @@ async def run_paper(
     use_volume = (
         settings.volume_gate_enabled if volume_gate is None else volume_gate
     )
-    kronos_gate_on = (
-        profile.kronos_gate_default if kronos_gate is None else kronos_gate
-    )
     if pattern_only:
-        # Pattern-only isolates the chart pattern: confirm gates default OFF
-        # unless their flag is explicitly passed.
+        # Pattern-only isolates the chart pattern: the volume gate defaults OFF
+        # unless its flag is explicitly passed.
         if volume_gate is None:
             use_volume = False
-        if kronos_gate is None:
-            kronos_gate_on = False
-    kronos_rank = profile.kronos_rank_default
     cf_on = settings.collect_first_enabled if collect_first is None else collect_first
     cf_n = (
         settings.collect_first_top_n
@@ -281,8 +262,6 @@ async def run_paper(
     else:
         log.info(f"  Scan every: {scan_interval}s")
     log.info(f"  Stream:     {effective_stream_start or ('ON' if use_stream else 'OFF')}")
-    log.info(f"  Kronos gate:{'ON' if kronos_gate_on else 'OFF'}")
-    log.info(f"  Kronos rank:{'ON' if kronos_rank else 'OFF'}")
     log.info(f"  Volume gate:{'ON' if use_volume else 'OFF'}")
     log.info(f"  Pattern-only:{'ON' if pattern_only else 'OFF'}")
     log.info(
@@ -348,8 +327,6 @@ async def run_paper(
             disabled_patterns=DISABLED_PATTERNS,
             data_feed=data_feed,
             scan_interval_seconds=scan_interval if use_stream else None,
-            kronos_gate=kronos_gate_on,
-            kronos_rank=kronos_rank,
             volume_gate=use_volume,
             pattern_only=pattern_only,
             market=profile.id,
@@ -557,11 +534,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "headline numbers; 0.001 matches the .cjs 'cost optional' mode).",
     )
     parser.add_argument(
-        "--kronos-gate",
-        action="store_true",
-        help="(deprecated / no-op) the engine no longer runs the Kronos gate.",
-    )
-    parser.add_argument(
         "--volume-gate",
         action="store_true",
         help="Enable the RVOL+OBV volume confirm gate for this run "
@@ -571,8 +543,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--pattern-only",
         action="store_true",
         help="Skip min share-price, SMA200 regime, min confidence, cooldown, "
-        "and long-only. Kronos and volume confirm gates default OFF unless "
-        "--kronos-gate / --volume-gate are passed. Use with --backtest / --paper.",
+        "and long-only. The volume confirm gate defaults OFF unless "
+        "--volume-gate is passed. Use with --backtest / --paper.",
     )
     parser.add_argument(
         "--symbols",
@@ -663,79 +635,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--paper-reset",
         action="store_true",
         help="Wipe the saved paper-trading account and start fresh (use with --paper).",
-    )
-    parser.add_argument(
-        "--kronos-test",
-        nargs="?",
-        const=20,
-        type=int,
-        default=None,
-        metavar="N",
-        help="Evaluate Kronos-base's +1 day / +3 trading-day close-price forecast accuracy "
-        "on N randomly sampled symbols (default: 20) from stocks_history.",
-    )
-    parser.add_argument(
-        "--kronos-liquid-only",
-        action="store_true",
-        help="With --kronos-test, rank symbols by recent dollar volume and take the "
-        "top N (liquid large/mid-caps) instead of a random sample.",
-    )
-    parser.add_argument(
-        "--kronos-sample-count",
-        type=int,
-        default=1,
-        metavar="N",
-        help="With --kronos-test, average N sampled forecast paths per window "
-        "(Kronos does this internally) instead of a single noisy path. Default: 1.",
-    )
-    parser.add_argument(
-        "--kronos-start-date",
-        type=str,
-        default="2026-03-01",
-        metavar="YYYY-MM-DD",
-        help="With --kronos-test, drop tickers with no data on/after this date "
-        "(stale/delisted) and only score windows as-of this date or later. "
-        "Older bars are still used as lookback context. Default: 2026-03-01.",
-    )
-    parser.add_argument(
-        "--kronos-use-finetuned",
-        action="store_true",
-        help="With --kronos-test, use the fine-tuned checkpoint from --kronos-finetune "
-        "instead of base Kronos weights (falls back to base if none exists).",
-    )
-    parser.add_argument(
-        "--kronos-finetune",
-        action="store_true",
-        help="Fine-tune Kronos-base's tokenizer + predictor on liquid tickers from "
-        "stocks_history. Saves to ~/Kronos/finetuned/. Needs a CUDA GPU to "
-        "finish in a reasonable time.",
-    )
-    parser.add_argument(
-        "--kronos-finetune-symbols",
-        type=int,
-        default=1500,
-        metavar="N",
-        help="With --kronos-finetune, train on the top N liquid tickers (default: 1500).",
-    )
-    parser.add_argument(
-        "--kronos-finetune-epochs",
-        type=int,
-        default=10,
-        metavar="N",
-        help="With --kronos-finetune, epochs for both tokenizer and predictor stages (default: 10).",
-    )
-    parser.add_argument(
-        "--kronos-finetune-batch-size",
-        type=int,
-        default=16,
-        metavar="N",
-        help="With --kronos-finetune, training batch size (default: 16, sized for an 8GB GPU).",
-    )
-    parser.add_argument(
-        "--kronos-finetune-skip-tokenizer",
-        action="store_true",
-        help="With --kronos-finetune, reuse the existing fine-tuned tokenizer checkpoint "
-        "(or base tokenizer if none) and only fine-tune the predictor.",
     )
     parser.add_argument(
         "--papertrade-stream",
@@ -834,30 +733,6 @@ async def main(args: argparse.Namespace | None = None) -> None:
     if args is None:
         args = _parse_args()
 
-    if args.kronos_finetune:
-        from core.kronos_finetune import run_kronos_finetune
-
-        run_kronos_finetune(
-            n_symbols=args.kronos_finetune_symbols,
-            tokenizer_epochs=args.kronos_finetune_epochs,
-            predictor_epochs=args.kronos_finetune_epochs,
-            batch_size=args.kronos_finetune_batch_size,
-            skip_tokenizer=args.kronos_finetune_skip_tokenizer,
-        )
-        return
-
-    if args.kronos_test is not None:
-        from core.kronos_eval import run_kronos_test
-
-        run_kronos_test(
-            n_symbols=args.kronos_test,
-            liquid_only=args.kronos_liquid_only,
-            sample_count=args.kronos_sample_count,
-            start_date=args.kronos_start_date,
-            use_finetuned=args.kronos_use_finetuned,
-        )
-        return
-
     if args.papertrade_stream:
         from data.stream_server import run_stream_server
 
@@ -938,7 +813,6 @@ async def main(args: argparse.Namespace | None = None) -> None:
         await run_paper(
             n_symbols=_resolve_n_symbols(args, args.paper),
             reset=args.paper_reset,
-            kronos_gate=True if args.kronos_gate else None,
             volume_gate=True if args.volume_gate else None,
             pattern_only=args.pattern_only,
             market=args.market,

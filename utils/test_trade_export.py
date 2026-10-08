@@ -24,7 +24,7 @@ def _envelope():
                     "patterns_found": 3,
                     "trades_opened": 1,
                     "signals_rejected": 2,
-                    "rejection_by_gate": {"kronos": 2},
+                    "rejection_by_gate": {"volume": 2},
                     "noise": "ignore",
                 },
                 "equity_png_b64": "nope",
@@ -168,7 +168,7 @@ def test_export_includes_both_books_and_review_prompt():
     assert us["closed_trades"][0]["daily_marks"][0]["date"] == "2026-01-05"
     assert "equity_png_b64" not in us
     assert "equity_png_b64" not in us["metrics"]
-    assert us["scan_stats"]["rejection_by_gate"] == {"kronos": 2}
+    assert us["scan_stats"]["rejection_by_gate"] == {"volume": 2}
     assert "noise" not in us["scan_stats"]
 
 

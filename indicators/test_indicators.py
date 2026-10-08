@@ -162,7 +162,7 @@ def test_indicators_only_skips_pattern_discovery():
         result = service.load_symbol(
             "AAA", "NASDAQ", "1d",
             run_patterns=True, indicators_only=True,
-            kronos_gate=False, volume_gate=False,
+            volume_gate=False,
         )
     assert result["scan"] == "indicators"
     assert result["signals"] == []

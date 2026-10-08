@@ -133,8 +133,6 @@ def _book_stub(market: str, running: bool = False, status: str = "Idle (e2e)") -
         "long_only": not us,
         "stream_blocked_by": None,
         "defaults": {
-            "kronos_gate": us,
-            "kronos_rank": False,
             "volume_gate": False,
             "n_symbols": 50 if us else 30,
         },
@@ -189,7 +187,6 @@ def run_e2e(base_url: str, headed: bool = False) -> None:
             "market": "us",
             "n_symbols": 1000,
             "use_stream": False,
-            "kronos_gate": False,
             "volume_gate": False,
             "stream_start": None,
         },
@@ -223,14 +220,10 @@ def run_e2e(base_url: str, headed: bool = False) -> None:
         expect(page.locator("header.topbar")).to_be_visible(timeout=10000)
         checks.append("login_ok")
 
-        # Nav. The Kronos tab only exists when ENABLE_KRONOS is on.
         page.click('a[href="/backtest"]')
         expect(page.locator("#bt-form")).to_be_visible(timeout=10000)
         page.click('a[href="/paper"]')
         expect(page.locator("#paper-start")).to_be_visible(timeout=10000)
-        if page.locator('a[href="/kronos"]').count():
-            page.click('a[href="/kronos"]')
-            expect(page.locator("#kronos-run")).to_be_visible(timeout=10000)
         page.click('a[href="/"]')
         expect(page.locator("#symbol-list")).to_be_visible(timeout=10000)
         checks.append("nav_all")
@@ -303,8 +296,6 @@ def run_e2e(base_url: str, headed: bool = False) -> None:
             "() => document.querySelectorAll('#symbol-list li').length >= 3",
             timeout=10000,
         )
-        if page.locator("#kronos-gate").count():
-            page.check("#kronos-gate")
         page.check("#volume-gate")
         page.select_option("#timeframe", "1W")
         page.click("#symbol-list li >> nth=0")
@@ -424,16 +415,12 @@ def run_e2e(base_url: str, headed: bool = False) -> None:
         expect(page.locator("#us-stream-date-wrap")).to_be_visible()
         page.uncheck("#us-stream")
         page.fill("#us-n", "1000")
-        kronos_paper = page.locator("#us-kronos").count() > 0
-        if kronos_paper:
-            page.check("#us-kronos")
         page.uncheck("#us-volume")
         page.click('.book-start[data-book="us"]')
         page.wait_for_timeout(600)
         assert paper_hits["start"] is not None, "paper/start not called"
         assert paper_hits["start"]["n_symbols"] == 1000, paper_hits["start"]
         assert paper_hits["start"]["market"] == "us"
-        assert paper_hits["start"]["kronos_gate"] is kronos_paper
         assert paper_hits["start"]["volume_gate"] is False
         status_text = page.locator("#us-status").inner_text()
         assert "less_than_equal" not in status_text

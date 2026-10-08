@@ -2,7 +2,7 @@
 
 ## Goal
 
-Add an opt-in mode to the scanner where a full scan pass **collects chart-pattern signals without opening anything**, then **ranks them by reward:risk ratio (R:R)**, keeps the **top N (default 4)**, and only those get queued for the existing one-bar deferred fill. Expensive gates (Kronos/volume/vision) run only on the winners.
+Each scan collects chart-pattern signals, ranks them by reward:risk, and opens only the top N.
 
 ## Current behavior (reference)
 
@@ -12,7 +12,6 @@ Add an opt-in mode to the scanner where a full scan pass **collects chart-patter
 
 1. **Ranking metric** = R:R: `reward = |take_profit − price|`, `risk = |price − stop_loss|`, `rr = reward/risk`. Computed *after* the risk-gate stop backstops finalize `stop_loss`.
 2. **Opt-in** = new `.env` settings, default off, so existing runs are unchanged.
-3. **Scope** = chart-pattern signals only (`not is_kronos_rank_signal(signal)`); the Kronos rank sleeve keeps its own top-K path.
 
 ## Changes
 
@@ -40,12 +39,9 @@ Returns `None` when `price <= 0`, `stop_loss is None`, `take_profit is None`, or
 
 - `__init__` params: `collect_first: bool | None = None`, `collect_first_top_n: int | None = None` → resolve from `settings` when `None`; store `self._collect_first`, `self._collect_first_top_n`.
 - New state `self._collect_pool: list[tuple[TradeSignal, BasePattern | None, OHLCVCandle]]`, reset at top of each `_scan_all`.
-- **`_process_signal`**: when `self._collect_first` and `not is_kronos_rank_signal(signal)`, after the cheap gates (min-price, cooldown, confidence, regime, long-only) **and** the risk-gate step (which mutates `stop_loss`), append `(signal, pattern, candle)` to `_collect_pool` and return — do **not** run Kronos/volume/vision/queue. The non-collect-first path (and rank-sleeve signals) stays exactly as today.
-- **`_flush_collect_first()`** (new), called in `_scan_all` right after `asyncio.gather(*workers)` (core/scanner.py:631), before the `_kronos_batch` flush:
   1. Dedupe the pool by `(symbol, timeframe)`, keeping the highest R:R signal per key.
   2. Sort by `(-rr, -confidence, symbol)`, `None` rr sorting last.
   3. Take top `self._collect_first_top_n`.
-  4. For each winner, run the Kronos 3d gate (if enabled) then `_finish_signal` (volume → vision → `_pending_entries`), reusing the existing code path (factor the tail of `_process_signal` at core/scanner.py:831-842 into a small helper `_kronos_then_finish` used by both paths).
   5. Log each non-winner as `status="rejected"` with reason `collect-first: R:R ranked below top {N}`; increment `signals_rejected` and `rejection_by_gate["collect_first"]`.
   6. Add a `"collect_first_selected"` / `"collect_first_ranked"` counter to `stats`.
 
@@ -53,8 +49,6 @@ Returns `None` when `price <= 0`, `stop_loss is None`, `take_profit is None`, or
 
 - `run_scanner` / `run_paper`: pass `collect_first=settings.collect_first_enabled`, `collect_first_top_n=settings.collect_first_top_n` into `MarketScanner(...)`.
 - Add `--collect-first` (store_true) and `--collect-first-top-n N` (int) flags; thread them into `run_paper`/`run_scanner`. Log the mode in the startup banner.
-
-### 5. Web / UI wiring (match existing `kronos_batch` pattern)
 
 - `web/app.py` payload + `web/services.py` + `web/jobs.py`: add `collect_first` (bool) and `collect_first_top_n` (int) passthrough to `MarketScanner`.
 - `ui/paper_dashboard.py` + `ui/backtest_dialog.py`: add a "Collect-first (top-N)" checkbox + spin (default off; disabled unless a real pattern path is active).
@@ -69,7 +63,6 @@ Returns `None` when `price <= 0`, `stop_loss is None`, `take_profit is None`, or
 
 ## Non-goals / out of scope
 
-- Does **not** change backtest behavior or the Kronos rank sleeve.
 - Does **not** remove the one-bar deferred fill (`_pending_entries`) — winners still fill on the next new bar.
 - Does **not** change default behavior (off unless enabled).
 

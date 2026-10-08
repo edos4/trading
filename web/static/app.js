@@ -56,20 +56,6 @@ function downloadB64(filename, b64, mime) {
   URL.revokeObjectURL(a.href);
 }
 
-function syncExplorerBatchKronos() {
-  const gate = document.getElementById("kronos-gate");
-  const wrap = document.getElementById("kronos-batch-wrap");
-  if (!wrap || !gate) return;
-  wrap.hidden = !gate.checked;
-}
-
-function syncBookBatchKronos(id) {
-  const gate = document.getElementById(`${id}-kronos`);
-  const rank = document.getElementById(`${id}-kronos-rank`);
-  const wrap = document.getElementById(`${id}-kronos-batch-wrap`);
-  if (!wrap) return;
-  wrap.hidden = !((gate && gate.checked) || (rank && rank.checked));
-}
 
 function syncBacktestPatternOnly() {
   const po = document.getElementById("p-pattern_only");
@@ -80,16 +66,6 @@ function syncBacktestPatternOnly() {
   }
 }
 
-function syncBacktestBatchKronos() {
-  const gate = document.getElementById("p-kronos_gate");
-  const rank = document.getElementById("p-kronos_rank");
-  const wrap = document.querySelector('[data-key="kronos_batch"]');
-  if (!wrap) return;
-  const on = !!(gate && gate.checked) || !!(rank && rank.checked);
-  wrap.hidden = !on;
-  const box = document.getElementById("p-kronos_batch");
-  if (!on && box) box.checked = false;
-}
 
 /* ── Explorer ─────────────────────────────────────────────────────────── */
 function initExplorer() {
@@ -146,16 +122,12 @@ function initExplorer() {
     renderList();
     status.textContent = `Loading ${row.symbol}...`;
     header.textContent = `${row.symbol} | loading...`;
-    const kronosGate = document.getElementById("kronos-gate");
-    const kronosBatch = document.getElementById("kronos-batch");
     const body = {
       symbol: row.symbol,
       exchange: row.exchange,
       timeframe: document.getElementById("timeframe").value,
       run_patterns: !!(runPatterns && runPatterns.checked && !(indicatorsOnly && indicatorsOnly.checked)),
       indicators_only: !!(indicatorsOnly && indicatorsOnly.checked),
-      kronos_gate: !!(kronosGate && kronosGate.checked),
-      kronos_batch: !!(kronosGate && kronosGate.checked && kronosBatch && kronosBatch.checked),
       volume_gate: document.getElementById("volume-gate").checked,
       market: (document.getElementById("market") || {}).value || "",
     };
@@ -211,11 +183,6 @@ function initExplorer() {
       const spec = (window.TB_MARKETS || []).find((m) => m.id === id);
       if (spec) {
         document.getElementById("count").value = spec.default_n_symbols;
-        const gateEl = document.getElementById("kronos-gate");
-        if (gateEl) {
-          gateEl.checked = !!spec.kronos_gate;
-          syncExplorerBatchKronos();
-        }
       }
       refreshSymbols().catch((e) => {
         status.textContent = String(e.message || e);
@@ -238,9 +205,6 @@ function initExplorer() {
       "text/csv",
     );
   };
-  const kronosGate = document.getElementById("kronos-gate");
-  if (kronosGate) kronosGate.onchange = syncExplorerBatchKronos;
-  syncExplorerBatchKronos();
   refreshSymbols().catch((e) => {
     status.textContent = String(e.message || e);
   });
@@ -348,23 +312,15 @@ function initBacktest() {
       setVal("p-n_symbols", spec.default_n_symbols);
       setVal("p-txn_cost_pct", spec.txn_cost_pct);
       setVal("p-account_value", spec.account_value);
-      setVal("p-kronos_gate", spec.kronos_gate);
-      setVal("p-kronos_rank", spec.kronos_rank);
       if (spec.breakeven_trigger_pct != null) {
         setVal("p-breakeven_trigger_pct", spec.breakeven_trigger_pct);
       }
       if (spec.breakeven_buffer_pct != null) {
         setVal("p-breakeven_buffer_pct", spec.breakeven_buffer_pct);
       }
-      syncBacktestBatchKronos();
     });
     marketSel.dispatchEvent(new Event("change"));
   }
-  const gateEl = document.getElementById("p-kronos_gate");
-  const rankEl = document.getElementById("p-kronos_rank");
-  if (gateEl) gateEl.addEventListener("change", syncBacktestBatchKronos);
-  if (rankEl) rankEl.addEventListener("change", syncBacktestBatchKronos);
-  syncBacktestBatchKronos();
   const poEl = document.getElementById("p-pattern_only");
   if (poEl) poEl.addEventListener("change", syncBacktestPatternOnly);
   syncBacktestPatternOnly();
@@ -433,11 +389,6 @@ function initPaper() {
     if (stream && wrap) {
       stream.onchange = () => { wrap.hidden = !stream.checked; };
     }
-    const gate = document.getElementById(`${id}-kronos`);
-    const rank = document.getElementById(`${id}-kronos-rank`);
-    if (gate) gate.addEventListener("change", () => syncBookBatchKronos(id));
-    if (rank) rank.addEventListener("change", () => syncBookBatchKronos(id));
-    syncBookBatchKronos(id);
     const indicatorsOnly = document.getElementById(`${id}-indicators-only`);
     const patternOnly = document.getElementById(`${id}-pattern-only`);
     if (indicatorsOnly && patternOnly) {
@@ -569,12 +520,6 @@ function initPaper() {
       n_symbols: Number(document.getElementById(`${id}-n`).value || 50),
       extra_symbols: (document.getElementById(`${id}-extra`) || {}).value || "",
       use_stream: !!(document.getElementById(`${id}-stream`) || {}).checked,
-      kronos_gate: !!(document.getElementById(`${id}-kronos`) || {}).checked,
-      kronos_rank: !!(document.getElementById(`${id}-kronos-rank`) || {}).checked,
-      kronos_batch: (
-        !!(document.getElementById(`${id}-kronos`) || {}).checked
-        || !!(document.getElementById(`${id}-kronos-rank`) || {}).checked
-      ) && !!(document.getElementById(`${id}-kronos-batch`) || {}).checked,
       volume_gate: !!(document.getElementById(`${id}-volume`) || {}).checked,
       indicators_only: !!(document.getElementById(`${id}-indicators-only`) || {}).checked,
       pattern_only: !!(document.getElementById(`${id}-pattern-only`) || {}).checked
@@ -1138,102 +1083,6 @@ function initPaper() {
   poll().catch(console.error);
 }
 
-function initKronos() {
-  const symbolEl = document.getElementById("kronos-symbol");
-  const daysEl = document.getElementById("kronos-days");
-  const marketEl = document.getElementById("kronos-market");
-  const runBtn = document.getElementById("kronos-run");
-  const status = document.getElementById("kronos-status");
-  const title = document.getElementById("kronos-chart-title");
-  const ohlc = document.getElementById("kronos-chart-ohlc");
-  const host = document.getElementById("kronos-chart-host");
-
-  function fmtTvOhlc(data, bar) {
-    if (bar) {
-      const all = (data.candles || []).concat(data.pred_candles || []);
-      const prev = all.findIndex((c) => c.time === bar.time);
-      const prevClose = prev > 0 ? all[prev - 1].close : bar.open;
-      const change = bar.close - prevClose;
-      const pct = prevClose ? (change / prevClose) * 100 : 0;
-      const sign = change >= 0 ? "+" : "";
-      const tag = bar.predicted ? "Kronos  " : "";
-      return {
-        text:
-          `${tag}${bar.time}  O ${Number(bar.open).toFixed(2)}  H ${Number(bar.high).toFixed(2)}  ` +
-          `L ${Number(bar.low).toFixed(2)}  C ${Number(bar.close).toFixed(2)}  ` +
-          `${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)` + fmtRsi(data, bar.time),
-        gain: change >= 0,
-      };
-    }
-    const o = data && data.ohlc;
-    if (!o) return { text: "", gain: true };
-    const sign = o.change >= 0 ? "+" : "";
-    return {
-      text:
-        `O ${Number(o.open).toFixed(2)}  H ${Number(o.high).toFixed(2)}  ` +
-        `L ${Number(o.low).toFixed(2)}  C ${Number(o.close).toFixed(2)}  ` +
-        `${sign}${Number(o.change).toFixed(2)} (${sign}${Number(o.change_pct).toFixed(2)}%)`,
-      gain: Number(o.change) >= 0,
-    };
-  }
-
-  function setOhlc(data, bar) {
-    if (!ohlc) return;
-    const shown = fmtTvOhlc(data, bar);
-    ohlc.textContent = shown.text;
-    ohlc.classList.toggle("gain", shown.gain);
-    ohlc.classList.toggle("loss", !shown.gain);
-  }
-
-  async function run() {
-    const symbol = (symbolEl && symbolEl.value || "").trim();
-    const days = Number(daysEl && daysEl.value);
-    const market = (marketEl && marketEl.value) || "us";
-    if (!symbol) {
-      if (status) status.textContent = "Enter a ticker like AAPL.";
-      return;
-    }
-    if (runBtn) runBtn.disabled = true;
-    if (status) status.textContent = `Running Kronos on ${symbol.toUpperCase()} (${days}d)…`;
-    try {
-      const data = await api("/api/kronos/predict", {
-        method: "POST",
-        body: JSON.stringify({ symbol, days, market }),
-      });
-      if (title) title.textContent = data.title || `${symbol} Kronos`;
-      setOhlc(data, null);
-      if (window.TVChart && host) {
-        window.TVChart.mount(host, data, {
-          onCandle(bar) {
-            setOhlc(data, bar);
-          },
-        });
-      }
-      const pred = data.pred || {};
-      if (status) {
-        status.textContent =
-          `${data.symbol} from ${pred.origin}: last ${Number(pred.last_close).toFixed(2)} → ` +
-          `Kronos ${pred.days}d ${Number(pred.pred_close).toFixed(2)} ` +
-          `(${Number(pred.pred_return_pct) >= 0 ? "+" : ""}${Number(pred.pred_return_pct).toFixed(2)}%)`;
-      }
-    } catch (e) {
-      if (window.TVChart) window.TVChart.unmount();
-      if (status) status.textContent = String(e.message || e);
-    } finally {
-      if (runBtn) runBtn.disabled = false;
-    }
-  }
-
-  runBtn?.addEventListener("click", run);
-  symbolEl?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") run();
-  });
-  daysEl?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") run();
-  });
-}
-
-/* ── Replay ───────────────────────────────────────────────────────────── */
 function initReplay() {
   const BOOKS = ["us", "ph"];
   const posBody = document.querySelector("#replay-pos tbody");
@@ -1908,5 +1757,4 @@ document.addEventListener("DOMContentLoaded", () => {
   if (window.TB_PAGE === "backtest") initBacktest();
   if (window.TB_PAGE === "paper") initPaper();
   if (window.TB_PAGE === "replay") initReplay();
-  if (window.TB_PAGE === "kronos") initKronos();
 });

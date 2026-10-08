@@ -74,7 +74,7 @@ def test_desktop_and_web_build_the_same_edit_request(desktop_editor):
         "session_count": 0, "warmup_bars": 30, "initial_capital": 100000.0,
         "sizing_mode": "fixed-notional", "position_notional": 10000.0,
         "txn_cost_pct": 0.001, "slippage_pct": 0.0, "pattern_only": False,
-        "volume_gate": False, "kronos_gate": False, "kronos_rank": False,
+        "volume_gate": False,
         "collect_first": 0, "end_policy": "keep-open",
     }
     base = base_version(store)

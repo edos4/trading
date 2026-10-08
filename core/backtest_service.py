@@ -182,8 +182,6 @@ class BacktestService:
         """Reject unsupported or contradictory execution settings."""
         settings = self._validate_settings(settings)
         unsupported = [name for name, flag in (
-            ("kronos_gate", settings.execution.kronos_gate),
-            ("kronos_rank", settings.execution.kronos_rank),
             ("collect_first", settings.execution.collect_first),
         ) if flag]
         if unsupported:

@@ -7,10 +7,9 @@ Every SCAN_INTERVAL_SECONDS it:
   2. Pushes the new candle into OHLCVStore
   3. Runs each registered pattern's analyze() method
   4. If a signal is returned:
-        a. Kronos 3d forecast gate (if enabled) — direction + 3% in 3 days
-        b. Renders a chart (if vision is enabled)
-        c. Asks Claude vision to confirm the pattern
-        d. Risk gates (ATR trail / R:R) then Kronos/vision; queue pending
+        a. Renders a chart (if vision is enabled)
+        b. Asks Claude vision to confirm the pattern
+        c. Risk gates (ATR trail / R:R) then vision; queue pending
            for next closed bar fill (same deferral as the backtester)
 
 Concurrency: symbols are processed in parallel across N feed sessions
@@ -19,7 +18,7 @@ uses batch snapshots (papertrade_stream_batch_size) so each worker's
 round-trip covers many symbols; after the first fill only the new candle
 is sent. pattern.analyze() runs in a spawn process pool
 (scanner_analyze_workers) against a copied candle list — the paper ledger
-and Kronos/vision gates stay on this loop. A tqdm progress bar shows
+and vision gates stay on this loop. A tqdm progress bar shows
 scan progress on the CLI.
 """
 
@@ -92,10 +91,6 @@ def seed_cooldown_from_trades(_tracker, _trades) -> None:
     return None
 
 
-def is_kronos_rank_signal(_signal) -> bool:
-    return False
-
-
 def signal_reward_risk(signal) -> float | None:
     if (
         getattr(signal, "price", None) is None or signal.price <= 0
@@ -153,13 +148,11 @@ class MarketScanner:
         disabled_patterns: list[str] | None = None,
         data_feed=None,
         scan_interval_seconds: int | None = None,
-        kronos_gate: bool | None = None,
         volume_gate: bool | None = None,
-        kronos_rank: bool | None = None,
-        kronos_batch: bool | None = None,
         market: str | None = None,
         pattern_only: bool = False,
         indicators_only: bool = False,
+        patterns_v2: bool = False,
         collect_first: bool | None = None,
         collect_first_top_n: int | None = None,
         duration_days: int | None = None,
@@ -177,14 +170,12 @@ class MarketScanner:
             if scan_interval_seconds is None
             else int(scan_interval_seconds)
         )
-        # 2026-09 refactor: ML gate / volume gate / collect-first / kronos rank
-        # are all removed from the money path. Accept the kwargs for API
+        # 2026-09 refactor: ML gate / volume gate / collect-first
+        # are removed from the money path. Accept the kwargs for API
         # compatibility but hard-disable them.
-        self._kronos_gate = False
         self._volume_gate = False
-        self._kronos_rank = False
-        self._kronos_batch = False
         self._indicators_only = bool(indicators_only)
+        self._patterns_v2 = bool(patterns_v2) and not self._indicators_only
         self._pattern_only = bool(pattern_only) and not self._indicators_only
         self._collect_first = False
         self._collect_first_top_n = (
@@ -246,11 +237,6 @@ class MarketScanner:
         self._cooldown_tracker: dict[tuple[str, str], tuple[int, bool]] = {}
         if self._paper is not None:
             seed_cooldown_from_trades(self._cooldown_tracker, self._paper.closed)
-        # Kronos rank sleeve: only re-forecast when the daily asof advances
-        # (hourly scans otherwise waste GPU on the same bar).
-        self._kronos_rank_last_asof: object | None = None
-        self._pending_kronos: list[tuple[TradeSignal, BasePattern | None, object]] = []
-        self._pending_kronos_lock = asyncio.Lock()
         # Collect-first: chart-pattern signals gathered during a scan, ranked
         # after the scan completes, then only the top-N finished.
         self._collect_pool: list[tuple[TradeSignal, BasePattern | None, object]] = []
@@ -262,7 +248,6 @@ class MarketScanner:
             "patterns_found": 0,
             "signals_rejected": 0,
             "volume_gate_rejected": 0,
-            "kronos_rank_emitted": 0,
             "collect_first_ranked": 0,
             "collect_first_selected": 0,
             "trades_opened": 0,
@@ -360,8 +345,6 @@ class MarketScanner:
                 gate = "cooldown"
             elif "long-only" in reason_lower:
                 gate = "long_only"
-            elif "kronos" in reason_lower:
-                gate = "kronos"
             elif "volume" in reason_lower:
                 gate = "volume"
             elif "vision" in reason_lower:
@@ -389,9 +372,6 @@ class MarketScanner:
             f"Scanner started | "
             f"symbols={self._symbols} | "
             f"patterns={[p.name for p in self._patterns]} | "
-            f"kronos_gate={'ON' if self._kronos_gate else 'OFF'} | "
-            f"kronos_rank={'ON' if self._kronos_rank else 'OFF'} | "
-            f"kronos_batch={'ON' if self._kronos_batch else 'OFF'} | "
             f"volume_gate={'ON' if self._volume_gate else 'OFF'} | "
             f"collect_first={'ON' if self._collect_first else 'OFF'} | "
             f"duration_days="
@@ -418,7 +398,7 @@ class MarketScanner:
 
     def _note_worker(self, *, stopped: bool = False) -> None:
         """Publish the pinned pattern set. Indicators are not pattern versions."""
-        if getattr(self, "_indicators_only", False):
+        if getattr(self, "_indicators_only", False) or getattr(self, "_patterns_v2", False):
             return
         from core.pattern_loader import acknowledge_worker
         acknowledge_worker(self, stopped=stopped)
@@ -440,8 +420,8 @@ class MarketScanner:
         from core.pattern_jobs import analyze_worker_count, make_analyze_pool
 
         self._close_analyze_pool()
-        if self._indicators_only:
-            # Indicators are in-process detectors, not pinned pattern versions.
+        if self._indicators_only or getattr(self, "_patterns_v2", False):
+            # Indicators and Patternsv2 run in-process. They are not pinned versions.
             self._analyze_workers = 1
             self._analyze_pool = None
             return
@@ -650,7 +630,6 @@ class MarketScanner:
         uses its own MCP session so there is no contention on the stdio pipe.
         """
         scan_start = time.monotonic()
-        self._pending_kronos = []
         self._collect_pool = []
         self.stats["patterns_found"] = 0
         self.stats["signals_rejected"] = 0
@@ -788,8 +767,6 @@ class MarketScanner:
         if self._collect_first:
             await self._flush_collect_first()
 
-        if self._kronos_batch and self._pending_kronos:
-            await self._flush_kronos_batch()
 
         # Mark equity against the completed simulated bar BEFORE advancing the
         # replay. PaperAccount deduplicates marks to one point per market
@@ -815,13 +792,6 @@ class MarketScanner:
                 )
                 self._running = False
 
-        if self._kronos_rank:
-            if new_closed_daily:
-                await self._run_kronos_rank_sleeve()
-            else:
-                log.debug(
-                    "KronosRank | skip — no new closed daily bar this scan"
-                )
 
         self.stats["symbols_with_snapshot"] = len(self._scan_snapshot_symbols)
         self.stats["daily_dates_seen"] = len(self._scan_daily_dates)
@@ -970,6 +940,8 @@ class MarketScanner:
 
     def _analyze_local(self, snapshot: MarketSnapshot) -> tuple[int, list[TradeSignal]]:
         """Inline analyze on this loop — tests, workers=1, or pool fallback."""
+        if getattr(self, "_patterns_v2", False) and not getattr(self, "_indicators_only", False):
+            return self._analyze_patterns_v2(snapshot)
         symbol, timeframe = snapshot.symbol, snapshot.timeframe
         n_bars = self._store.available(symbol, timeframe)
         n_eval = 0
@@ -1046,41 +1018,6 @@ class MarketScanner:
             self.stats["pattern_evaluations"] += n_eval
             await self._emit_signals(snapshot, signals)
 
-    async def _run_kronos_rank_sleeve(self) -> None:
-        """Cross-sectional top-K forecast sleeve — runs once per new daily asof."""
-        # Pick a representative asof from any symbol with 1d history.
-        asof = None
-        for symbol in self._symbols:
-            df = self._store.get_df(symbol, "1d", min_bars=1)
-            if df is not None and len(df):
-                asof = pd.Timestamp(df.index[-1]).normalize()
-                break
-        if asof is None:
-            return
-        if self._kronos_rank_last_asof == asof:
-            log.debug(f"KronosRank | skip — already forecast asof={asof.date()}")
-            return
-
-        signals = await asyncio.to_thread(
-            run_sleeve,
-            self._store,
-            list(self._symbols),
-            long_only=(
-                False
-                if not structure_filters_enabled(self._pattern_only)
-                else (True if get_market(self._market).long_only else None)
-            ),
-            use_batch=self._kronos_batch,
-        )
-        self._kronos_rank_last_asof = asof
-        self.stats["kronos_rank_emitted"] = self.stats.get("kronos_rank_emitted", 0) + len(
-            signals
-        )
-        for signal in signals:
-            self.stats["patterns_found"] += 1
-            self._record_detection(signal)
-            candle = self._store.latest_candle(signal.symbol, "1d")
-            await self._process_signal(signal, pattern=None, candle=candle)
 
     # ── Signal pipeline ────────────────────────────────────────────────────────
     async def _process_signal(
@@ -1138,7 +1075,7 @@ class MarketScanner:
             self._append_signal_log(signal, status="rejected", reason=cooldown_reason)
             return
 
-        # Step 0 — Same entry gates the backtester applies before Kronos/volume
+        # Step 0 — Same entry gates the backtester applies before volume
         # (min_confidence + SMA200 regime). Without these, paper/live took
         # trades the "validated" backtest would have skipped. Pattern-only
         # skips confidence for all patterns, but the regime gate stays on
@@ -1196,51 +1133,15 @@ class MarketScanner:
             self._append_signal_log(signal, status="rejected", reason=risk_reason)
             return
 
-        # Collect-first: don't finish yet. Defer Kronos/volume/vision until the
+        # Collect-first: don't finish yet. Defer volume/vision until the
         # full scan has drained, then rank the pool by R:R and finish only the
-        # top-N. The Kronos rank sleeve keeps its own top-K path (skipped here).
-        if self._collect_first and not is_kronos_rank_signal(signal):
+        # top-N.
+        if self._collect_first:
             self._collect_pool.append((signal, pattern, candle))
             return
 
-        await self._kronos_then_finish(signal, pattern, candle)
-
-    async def _kronos_then_finish(
-        self, signal: TradeSignal, pattern: BasePattern | None = None, candle=None,
-    ) -> None:
-        # Step 0b — Kronos 3d confirm gate. Sequential unless Batch Kronos.
-        # Skip for pattern_kronos_rank — the forecast *is* the entry signal.
-        if self._kronos_gate and not is_kronos_rank_signal(signal):
-            if self._kronos_batch:
-                async with self._pending_kronos_lock:
-                    self._pending_kronos.append((signal, pattern, candle))
-                return
-            gate = kronos_gate_check(signal, self._store)
-            if not self._kronos_gate_ok(signal, gate):
-                return
-
         await self._finish_signal(signal, pattern, candle)
 
-    def _kronos_gate_ok(self, signal: TradeSignal, gate) -> bool:
-        if not gate.passed:
-            reason = (
-                f"Kronos 3d confirm gate vetoed this {signal.action}: {gate.reason}. "
-                f"Forecast must agree with the pattern direction and clear "
-                f"3% in 3 days (KRONOS_MIN_MOVE_PCT)."
-            )
-            log.info(
-                f"Signal REJECTED by Kronos gate — {signal.symbol} "
-                f"{signal.pattern} | {gate.reason}"
-            )
-            self.stats["signals_rejected"] += 1
-            self._append_signal_log(signal, status="rejected", reason=reason)
-            return False
-        if gate.pred_1w is not None:
-            log.info(
-                f"Kronos gate PASS | {signal.symbol} {signal.pattern} | "
-                f"pred_3d={gate.pred_1w:+.2%} in 3d | {gate.reason}"
-            )
-        return True
 
     async def _flush_collect_first(self) -> None:
         """Rank the collected chart-pattern signals by R:R; finish the top-N."""
@@ -1301,28 +1202,13 @@ class MarketScanner:
                 f"Collect-first | selected {signal.symbol} {signal.pattern} "
                 f"R:R={rr_txt}"
             )
-            await self._kronos_then_finish(signal, pattern, candle)
-
-    async def _flush_kronos_batch(self) -> None:
-        pending = self._pending_kronos
-        self._pending_kronos = []
-        if not pending:
-            return
-        signals = [item[0] for item in pending]
-        log.info(f"Kronos batch | gating {len(signals)} pattern hits")
-        results = await asyncio.to_thread(
-            kronos_gate_check_many, signals, self._store,
-        )
-        for (signal, pattern, candle), gate in zip(pending, results):
-            if not self._kronos_gate_ok(signal, gate):
-                continue
             await self._finish_signal(signal, pattern, candle)
+
 
     async def _finish_signal(
         self, signal: TradeSignal, pattern: BasePattern | None = None, candle=None,
     ) -> None:
-        # Sleeve skips volume by default — ranking is price-path based.
-        if self._volume_gate and not is_kronos_rank_signal(signal):
+        if self._volume_gate:
             vgate = volume_confirm_gate(signal, self._store)
             if not vgate.passed:
                 reason = (
@@ -1348,8 +1234,7 @@ class MarketScanner:
         # it — vision_min_indicator_confidence exists only to decide whether
         # a signal is worth spending a vision check on, not as a second
         # trade-approval gate when vision is off.
-        # Skip vision for Kronos rank sleeve (no chart pattern to confirm).
-        if settings.vision_confirmation_enabled and not is_kronos_rank_signal(signal):
+        if settings.vision_confirmation_enabled:
             if signal.confidence < settings.vision_min_indicator_confidence:
                 reason = (
                     f"Vision gate skipped the trade: confidence {signal.confidence:.2f} "
@@ -1464,7 +1349,9 @@ class MarketScanner:
     def _record_detection(self, signal: TradeSignal) -> None:
         if signal.pattern in EXCLUDED_PATTERNS:
             return
-        filename = self._pattern_files.get(signal.pattern, "?")
+        filename = self._pattern_files.get(signal.pattern)
+        if not filename:
+            filename = "patternsv2" if getattr(self, "_patterns_v2", False) else "?"
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         row = (
             f"| {ts} | `{signal.pattern}` | {filename} | "
@@ -1474,12 +1361,37 @@ class MarketScanner:
         with PATTERNS_DETECTED_FILE.open("a", encoding="utf-8") as f:
             f.write(row)
 
+    def _analyze_patterns_v2(self, snapshot: MarketSnapshot) -> tuple[int, list[TradeSignal]]:
+        """Breakouts from technical-pattern-detector on the current bar only."""
+        from patterns_v2.signals import MIN_BARS, detect_trade_signals
+
+        symbol, timeframe = snapshot.symbol, snapshot.timeframe
+        if self._store.available(symbol, timeframe) < MIN_BARS:
+            return 0, []
+        df = self._store.get_df(symbol, timeframe, min_bars=MIN_BARS)
+        if df is None:
+            return 0, []
+        try:
+            hits = detect_trade_signals(
+                df, symbol=symbol, timeframe=timeframe, latest_bar_only=True,
+            )
+        except Exception:
+            log.exception(f"Scan | patternsv2 {symbol} {timeframe}")
+            return 1, []
+        return 1, hits
+
     def _discover_patterns(self) -> None:
         if self._indicators_only:
             from indicators import discover as discover_indicators
             self._version_set = {}
             self._patterns = discover_indicators()
             self._pattern_files = {p.name: "indicator" for p in self._patterns}
+            return
+        if getattr(self, "_patterns_v2", False):
+            from patterns_v2.signals import Patternsv2Scan
+            self._version_set = {}
+            self._patterns = [Patternsv2Scan()]
+            self._pattern_files = {}
             return
         from core.pattern_loader import discover
         from core.pattern_versions import PatternVersions

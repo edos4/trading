@@ -124,16 +124,6 @@ REPLAY_PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
         "check", False, None,
     ),
     (
-        "kronos_gate", "Kronos gate",
-        "Require the Kronos forecast to agree on direction.",
-        "check", False, None,
-    ),
-    (
-        "kronos_rank", "Kronos rank",
-        "Enable the cross-sectional Kronos ranked sleeve.",
-        "check", False, None,
-    ),
-    (
         "collect_first", "Collect first top N",
         "Collect signals and keep the best N by reward:risk. 0 = disabled.",
         "spin", (0.0, 0.0, 50.0, 1.0), None,
@@ -271,8 +261,6 @@ def settings_from_values(values: dict[str, Any]) -> BacktestSettings:
         slippage_pct=float(values.get("slippage_pct") or 0.0),
         pattern_only=bool(values.get("pattern_only")),
         volume_gate=bool(values.get("volume_gate")),
-        kronos_gate=bool(values.get("kronos_gate")),
-        kronos_rank=bool(values.get("kronos_rank")),
         collect_first=int(float(values.get("collect_first") or 0)),
         end_policy=end_policy,
     )
@@ -298,8 +286,6 @@ def effective_parameters(settings: BacktestSettings, extra: dict | None = None) 
         ("slippage_pct", execution.slippage_pct),
         ("pattern_only", execution.pattern_only),
         ("volume_gate", execution.volume_gate),
-        ("kronos_gate", execution.kronos_gate),
-        ("kronos_rank", execution.kronos_rank),
         ("collect_first", execution.collect_first),
         ("end_policy", execution.end_policy),
         ("market", settings.market),

@@ -18,7 +18,7 @@ def settings():
         execution=ExecutionSettings(
             initial_capital=100000, sizing_mode="fixed-notional", position_notional=10000,
             txn_cost_pct=0.001, slippage_pct=0, pattern_only=True, volume_gate=False,
-            kronos_gate=False, kronos_rank=False, collect_first=0, end_policy="keep-open",
+            collect_first=0, end_policy="keep-open",
             parameters=(Parameter(name="session_timezone", value="America/New_York"),),
         ),
     )

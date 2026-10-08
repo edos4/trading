@@ -13,7 +13,6 @@ double-top ruleset, `patterns/_rounding.py` ≈ `backtest_rb_v3.cjs`, etc.). Wha
 | Data | offline, one JSON/symbol, daily bars, skip `<100` bars | live fetch (`33ai.edos.uk`/Yahoo) + 6h-TTL cache |
 | Sizing | flat **$10,000** per trade, independent, no compounding | risk-based (0.75% of 100k / stop distance) |
 | Portfolio | none — every trade stands alone | compounding capital ledger, max-concurrent cap, MTM equity curve |
-| Entry gates | none beyond the pattern's own conditions | min-confidence, Kronos ML gate, SMA200 regime, post-loss cooldown, min-share-price, long-only, R:R reject |
 | Exit | fixed per-pattern ladder: hard stop → target → reclaim → trail → time → data_end | that ladder **plus** engine overlays: `breakeven_stop`, `profit_lock`, `first_bar_invalidation`, `dead_trade_exit`, synthetic ATR stop |
 | Metrics | trades / W-L / win-rate% / avg-pnl% / total$ / worst$ / exit histogram (+ PF, ROI) | Sharpe, max drawdown, R multiples, expectancy, account-weighted % |
 | Output | `<pattern>_results.json` (`meta`/`summary`/`trades`/`blocked`/`filtered`) + console block | `backtest_results_<ts>.json` via `BacktestResult.to_dict()` |
@@ -26,8 +25,7 @@ strength to preserve — the refactor swaps the core's *internals*, and paper in
 documented per-pattern numbers, on the bot's own offline data cache.
 
 ### User decisions (already confirmed)
-1. **Strip entirely** every engine overlay — no min-confidence, Kronos, regime, cooldown, ATR stop
-   floor, breakeven, profit-lock, first-bar-invalidation, dead-trade, R:R reject, min-share-price,
+1. **Drop engine overlays:** floor, breakeven, profit-lock, first-bar-invalidation, dead-trade, R:R reject, min-share-price,
    long-only. Engine = pattern conditions + pattern exit ladder only.
 2. **Flat $10k independent trades.** No risk sizing, no capital ledger, no equity curve, no
    Sharpe/drawdown. Metrics = the `.cjs` `summarize()` set + profit factor.
@@ -93,7 +91,6 @@ documented per-pattern numbers, on the bot's own offline data cache.
 `_build_portfolio_equity_curve` (:572), `_drawdown_pct`, `_realized_daily_returns`;
 `_enforce_max_open_positions` (:1536); `_profit_take_level` / `_profit_lock_level` /
 `_resolve_profit_lock_trigger_pct`; the breakeven / profit-lock / first-bar-invalidation /
-dead-trade blocks inside `_check_exit` (:1028–1128); Kronos + volume-gate + min-confidence +
 regime + cooldown + min-share-price + long-only checks in `_core_backtest_symbol` (:1773–1847).
 
 **New `_check_exit(candle, position, bar_idx) -> (price|None, reason)`** — no `ENGINE` reads,
@@ -245,15 +242,9 @@ Because `PaperAccount` already imports the core functions, the new ladder is inh
 - **`core/scanner.py`** — `_process_signal` (:948) and `_finish_signal` (:1183) collapse to
   "for each new bar, for each pattern, `analyze()` → if signal, `_apply_notional_sizing` →
   `paper.open_position()`". Delete the whole gate gauntlet, the volume-gate block, the vision
-  block, `_kronos_then_finish` / `_run_kronos_rank_sleeve` / `_pending_kronos*`, and collect-first
   (`_collect_pool` / `_flush_collect_first` — `signal_reward_risk` is deleted with
-  `engine_defaults`). `MarketScanner.__init__` loses `kronos_gate` / `kronos_rank` /
   `volume_gate` / `collect_first*` / `pattern_only`.
 
-### 6. Kronos & vision — sever, keep on disk
-
-Delete every Kronos import/call from `core/backtester.py` and `core/scanner.py`; **keep**
-`core/kronos_*.py` and any standalone `main.py` kronos subcommand. `analysis/vision_checker.py`
 stays; delete only the `settings.vision_confirmation_enabled` block + `_run_vision_check` call
 from the scanner. Also sever `analysis/price_volume.volume_confirm_gate` from the money path
 (keep `compute_volume_metrics` only if the `rvol`/`obv_slope` JSON columns are still wanted —
@@ -263,7 +254,6 @@ otherwise drop those fields from `BacktestTrade`). Check `core/paper_books.py` /
 ### 7. Callers & tests
 
 - **`main.py`** — `run_backtest` / `run_paper` / `run_scanner` / `_parse_args`: drop
-  `--kronos-gate`, `--volume-gate`, `--volume-gate-compare`, `--pattern-only`,
   `--collect-first*`; add `--barcache DIR`, `--universe NAME`, `--txn-cost FLOAT`. Delete the
   `volume_gate_compare` A/B block (`main.py:467–528`).
 - **`ui/backtest_dialog.py PARAMS`** (:44) + **`web/jobs.py`** — remove every risk/gate/overlay
@@ -271,7 +261,6 @@ otherwise drop those fields from `BacktestTrade`). Check `core/paper_books.py` /
   add `barcache_dir`, `txn_cost_pct`. `web/jobs.py` iterates `PARAMS` generically — drop the
   hardcoded `"hard_stop_percentage"` at `web/jobs.py:96`.
 - **Tests** — delete `core/test_risk_gates.py`, `core/test_engine_defaults.py`,
-  `core/test_volume_gate.py`, `core/test_pattern_only.py`, `core/test_kronos_*` (unless the
   standalone CLI is kept). Rewrite `core/test_execution_accounting.py` (flat $10k:
   `qty == floor(10000/entry)` or fractional; `pnl_usd == shares*(entry−exit)` short /
   `shares*(exit−entry)` long; txn 0; no ledger) and `core/test_paper_trader.py` (drop
@@ -294,7 +283,6 @@ otherwise drop those fields from `BacktestTrade`). Check `core/paper_books.py` /
    `barcache_dir`.
 6. Pattern touch-ups one at a time — each followed by its single-pattern backtest over
    `data/barcache` and a diff vs the `.cjs` number.
-7. Paper trader → scanner → Kronos/vision sever.
 8. Callers: `main.py`, `ui/backtest_dialog.py`, `web/jobs.py`.
 9. Tests: delete / rewrite / add.
 10. Verification pass.
@@ -309,7 +297,6 @@ otherwise drop those fields from `BacktestTrade`). Check `core/paper_books.py` /
 | `core/backtester.py` | `_check_exit` (:995), `_core_backtest_symbol` (:1697), `_apply_sizing` (:1433), `_open_trade`/`_close_trade` (:1272/:1382), `BacktestResult` (:152), `Backtester.run` (:2134); delete `apply_risk_gates` / `_apply_capital_ledger` / `_enforce_max_open_positions` / `_build_portfolio_equity_curve` |
 | `core/engine_defaults.py` | collapse `EngineDefaults`→`EngineConfig`; delete all gate helpers + `*_kwargs` |
 | `core/paper_trader.py` | `_open_position_locked` (:481), `_on_bar_locked` (:689), `to_result` (:837) |
-| `core/scanner.py` | `_process_signal` (:948), `_finish_signal` (:1183); delete gauntlet + Kronos + collect-first |
 | `patterns/base_pattern.py` | `TradeSignal` — new `stop_loss_pct_cap` / `reclaim_exit` / `reclaim_lower_rail` |
 | `patterns/002,004,005,006,007,008,009,010_*.py` | exit-field reconciliation; RSI→Wilder for 002/006; right-margin guard; fix `protective_exit_on_close` (004/005) |
 | `patterns/_channels.py`, `_rounding.py`, `_rules.py` | pass `rsi_wilder`; `earnings_blackout` reads the new earnings cache |
@@ -385,7 +372,6 @@ Branch `refactor/cjs-backtest-methodology`.
 - `core/paper_trader.py` — notional sizing, stripped portfolio caps / daily-loss / gross
   exposure / cash-affordability / slippage-default / R:R / breakeven / profit-lock;
   `to_result()` emits the `.cjs` block; tolerant load for old ledgers.
-- `core/scanner.py` — gate gauntlet + Kronos + collect-first + vision severed; signal path
   is `analyze() → _apply_notional_sizing → paper.open_position`.
 - `main.py` — `run_backtest` rewritten (`--barcache` / `--universe` / `--txn-cost`; per-
   pattern universe default); legacy A/B path removed.
@@ -395,7 +381,6 @@ Branch `refactor/cjs-backtest-methodology`.
   006 → C21 reclaim + C22/C23 filters + C24 dual stop + offline earnings cache; 008 → RS
   invalidation stop + notional qty; 010 → 60-bar timeout. 009 already matched.
 - Tests: obsolete suites deleted (`test_risk_gates`, `test_engine_defaults`,
-  `test_volume_gate`, `test_pattern_only`, `test_kronos_gate`, `test_kronos_rank_sleeve`);
   `test_execution_accounting` rewritten; obsolete cases dropped from `test_paper_trader` /
   `test_market` / `test_scanner_deferred_entry` / `test_services_patterns`.
   **211 pass**; remaining failures are pre-existing/environmental (`web/` needs the MCP

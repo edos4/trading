@@ -53,8 +53,6 @@ class MarketProfile:
     breakeven_trigger_pct: float | None
     breakeven_buffer_pct: float
     long_only: bool
-    kronos_gate_default: bool
-    kronos_rank_default: bool
     scan_interval_seconds: int
     universe_order: str
     default_n_symbols: int
@@ -80,8 +78,6 @@ US = MarketProfile(
     breakeven_trigger_pct=0.06,
     breakeven_buffer_pct=0.0015,
     long_only=False,
-    kronos_gate_default=True,
-    kronos_rank_default=False,
     scan_interval_seconds=3600,
     universe_order="value",
     default_n_symbols=50,
@@ -107,8 +103,6 @@ PH = MarketProfile(
     breakeven_trigger_pct=0.05,  # skip +3% flicker (PH paper: PNB 003 in 3 bars)
     breakeven_buffer_pct=0.008,  # ≥ RT cost so BE is a ₱ scratch, not −0.6%
     long_only=True,
-    kronos_gate_default=False,
-    kronos_rank_default=False,
     scan_interval_seconds=300,
     universe_order="Value.Traded",
     default_n_symbols=30,
@@ -584,9 +578,6 @@ def markets_payload() -> list[dict]:
             "breakeven_trigger_pct": p.breakeven_trigger_pct,
             "breakeven_buffer_pct": p.breakeven_buffer_pct,
             "account_value": p.paper_initial_capital,
-            "kronos_gate": p.kronos_gate_default,
-            "kronos_rank": p.kronos_rank_default,
-            "kronos_batch": False,
             "long_only": p.long_only,
             "scan_interval_seconds": p.scan_interval_seconds,
         })
