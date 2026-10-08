@@ -16,7 +16,6 @@ after reload job label: job 4f84740e
 page errors: none
 BROWSER-SMOKE-OK
 
-# Covered: auth redirect, the Patterns nav beside Kronos, catalog render,
 # version history, source view, a real submit through the browser, live progress
 # to a terminal state, and reload reconnection to the durable job id. No client
 # page errors. Default selection and deletion are asserted by the API/desktop

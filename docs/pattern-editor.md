@@ -4,8 +4,6 @@ Status: proposed. This document plans the implementation; it does not change run
 
 ## Goal
 
-Read patterns exclusively from PostgreSQL, initially seeded byte-for-byte from the repository’s file patterns, maintain immutable versions with a selectable default, and provide a **Patterns** editor beside **Kronos**. A user selects a pattern/version, describes a change in a textbox, and presses **Submit**. AI edits that pattern, creates a version, and automatically backtests it using historical streaming behavior shared with paper trading. Both `python main.py --web` and `python main.py --ui` must support stream backtests.
-
 ## Existing code and gaps
 
 - `core/pattern_edit_store.py` currently implements a SQLite registry at `data/pattern_edit/registry.sqlite3`, with source/artifact bytes under `pattern_versions/`. This is legacy implementation to replace, not the proposed storage backend. The new implementation must not create, read, or fall back to SQLite.
@@ -16,13 +14,11 @@ Read patterns exclusively from PostgreSQL, initially seeded byte-for-byte from t
 - `core/backtester.py` is an offline daily-bar backtester. `web/jobs.py` and `ui/backtest_dialog.py` expose cache-based settings, without a historical stream mode. Web form definitions currently depend on the desktop dialog module.
 - `data/stream_client.py`, `data/stream_server.py`, `core/scanner.py`, and `core/paper_trader.py` contain the historical replay and paper execution pieces to reuse.
 - `tests/test_backtest_paper_parity.py` checks selected fill scenarios; it does not establish full stream/scanner parity or absence of future-data exposure.
-- Web navigation lives in `web/templates/base.html`. Desktop `ui/app.py` currently opens Kronos using a toolbar button, rather than a tab.
 
 ## Product decisions
 
 Items 1, 2, 7, 8, and the provider/model choice in item 6 are confirmed by the user. Other lifecycle details are proposed implementation defaults.
 
-1. Provide a web **Patterns** tab immediately beside **Kronos**, plus a desktop **Patterns** toolbar button/dialog beside Kronos, following the existing desktop navigation.
 2. Automatically backtest each valid generated version using a saved, visible preset. Require the user to configure a preset before the first submission; do not silently choose a date range or universe.
 3. Never automatically make an AI version the default. The user explicitly selects **Set default** after validation and a successful backtest. A completed backtest with zero trades is valid but clearly labeled; profitability is not an automatic promotion criterion.
 4. **Delete version** archives it from normal selection while preserving historical results and provenance. Deleting the default requires choosing a replacement in the same transaction. Keep at least one usable version. Physical deletion/garbage collection is outside the initial scope.

@@ -214,7 +214,7 @@ def _yahoo_chart_payload(
     return None
 
 # interval, range, max bars to keep
-# Daily uses 2y so Kronos gate can take LOOKBACK=400 (1y ≈ 252 bars is too short).
+# Daily uses 2y so pattern lookback has room (1y ≈ 252 bars is too short).
 _CHART_SPECS: dict[str, tuple[str, str, int]] = {
     "1d": ("1d", "2y", 512),
     "1W": ("1wk", "5y", 65),

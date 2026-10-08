@@ -272,9 +272,6 @@ class PaperBook:
             "long_only": profile.long_only,
             "stream_blocked_by": stream_blocked_by,
             "defaults": {
-                "kronos_gate": profile.kronos_gate_default,
-                "kronos_rank": profile.kronos_rank_default,
-                "kronos_batch": settings.kronos_batch_enabled,
                 "volume_gate": settings.volume_gate_enabled,
                 "n_symbols": profile.default_n_symbols,
             },
@@ -469,12 +466,10 @@ class PaperBook:
         *,
         extra_symbols: str = "",
         use_stream: bool,
-        kronos_gate: bool,
-        kronos_rank: bool,
-        kronos_batch: bool = False,
         volume_gate: bool,
         pattern_only: bool = False,
         indicators_only: bool = False,
+        patterns_v2: bool = False,
         collect_first: bool = False,
         collect_first_top_n: int = 4,
         stream_start: Optional[str] = None,
@@ -489,9 +484,9 @@ class PaperBook:
         self._thread = threading.Thread(
             target=self._run_thread,
             args=(
-                n_symbols, extra_symbols, use_stream, kronos_gate, kronos_rank,
-                kronos_batch, volume_gate, pattern_only, indicators_only,
-                collect_first, collect_first_top_n, stream_start,
+                n_symbols, extra_symbols, use_stream, volume_gate, pattern_only,
+                indicators_only, patterns_v2, collect_first, collect_first_top_n,
+                stream_start,
             ),
             name=f"paper-{self.market}",
             daemon=True,
@@ -664,9 +659,6 @@ class PaperBook:
         n_symbols: int,
         extra_symbols: str,
         use_stream: bool,
-        kronos_gate: bool,
-        kronos_rank: bool,
-        kronos_batch: bool,
         volume_gate: bool,
         pattern_only: bool,
         indicators_only: bool,
@@ -743,9 +735,6 @@ class PaperBook:
                 scan_interval_seconds=(
                     settings.papertrade_stream_interval_seconds if use_stream else profile.scan_interval_seconds
                 ),
-                kronos_gate=kronos_gate,
-                kronos_rank=kronos_rank,
-                kronos_batch=kronos_batch,
                 volume_gate=volume_gate,
                 pattern_only=pattern_only and not indicators_only,
                 indicators_only=indicators_only,
@@ -771,9 +760,6 @@ class PaperBook:
             self.status = (
                 f"Running — {profile.label}, {len(symbols)} symbols, {pace}"
                 f"{stream_note}"
-                f", Kronos gate={'ON' if kronos_gate else 'OFF'}"
-                f", Kronos rank={'ON' if kronos_rank else 'OFF'}"
-                f", Kronos batch={'ON' if kronos_batch else 'OFF'}"
                 f", Volume gate={'ON' if volume_gate else 'OFF'}"
                 f", Pattern-only={'ON' if pattern_only and not indicators_only else 'OFF'}"
                 f", Indicators-only={'ON' if indicators_only else 'OFF'}"
@@ -870,9 +856,6 @@ class PaperBookManager:
         *,
         extra_symbols: str = "",
         use_stream: bool,
-        kronos_gate: bool,
-        kronos_rank: bool,
-        kronos_batch: bool = False,
         volume_gate: bool,
         pattern_only: bool = False,
         indicators_only: bool = False,
@@ -892,9 +875,6 @@ class PaperBookManager:
             n_symbols,
             extra_symbols=extra_symbols,
             use_stream=use_stream,
-            kronos_gate=kronos_gate,
-            kronos_rank=kronos_rank,
-            kronos_batch=kronos_batch,
             volume_gate=volume_gate,
             pattern_only=pattern_only,
             indicators_only=indicators_only,
@@ -915,9 +895,6 @@ class PaperBookManager:
                 int(payload.get("n_symbols") or get_market(mid).default_n_symbols),
                 extra_symbols=payload.get("extra_symbols") or "",
                 use_stream=bool(payload.get("use_stream")),
-                kronos_gate=bool(payload.get("kronos_gate")),
-                kronos_rank=bool(payload.get("kronos_rank")),
-                kronos_batch=bool(payload.get("kronos_batch")),
                 volume_gate=bool(payload.get("volume_gate")),
                 pattern_only=bool(payload.get("pattern_only")),
                 indicators_only=bool(payload.get("indicators_only")),

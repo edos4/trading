@@ -7,7 +7,7 @@
 #   ./install.sh --no-system          # skip apt (no sudo / already installed)
 #   ./install.sh --no-db              # skip postgres create/start
 #
-# Idempotent: safe to re-run. Heavy/optional bits (Kronos weights, IB TWS)
+# Idempotent: safe to re-run. Heavy/optional bits (IB TWS)
 # are NOT installed by default — see notes at the end.
 set -euo pipefail
 
@@ -162,11 +162,6 @@ try:
     print(f"    OK   tkinter {tkinter.TkVersion} (--ui will work)")
 except Exception as exc:
     print(f"    NOTE tkinter unavailable ({exc}) — --web/--paper/--backtest still work; install python3-tk for --ui")
-try:
-    import torch
-    print(f"    OK   torch {torch.__version__} (Kronos stays OFF unless ENABLE_KRONOS=true)")
-except Exception:
-    print("    NOTE torch unavailable — Kronos features disabled")
 sys.exit(0)
 EOF
 
@@ -179,8 +174,6 @@ echo "     Web dashboard:                  ./run_web.sh   # or: .venv/bin/python
 echo "     Desktop explorer (needs X):     ./run_ui.sh    # needs python3-tk"
 echo
 echo "Not installed by design (heavy/optional):"
-echo "  - Kronos weights (~/Kronos): git clone https://github.com/shiyu-coder/Kronos.git ~/Kronos"
-echo "    + cache weights per README 'Kronos Confirm Gate'. Keep ENABLE_KRONOS=false for speed."
 echo "  - IB TWS/Gateway: not required (execution is disabled in core/scanner.py). For live,"
 echo "    prefer IB Gateway over TWS on Lubuntu (much lighter), Java 8+."
 echo "  - Playwright browsers: re-run as ./install.sh --with-playwright if you need them."

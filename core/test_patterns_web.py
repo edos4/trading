@@ -71,8 +71,6 @@ def patterns_web(published_pattern_catalog, edit_doubles, sandbox_double):
             mock.web_ui_secret_key = "test-secret-key"
             mock.web_ui_https = False
             mock.web_ui_session_hours = 12
-            mock.enable_kronos = True
-            mock.kronos_gate_enabled = True
             mock.volume_gate_enabled = False
             mock.papertrade_stream_start_date = ""
         try:
@@ -200,13 +198,13 @@ def test_patterns_endpoints_require_auth():
             item.stop()
 
 
-def test_patterns_page_renders_beside_kronos(patterns_web):
+def test_patterns_page_renders(patterns_web):
     client, *_ = patterns_web
     page = client.get("/patterns")
     assert page.status_code == 200
     assert "pat-submit" in page.text and "pat-instruction" in page.text
     nav = page.text.split("</nav>")[0]
-    assert nav.index('href="/kronos"') < nav.index('href="/patterns"')
+    assert 'href="/patterns"' in nav
 
 
 # ── reads ────────────────────────────────────────────────────────────────

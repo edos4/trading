@@ -606,18 +606,6 @@ progress::-moz-progress-bar { background: var(--accent); border-radius: 999px; }
 .book-lamps [data-book="us"].on { color: var(--accent); }
 .book-lamps [data-book="ph"].on { color: var(--ph); }
 
-.kronos-chart-panel {
-  padding: 0;
-  overflow: hidden;
-  background: #131722;
-  min-height: 620px;
-  display: flex;
-  flex-direction: column;
-}
-.kronos-chart-host {
-  min-height: 540px;
-  height: min(70vh, 720px);
-}
 .tv-ohlc.gain { color: #26a69a; }
 .tv-ohlc.loss { color: #ef5350; }
 
@@ -661,8 +649,6 @@ img, video, canvas, pre, table { max-width: 100%; }
   .session-strip, .replay-bar { position: static; }
   .clock-pair { gap: 0.75rem; }
   .book-head, .blotter-head { flex-wrap: wrap; }
-  .kronos-chart-panel { min-height: 70vh; }
-  .kronos-chart-host { min-height: 60vh; }
   .login-main { padding: 1rem; }
   .login-card { padding: 1.15rem; }
 }

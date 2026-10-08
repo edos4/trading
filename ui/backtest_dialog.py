@@ -101,10 +101,6 @@ class BacktestDialog:
             row += 2
         if "market" in self._vars:
             self._vars["market"].trace_add("write", lambda *_: self._apply_market_defaults())
-        for key in ("kronos_gate", "kronos_rank"):
-            if key in self._vars:
-                self._vars[key].trace_add("write", lambda *_: self._sync_batch_kronos())
-        self._sync_batch_kronos()
         if "pattern_only" in self._vars:
             self._vars["pattern_only"].trace_add(
                 "write", lambda *_: self._sync_pattern_only(),
@@ -125,14 +121,13 @@ class BacktestDialog:
         for c in range(10):
             frame.columnconfigure(c, weight=0, pad=8)
 
-        hide_kronos = () if settings.enable_kronos else ("kronos_gate", "kronos_rank")
         entries = [
             ("mode", "Mode",
              "offline replays the full tape; historical-stream replays session-by-session like paper.",
              "combo", "offline", ["offline", "historical-stream"]),
         ] + [
             e for e in REPLAY_PARAMS
-            if e[0] not in self.STREAM_SKIP and e[0] not in hide_kronos
+            if e[0] not in self.STREAM_SKIP
         ]
         self._stream_entries = entries
         row = 0
@@ -343,19 +338,6 @@ class BacktestDialog:
         self._stream_run_btn.config(state=tk.NORMAL)
         self._stream_cancel_btn.config(state=tk.DISABLED)
 
-    def _sync_batch_kronos(self) -> None:
-        gate = bool(self._vars.get("kronos_gate") and self._vars["kronos_gate"].get())
-        rank = bool(self._vars.get("kronos_rank") and self._vars["kronos_rank"].get())
-        widget = getattr(self, "_batch_kronos_widget", None)
-        var = self._vars.get("kronos_batch")
-        if widget is None or var is None:
-            return
-        if gate or rank:
-            widget.configure(state=tk.NORMAL)
-        else:
-            var.set(False)
-            widget.configure(state=tk.DISABLED)
-
     def _sync_pattern_only(self) -> None:
         on = bool(self._vars.get("pattern_only") and self._vars["pattern_only"].get())
         state = tk.DISABLED if on else tk.NORMAL
@@ -368,8 +350,6 @@ class BacktestDialog:
             "n_symbols": profile.default_n_symbols,
             "txn_cost_pct": profile.txn_cost_pct,
             "account_value": profile.paper_initial_capital,
-            "kronos_gate": profile.kronos_gate_default,
-            "kronos_rank": profile.kronos_rank_default,
             "breakeven_trigger_pct": profile.breakeven_trigger_pct or 0.0,
             "breakeven_buffer_pct": profile.breakeven_buffer_pct,
         }
@@ -401,8 +381,6 @@ class BacktestDialog:
             var = tk.BooleanVar(value=default)
             cb = ttk.Checkbutton(parent, variable=var)
             cb.grid(row=grid_row, column=col + 1, sticky=tk.W, padx=(0, 8))
-            if key == "kronos_batch":
-                self._batch_kronos_widget = cb
             if key == "regime_filter":
                 self._structure_widgets[key] = cb
         else:

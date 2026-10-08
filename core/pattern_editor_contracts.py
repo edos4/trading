@@ -165,8 +165,6 @@ class ExecutionSettings(Contract):
     slippage_pct: Annotated[float, Field(ge=0, lt=1)]
     pattern_only: bool
     volume_gate: bool
-    kronos_gate: bool
-    kronos_rank: bool
     collect_first: NonNegativeInt
     end_policy: Literal["keep-open", "force-close", "offline-legacy"]
     # Freeze all additional engine/risk/gate settings; never reread globals mid-run.

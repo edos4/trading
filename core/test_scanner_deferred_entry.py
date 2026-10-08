@@ -98,7 +98,7 @@ def _demo_body():
     paper = PaperAccount(initial_capital=100_000.0, slippage_pct=0.0)
     scanner = MarketScanner(
         symbols=["TEST"], paper_account=paper, data_feed=feed,
-        kronos_gate=False, volume_gate=False, kronos_rank=False,
+        volume_gate=False,
     )
     scanner._patterns = [_FirstBarBuyPattern()]
 
@@ -153,7 +153,7 @@ def test_scanner_drops_no_data_but_retries_history_unavailable():
 
     dead = MarketScanner(
         symbols=["EXPH"], data_feed=_SkipFeed("no_data"),
-        kronos_gate=False, volume_gate=False, kronos_rank=False,
+        volume_gate=False,
     )
     dead._patterns = [_FirstBarBuyPattern()]
     asyncio.run(dead._scan_all())
@@ -161,7 +161,7 @@ def test_scanner_drops_no_data_but_retries_history_unavailable():
 
     busy = MarketScanner(
         symbols=["KNSL"], data_feed=_SkipFeed("history_unavailable"),
-        kronos_gate=False, volume_gate=False, kronos_rank=False,
+        volume_gate=False,
     )
     busy._patterns = [_FirstBarBuyPattern()]
     asyncio.run(busy._scan_all())
@@ -189,7 +189,7 @@ def test_scanner_batch_fetch_snapshots_marks_no_data_dead():
 
     scanner = MarketScanner(
         symbols=["EXPH", "GYGC"], data_feed=_BatchSkipFeed(),
-        kronos_gate=False, volume_gate=False, kronos_rank=False,
+        volume_gate=False,
     )
     scanner._patterns = [_FirstBarBuyPattern()]
     asyncio.run(scanner._scan_all())
@@ -200,7 +200,7 @@ def test_scanner_batch_fetch_snapshots_marks_no_data_dead():
 def test_scan_interval_zero_is_kept():
     scanner = MarketScanner(
         symbols=["AAPL"], scan_interval_seconds=0,
-        kronos_gate=False, volume_gate=False, kronos_rank=False, market="us",
+        volume_gate=False, market="us",
     )
     assert scanner._scan_interval == 0
     scanner.stats["scan_duration_s"] = 12.0
@@ -210,7 +210,7 @@ def test_scan_interval_zero_is_kept():
 def test_duration_days_stops_when_sim_days_reached():
     scanner = MarketScanner(
         symbols=["AAPL"], duration_days=2,
-        kronos_gate=False, volume_gate=False, kronos_rank=False, market="us",
+        volume_gate=False, market="us",
     )
     assert scanner._duration_days == 2
     scanner._running = True
@@ -225,7 +225,7 @@ def test_duration_days_stops_when_sim_days_reached():
 def test_duration_days_unlimited_never_stops():
     scanner = MarketScanner(
         symbols=["AAPL"],
-        kronos_gate=False, volume_gate=False, kronos_rank=False, market="us",
+        volume_gate=False, market="us",
     )
     assert scanner._duration_days is None
     scanner._running = True
@@ -239,7 +239,7 @@ def test_run_stops_after_duration_days():
 
     scanner = MarketScanner(
         symbols=["AAPL"], duration_days=3, scan_interval_seconds=0,
-        kronos_gate=False, volume_gate=False, kronos_rank=False, market="us",
+        volume_gate=False, market="us",
     )
     scans = {"n": 0}
 

@@ -23,7 +23,6 @@ frontend resolves patterns, validates presets, or decides eligibility itself.
 ## Web tab (P09)
 
 - `web/templates/patterns.html` + `web/static/patterns.js`; a **Patterns** link
-  sits immediately beside **Kronos** in `web/templates/base.html`.
 - Authenticated endpoints in `web/app.py`:
   - `GET /patterns`
   - `GET /api/patterns`, `GET /api/patterns/{pattern_id}/versions`
@@ -62,7 +61,6 @@ frontend resolves patterns, validates presets, or decides eligibility itself.
 ## Desktop dialog (P10)
 
 - `ui/patterns_dialog.py` is opened by the **Patterns** toolbar button beside
-  **Kronos** in `ui/app.py`. It uses the same `PatternEditor` facade and the same
   `edit_request_from_values` builder, so both frontends enforce identical rules.
 - It shows the same history/badges, source/documentation/diff, saved-preset
   selector with the replay settings, the same provider/provider-balance line,

@@ -62,7 +62,6 @@ bar on a session is simply skipped; unequal histories are normal.
 
 The replay applies the frozen `ExecutionSettings`: capital, fixed-notional
 sizing, transaction costs, slippage (through the shared fill math), the version
-set, and the volume gate when enabled. `kronos_gate`, `kronos_rank`,
 `collect_first` and non-fixed sizing modes are rejected at submission rather
 than silently ignored.
 

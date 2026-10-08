@@ -154,7 +154,6 @@ never a silent file fallback.
 
 ```bash
 .venv/bin/python main.py --web     # Patterns tab at /patterns (authenticated)
-.venv/bin/python main.py --ui      # Patterns toolbar button beside Kronos
 ```
 
 Both launch modes must be able to run and cancel a historical stream backtest

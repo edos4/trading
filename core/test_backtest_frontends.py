@@ -52,7 +52,6 @@ def web_env(published_pattern_catalog, monkeypatch):
         mock.web_ui_secret_key = "test-secret-key"
         mock.web_ui_https = False
         mock.web_ui_session_hours = 12
-        mock.kronos_gate_enabled = True
         mock.volume_gate_enabled = False
     from web.app import create_app
 
@@ -172,7 +171,7 @@ def test_web_rejects_malformed_and_unsupported_settings(web_env):
     bad = _body(service, rows, start_date=None)
     assert client.post("/api/backtest/runs", json=bad).status_code >= 400
     # unsupported gate combination is rejected by shared validation
-    assert client.post("/api/backtest/runs", json=_body(service, rows, kronos_gate=True)).status_code == 400
+    assert client.post("/api/backtest/runs", json=_body(service, rows, collect_first=4)).status_code == 400
     # unknown version is rejected
     unknown = _body(service, rows, versions={PATTERN: "does-not-exist"})
     assert client.post("/api/backtest/runs", json=unknown).status_code == 400

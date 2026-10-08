@@ -20,7 +20,7 @@
     "session_count", "warmup_bars", "initial_capital", "position_notional",
     "txn_cost_pct", "slippage_pct", "collect_first",
   ]);
-  const CHECK_KEYS = ["pattern_only", "volume_gate", "kronos_gate", "kronos_rank"];
+  const CHECK_KEYS = ["pattern_only", "volume_gate"];
   const TERMINAL = ["completed", "failed", "cancelled", "blocked", "interrupted"];
 
   function esc(value) {

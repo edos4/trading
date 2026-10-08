@@ -55,7 +55,6 @@ record the actual rollout status truthfully.
 
 - [ ] `main.py --web`: `/health` 200; unauthenticated `/patterns` and
       `/api/patterns` return 401; login works; `/patterns` renders with the nav
-      beside Kronos; catalog lists ten patterns with the imported defaults.
 - [ ] `main.py --ui`: the Patterns toolbar opens the dialog; catalog/versions
       load; the desktop is responsive during a run.
 - [ ] Start, inspect, cancel and revisit a historical stream backtest from each

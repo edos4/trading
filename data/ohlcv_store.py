@@ -17,7 +17,7 @@ import pandas as pd
 from data.tv_client import OHLCVCandle, MarketSnapshot
 
 # How many candles to keep in memory per symbol/timeframe
-# Sized for Kronos gate LOOKBACK=400 (+ headroom) and TV history ≤512.
+# Sized for TV history ≤512.
 DEFAULT_WINDOW = 512
 
 

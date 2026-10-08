@@ -15,9 +15,9 @@ TV_DIM = "#787b86"
 TV_UP = "#26a69a"
 TV_DOWN = "#ef5350"
 TV_RSI = "#7e57c2"
-TV_KRONOS = "#ffeb3b"
-TV_KRONOS_UP = "#ffeb3b"
-TV_KRONOS_DOWN = "#f9a825"
+FORECAST = "#ffeb3b"
+FORECAST_UP = "#ffeb3b"
+FORECAST_DOWN = "#f9a825"
 TV_CROSS = "#9598a1"
 TV_DRAW = "#42a5f5"      # manual trendlines / vertical markers
 TV_TOOL = "#1e222d"      # toolbar button face
@@ -64,7 +64,7 @@ class TradingViewChart(tk.Frame):
         self._levels: list[dict] = []
         self._markers: dict[str, list[dict]] = {}
         self._forecast: dict[str, float] = {}
-        self._forecast_color = TV_KRONOS
+        self._forecast_color = FORECAST
         self._start = 0
         self._visible = 120
         self._hover: Optional[int] = None
@@ -265,7 +265,7 @@ class TradingViewChart(tk.Frame):
             row["time"]: row["value"] for row in payload.get("forecast") or []
             if row.get("time") is not None and row.get("value") is not None
         }
-        self._forecast_color = payload.get("forecast_color") or TV_KRONOS
+        self._forecast_color = payload.get("forecast_color") or FORECAST
         n = len(self._candles)
         extra = len(payload.get("pred_candles") or [])
         self._visible = min(max(n, 2), max(180, extra + 80))
@@ -276,7 +276,7 @@ class TradingViewChart(tk.Frame):
         self._title_var.set(title)
         if self._forecast:
             self._legend_var.set(
-                "RSI 14    Kronos forecast    scroll to zoom · drag to pan"
+                "RSI 14    forecast    scroll to zoom · drag to pan"
             )
         else:
             self._legend_var.set(self._default_legend)
@@ -312,7 +312,7 @@ class TradingViewChart(tk.Frame):
         vol_s = _fmt_volume(vol) if vol is not None else "—"
         rsi = self._rsi.get(candle["time"])
         rsi_s = f"    RSI {rsi:.1f}" if rsi is not None else ""
-        prefix = "Kronos  " if candle.get("predicted") else ""
+        prefix = "Forecast  " if candle.get("predicted") else ""
         self._ohlc_var.set(
             f"{prefix}{candle['time']}    O {_fmt_price(o)}  H {_fmt_price(h)}  "
             f"L {_fmt_price(low)}  C {_fmt_price(c)}    "
@@ -642,7 +642,7 @@ class TradingViewChart(tk.Frame):
         for i, row in enumerate(visible):
             x = self._x_for(i)
             if row.get("predicted"):
-                color = TV_KRONOS_UP if row["close"] >= row["open"] else TV_KRONOS_DOWN
+                color = FORECAST_UP if row["close"] >= row["open"] else FORECAST_DOWN
             else:
                 color = TV_UP if row["close"] >= row["open"] else TV_DOWN
             y_h = self._y_price(row["high"])

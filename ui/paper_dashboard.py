@@ -86,10 +86,6 @@ class MarketBookFrame(ttk.LabelFrame):
         self.n_var = tk.IntVar(value=profile.default_n_symbols)
         self.extra_var = tk.StringVar(value="")
         self.stream_var = tk.BooleanVar(value=False)
-        kronos = settings.enable_kronos
-        self.kronos_gate_var = tk.BooleanVar(value=kronos and profile.kronos_gate_default)
-        self.kronos_rank_var = tk.BooleanVar(value=kronos and profile.kronos_rank_default)
-        self.kronos_batch_var = tk.BooleanVar(value=kronos and settings.kronos_batch_enabled)
         self.volume_gate_var = tk.BooleanVar(value=settings.volume_gate_enabled)
         self.collect_first_var = tk.BooleanVar(value=settings.collect_first_enabled)
         self.collect_first_top_n_var = tk.IntVar(value=settings.collect_first_top_n)
@@ -141,19 +137,6 @@ class MarketBookFrame(ttk.LabelFrame):
             flags, text="Indicators only", variable=self.indicators_only_var,
             command=self._sync_indicators_only,
         ).pack(side=tk.LEFT, padx=(8, 0))
-        self._batch_kronos_cb: Optional[ttk.Checkbutton] = None
-        if settings.enable_kronos:
-            ttk.Checkbutton(
-                flags, text="Kronos 3d gate", variable=self.kronos_gate_var,
-                command=self._sync_batch_kronos,
-            ).pack(side=tk.LEFT, padx=(8, 0))
-            ttk.Checkbutton(
-                flags, text="Kronos rank", variable=self.kronos_rank_var,
-                command=self._sync_batch_kronos,
-            ).pack(side=tk.LEFT, padx=(8, 0))
-            self._batch_kronos_cb = ttk.Checkbutton(
-                flags, text="Batch Kronos", variable=self.kronos_batch_var,
-            )
         self._volume_gate_cb = ttk.Checkbutton(
             flags, text="Volume gate", variable=self.volume_gate_var,
         )
@@ -178,7 +161,6 @@ class MarketBookFrame(ttk.LabelFrame):
             **self._stream_start_date_kwargs(),
         )
         self.stream_start_picker.pack(side=tk.LEFT)
-        self._sync_batch_kronos()
 
     def _sync_indicators_only(self) -> None:
         if self.indicators_only_var.get():
@@ -186,16 +168,6 @@ class MarketBookFrame(ttk.LabelFrame):
             self._pattern_only_cb.state(["disabled"])
         else:
             self._pattern_only_cb.state(["!disabled"])
-
-    def _sync_batch_kronos(self) -> None:
-        if self._batch_kronos_cb is None:
-            return
-        if self.kronos_gate_var.get() or self.kronos_rank_var.get():
-            self._batch_kronos_cb.pack(
-                side=tk.LEFT, padx=(8, 0), before=self._volume_gate_cb,
-            )
-        else:
-            self._batch_kronos_cb.pack_forget()
 
     @staticmethod
     def _stream_start_date_kwargs() -> dict:
@@ -228,12 +200,6 @@ class MarketBookFrame(ttk.LabelFrame):
             "n_symbols": int(self.n_var.get()),
             "extra_symbols": self.extra_var.get(),
             "use_stream": bool(self.stream_var.get()),
-            "kronos_gate": bool(self.kronos_gate_var.get()),
-            "kronos_rank": bool(self.kronos_rank_var.get()),
-            "kronos_batch": bool(
-                (self.kronos_gate_var.get() or self.kronos_rank_var.get())
-                and self.kronos_batch_var.get()
-            ),
             "volume_gate": bool(self.volume_gate_var.get()),
             "pattern_only": bool(self.pattern_only_var.get()) and not self.indicators_only_var.get(),
             "indicators_only": bool(self.indicators_only_var.get()),
