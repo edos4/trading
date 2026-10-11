@@ -597,23 +597,106 @@ modes — they call the real `Backtester` / `MarketScanner`.
 
 ## Operate via MCP (AI agent)
 
-An AI agent can operate and inspect the bot through a local (stdio) **MCP
-server** — explore markets, read history, run patterns on a symbol, control the
-US/PH paper books, submit/monitor backtests, drive the AI pattern editor, and run
-DB maintenance. It is a thin typed client over the **running web UI's** `/api/*`
-surface, so `python main.py --web` must be up (that process owns the paper books
-and backtest jobs — the MCP server never starts a second owner).
+Full guide to the bot's **MCP (Model Context Protocol) server**. It lets an AI
+agent (Command Code, Claude Desktop, or any MCP client) operate and inspect the
+bot: explore markets and history, run patterns on a symbol, start/stop and
+inspect the US+PH paper books, submit and monitor backtests, run AI pattern
+edits, and do DB maintenance.
 
-There is **no live order path**: the tools expose paper, backtest, and editor
-capabilities only. It binds no port; the agent spawns the process over stdio.
+### How it works
 
-```bash
-# Prereq: the web UI running (python main.py --web), then:
-python main.py --mcp          # or: python -m mcp_server
+```
+AI agent ──stdio (JSON-RPC)──▶ mcp_server ──HTTP + Basic auth──▶ web UI (main.py --web)
+                                   │                                 │
+                                   │                                 └─ owns paper books,
+                                   └─ local calls (db_check/update)     backtest jobs, editor
 ```
 
-Wire it into an MCP client (cwd must be the repo root so `.env` and relative
-paths resolve):
+- **Transport is stdio.** The agent spawns `mcp_server` as a child process and
+  speaks JSON-RPC over stdin/stdout. The server opens **no port** — nothing to
+  expose or firewall, and secrets stay in `.env`.
+- **It proxies to the web UI's `/api/*`** (with `WEB_UI_*` Basic auth), so the
+  process running `main.py --web` stays the *single owner* of the paper books
+  and backtest jobs. The MCP server never starts a second paper/backtest engine.
+  **So `python main.py --web` must be running** for anything that touches state.
+- Only `db_check`/`db_update` (local Postgres — not in the web API) and
+  `deploy_*` (the separate deploy gateway) run outside that proxy.
+- **There is no live order path** — `broker/`/`risk/` are not implemented, so
+  the tools cover paper, backtest, and the pattern editor only.
+
+### Prerequisites
+
+1. A working checkout with dependencies installed:
+   ```bash
+   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+   ```
+2. A filled-in `.env` (see [Setup](#setup)) — at minimum `WEB_UI_PASSWORD`. The
+   MCP server reads the same `.env`.
+3. **The web UI running** (the proxy target):
+   ```bash
+   ./run_web.sh --no-tunnel                 # or: python main.py --web
+   curl -fsS http://127.0.0.1:8080/health   # {"ok":true}
+   ```
+4. An MCP-capable client (Command Code, Claude Desktop, Cursor, …).
+
+### Start the server
+
+Normally the **client spawns the server** — you don't run it by hand. To run or
+inspect it directly:
+
+```bash
+cd /path/to/trading
+./run_mcp.sh                 # cd's to repo root, then execs .venv python -m mcp_server
+# or, from the repo root only:
+.venv/bin/python -m mcp_server
+.venv/bin/python main.py --mcp
+```
+
+`run_mcp.sh` is the robust option: it `cd`s to the repo root first, so `.env`
+and repo-relative paths resolve regardless of the caller's working directory.
+Plain `python -m mcp_server` must be launched **from the repo root** (or with
+`PYTHONPATH` pointing at it). Both are silent on stdout — stdout carries the
+MCP protocol, so the server must never print to it.
+
+Inspect tools/resources/prompts interactively with the MCP Inspector:
+
+```bash
+npx @modelcontextprotocol/inspector ./run_mcp.sh
+```
+
+### Add it to your MCP client
+
+**Command Code** — add it as a stdio server:
+
+```bash
+# from the repo root; prefer the launcher so the working directory is always right
+cmd mcp add trading-bot -- /path/to/trading/run_mcp.sh
+
+# or point straight at the venv interpreter (run this from the repo root)
+cmd mcp add trading-bot -- /path/to/trading/.venv/bin/python -m mcp_server
+```
+
+`--scope` controls where it is stored: `local` (default,
+`~/.commandcode/projects/<slug>/mcp.json`), `project` (`.mcp.json`, versioned),
+or `user` (`~/.commandcode/mcp.json`). The tools then appear as
+`mcp__trading-bot__<tool>`. Verify with `cmd mcp list`, `cmd mcp get trading-bot`,
+or the in-session `/mcp` menu.
+
+**Claude Desktop / generic `.mcp.json`** (the launcher keeps `cwd` correct):
+
+```json
+{
+  "mcpServers": {
+    "trading-bot": {
+      "command": "/path/to/trading/run_mcp.sh",
+      "args": []
+    }
+  }
+}
+```
+
+Clients that support an explicit working directory can call the interpreter
+directly instead:
 
 ```json
 {
@@ -627,24 +710,134 @@ paths resolve):
 }
 ```
 
-Tools (grouped): **market** `get_markets`, `list_symbols`, `get_history_symbols`,
-`get_history_bars`, `get_history_meta`, `analyze_symbol`, `server_health`;
-**patterns** `list_patterns`, `list_pattern_versions`, `get_pattern_version`
-(+`_source`/`_bundle`), `submit_pattern_edit`, `get_pattern_edit_job`,
-`set_pattern_default`, `archive_pattern_version`, …; **backtest**
-`submit_backtest_run`, `get_backtest_run`, `cancel_backtest_run`,
-`retry_backtest_run`, `backtest_catalog`, presets, quick run; **paper**
-`paper_status`, `paper_start`, `paper_start_both`, `paper_stop`, `paper_reset`,
-`paper_export_trades`, `paper_trade_chart`; **kronos** `kronos_predict`;
-**replay**; **maintenance** `db_check`/`db_update`; **deploy**
-`deploy_status`/`deploy`. Resources: `trading://markets`,
-`trading://patterns/catalog`, `trading://paper/status`.
+### Configuration (`.env`)
 
-Config lives in `.env` (see `.env.example`): `MCP_API_URL` (default
-`http://127.0.0.1:8080`), `MCP_USERNAME`/`MCP_PASSWORD` (fall back to
-`WEB_UI_*`), and the **default-deny** gates `MCP_ALLOW_DESTRUCTIVE`,
-`MCP_ALLOW_MAINTENANCE`, `MCP_ALLOW_DEPLOY` (+ `MCP_DEPLOY_URL`,
-`MCP_DEPLOY_TOKEN`). A tool refuses with a clear message until its flag is set.
+| Variable | Default | Meaning |
+|---|---|---|
+| `MCP_API_URL` | `http://127.0.0.1:8080` | Web UI base URL the tools proxy to |
+| `MCP_USERNAME` / `MCP_PASSWORD` | falls back to `WEB_UI_USERNAME` / `WEB_UI_PASSWORD` | Basic auth for `/api/*` |
+| `MCP_TIMEOUT_SECONDS` | `60` | HTTP timeout for proxied calls |
+| `MCP_MAX_HISTORY_BARS` | `2000` | Cap for `get_history_bars`, to bound output |
+| `MCP_ALLOW_DESTRUCTIVE` | `false` | Enable paper reset/reset-logs, pattern default/archive, replay clear/upload |
+| `MCP_ALLOW_MAINTENANCE` | `false` | Enable `db_check` / `db_update` |
+| `MCP_ALLOW_DEPLOY` | `false` | Enable `deploy_status` / `deploy` |
+| `MCP_DEPLOY_URL` | `http://127.0.0.1:8099` | Deploy gateway base URL |
+| `MCP_DEPLOY_TOKEN` | *(empty)* | Bearer token == the gateway's `DEPLOY_GATEWAY_TOKEN` |
+
+A gated tool returns a clear "disabled — set `MCP_ALLOW_*`" message until its
+flag is set, so an agent cannot wipe a ledger or deploy by accident. Flags are
+read at process start — restart the client session after editing `.env`.
+
+### Tool reference
+
+⚠ = destructive/maintenance/deploy; requires the matching `MCP_ALLOW_*` flag.
+
+**Market data & explorer**
+
+| Tool | Key parameters | Returns |
+|---|---|---|
+| `server_health` | — | `{ok, ...}`; never raises — use it to check the web UI is up |
+| `get_markets` | — | market profiles (us, ph) + default |
+| `list_symbols` | `n=50`, `market` | top-N screener universe |
+| `get_history_symbols` | `market` | symbols in the OHLCV store (+ last bar) |
+| `get_history_bars` | `symbol`, `market`, `after_ts`, `limit` | daily bars (`limit` capped by `MCP_MAX_HISTORY_BARS`) |
+| `get_history_meta` | `symbol`, `market` | row count / first / last bar |
+| `analyze_symbol` | `symbol`, `exchange`, `timeframe="1d"`, `run_patterns`, `indicators_only`, `volume_gate`, `kronos_gate`, `kronos_batch`, `market`, `save_chart` | candles + pattern signals + chart PNG (`save_chart` writes a file and returns `chart_png_path`) |
+
+**Pattern registry & editor**
+
+| Tool | Key parameters |
+|---|---|
+| `list_patterns` | — |
+| `get_patterns_pinned` / `get_patterns_bundle` | `selected` (`{pattern_id: version_id}`), `disabled` |
+| `list_pattern_versions` | `pattern_id`, `include_archived` |
+| `get_pattern_version` / `get_pattern_version_source` / `get_pattern_version_bundle` | `version_id` |
+| `diff_pattern_version` | `version_id`, `base_version_id` |
+| `get_pattern_provider` | — (AI provider config + balance) |
+| `submit_pattern_edit` | `pattern_id`, `base_version_id`, `instruction`, `settings`, `preset_id`/`preset_name`, `chart_context`, `idempotency_key` → `job_id` |
+| `get_pattern_edit_job` / `cancel_pattern_edit` / `retry_pattern_edit` | `job_id` |
+| `backtest_pattern_version` | `version_id`, `settings` |
+| `get_pattern_run` / `get_pattern_run_chart` | `run_id` (, `detection`) |
+| ⚠ `set_pattern_default` | `version_id`, `expected_generation`, `idempotency_key` |
+| ⚠ `archive_pattern_version` | `version_id`, `expected_generation`, `replacement_default_version_id`, `idempotency_key` |
+
+**Backtests**
+
+| Tool | Key parameters |
+|---|---|
+| `backtest_catalog` / `backtest_versions` | — / `pattern_id`, `include_archived` |
+| `list_backtest_presets` / `save_backtest_preset` | — / `name`, `settings`, `preset_id`, `expected_generation` |
+| `submit_backtest_run` | `mode`, `market`, `symbols`, `universe`, `versions`, `start_date`, `end_date`, `session_count`, `warmup_bars`, `initial_capital`, `sizing_mode`, `position_notional`, `txn_cost_pct`, `slippage_pct`, `pattern_only`, `volume_gate`, `kronos_gate`, `kronos_rank`, `collect_first`, `end_policy`, `preset_id`/`preset_name`, `idempotency_key` → `run_id` |
+| `get_backtest_run` | `run_id` (payload / state / progress) |
+| `cancel_backtest_run` / `retry_backtest_run` | `run_id` |
+| `backtest_quick_status` / `backtest_quick_run` | — / `pattern`, `market`, `universe`, `symbols`, `txn_cost_pct`, `volume_gate`, `pattern_only` (single-slot; HTTP 409 if busy) |
+
+**Paper trading**
+
+| Tool | Key parameters |
+|---|---|
+| `paper_status` | `market` (`us`/`ph`; omitted = both), `lamps` |
+| `paper_start` | `market` (required), `n_symbols`, `extra_symbols`, `use_stream`, `stream_start`, `pattern_only`, `indicators_only`, `collect_first`, `collect_first_top_n`, `kronos_gate`/`kronos_rank`/`kronos_batch`, `volume_gate` |
+| `paper_start_both` | `us`, `ph` (PaperStartRequest dicts, minus `market`) |
+| `paper_stop` | `market` (`us`/`ph`/`all`) |
+| ⚠ `paper_reset` | `market` |
+| ⚠ `paper_reset_logs` | `market` |
+| `paper_export_trades` | `market` |
+| `paper_trade_chart` | `market`, `side` (`open`/`closed`), `symbol`, `index`, `log_time`, `trade_id` |
+
+**Kronos · Replay · Maintenance · Deploy**
+
+| Tool | Key parameters | Notes |
+|---|---|---|
+| `kronos_predict` | `symbol`, `days=3`, `market` | HTTP 404 unless `ENABLE_KRONOS=true` |
+| `replay_load` / `replay_chart` | — / chart fields | read-only |
+| ⚠ `replay_upload` / `replay_clear` | `books` / — | mutates the stored replay |
+| ⚠ `db_check` | `stale_days=7`, `market` | → `{exit_code, report}`; needs local Postgres |
+| ⚠ `db_update` | `fetch=True`, `fetch_limit` | writes Postgres |
+| ⚠ `deploy_status` / `deploy` | — / `ref`, `commit`, `force` | needs `MCP_DEPLOY_TOKEN` |
+
+**Resources:** `trading://markets`, `trading://patterns/catalog`,
+`trading://paper/status`.
+**Prompt:** `daily_review(market="us")` — summarizes the paper book and suggests a
+next action.
+
+### Example requests
+
+Once connected, just ask the agent in natural language:
+
+- "Which markets can I trade, and which is the default?"
+- "Show me the top 20 PH symbols."
+- "Analyze AAPL on the daily with the volume gate on, and save the chart."
+- "Are the paper books running? Show open positions and R-multiples for the US book."
+- "Start the US paper book on the top 50 names with collect-first top 4."
+- "Stop all paper books."
+- "Run an offline backtest of double_bottom on the top 100 names; report win rate and profit factor."
+- "Draft an AI edit to make pattern_003_double_bottom require a first-bar reclaim, then show me the job result."
+- "Is the history DB fresh? Check the last 7 days." *(needs `MCP_ALLOW_MAINTENANCE`)*
+
+### Safety & guardrails
+
+- **No live trading.** No tool can place a real order; execution is paper/backtest only.
+- **Default-deny destructive ops.** `paper_reset`, `paper_reset_logs`, pattern
+  `set_default`/`archive`, `replay_clear`/`upload`, `db_update`, and `deploy`
+  each need their `MCP_ALLOW_*` flag in `.env`.
+- **No secrets in errors**, and large outputs are bounded (`get_history_bars`
+  cap; `analyze_symbol` can write the chart to a file instead of inline base64).
+- **One state owner.** The server never runs its own paper/backtest engine, so it
+  cannot corrupt a running book's ledger.
+
+### Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| "web service unreachable" | `python main.py --web` isn't running, or `MCP_API_URL` is wrong — check `/health`. |
+| HTTP 401 from a tool | Bad credentials — set `MCP_USERNAME`/`MCP_PASSWORD` (or `WEB_UI_*`) to the web UI login. |
+| Tools don't appear in the client | Reconnect; `cmd mcp list` / `/mcp` (Command Code); confirm the command path is absolute and executable. |
+| `No module named mcp_server` | Launch from the repo root, or use `./run_mcp.sh`. |
+| HTTP 404 on `kronos_predict` | `ENABLE_KRONOS=false` (Kronos controls hidden by design). |
+| HTTP 503 on history/backtest/pattern tools | Postgres (pattern editor / history) unavailable on the web host. |
+| HTTP 409 on `paper_start` / `backtest_quick_run` | That book is already running / a quick backtest is already in flight. |
+| "Destructive/Maintenance/Deploy MCP tools are disabled" | Set the matching `MCP_ALLOW_*` flag in `.env` and restart the client session. |
 
 ## Deploying to the engine from another computer — optional, host-specific
 
