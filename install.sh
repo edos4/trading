@@ -103,7 +103,7 @@ fi
 say "Creating runtime dirs"
 mkdir -p logs charts data/barcache trade_histories pattern_versions
 
-chmod +x run_ui.sh run_web.sh paper_stream.sh deploy_to_contabo.sh 2>/dev/null || true
+chmod +x run_ui.sh run_web.sh run_deploy.sh paper_stream.sh deploy_to_contabo.sh deploy_to_engine.sh 2>/dev/null || true
 
 # ── 5. PostgreSQL (local stocks_history) ──────────────────────────────────
 if [[ "$DO_DB" -eq 1 ]]; then

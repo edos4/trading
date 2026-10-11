@@ -1,0 +1,17 @@
+[Unit]
+Description=Trading Bot web UI (+ Cloudflare Tunnel when .env opts in)
+Documentation=file://@ROOT_DIR@/README.md
+# Keep restarting forever: survive reboots, crashes and crash loops.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=@ROOT_DIR@
+ExecStart=@ROOT_DIR@/run_web.sh --require-tunnel
+Restart=always
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target

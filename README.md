@@ -495,7 +495,63 @@ Auth: form login → signed HttpOnly session cookie (`tb_session`). All pages an
 `/api/*` routes require a valid session **or HTTP Basic** (same
 `WEB_UI_USERNAME` / `WEB_UI_PASSWORD`). `/login`, `/logout`, `/health`, and
 `/static/*` are public. Put nginx/Caddy TLS in front for VPS deploys and set
-`WEB_UI_HTTPS=true`.
+`WEB_UI_HTTPS=true`. The session cookie is also flagged `Secure` automatically
+whenever a request arrives over TLS (`X-Forwarded-Proto: https`), so no extra
+config is needed behind a TLS-terminating proxy or the Cloudflare Tunnel below.
+
+### Local web with a public URL (Cloudflare Tunnel) — optional, host-specific
+
+`./run_web.sh` is a plain local server by default. On a host that opts in (by
+setting `CLOUDFLARE_TUNNEL_TOKEN` **and** `CLOUDFLARE_TUNNEL_HOSTNAME` in `.env`)
+it also exposes the same UI publicly through a Cloudflare Tunnel — no inbound
+ports and no static IP. It uses the Cloudflare `cf` CLI (`cf auth login` once)
+with a remotely-managed tunnel, so the ingress rules live in Cloudflare and only
+the tunnel token is needed locally.
+
+```bash
+./run_web.sh              # local; + tunnel when .env opts in
+./run_web.sh --no-tunnel  # web UI only → http://localhost:8080
+```
+
+Settings come from `.env` (see `.env.example`): `CLOUDFLARE_TUNNEL_TOKEN` and
+`CLOUDFLARE_TUNNEL_HOSTNAME`. A clone without those (or `--no-tunnel`) stays
+local-only, so this never affects other machines. Ctrl+C stops both.
+
+Verify the public URL end-to-end with [browser-use](https://github.com/browser-use/browser-use):
+
+```bash
+# One-time: browser-use pins conflict with the app's deps, so it gets its own venv
+python3 -m venv .venv-browseruse
+.venv-browseruse/bin/pip install browser-use playwright
+.venv-browseruse/bin/python -m playwright install chromium
+
+# Local by default; pass --base-url https://<public-host> for the tunnelled URL.
+.venv-browseruse/bin/python web/test_e2e_browseruse.py
+```
+
+### Keep it running across restarts (systemd)
+
+`run_web.sh` is wrapped in a systemd **user** service so the app and tunnel come
+back automatically after a reboot or crash, with no login required (login
+`linger` is enabled):
+
+```bash
+scripts/install_web_service.sh              # install + enable + start
+scripts/install_web_service.sh --status
+scripts/install_web_service.sh --uninstall
+```
+
+The unit is `deploy/trading-web.service`, installed to
+`~/.config/systemd/user/trading-web.service`, and runs
+`run_web.sh --require-tunnel`. That flag makes `run_web.sh` **exit** instead of
+silently serving local-only when the tunnel token or the `cf` CLI is missing, so
+`Restart=always` surfaces the fault rather than hiding it. Manage it with:
+
+```bash
+systemctl --user status  trading-web.service
+systemctl --user restart trading-web.service   # pick up code / .env changes
+journalctl --user -u trading-web.service -f
+```
 
 **One history database (VPS).** Contabo runs Postgres `stocks_history` and
 serves `GET /api/history/symbols`, `GET /api/history/{symbol}`, and
@@ -538,6 +594,58 @@ What both UIs support:
 The explorer reuses the same data, pattern, chart-rendering, Kronos-gate,
 and volume-gate code as the scanner. Backtest / Paper Trading are not toy
 modes — they call the real `Backtester` / `MarketScanner`.
+
+## Deploying to the engine from another computer — optional, host-specific
+
+`deploy_to_engine.sh` deploys this repo to the machine that runs the deploy
+gateway (the engine serving the public UI) from any computer — no SSH key
+distribution.
+
+The client pushes the branch to GitHub, then POSTs the ref to an authenticated
+webhook (`web/deploy_gateway.py`). The gateway fetches that exact commit, checks
+it out, syncs deps and restarts `trading-web.service`. It runs as its own user
+service behind its own Cloudflare Tunnel, so a deploy (which restarts the web
+UI) never takes the deploy endpoint down. See `deploy_to_contabo.sh` for the
+separate VPS deploy.
+
+This is inert unless the host sets `DEPLOY_GATEWAY_TOKEN` in `.env`: the gateway
+and `run_deploy.sh` both refuse to start without a token, so a plain clone never
+runs it.
+
+### One-time setup (on the engine)
+```bash
+# 1. Create the tunnel + DNS and print the tokens. DEPLOY_TUNNEL_NAME and
+#    DEPLOY_TUNNEL_HOSTNAME are required (env or .env); the zone is derived from
+#    the hostname unless DEPLOY_ZONE is set.
+DEPLOY_TUNNEL_NAME=<tunnel-name> DEPLOY_TUNNEL_HOSTNAME=<deploy-host> \
+  ./scripts/setup_deploy_tunnel.sh
+
+# 2. Put the printed values in .env
+DEPLOY_GATEWAY_TOKEN=<generated>
+DEPLOY_TUNNEL_HOSTNAME=<deploy-host>
+DEPLOY_TUNNEL_TOKEN=<tunnel token>
+
+# 3. Install the always-on user service (survives reboots)
+./scripts/install_deploy_service.sh
+curl -fsS https://<deploy-host>/health
+```
+
+### Deploying (from any computer)
+```bash
+export DEPLOY_TOKEN=<the engine's DEPLOY_GATEWAY_TOKEN>
+export DEPLOY_URL=https://<deploy-host>     # overrides the built-in default
+./deploy_to_engine.sh                 # push + deploy the current branch
+./deploy_to_engine.sh --ref main
+./deploy_to_engine.sh --no-push       # deploy an already-pushed commit
+```
+
+### Security
+This endpoint runs code, so it binds `127.0.0.1` only, requires
+`DEPLOY_GATEWAY_TOKEN` (constant-time compare) and refuses to start without it,
+only ever runs a fixed command list (never a shell), and refuses to deploy over
+a dirty tree unless `--force`. For defense in depth, put a Cloudflare Access
+application in front of the deploy host (Zero Trust → Access → allow only your
+account).
 
 ## Adding a New Pattern
 
