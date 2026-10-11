@@ -202,7 +202,8 @@ def test_history_path_encodes_slash_tickers() -> None:
 def test_load_daily_bars_forwards_limit() -> None:
     from data.history import load_daily_bars
 
-    with patch("data.history_client.fetch_history_bars", return_value=[]) as load, \
+    with patch("data.history.local_history_backfill_enabled", return_value=False), \
+         patch("data.history_client.fetch_history_bars", return_value=[]) as load, \
          patch("data.db.get_conn") as get_conn:
         load_daily_bars("AAPL", limit=512)
     load.assert_called_once_with("AAPL", after_ts=None, limit=512, market=None)
@@ -212,7 +213,8 @@ def test_load_daily_bars_forwards_limit() -> None:
 def test_load_daily_bars_never_uses_postgres() -> None:
     from data.history import load_daily_bars
 
-    with patch("data.history_client.fetch_history_bars", return_value=None) as load, \
+    with patch("data.history.local_history_backfill_enabled", return_value=False), \
+         patch("data.history_client.fetch_history_bars", return_value=None) as load, \
          patch("data.db.load_daily_ohlcv_rows") as db_load, \
          patch("data.db.get_conn") as get_conn:
         assert load_daily_bars("AAPL") is None
@@ -348,7 +350,8 @@ def test_list_history_symbols_uses_api_when_configured() -> None:
     from data.history import list_history_symbols
 
     rows = [{"symbol": "AAPL", "row_count": 10}]
-    with patch("data.history_client.fetch_history_symbols", return_value=rows) as fetch, \
+    with patch("data.history.local_history_backfill_enabled", return_value=False), \
+         patch("data.history_client.fetch_history_symbols", return_value=rows) as fetch, \
          patch("data.db.get_conn") as get_conn, \
          patch("data.db.all_symbols") as all_sym:
         assert list_history_symbols() == rows
