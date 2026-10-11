@@ -20,6 +20,8 @@ Usage:
     python main.py --web                            # Launch the authenticated web UI (VPS)
                                                     # On start: connect to stocks_history and
                                                     # backfill missing/stale daily bars per symbol.
+    python main.py --mcp                            # Run the MCP server (stdio) so an AI agent
+                                                    # can operate the bot via the web UI API.
     python main.py --papertrade-stream              # Serve historical bars (33ai /api/history) for paper trading when markets are closed
     python main.py --papertrade-stream --papertrade-stream-start 2025-01-02  # Replay from a specific date
     python main.py --kronos-test                    # Score Kronos-base +1d/+3d forecast accuracy (20 random symbols)
@@ -649,6 +651,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "Binds WEB_UI_HOST:WEB_UI_PORT (default 0.0.0.0:8080).",
     )
     parser.add_argument(
+        "--mcp",
+        action="store_true",
+        help="Run the MCP server (stdio) so an AI agent can operate the bot "
+        "through the running web UI (python main.py --web). No network listener.",
+    )
+    parser.add_argument(
         "--paper",
         nargs="?",
         const=50,
@@ -995,5 +1003,9 @@ if __name__ == "__main__":
         from web.app import run as run_web
 
         run_web()
+    elif _args.mcp:
+        from mcp_server.server import run as run_mcp
+
+        run_mcp()
     else:
         raise SystemExit(_run_async_entry(_args))

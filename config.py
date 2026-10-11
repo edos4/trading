@@ -237,6 +237,26 @@ class Settings(BaseSettings):
     # Idle session lifetime (hours).
     web_ui_session_hours: int = 12
 
+    # ── MCP server (python main.py --mcp / python -m mcp_server) ────────────
+    # A local, stdio MCP server so an AI agent can operate the bot. It is a
+    # thin typed client over the running web UI's /api/* surface (one owner of
+    # paper books / backtest jobs), so `python main.py --web` must be up.
+    # No network listener: the agent spawns this process over stdio.
+    mcp_api_url: str = "http://127.0.0.1:8080"
+    # Basic-auth credentials for /api/*. Empty falls back to WEB_UI_* below.
+    mcp_username: str = ""
+    mcp_password: str = ""
+    mcp_timeout_seconds: float = 60.0
+    # Hard cap on bars returned by get_history_bars (the API allows 2000).
+    mcp_max_history_bars: int = 2000
+    # Default-deny mutating tools; each group needs its flag set in .env.
+    mcp_allow_destructive: bool = False   # paper reset/reset-logs, pattern default/archive, replay clear/upload
+    mcp_allow_maintenance: bool = False   # db_check / db_update (local Postgres)
+    mcp_allow_deploy: bool = False        # deploy_status / deploy (deploy gateway)
+    # Deploy gateway the deploy_* tools target (loopback + bearer token).
+    mcp_deploy_url: str = "http://127.0.0.1:8099"
+    mcp_deploy_token: str = ""            # == DEPLOY_GATEWAY_TOKEN on the gateway host
+
     # ── Deploy gateway (optional, host-specific) ────────────────────────────
     # An authenticated HTTPS webhook on this machine: another computer pushes a
     # branch to GitHub, then POSTs the ref; the gateway fetches that ref into

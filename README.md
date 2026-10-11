@@ -595,6 +595,57 @@ The explorer reuses the same data, pattern, chart-rendering, Kronos-gate,
 and volume-gate code as the scanner. Backtest / Paper Trading are not toy
 modes — they call the real `Backtester` / `MarketScanner`.
 
+## Operate via MCP (AI agent)
+
+An AI agent can operate and inspect the bot through a local (stdio) **MCP
+server** — explore markets, read history, run patterns on a symbol, control the
+US/PH paper books, submit/monitor backtests, drive the AI pattern editor, and run
+DB maintenance. It is a thin typed client over the **running web UI's** `/api/*`
+surface, so `python main.py --web` must be up (that process owns the paper books
+and backtest jobs — the MCP server never starts a second owner).
+
+There is **no live order path**: the tools expose paper, backtest, and editor
+capabilities only. It binds no port; the agent spawns the process over stdio.
+
+```bash
+# Prereq: the web UI running (python main.py --web), then:
+python main.py --mcp          # or: python -m mcp_server
+```
+
+Wire it into an MCP client (cwd must be the repo root so `.env` and relative
+paths resolve):
+
+```json
+{
+  "mcpServers": {
+    "trading-bot": {
+      "command": "/path/to/trading/.venv/bin/python",
+      "args": ["-m", "mcp_server"],
+      "cwd": "/path/to/trading"
+    }
+  }
+}
+```
+
+Tools (grouped): **market** `get_markets`, `list_symbols`, `get_history_symbols`,
+`get_history_bars`, `get_history_meta`, `analyze_symbol`, `server_health`;
+**patterns** `list_patterns`, `list_pattern_versions`, `get_pattern_version`
+(+`_source`/`_bundle`), `submit_pattern_edit`, `get_pattern_edit_job`,
+`set_pattern_default`, `archive_pattern_version`, …; **backtest**
+`submit_backtest_run`, `get_backtest_run`, `cancel_backtest_run`,
+`retry_backtest_run`, `backtest_catalog`, presets, quick run; **paper**
+`paper_status`, `paper_start`, `paper_start_both`, `paper_stop`, `paper_reset`,
+`paper_export_trades`, `paper_trade_chart`; **kronos** `kronos_predict`;
+**replay**; **maintenance** `db_check`/`db_update`; **deploy**
+`deploy_status`/`deploy`. Resources: `trading://markets`,
+`trading://patterns/catalog`, `trading://paper/status`.
+
+Config lives in `.env` (see `.env.example`): `MCP_API_URL` (default
+`http://127.0.0.1:8080`), `MCP_USERNAME`/`MCP_PASSWORD` (fall back to
+`WEB_UI_*`), and the **default-deny** gates `MCP_ALLOW_DESTRUCTIVE`,
+`MCP_ALLOW_MAINTENANCE`, `MCP_ALLOW_DEPLOY` (+ `MCP_DEPLOY_URL`,
+`MCP_DEPLOY_TOKEN`). A tool refuses with a clear message until its flag is set.
+
 ## Deploying to the engine from another computer — optional, host-specific
 
 `deploy_to_engine.sh` deploys this repo to the machine that runs the deploy
