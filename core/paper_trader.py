@@ -48,12 +48,75 @@ DEFAULT_ACCOUNT_PATH = Path("data/cache/paper_account.json")
 
 def _max_open_per_symbol(pattern_name: str) -> int | None:
     # Legacy signals lack a rule snapshot. Consult catalog metadata, never source files.
+    # A down editor database must not abort the paper scan: the bar is already
+    # marked processed by then, so the breakout would be skipped for good.
+    from core.pattern_editor_db import DatabaseUnavailable
     from core.pattern_versions import PatternVersions
-    versions = PatternVersions()
-    pattern = next((p for p in versions.catalog() if p['id'] == pattern_name), None)
-    if pattern is None:
+    try:
+        versions = PatternVersions()
+        pattern = next((p for p in versions.catalog() if p['id'] == pattern_name), None)
+        if pattern is None:
+            return None
+        return (
+            versions.store.get('versions', pattern['active'])
+            .get('metadata', {})
+            .get('MAX_OPEN_PER_SYMBOL')
+        )
+    except DatabaseUnavailable:
+        log.warning(
+            f"Paper | pattern catalog unavailable; no MAX_OPEN_PER_SYMBOL "
+            f"cap for {pattern_name}"
+        )
         return None
-    return versions.store.get('versions', pattern['active']).get('metadata', {}).get('MAX_OPEN_PER_SYMBOL')
+
+
+def book_has_trades(account: PaperAccount) -> bool:
+    return bool(account.positions) or bool(account.closed)
+
+
+def resolve_stream_start(
+    account: PaperAccount,
+    stream_start: str | None,
+    market: str,
+) -> tuple[str | None, bool]:
+    """Start date for the stream server, and whether to clear the scan clock.
+
+    Stop then Start normally continues from the saved session, so a replay
+    does not rescan days already in the ledger. An empty book (no open or
+    closed trades) honors an earlier date instead. Resuming that book on its
+    last bar scans nothing and stops after zero sessions.
+    """
+    saved = account.sim_now()
+    if saved is None:
+        return stream_start, False
+    profile = get_market(market)
+    resume_date = saved.astimezone(ZoneInfo(profile.session_tz)).date()
+    configured = None
+    if stream_start:
+        try:
+            configured = datetime.strptime(stream_start, "%Y-%m-%d").date()
+        except ValueError:
+            configured = None
+    if (
+        configured is not None
+        and configured < resume_date
+        and not book_has_trades(account)
+    ):
+        log.info(
+            f"Paper | saved session {resume_date.isoformat()} has no trades; "
+            f"replaying from {configured.isoformat()}"
+        )
+        return configured.isoformat(), True
+    if configured is None or configured <= resume_date:
+        if configured is not None and configured < resume_date:
+            log.info(
+                f"Paper | stream start {configured.isoformat()} is behind "
+                f"saved session {resume_date.isoformat()} which already has "
+                f"trades; continuing from {resume_date.isoformat()}. "
+                f"Reset the book to replay from {configured.isoformat()}."
+            )
+        return resume_date.isoformat(), False
+    return configured.isoformat(), False
 
 
 def _setup_key(signal_or_trade) -> tuple:
@@ -208,6 +271,8 @@ class PaperAccount:
             self.initial_capital = profile.paper_initial_capital
         else:
             self.initial_capital = settings.paper_initial_capital
+        if not math.isfinite(self.initial_capital) or self.initial_capital < 0:
+            raise ValueError("Paper initial capital must be finite and nonnegative")
         self.cash = self.initial_capital
         self.txn_cost_pct = (
             profile.txn_cost_pct if txn_cost_pct is None else txn_cost_pct
@@ -215,6 +280,10 @@ class PaperAccount:
         # Slippage defaults OFF (backtest/paper parity, `.cjs` methodology).
         # Set > 0 explicitly to model fill slippage on the paper book.
         self.slippage_pct = slippage_pct if slippage_pct is not None else 0.0
+        if not math.isfinite(self.txn_cost_pct) or self.txn_cost_pct < 0:
+            raise ValueError("Transaction cost must be finite and nonnegative")
+        if not math.isfinite(self.slippage_pct) or not 0 <= self.slippage_pct < 1:
+            raise ValueError("Slippage must be finite and between zero and one")
         # Vestigial — no daily-loss limit is enforced anymore.
         self.max_daily_loss = float("inf") if max_daily_loss is None else max_daily_loss
         self.positions: dict[str, list[BacktestTrade]] = {}
@@ -349,6 +418,19 @@ class PaperAccount:
     def mark_bar_processed(self, symbol: str, timeframe: str, identity_key: str) -> None:
         with self._lock:
             self._processed_bar_ids[f"{symbol}|{timeframe}"] = identity_key
+
+    def clear_scan_clock(self) -> None:
+        """Drop replay watermarks so an earlier start date is scanned again."""
+        with self._lock:
+            self._processed_bar_ids.clear()
+            self._sim_now = None
+            self._sim_now_by_timeframe.clear()
+            self._bar_count.clear()
+            self.equity_curve.clear()
+            self._last_price.clear()
+            self._daily_key = ""
+            self._daily_pnl = 0.0
+            self._tick = 0
 
     def sim_now(self, timeframe: str | None = None) -> datetime | None:
         with self._lock:
@@ -508,14 +590,21 @@ class PaperAccount:
         candle: OHLCVCandle,
         store: OHLCVStore,
     ) -> tuple[bool, str]:
-        self._reset_daily_if_needed(candle.timestamp or datetime.now(timezone.utc))
-
         with self._lock:
+            self._reset_daily_if_needed(candle.timestamp or datetime.now(timezone.utc))
             return self._open_position_locked(signal, candle, store)
 
     def _open_position_locked(
         self, signal: TradeSignal, candle: OHLCVCandle, store: OHLCVStore,
     ) -> tuple[bool, str]:
+        if signal.action not in ("BUY", "SELL"):
+            return False, "Trade entries require BUY or SELL."
+        if not all(math.isfinite(value) and value > 0
+                   for value in (candle.open, candle.high, candle.low, candle.close)):
+            return False, "Trade candle prices must be finite and positive."
+        if any(value is not None and (not math.isfinite(value) or value <= 0)
+               for value in (signal.stop_loss, signal.take_profit)):
+            return False, "Trade stop and target must be finite and positive."
         sym = signal.symbol
         open_list = self.positions.get(sym, [])
         key = _setup_key(signal)
@@ -531,9 +620,11 @@ class PaperAccount:
             )
         if signal.pattern_version_id and signal.requested_rules:
             cap = signal.requested_rules.get("max_open_per_symbol")
-        elif self.indicators_only:
-            # Indicators are not pinned pattern versions. Pattern scans still
-            # consult the catalog, including when a name starts with indicator_.
+        elif self.indicators_only or signal.provenance == "patternsv2":
+            # Indicators and Patternsv2 are not pinned pattern versions, so
+            # they have no catalog MAX_OPEN_PER_SYMBOL. Looking one up opens
+            # the pattern-editor database; a timeout there used to abort the
+            # whole paper scan after the bar was already marked processed.
             cap = None
         else:
             cap = _max_open_per_symbol(signal.pattern)
@@ -584,10 +675,13 @@ class PaperAccount:
                 f"Sizing: ${ENGINE.position_notional:,.0f} buys < 1 share of "
                 f"{signal.symbol} at {format_money(candle.close, self.market)}."
             )
-        if profile.lot_round and not apply_lot_rounding(signal):
-            return False, (
-                f"Lot rounding: {signal.symbol} size rounded below one board lot."
-            )
+        if profile.lot_round:
+            ts = candle.timestamp
+            session_date = ts.astimezone(ZoneInfo(profile.session_tz)).date() if ts else None
+            if not apply_lot_rounding(signal, as_of=session_date):
+                return False, (
+                    f"Lot rounding: {signal.symbol} size rounded below one board lot."
+                )
 
         fill_candle = candle
         slip = self.slippage_pct
@@ -617,12 +711,12 @@ class PaperAccount:
             self.cash += notional  # short: receive proceeds up front
 
         self.positions.setdefault(sym, []).append(position)
-        self._last_price[signal.symbol] = position.entry_price
+        self._last_price[signal.symbol] = candle.close
         mark_ts = position.sim_entry_date or fill_candle.timestamp or datetime.now(timezone.utc)
         self._record_position_mark(
             signal.symbol,
             position,
-            position.entry_price,
+            candle.close,
             mark_ts,
             self.bar_count(signal.symbol, signal.timeframe),
         )
@@ -663,6 +757,8 @@ class PaperAccount:
         """
         if not self.indicators_only:
             return None
+        if not math.isfinite(candle.close) or candle.close <= 0:
+            return None
         with self._lock:
             open_list = self.positions.get(symbol) or []
             if position not in open_list:
@@ -680,6 +776,7 @@ class PaperAccount:
                 symbol, position, exit_price, now, bar_idx, status=reason,
             )
             _close_trade(position, exit_price, reason, candle, self.txn_cost_pct)
+            position.exit_bar_idx = bar_idx
             position.sim_exit_date = position.exit_date
             position.exit_date = datetime.now(timezone.utc)
             notional_out = exit_price * position.qty
@@ -719,6 +816,10 @@ class PaperAccount:
     def _on_bar_locked(
         self, symbol: str, candle: OHLCVCandle, timeframe: str | None, is_new_bar: bool,
     ) -> list[BacktestTrade]:
+        if not all(math.isfinite(value) and value > 0
+                   for value in (candle.open, candle.high, candle.low, candle.close)):
+            log.warning(f"Paper | ignoring invalid candle prices for {symbol}")
+            return []
         self._last_price[symbol] = candle.close
         if candle.timestamp is not None:
             if self._sim_now is None or candle.timestamp > self._sim_now:
@@ -891,9 +992,10 @@ class PaperAccount:
                 "initial_capital": self.initial_capital,
                 "cash": self.cash,
                 "txn_cost_pct": self.txn_cost_pct,
+                "slippage_pct": self.slippage_pct,
                 "max_daily_loss": self.max_daily_loss,
                 "tick": self._tick,
-                "bar_count": self._bar_count,
+                "bar_count": dict(self._bar_count),
                 "sim_now_by_timeframe": {
                     tf: ts.isoformat() for tf, ts in self._sim_now_by_timeframe.items()
                 },
@@ -909,10 +1011,10 @@ class PaperAccount:
                 "closed": [_trade_to_dict(t) for t in self.closed],
                 "equity_curve": list(self.equity_curve),
             }
-        p = Path(path) if path is not None else get_market(self.market).paper_account_path
-        p.parent.mkdir(parents=True, exist_ok=True)
-        from core.pattern_edit_store import atomic_write
-        atomic_write(p, json.dumps(payload, indent=2).encode())
+            p = Path(path) if path is not None else get_market(self.market).paper_account_path
+            p.parent.mkdir(parents=True, exist_ok=True)
+            from core.pattern_edit_store import atomic_write
+            atomic_write(p, json.dumps(payload, indent=2).encode())
 
     @classmethod
     def load(cls, path: str | Path | None = None, *, market: str | None = None) -> "PaperAccount":
@@ -923,9 +1025,10 @@ class PaperAccount:
             return acct
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            log.warning(f"Paper | failed to load {p}, starting fresh")
-            return acct
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"Paper account could not be loaded: {p}") from exc
+        if not isinstance(data, dict):
+            raise ValueError(f"Paper account must contain a JSON object: {p}")
         saved_market = data.get("market")
         if saved_market and get_market(saved_market).id != profile.id:
             log.warning(
@@ -933,9 +1036,15 @@ class PaperAccount:
                 f"{profile.id} account instead of mixing books"
             )
             return acct
-        acct.initial_capital = data.get("initial_capital", acct.initial_capital)
+        acct = cls(
+            market=profile.id,
+            initial_capital=data.get("initial_capital", acct.initial_capital),
+            txn_cost_pct=data.get("txn_cost_pct", acct.txn_cost_pct),
+            slippage_pct=data.get("slippage_pct", acct.slippage_pct),
+        )
         acct.cash = data.get("cash", acct.initial_capital)
-        acct.txn_cost_pct = data.get("txn_cost_pct", acct.txn_cost_pct)
+        if not math.isfinite(acct.cash):
+            raise ValueError(f"Paper account cash must be finite: {p}")
         acct.max_daily_loss = data.get("max_daily_loss", acct.max_daily_loss)
         acct._tick = data.get("tick", 0)
         raw_bar_count = data.get("bar_count", {}) or {}

@@ -49,7 +49,13 @@ from core.scanner import MarketScanner
 from core.backtester import Backtester
 from core.engine_defaults import ENGINE
 from core.market import format_money, get_market
-from core.paper_trader import PaperAccount, days_held, r_multiple, unrealized_pct
+from core.paper_trader import (
+    PaperAccount,
+    days_held,
+    r_multiple,
+    resolve_stream_start,
+    unrealized_pct,
+)
 from data.tv_client import TVClient
 from utils.logger import log
 
@@ -105,24 +111,10 @@ def _effective_stream_start(
     market: str,
 ) -> str | None:
     """Resume a saved ledger's sim date when it is ahead of --stream."""
-    from zoneinfo import ZoneInfo
-
-    effective = stream_start
-    if account.sim_now() is None:
-        return effective
-    resume_from = account.sim_now()
-    if resume_from is None:
-        return effective
-    profile = get_market(market)
-    resume_date = resume_from.astimezone(ZoneInfo(profile.session_tz)).date()
-    configured_date = None
-    if stream_start:
-        try:
-            configured_date = datetime.strptime(stream_start, "%Y-%m-%d").date()
-        except ValueError:
-            configured_date = None
-    if configured_date is None or configured_date <= resume_date:
-        return resume_date.isoformat()
+    effective, rewind = resolve_stream_start(account, stream_start, market)
+    if rewind:
+        account.clear_scan_clock()
+        account.save()
     return effective
 
 

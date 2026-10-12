@@ -20,7 +20,7 @@ Differences from the offline walk are deliberate and required by P06:
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
 
 from core.backtester import (
@@ -35,7 +35,7 @@ from core.backtester import (
     _update_prev_hl,
 )
 from core.engine_defaults import is_fractional_qty
-from core.market import apply_lot_rounding
+from core.market import apply_lot_rounding, get_market
 from core.pattern_edit_store import EditError
 from data.ohlcv_store import DEFAULT_WINDOW, OHLCVStore
 from data.tv_client import OHLCVCandle
@@ -86,6 +86,7 @@ class _SymbolSeries:
     open_positions: list[BacktestTrade] = field(default_factory=list)
     closed: list[BacktestTrade] = field(default_factory=list)
     last_close: float | None = None
+    last_candle: OHLCVCandle | None = None
     last_date: date | None = None
 
 
@@ -107,12 +108,14 @@ class StreamReplay:
             raise EditError("Only fixed-notional sizing is supported for stream replay")
         self.notional = settings.execution.position_notional
         self.txn_cost = settings.execution.txn_cost_pct
+        self.slippage = settings.execution.slippage_pct
         self.lot_round = settings.market == "ph"
+        self.long_only = get_market(settings.market).long_only
         self.patterns = list(patterns)
+        self.events: list[dict] = []
         self.series = self._build_series(dataset)
         if not self.series:
             raise EditError("No frozen daily history available for the selected symbols")
-        self.events: list[dict] = []
         self.total_signals = 0
         self._closed_order: list[BacktestTrade] = []
         self.equity_curve: list[dict] = []
@@ -198,6 +201,7 @@ class StreamReplay:
                                 "last_session": calendar[-1].isoformat()})
         if self.settings.execution.end_policy == "force-close":
             self._force_close(calendar[-1])
+            self._mark_equity(calendar[-1])
         return self._artifacts(calendar)
 
     def _advance_session(self, session: date, start: date) -> None:
@@ -223,6 +227,7 @@ class StreamReplay:
         series.store.apply_candle(series.symbol, self.settings.timeframe, candle)
         series.pushed += 1
         series.last_close = candle.close
+        series.last_candle = candle
         series.last_date = _session_date(candle, self.session_tz)
 
     def _manage(self, series: _SymbolSeries, candle: OHLCVCandle) -> None:
@@ -234,6 +239,7 @@ class StreamReplay:
             _update_neckline_state(position, candle, bar_index)
             exit_price, reason = _check_exit(candle, position, bar_index)
             if exit_price is not None:
+                exit_price *= 1 + self.slippage if position.action == "SELL" else 1 - self.slippage
                 _close_trade(position, exit_price, reason, candle, self.txn_cost)
                 series.closed.append(position)
                 self._closed_order.append(position)
@@ -259,11 +265,11 @@ class StreamReplay:
                 if self.settings.timeframe not in pattern.timeframes:
                     continue
                 max_open = getattr(pattern, "MAX_OPEN_PER_SYMBOL", None)
-                if max_open is not None and sum(
-                    1 for p in series.open_positions if p.pattern == pattern.name
-                ) >= max_open:
-                    continue
                 for _ in range(8):
+                    if max_open is not None and sum(
+                        1 for p in series.open_positions if p.pattern == pattern.name
+                    ) >= max_open:
+                        break
                     signal = pattern.analyze(snapshot, series.store)
                     if signal is None:
                         break
@@ -279,6 +285,12 @@ class StreamReplay:
                         "stop": signal.stop_loss, "target": signal.take_profit,
                         "chart_annotations": signal.chart_annotations,
                     })
+                    if signal.action not in ("BUY", "SELL") or (self.long_only and signal.action == "SELL"):
+                        _dedup.mark(*key)
+                        series.used.update(key)
+                        if not key:
+                            break
+                        continue
                     if getattr(signal, "blocked_reason", None):
                         _dedup.mark(*key)
                         series.used.update(key)
@@ -309,13 +321,20 @@ class StreamReplay:
                     signal.signal_bar_timestamp = candle.timestamp
                     if self.lot_round:
                         signal.price = signal.price or candle.close
-                        if not apply_lot_rounding(signal):
+                        if not apply_lot_rounding(signal, as_of=_session_date(candle, self.session_tz)):
                             _dedup.mark(*key)
                             series.used.update(key)
                             continue
-                    series.open_positions.append(_open_trade(signal, candle, series.pushed))
+                    fill_price = candle.close * (
+                        1 + self.slippage if signal.action == "BUY" else 1 - self.slippage
+                    )
+                    series.open_positions.append(_open_trade(
+                        signal, replace(candle, close=fill_price), series.pushed,
+                    ))
                     _dedup.mark(*key)
                     series.used.update(key)
+                    if not key:
+                        break
             series.used = set(_dedup._used)
 
     def _gates_allow(self, signal, store) -> bool:
@@ -340,17 +359,26 @@ class StreamReplay:
                 else:
                     unrealized += (position.entry_price - series.last_close) * position.qty
         equity = self.settings.execution.initial_capital + realized + unrealized
-        self.equity_curve.append({"date": session.isoformat(), "realized_pnl": round(realized, 6),
-                                  "unrealized_pnl": round(unrealized, 6),
-                                  "equity": round(equity, 6)})
+        point = {"date": session.isoformat(), "realized_pnl": round(realized, 6),
+                 "unrealized_pnl": round(unrealized, 6), "equity": round(equity, 6)}
+        if self.equity_curve and self.equity_curve[-1]["date"] == point["date"]:
+            self.equity_curve[-1] = point
+        else:
+            self.equity_curve.append(point)
 
     def _force_close(self, session: date) -> None:
         for series in self.series.values():
             if not series.open_positions:
                 continue
-            candle = series.candles[-1]
+            candle = series.last_candle
+            if candle is None:
+                continue
             for position in series.open_positions:
-                _close_trade(position, candle.close, "force_close", candle, self.txn_cost)
+                position.exit_bar_idx = series.pushed
+                exit_price = candle.close * (
+                    1 + self.slippage if position.action == "SELL" else 1 - self.slippage
+                )
+                _close_trade(position, exit_price, "force_close", candle, self.txn_cost)
                 series.closed.append(position)
                 self._closed_order.append(position)
             series.open_positions = []

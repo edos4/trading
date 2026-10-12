@@ -557,3 +557,48 @@ def test_stream_probe_does_not_log_a_failed_handshake() -> None:
 
 def test_stream_probe_reports_a_closed_port_as_down() -> None:
     assert PaperBook._port_open("127.0.0.1", _free_port()) is False
+
+
+def test_empty_book_replays_from_an_earlier_start() -> None:
+    from core.paper_trader import PaperAccount, resolve_stream_start
+
+    acct = PaperAccount(market="us")
+    acct._sim_now = datetime(2026, 10, 7, 13, 30, tzinfo=timezone.utc)
+    acct.mark_bar_processed("NIO", "1d", "datetime.date(2026, 10, 7)")
+    start, rewind = resolve_stream_start(acct, "2026-09-08", "us")
+    assert (start, rewind) == ("2026-09-08", True)
+    acct.clear_scan_clock()
+    assert acct.sim_now() is None
+    assert acct.processed_bar_identities_snapshot() == {}
+
+
+def test_book_with_trades_stays_on_the_saved_session() -> None:
+    from core.paper_trader import PaperAccount, resolve_stream_start
+
+    acct = PaperAccount(market="us")
+    acct._sim_now = datetime(2026, 10, 7, 13, 30, tzinfo=timezone.utc)
+    acct.closed.append(object())
+    start, rewind = resolve_stream_start(acct, "2026-09-08", "us")
+    assert (start, rewind) == ("2026-10-07", False)
+
+
+def test_status_payload_drops_infinite_profit_factor() -> None:
+    import json
+
+    from core.paper_books import json_safe
+
+    payload = {"metrics": {"profit_factor": float("inf"), "win_rate_pct": float("nan")}}
+    clean = json_safe(payload)
+    json.dumps(clean, allow_nan=False)
+    assert clean["metrics"]["profit_factor"] is None
+    assert clean["metrics"]["win_rate_pct"] is None
+    assert payload["metrics"]["profit_factor"] == float("inf")
+
+
+def test_same_day_start_does_not_rewind() -> None:
+    from core.paper_trader import PaperAccount, resolve_stream_start
+
+    acct = PaperAccount(market="us")
+    acct._sim_now = datetime(2026, 10, 7, 13, 30, tzinfo=timezone.utc)
+    start, rewind = resolve_stream_start(acct, "2026-10-07", "us")
+    assert (start, rewind) == ("2026-10-07", False)

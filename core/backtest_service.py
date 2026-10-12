@@ -30,6 +30,7 @@ from core.pattern_editor_contracts import (
 from core.pattern_provenance import engine_hash
 from core.pattern_versions import PatternVersions
 from core.stream_backtest import ReplayCancelled, StreamReplay
+from utils.json_values import json_safe as _json_safe
 from utils.logger import log
 
 
@@ -733,19 +734,6 @@ def request_from_values(service: "BacktestService", values: dict,
 
 def _error(code: ErrorCode, message: str, *, retryable: bool = False) -> dict:
     return DomainError(code=code, message=message, retryable=retryable).model_dump(mode="json")
-
-
-def _json_safe(value):
-    """Replace non-finite floats (e.g. an infinite profit factor) with null."""
-    import math
-
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
-    if isinstance(value, dict):
-        return {key: _json_safe(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_safe(item) for item in value]
-    return value
 
 
 # ── in-process cancellation registry ─────────────────────────────────────

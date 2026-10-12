@@ -41,6 +41,7 @@ from core.paper_trader import (
     bars_held,
     position_status,
     r_multiple,
+    resolve_stream_start,
     risk_dollars,
     unrealized_pct,
 )
@@ -48,6 +49,7 @@ from core.scanner import MarketScanner
 from core.signal_log_store import load_signal_log, reset_signal_log
 from data.edgar_client import set_skip_edgar
 from data.stream_client import StreamClient
+from utils.json_values import json_safe
 
 
 def _chart_history_frame(scanner, symbol: str, timeframe: str, *, market: str):
@@ -119,6 +121,7 @@ class PaperBook:
         self._stream_proc: Optional[subprocess.Popen] = None
         self.error: Optional[str] = None
         self._thread: Optional[threading.Thread] = None
+        self._stop_requested = threading.Event()
         self._chart_key: tuple[int, float] | None = None
         self._chart_b64: Optional[str] = None
 
@@ -243,7 +246,7 @@ class PaperBook:
         display_status = status
         if session_idle and not error:
             display_status = "PH session closed — scanner idle until AM/PM"
-        return {
+        return json_safe({
             "running": running,
             "status": display_status,
             "error": error,
@@ -275,7 +278,7 @@ class PaperBook:
                 "volume_gate": settings.volume_gate_enabled,
                 "n_symbols": profile.default_n_symbols,
             },
-        }
+        })
 
     def _equity_chart_b64(self, account: PaperAccount) -> Optional[str]:
         curve = account.equity_curve_snapshot()
@@ -478,11 +481,12 @@ class PaperBook:
             if self.running:
                 return f"{self.market.upper()} paper session already running."
             self.running = True
+            self._stop_requested.clear()
             self.error = None
             self.use_stream = use_stream
             self.status = "Fetching symbols..."
         self._thread = threading.Thread(
-            target=self._run_thread,
+            target=self._thread_main,
             args=(
                 n_symbols, extra_symbols, use_stream, volume_gate, pattern_only,
                 indicators_only, patterns_v2, collect_first, collect_first_top_n,
@@ -494,13 +498,39 @@ class PaperBook:
         self._thread.start()
         return None
 
+    def _thread_main(self, *args) -> None:
+        """Startup failures must release the book just like scanner failures."""
+        try:
+            self._run_thread(*args)
+        except Exception:
+            log.exception(f"PaperBook | {self.market} session failed")
+            with self.lock:
+                self.error = "Paper session failed. Check server logs for details."
+                self.status = self.error
+        finally:
+            with self.lock:
+                loop = self.loop
+                self.loop = None
+                self.task = None
+                self.running = False
+                if self._stop_requested.is_set() and not self.error:
+                    self.status = "Stopped."
+            if loop is not None and not loop.is_closed():
+                loop.close()
+
     def stop(self) -> None:
         with self.lock:
             loop, task = self.loop, self.task
-            if not self.running or loop is None or task is None:
+            if not self.running:
                 return
+            self._stop_requested.set()
             self.status = "Stopping..."
-        loop.call_soon_threadsafe(task.cancel)
+        if loop is not None and task is not None:
+            try:
+                loop.call_soon_threadsafe(task.cancel)
+            except RuntimeError:
+                if not loop.is_closed():
+                    raise
 
     def reset(self) -> str | None:
         with self.lock:
@@ -662,6 +692,7 @@ class PaperBook:
         volume_gate: bool,
         pattern_only: bool,
         indicators_only: bool,
+        patterns_v2: bool,
         collect_first: bool,
         collect_first_top_n: int,
         stream_start: Optional[str],
@@ -672,27 +703,20 @@ class PaperBook:
         with self.lock:
             self.account = PaperAccount.load(market=profile.id)
         effective_stream_start = stream_start
-        if use_stream and self.account.sim_now() is not None:
-            resume_from = self.account.sim_now()
-            if resume_from is not None:
-                resume_date = resume_from.astimezone(
-                    ZoneInfo(profile.session_tz)
-                ).date()
-                configured_date = None
-                if stream_start:
-                    try:
-                        configured_date = datetime.strptime(
-                            stream_start, "%Y-%m-%d"
-                        ).date()
-                    except ValueError:
-                        configured_date = None
-                if configured_date is None or configured_date <= resume_date:
-                    effective_stream_start = resume_date.isoformat()
+        if use_stream:
+            effective_stream_start, rewind = resolve_stream_start(
+                self.account, stream_start, profile.id,
+            )
+            if rewind:
+                self.account.clear_scan_clock()
+                self.account.save()
 
         resuming = False
         sim_now = self.account.sim_now()
         if sim_now is not None and effective_stream_start:
-            saved = sim_now.astimezone(ZoneInfo(profile.session_tz)).date().isoformat()
+            saved = sim_now.astimezone(
+                ZoneInfo(profile.session_tz)
+            ).date().isoformat()
             resuming = effective_stream_start == saved
 
         if use_stream:
@@ -702,7 +726,6 @@ class PaperBook:
             )
             if error:
                 with self.lock:
-                    self.running = False
                     self.error = error
                     self.status = error
                 return
@@ -711,9 +734,10 @@ class PaperBook:
         symbol_rows = TVClient.fetch_universe_cached(
             n_symbols, profile.id, extra_symbols=extra_symbols,
         )
+        if self._stop_requested.is_set():
+            return
         if not symbol_rows:
             with self.lock:
-                self.running = False
                 self.error = "No symbols from screener or additional list."
                 self.status = self.error
             return
@@ -738,12 +762,15 @@ class PaperBook:
                 volume_gate=volume_gate,
                 pattern_only=pattern_only and not indicators_only,
                 indicators_only=indicators_only,
+                patterns_v2=bool(patterns_v2) and not indicators_only,
                 collect_first=collect_first,
                 collect_first_top_n=collect_first_top_n,
                 market=profile.id,
             )
             self.scanner = scanner
             self.task = loop.create_task(scanner.run())
+            if self._stop_requested.is_set():
+                self.task.cancel()
             interval = (
                 settings.papertrade_stream_interval_seconds
                 if use_stream
@@ -763,6 +790,7 @@ class PaperBook:
                 f", Volume gate={'ON' if volume_gate else 'OFF'}"
                 f", Pattern-only={'ON' if pattern_only and not indicators_only else 'OFF'}"
                 f", Indicators-only={'ON' if indicators_only else 'OFF'}"
+                f", Patternsv2={'ON' if patterns_v2 and not indicators_only else 'OFF'}"
                 f", Collect-first={'ON' if collect_first else 'OFF'}"
                 f", session={session_label(profile.id)}"
             )
@@ -778,12 +806,24 @@ class PaperBook:
         finally:
             self.account.save()
             loop.close()
+            sim_days = 0
             with self.lock:
-                self.running = False
+                scanner = self.scanner
+            if scanner is not None:
+                sim_days = int((scanner.stats or {}).get("sim_days") or 0)
+            with self.lock:
                 self.loop = None
                 self.task = None
                 self.error = error_msg
-                self.status = error_msg or "Stopped."
+                if error_msg:
+                    self.status = error_msg
+                elif use_stream and sim_days == 0 and effective_stream_start:
+                    self.status = (
+                        f"Stopped. No new session on {effective_stream_start} — "
+                        "that day is already scanned. Reset the book to replay it."
+                    )
+                else:
+                    self.status = "Stopped."
                 # The stream process keeps its tapes. The next Start reuses it
                 # when the market and replay clock still match; a mismatch
                 # kills the port from _ensure_stream_server.
@@ -798,6 +838,7 @@ class PaperBookManager:
     """US + PH books. Start/stop/reset are per-market; stream is exclusive."""
 
     def __init__(self) -> None:
+        self._start_lock = threading.Lock()
         self.books: dict[str, PaperBook] = {
             MARKET_US: PaperBook(MARKET_US),
             MARKET_PH: PaperBook(MARKET_PH),
@@ -859,29 +900,32 @@ class PaperBookManager:
         volume_gate: bool,
         pattern_only: bool = False,
         indicators_only: bool = False,
+        patterns_v2: bool = False,
         collect_first: bool = False,
         collect_first_top_n: int = 4,
         stream_start: Optional[str] = None,
     ) -> str | None:
-        book = self._book(market)
-        if use_stream:
-            holder = self.stream_holder()
-            if holder and holder != book.market:
-                return (
-                    f"Paper stream is already in use by {holder.upper()}. "
-                    f"Stop {holder.upper()} or run {book.market.upper()} live."
-                )
-        return book.start(
-            n_symbols,
-            extra_symbols=extra_symbols,
-            use_stream=use_stream,
-            volume_gate=volume_gate,
-            pattern_only=pattern_only,
-            indicators_only=indicators_only,
-            collect_first=collect_first,
-            collect_first_top_n=collect_first_top_n,
-            stream_start=stream_start,
-        )
+        with self._start_lock:
+            book = self._book(market)
+            if use_stream:
+                holder = self.stream_holder()
+                if holder and holder != book.market:
+                    return (
+                        f"Paper stream is already in use by {holder.upper()}. "
+                        f"Stop {holder.upper()} or run {book.market.upper()} live."
+                    )
+            return book.start(
+                n_symbols,
+                extra_symbols=extra_symbols,
+                use_stream=use_stream,
+                volume_gate=volume_gate,
+                pattern_only=pattern_only,
+                indicators_only=indicators_only,
+                patterns_v2=patterns_v2,
+                collect_first=collect_first,
+                collect_first_top_n=collect_first_top_n,
+                stream_start=stream_start,
+            )
 
     def start_both(self, specs: dict[str, dict[str, Any]]) -> dict[str, str]:
         """Start each market present in specs. Returns {market: error} for failures."""
@@ -898,6 +942,7 @@ class PaperBookManager:
                 volume_gate=bool(payload.get("volume_gate")),
                 pattern_only=bool(payload.get("pattern_only")),
                 indicators_only=bool(payload.get("indicators_only")),
+                patterns_v2=bool(payload.get("patterns_v2")),
                 collect_first=bool(payload.get("collect_first")),
                 collect_first_top_n=int(payload.get("collect_first_top_n") or 4),
                 stream_start=payload.get("stream_start"),
