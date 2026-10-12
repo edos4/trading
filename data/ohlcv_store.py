@@ -10,7 +10,6 @@ Key: (symbol, timeframe) → deque of OHLCVCandle, max length = WINDOW
 
 from __future__ import annotations
 from collections import deque
-from dataclasses import asdict
 
 import pandas as pd
 
@@ -134,8 +133,10 @@ class OHLCVStore:
         cached = self._df_cache.get(key)
         if cached is not None and cached[0] == version:
             return cached[1]
-        records = [asdict(c) for c in candles]
-        df = pd.DataFrame(records)
+        df = pd.DataFrame.from_records(
+            [(c.open, c.high, c.low, c.close, c.volume, c.timestamp) for c in candles],
+            columns=["open", "high", "low", "close", "volume", "timestamp"],
+        )
         if "timestamp" in df.columns and df["timestamp"].notna().any():
             idx = pd.to_datetime(df["timestamp"])
             tz = self._session_tz

@@ -48,6 +48,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+from bisect import bisect_right
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -132,6 +133,7 @@ def _stream_history_bars() -> int:
 class _SymbolTape:
     def __init__(self, rows: list[dict], start_ts: int | None = None):
         self.rows = rows  # sorted by timestamp ascending
+        self._asof_keys = [asof_key(row["timestamp"]) for row in rows]
         if start_ts is not None:
             idx = next(
                 (i for i, r in enumerate(rows) if r["timestamp"] >= start_ts),
@@ -166,34 +168,21 @@ class _SymbolTape:
             end = idx + 1
         else:
             end = self.cursor + 1
-        start = max(0, end - lookback)
-        history = self.rows[start:end]
-        if not history:
+        if end <= 0 or not self.rows:
             return None
-        payload: dict = {"candle": history[-1]}
+        payload: dict = {"candle": self.rows[end - 1]}
         if include_history:
-            payload["history"] = history
+            payload["history"] = self.rows[max(0, end - lookback):end]
         return payload
 
     def index_for_asof(self, asof_ts: int) -> int | None:
         key = asof_key(asof_ts)
-        idx = None
-        for i, row in enumerate(self.rows):
-            row_key = asof_key(row["timestamp"])
-            if row_key == key:
-                idx = i
-            elif idx is not None:
-                break
-            elif row_key > key:
-                break
-        return idx
+        idx = bisect_right(self._asof_keys, key) - 1
+        return idx if idx >= 0 and self._asof_keys[idx] == key else None
 
     def next_ts_after(self, asof_ts: int) -> int | None:
-        key = asof_key(asof_ts)
-        for row in self.rows:
-            if asof_key(row["timestamp"]) > key:
-                return int(row["timestamp"])
-        return None
+        idx = bisect_right(self._asof_keys, asof_key(asof_ts))
+        return int(self.rows[idx]["timestamp"]) if idx < len(self.rows) else None
 
 
 def tape_query(start_ts: int | None) -> tuple[int | None, int]:

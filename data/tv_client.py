@@ -13,6 +13,7 @@ import logging
 import shutil
 import sys
 import threading
+import asyncio
 import time
 import urllib.error
 import urllib.request
@@ -647,14 +648,17 @@ class TVClient:
 
         exchange = self._exchange_for(symbol)
         try:
-            candle = self._fetch_candle_screener(symbol, exchange, timeframe)
+            candle = await asyncio.to_thread(
+                self._fetch_candle_screener, symbol, exchange, timeframe,
+            )
             if candle is None:
                 log.error(f"TVClient | No screener data for {symbol} {timeframe}")
                 return None
 
             if store is not None:
-                history = self._fetch_history_screener(
-                    symbol, exchange, timeframe, latest=candle
+                history = await asyncio.to_thread(
+                    self._fetch_history_screener,
+                    symbol, exchange, timeframe, latest=candle,
                 )
                 if history:
                     # The history source supplies the stable session timestamp
