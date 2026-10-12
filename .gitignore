@@ -4,8 +4,12 @@ charts
 __pycache__
 data/__pycache__
 .venv
+.venv-browseruse
+# cf CLI project-local cache (account id/name)
+.cloudflare
 logs/bot.log
 logs/db_update.log
+logs/update-db.lock
 logs/paper_signals_*.jsonl
 logs/stocks_history_updated.txt
 logs/stocks_history_updated.txt.tmp

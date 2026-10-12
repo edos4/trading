@@ -3,6 +3,8 @@ config.py — All settings loaded from .env.
 Import `settings` everywhere; nothing reads os.environ directly.
 """
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
 from enum import Enum
@@ -183,6 +185,50 @@ class Settings(BaseSettings):
     # Idle session lifetime (hours).
     web_ui_session_hours: int = 12
 
+    # ── MCP server (python main.py --mcp / python -m mcp_server) ────────────
+    # A local, stdio MCP server so an AI agent can operate the bot. It is a
+    # thin typed client over the running web UI's /api/* surface (one owner of
+    # paper books / backtest jobs), so `python main.py --web` must be up.
+    # No network listener: the agent spawns this process over stdio.
+    mcp_api_url: str = "http://127.0.0.1:8080"
+    # Basic-auth credentials for /api/*. Empty falls back to WEB_UI_* below.
+    mcp_username: str = ""
+    mcp_password: str = ""
+    mcp_timeout_seconds: float = 60.0
+    # Hard cap on bars returned by get_history_bars (the API allows 2000).
+    mcp_max_history_bars: int = 2000
+    # Default-deny mutating tools; each group needs its flag set in .env.
+    mcp_allow_destructive: bool = False   # paper reset/reset-logs, pattern default/archive, replay clear/upload
+    mcp_allow_maintenance: bool = False   # db_check / db_update (local Postgres)
+    mcp_allow_deploy: bool = False        # deploy_status / deploy (deploy gateway)
+    # Deploy gateway the deploy_* tools target (loopback + bearer token).
+    mcp_deploy_url: str = "http://127.0.0.1:8099"
+    mcp_deploy_token: str = ""            # == DEPLOY_GATEWAY_TOKEN on the gateway host
+
+    # ── Deploy gateway (optional, host-specific) ────────────────────────────
+    # An authenticated HTTPS webhook on this machine: another computer pushes a
+    # branch to GitHub, then POSTs the ref; the gateway fetches that ref into
+    # deploy_repo_dir and restarts deploy_restart_units. Bound to loopback only
+    # — run_deploy.sh's Cloudflare Tunnel is the sole ingress. Inert unless a
+    # deploy_gateway_token is set (run_deploy.sh and the gateway both refuse to
+    # start without one), so a plain clone never runs it.
+    deploy_gateway_host: str = "127.0.0.1"
+    deploy_gateway_port: int = 8099
+    # Required. The gateway refuses to bind without it (this endpoint runs code).
+    deploy_gateway_token: str = ""
+    # Repo to deploy into. Empty = this repo (the directory holding config.py).
+    deploy_repo_dir: str = ""
+    # Comma-separated branch allowlist. Empty = any branch that exists on origin.
+    deploy_allowed_refs: str = ""
+    # systemd --user units restarted after a successful checkout. Empty = none
+    # (the host that serves the deploy sets this, e.g. trading-web.service).
+    deploy_restart_units: str = ""
+    # Allow deploying over a dirty working tree (off by default).
+    deploy_allow_dirty: bool = False
+    deploy_tunnel_token: str = ""
+    # Public hostname for run_deploy.sh's tunnel. Empty = loopback only.
+    deploy_tunnel_hostname: str = ""
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
@@ -288,6 +334,22 @@ class Settings(BaseSettings):
             if symbol and exchange:
                 out[symbol] = exchange
         return out
+
+    @property
+    def deploy_repo_path(self) -> Path:
+        """Repo the deploy gateway updates. Empty deploy_repo_dir = this repo."""
+        configured = (self.deploy_repo_dir or "").strip()
+        if configured:
+            return Path(configured).expanduser().resolve()
+        return Path(__file__).resolve().parent
+
+    @property
+    def deploy_ref_allowlist(self) -> list[str]:
+        return [r.strip() for r in self.deploy_allowed_refs.split(",") if r.strip()]
+
+    @property
+    def deploy_units(self) -> list[str]:
+        return [u.strip() for u in self.deploy_restart_units.split(",") if u.strip()]
 
 
 settings = Settings()

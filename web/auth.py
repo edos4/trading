@@ -1,7 +1,8 @@
 """Session login for the web UI.
 
 Requires WEB_UI_PASSWORD in .env. Passwords compared with secrets.compare_digest.
-Session cookie is HttpOnly + SameSite=Lax (+ Secure when WEB_UI_HTTPS=true).
+Session cookie is HttpOnly + SameSite=Lax, and Secure when WEB_UI_HTTPS=true or
+the request arrived over TLS (e.g. via the Cloudflare Tunnel edge).
 """
 
 from __future__ import annotations
@@ -81,14 +82,29 @@ def verify_history_credentials(username: str, password: str) -> bool:
     return _digest_eq(username, expected) and _digest_eq(password, expected)
 
 
-def set_session_cookie(response: RedirectResponse, username: str) -> None:
+def request_is_https(request: Request) -> bool:
+    """True when the request arrived over TLS, directly or via a TLS proxy.
+
+    Cloudflare Tunnel terminates TLS at the edge and forwards plain HTTP to
+    localhost with ``X-Forwarded-Proto: https`` (uvicorn trusts proxy headers
+    from loopback), so the public session cookie still gets the Secure flag.
+    """
+    if settings.web_ui_https:
+        return True
+    proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
+    return request.url.scheme == "https" or proto == "https"
+
+
+def set_session_cookie(
+    response: RedirectResponse, username: str, *, secure: Optional[bool] = None
+) -> None:
     response.set_cookie(
         key=SESSION_COOKIE,
         value=create_session_token(username),
         max_age=SESSION_MAX_AGE,
         httponly=True,
         samesite="lax",
-        secure=bool(settings.web_ui_https),
+        secure=bool(settings.web_ui_https) if secure is None else secure,
         path="/",
     )
 
