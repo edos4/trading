@@ -109,7 +109,7 @@ def submit(client, store, **overrides):
     body = {
         "pattern_id": PATTERN, "base_version_id": base_version(store),
         "instruction": "Require two closes above the neckline before entry.",
-        "preset_name": "patterns web", "settings": settings_values(sessions=40),
+        "preset_name": "patterns web", "settings": settings_values(sessions=2),
     }
     body.update(overrides)
     return client.post("/api/patterns/edits", json=body)

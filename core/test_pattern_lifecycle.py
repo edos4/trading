@@ -158,6 +158,8 @@ def test_scanner_backtest_and_frontend_discovery(published_pattern_catalog, monk
     service = PatternVersions(store)
     scanner = MarketScanner.__new__(MarketScanner)
     scanner._disabled_patterns = set()
+    scanner._indicators_only = False
+    scanner._patterns_v2 = False
     scanner._analyze_pool = None
     scanner._market = 'us'
     scanner._discover_patterns()
