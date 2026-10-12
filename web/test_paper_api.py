@@ -133,6 +133,35 @@ class WebPaperApiTests(unittest.TestCase):
         self.assertTrue(start.call_args.kwargs.get("indicators_only"))
         self.assertFalse(start.call_args.kwargs.get("pattern_only"))
 
+    def test_patterns_v2_reaches_paper_start(self) -> None:
+        self._login()
+        body = {
+            "market": "us",
+            "n_symbols": 10,
+            "use_stream": False,
+            "patterns_v2": True,
+        }
+        with patch("web.app.paper_books.start", return_value=None) as start:
+            r = self.client.post("/api/paper/start", json=body)
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(start.call_args.kwargs.get("patterns_v2"))
+        self.assertFalse(start.call_args.kwargs.get("indicators_only"))
+
+    def test_indicators_only_replaces_patterns_v2(self) -> None:
+        self._login()
+        body = {
+            "market": "us",
+            "n_symbols": 10,
+            "use_stream": False,
+            "indicators_only": True,
+            "patterns_v2": True,
+        }
+        with patch("web.app.paper_books.start", return_value=None) as start:
+            r = self.client.post("/api/paper/start", json=body)
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(start.call_args.kwargs.get("indicators_only"))
+        self.assertFalse(start.call_args.kwargs.get("patterns_v2"))
+
     def test_export_envelope(self) -> None:
         self._login()
         r = self.client.get("/api/paper/export")

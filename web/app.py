@@ -64,6 +64,7 @@ class SymbolRequest(BaseModel):
     timeframe: str = "1d"
     run_patterns: bool = True
     indicators_only: bool = False
+    patterns_v2: bool = False
     volume_gate: Optional[bool] = None
     market: Optional[str] = None
 
@@ -75,6 +76,7 @@ class PaperStartRequest(BaseModel):
     volume_gate: bool = True
     pattern_only: bool = False
     indicators_only: bool = False
+    patterns_v2: bool = False
     collect_first: bool = False
     collect_first_top_n: int = 4
     stream_start: Optional[str] = None
@@ -461,6 +463,7 @@ def create_app() -> FastAPI:
                 payload.timeframe,
                 run_patterns=payload.run_patterns,
                 indicators_only=payload.indicators_only,
+                patterns_v2=payload.patterns_v2,
                 volume_gate=payload.volume_gate,
                 market=payload.market,
             )
@@ -860,6 +863,7 @@ def create_app() -> FastAPI:
             volume_gate=payload.volume_gate,
             pattern_only=payload.pattern_only and not payload.indicators_only,
             indicators_only=payload.indicators_only,
+            patterns_v2=payload.patterns_v2 and not payload.indicators_only,
             collect_first=payload.collect_first,
             collect_first_top_n=payload.collect_first_top_n,
             stream_start=payload.stream_start,

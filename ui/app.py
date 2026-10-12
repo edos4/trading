@@ -37,6 +37,7 @@ from data.history import fetch_ohlcv_candles
 from data.tv_client import TVClient
 from patterns.base_pattern import TradeSignal
 from patterns.chart_scan import latest_signals_over_lookback
+from patterns_v2.signals import MIN_BARS as PATTERNS_V2_MIN_BARS, detect_trade_signals
 from ui.backtest_dialog import BacktestDialog
 from utils.logger import log
 
@@ -149,6 +150,12 @@ class TradingBotUI:
             toolbar, text="Indicators only", variable=self.indicators_only_var,
             command=self._sync_indicators_only,
         ).pack(side=tk.LEFT, padx=(12, 0))
+        self.patterns_v2_var = tk.BooleanVar(value=False)
+        self._patterns_v2_cb = ttk.Checkbutton(
+            toolbar, text="Patternsv2", variable=self.patterns_v2_var,
+            command=self._sync_patterns_v2,
+        )
+        self._patterns_v2_cb.pack(side=tk.LEFT, padx=(12, 0))
         self.volume_gate_var = tk.BooleanVar(value=settings.volume_gate_enabled)
         self._volume_gate_cb = ttk.Checkbutton(
             toolbar, text="Volume gate", variable=self.volume_gate_var,
@@ -267,9 +274,23 @@ class TradingBotUI:
     def _sync_indicators_only(self) -> None:
         """Indicators only scans indicators and leaves patterns unchecked."""
         if self.indicators_only_var.get():
+            self.patterns_v2_var.set(False)
+            self._patterns_v2_cb.state(["disabled"])
             self.run_patterns_var.set(False)
             self._run_patterns_cb.state(["disabled"])
         else:
+            self._patterns_v2_cb.state(["!disabled"])
+            if not self.patterns_v2_var.get():
+                self._run_patterns_cb.state(["!disabled"])
+                self.run_patterns_var.set(True)
+
+    def _sync_patterns_v2(self) -> None:
+        """Patternsv2 replaces the built-in pattern scan."""
+        if self.patterns_v2_var.get():
+            self.indicators_only_var.set(False)
+            self.run_patterns_var.set(False)
+            self._run_patterns_cb.state(["disabled"])
+        elif not self.indicators_only_var.get():
             self._run_patterns_cb.state(["!disabled"])
             self.run_patterns_var.set(True)
 
@@ -319,12 +340,17 @@ class TradingBotUI:
             self._safe_after(lambda: self._fail(f"No history available for {symbol} {timeframe}."))
             return
         indicators_only = bool(self.indicators_only_var.get())
-        run_patterns = bool(self.run_patterns_var.get()) and not indicators_only
-        if (run_patterns or indicators_only) and len(candles) < PATTERN_SCAN_HISTORY_BARS:
-            kind = "indicator" if indicators_only else "pattern"
+        patterns_v2 = bool(self.patterns_v2_var.get()) and not indicators_only
+        run_patterns = (
+            bool(self.run_patterns_var.get()) and not indicators_only and not patterns_v2
+        )
+        scanning = run_patterns or indicators_only or patterns_v2
+        need = PATTERNS_V2_MIN_BARS if patterns_v2 else PATTERN_SCAN_HISTORY_BARS
+        if scanning and len(candles) < need:
+            kind = "indicator" if indicators_only else ("patternsv2" if patterns_v2 else "pattern")
             self._safe_after(lambda: self._fail(
                 f"{symbol} {timeframe} has {len(candles)} bars; "
-                f"need {PATTERN_SCAN_HISTORY_BARS} days of back history "
+                f"need {need} bars of history "
                 f"for {kind} scan."
             ))
             return
@@ -336,13 +362,24 @@ class TradingBotUI:
             return
 
         signals: list[TradeSignal] = []
-        if run_patterns or indicators_only:
+        if scanning:
             use_volume = self.volume_gate_var.get()
-            raw = latest_signals_over_lookback(
-                self._indicators if indicators_only else self._patterns,
-                symbol, timeframe, candles,
-                session_tz=self._store._session_tz,
-            )
+            if patterns_v2:
+                try:
+                    raw = detect_trade_signals(
+                        df, symbol=symbol, timeframe=timeframe,
+                        lookback=PATTERN_SCAN_HISTORY_BARS,
+                    )
+                except (ImportError, FileNotFoundError) as exc:
+                    msg = str(exc)
+                    self._safe_after(lambda m=msg: self._fail(m))
+                    return
+            else:
+                raw = latest_signals_over_lookback(
+                    self._indicators if indicators_only else self._patterns,
+                    symbol, timeframe, candles,
+                    session_tz=self._store._session_tz,
+                )
             cheap: list[TradeSignal] = []
             for sig in raw:
                 if not passes_min_confidence(sig):
@@ -373,7 +410,7 @@ class TradingBotUI:
             self._safe_after(lambda: self._fail(msg))
             return
 
-        kind = "indicator" if indicators_only else "pattern"
+        kind = "indicator" if indicators_only else ("patternsv2" if patterns_v2 else "pattern")
         self._safe_after(lambda: self._render_result(
             symbol, timeframe, exchange, df, signals, png, kind,
         ))

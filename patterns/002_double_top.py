@@ -33,7 +33,7 @@ class _Setup:
     h1_rsi: float
     h2_rsi: float
     entry: int
-    neckline_break_bar: int
+    neckline_break_bar: int | None
 
 
 class DoubleTopPattern(BasePattern):
@@ -82,18 +82,20 @@ class DoubleTopPattern(BasePattern):
         ind = IndicatorEngine(df)
         rsi = ind.rsi_wilder(self.RSI_PERIOD)
         current = _dedup.current_bar(len(df) - 1)
+        historical = _dedup.historical_walk()
         n = len(df)
         highs = extrema(ind.high, "high", self.LB, strict=True)
 
         for h1 in highs:
-            if _dedup.used(h1) or h1 + self.GAP_MIN + self.OUTCOME_WINDOW + 3 >= n:
+            reserve = self.OUTCOME_WINDOW + 3 if historical else self.LB
+            if _dedup.used(h1) or h1 + self.GAP_MIN + reserve >= n:
                 continue
             h1_rsi = float(rsi.iloc[h1])
             if not np.isfinite(h1_rsi) or h1_rsi < self.H1_RSI_MIN:
                 continue
             h1_high = float(ind.high.iloc[h1])
             # C1: deepest valley in the H1+1 .. H1+65 window
-            v_end = min(h1 + self.VALLEY_WINDOW, n - self.OUTCOME_WINDOW - 3)
+            v_end = min(h1 + self.VALLEY_WINDOW, n - reserve)
             if v_end <= h1 + 1:
                 continue
             vslice = ind.low.iloc[h1 + 1 : v_end + 1].to_numpy(dtype=float)
@@ -107,22 +109,32 @@ class DoubleTopPattern(BasePattern):
             # outcome window shows no neckline break it is still consumed (the
             # `usedH1` + `break`), so a later, deeper H2 is never considered.
             # Only a C13 cancellation ("continue") lets the search move on.
-            h2_cap = n - self.OUTCOME_WINDOW - 3
+            h2_cap = n - self.OUTCOME_WINDOW - 3 if historical else current - self.LB
             for h2 in highs:
-                if h2 < valley + 3:
+                if historical and h2 < valley + 3:
                     continue
                 if h2 - h1 < self.GAP_MIN:
                     continue
                 if h2 - h1 > self.GAP_MAX or h2 > h2_cap:
                     break
+                if not historical:
+                    # The live neckline is between the two confirmed peaks;
+                    # a later breakdown must not move it below the old valley.
+                    v_end = min(h1 + self.VALLEY_WINDOW, h2 - 1)
+                    vslice = ind.low.iloc[h1 + 1 : v_end + 1].to_numpy(dtype=float)
+                    valley = h1 + 1 + int(np.argmin(vslice))
+                    neckline = float(ind.low.iloc[valley])
+                    if h2 < valley + 3 or (h1_high - neckline) / h1_high < self.VALLEY_DEPTH_MIN:
+                        continue
                 verdict = self._evaluate(ind, rsi, h1, h2, valley, neckline,
-                                         h1_high, h1_rsi, n)
+                                         h1_high, h1_rsi, n, causal=not historical)
                 if verdict is None:                 # structural gate failed
                     continue
                 if verdict == "cancelled":          # C13 — keep searching
                     continue
                 if verdict == "pending":            # committed, no break -> no trade
-                    _dedup.mark(h1)
+                    if historical:
+                        _dedup.mark(h1)
                     break
                 setup = verdict
                 if setup.entry != current:
@@ -162,14 +174,18 @@ class DoubleTopPattern(BasePattern):
         return None
 
     def _evaluate(self, ind, rsi, h1, h2, valley, neckline, h1_high, h1_rsi,
-                  n) -> _Setup | str | None:
+                  n, *, causal=False) -> _Setup | str | None:
         """`.cjs` scanDoubleTop verdict for one (H1, H2) pair:
         ``None`` — a structural gate (C2/C4/C6-C12) failed, try the next H2;
         ``"cancelled"`` — C13: a post-H2 bar exceeded H2 before any neckline
         break, try the next H2;
         ``"pending"`` — structure holds but the neckline never broke in the
         outcome window: `.cjs` still consumes H1 here, so no trade;
-        ``_Setup`` — confirmed break, carries the entry bar."""
+        ``_Setup`` — confirmed break, carries the entry bar.
+
+        Live evaluation honors the day-seven entry without requiring a
+        neckline break in future data, and waits for H2 to be confirmed.
+        """
         h2_high = float(ind.high.iloc[h2])
         h2_close = float(ind.close.iloc[h2])
         h1_close = float(ind.close.iloc[h1])
@@ -201,15 +217,17 @@ class DoubleTopPattern(BasePattern):
         # C13 + outcome: neckline must break within 30 bars of H2, and no bar
         # may exceed H2's high before that.
         days_to_cross = None
-        scan_end = min(h2 + self.OUTCOME_WINDOW, n - 1)
+        scan_end = min(h2 + (self.ENTRY_DELAY if causal else self.OUTCOME_WINDOW), n - 1)
         for k in range(h2 + 1, scan_end + 1):
             if float(ind.close.iloc[k]) < neckline:
                 days_to_cross = k - h2
                 break
             if float(ind.high.iloc[k]) > h2_high:
                 return "cancelled"  # C13
-        if days_to_cross is None:
+        if days_to_cross is None and (not causal or h2 + self.ENTRY_DELAY >= n):
             return "pending"
-        entry = h2 + min(self.ENTRY_DELAY, days_to_cross)
+        entry = h2 + min(self.ENTRY_DELAY, days_to_cross) if days_to_cross is not None else h2 + self.ENTRY_DELAY
+        if causal:
+            entry = max(entry, h2 + self.LB)
         return _Setup(h1, h2, valley, neckline, h1_high, h2_high, h1_rsi, h2_rsi,
-                      entry, h2 + days_to_cross)
+                      entry, h2 + days_to_cross if days_to_cross is not None else None)

@@ -148,7 +148,7 @@ def _structure(
 
 
 def _find_break(ind: IndicatorEngine, rsi, second: int, current: int, st: _Structure,
-                up: bool) -> int | None:
+                up: bool, *, min_confirm: int | None = None) -> int | None:
     """First 2-consecutive-close break of the rising rail (`.cjs` scanEnd = SH2+30)."""
     line = lambda idx: st.turn_price + st.slope * (idx - st.turn)
     consecutive = 0
@@ -160,7 +160,7 @@ def _find_break(ind: IndicatorEngine, rsi, second: int, current: int, st: _Struc
             return None
         crossed = close < line(idx) if up else close > line(idx)
         consecutive = consecutive + 1 if crossed else 0
-        if consecutive >= NECK_CONFIRM:
+        if consecutive >= NECK_CONFIRM and (min_confirm is None or idx >= min_confirm):
             return idx
     return None
 
@@ -189,13 +189,18 @@ def find_channel(
     but only when its 2-close break confirms on the current bar.
 
     For the earliest non-consumed SH1, `.cjs` takes the earliest SH2 that
-    passes structure and breaks within 30 bars. To stay walk-forward-safe we
-    only look past an SH2 candidate once its 30-bar break window has fully
-    elapsed with no break — otherwise `.cjs` might still commit to it.
+    passes structure and breaks within 30 bars. An explicit historical walk
+    preserves the legacy full-history bounds. Live scans need only confirmed
+    pivots and two closing breaks, without reserving future exit bars.
     """
     global _memo_gen, _st_memo, _brk_memo
-    if _memo_gen != _dedup.generation():
+    historical = _dedup.historical_walk()
+    if historical and _memo_gen != _dedup.generation():
         _memo_gen, _st_memo, _brk_memo = _dedup.generation(), {}, {}
+    # Live frames change per symbol and per bar; a cached missing breakout is
+    # only stable in the backtest's explicitly fixed full-history frame.
+    structures = _st_memo if historical else {}
+    breaks = _brk_memo if historical else {}
 
     up = direction == "up"
     series = ind.high if up else ind.low
@@ -204,24 +209,27 @@ def find_channel(
     # `.cjs` loop bounds: SH1 < n-68, SH2 <= n-48, break <= n-16 — it never
     # anchors a pattern it can't fully simulate. Match those so the walk
     # doesn't form trailing-edge patterns `.cjs` skips.
-    max_first = n - (MIN_GAP + NECK_SCAN_DAYS + 15 + LB)
-    max_second = n - (NECK_SCAN_DAYS + 15 + LB)
-    max_break = n - 16
+    max_first = n - (MIN_GAP + NECK_SCAN_DAYS + 15 + LB) if historical else current - LB - MIN_GAP
+    max_second = n - (NECK_SCAN_DAYS + 15 + LB) if historical else current - LB
+    max_break = n - 16 if historical else current
 
     def _st(f: int, s: int):
-        key = (f, s)
-        if key not in _st_memo:
-            _st_memo[key] = _structure(ind, rsi, f, s, direction)
-        return _st_memo[key]
+        key = (direction, f, s)
+        if key not in structures:
+            structures[key] = _structure(ind, rsi, f, s, direction)
+        return structures[key]
 
     def _brk(f: int, s: int, st):
-        key = (f, s)
-        if key not in _brk_memo:
-            _brk_memo[key] = (
+        key = (direction, f, s)
+        if key not in breaks:
+            breaks[key] = (
                 None if st is None
-                else _find_break(ind, rsi, s, min(n - 1, s + NECK_SCAN_DAYS), st, up)
+                else _find_break(
+                    ind, rsi, s, min(n - 1 if historical else current, s + NECK_SCAN_DAYS), st, up,
+                    min_confirm=None if historical else s + LB,
+                )
             )
-        return _brk_memo[key]
+        return breaks[key]
 
     def _first_valid_second(f: int, taken: set[int]) -> int | None:
         """The SH2 the `.cjs` inner loop commits to for SH1=f (or None).
