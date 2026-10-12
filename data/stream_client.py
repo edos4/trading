@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 import websockets
+from websockets.exceptions import ConnectionClosed
 
 from config import settings
 from data.ohlcv_store import OHLCVStore
@@ -79,7 +80,7 @@ class StreamClient:
         store: OHLCVStore | None,
     ) -> MarketSnapshot:
         if not reply or "error" in reply:
-            code = str((reply or {}).get("code") or "no_data")
+            code = str((reply or {}).get("code") or "history_unavailable")
             message = str((reply or {}).get("error") or f"no data for {symbol}")
             if code in ("asof_mismatch", "history_unavailable"):
                 log.debug(f"StreamClient | {symbol}: {message}")
@@ -150,17 +151,14 @@ class StreamClient:
                 "history_for": history_for,
             }))
             reply = json.loads(await mcp_session.recv())
-        except websockets.exceptions.ConnectionClosed as exc:
-            log.warning(f"StreamClient | batch: connection closed ({exc})")
-            return {s: None for s in symbols}
+        except ConnectionClosed as exc:
+            raise ConnectionError("Stream snapshot connection closed") from exc
         except Exception as exc:
-            log.error(f"StreamClient | batch request failed: {exc}")
-            return {s: None for s in symbols}
+            raise ConnectionError("Stream snapshot request failed") from exc
 
         payloads = reply.get("results") if isinstance(reply, dict) else None
         if not isinstance(payloads, dict):
-            log.error("StreamClient | batch reply missing results")
-            return {s: None for s in symbols}
+            raise ConnectionError("Stream snapshot reply missing results")
 
         out: dict[str, MarketSnapshot | FetchSkip | None] = {}
         for symbol in symbols:
@@ -171,6 +169,10 @@ class StreamClient:
                 )
             except FetchSkip as exc:
                 out[symbol] = exc
+            except (KeyError, TypeError, ValueError, OverflowError) as exc:
+                out[symbol] = FetchSkip(
+                    "history_unavailable", f"invalid snapshot for {symbol}: {exc}",
+                )
         return out
 
     async def preload_universe(self, symbols: list[str], mcp_session=None) -> dict:

@@ -380,3 +380,67 @@ def test_status_payload_reports_market_start_and_asof():
     server._asof_ts = server._start_ts
     assert server.status_payload()["asof_day"] == "2026-08-31"
 
+
+def test_indexed_tape_matches_last_same_day_print_and_skips_missing_days():
+    from datetime import datetime, timezone
+
+    def ts(day, hour):
+        return int(datetime(2026, 8, day, hour, tzinfo=timezone.utc).timestamp())
+
+    tape = _SymbolTape([
+        {"timestamp": ts(3, 13), "close": 1},
+        {"timestamp": ts(3, 21), "close": 2},
+        {"timestamp": ts(5, 21), "close": 3},
+    ])
+    assert tape.index_for_asof(ts(2, 21)) is None
+    assert tape.index_for_asof(ts(3, 0)) == 1
+    assert tape.snapshot(ts(3, 0), include_history=False)["candle"]["close"] == 2
+    assert tape.index_for_asof(ts(4, 21)) is None
+    assert tape.index_for_asof(ts(6, 21)) is None
+    assert tape.next_ts_after(ts(2, 21)) == ts(3, 13)
+    assert tape.next_ts_after(ts(3, 0)) == ts(5, 21)
+    assert tape.next_ts_after(ts(4, 21)) == ts(5, 21)
+    assert tape.next_ts_after(ts(5, 0)) is None
+    empty = _SymbolTape([])
+    assert empty.index_for_asof(ts(3, 0)) is None
+    assert empty.next_ts_after(ts(3, 0)) is None
+    assert empty.snapshot() is None
+
+
+def test_stream_client_transport_failure_requests_reconnection():
+    import asyncio
+    import pytest
+    from data.stream_client import StreamClient
+
+    class BrokenSession:
+        async def send(self, _message):
+            raise OSError("disconnected")
+
+    with pytest.raises(ConnectionError, match="request failed"):
+        asyncio.run(StreamClient().fetch_snapshots(["AAA"], mcp_session=BrokenSession()))
+
+
+def test_missing_or_malformed_symbol_reply_is_retryable_and_keeps_other_symbols():
+    import asyncio
+    import json
+    from data.stream_client import FetchSkip, StreamClient
+
+    class Session:
+        async def send(self, _message):
+            pass
+
+        async def recv(self):
+            return json.dumps({"results": {
+                "BBB": {"candle": {"timestamp": "invalid"}},
+                "CCC": {"candle": {"open": 1, "high": 1, "low": 1,
+                                   "close": 1, "volume": 1, "timestamp": 1}},
+            }})
+
+    result = asyncio.run(StreamClient().fetch_snapshots(
+        ["AAA", "BBB", "CCC"], mcp_session=Session(),
+    ))
+    for symbol in ("AAA", "BBB"):
+        assert isinstance(result[symbol], FetchSkip)
+        assert result[symbol].code == "history_unavailable"
+    assert result["CCC"].candle.close == 1
+

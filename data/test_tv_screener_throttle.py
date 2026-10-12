@@ -108,3 +108,41 @@ def test_history_reuses_latest_candle_without_second_screener():
     fetch_candle.assert_not_called()
     assert out[-1].close == 1.5
     assert out[-1].volume == 100.0
+
+
+def test_snapshot_workers_overlap_blocking_candle_and_history_fetches(monkeypatch):
+    import asyncio
+    import threading
+    from datetime import datetime, timezone
+
+    from data.ohlcv_store import OHLCVStore
+
+    client = tv_client.TVClient(screener="america", exchange="NASDAQ")
+    candle = tv_client.OHLCVCandle(1, 2, 0.5, 1.5, 100, datetime(2026, 1, 5, tzinfo=timezone.utc))
+    candle_barrier = threading.Barrier(2, timeout=2)
+    history_barrier = threading.Barrier(2, timeout=2)
+
+    def fetch_candle(*args):
+        candle_barrier.wait()
+        return candle
+
+    def fetch_history(*args, **kwargs):
+        history_barrier.wait()
+        return [candle]
+
+    async def fetch_analysis(*args, **kwargs):
+        return {}
+
+    monkeypatch.setattr(client, "_fetch_candle_screener", fetch_candle)
+    monkeypatch.setattr(client, "_fetch_history_screener", fetch_history)
+    monkeypatch.setattr(client, "_fetch_mcp_analysis", fetch_analysis)
+    store = OHLCVStore()
+
+    async def scan():
+        return await asyncio.gather(*[
+            client.fetch_snapshot(symbol, "1d", store=store) for symbol in ("AAA", "BBB")
+        ])
+
+    snapshots = asyncio.run(scan())
+    assert [snapshot.symbol for snapshot in snapshots] == ["AAA", "BBB"]
+    assert store.available("AAA", "1d") == store.available("BBB", "1d") == 1

@@ -407,6 +407,8 @@ class MarketScanner:
         """End the scan loop after N unique market sessions (sim_days)."""
         if self._duration_days is None:
             return False
+        if not self.stats.get("scan_complete", True):
+            return False
         if self._sim_days < self._duration_days:
             return False
         log.info(
@@ -635,6 +637,9 @@ class MarketScanner:
         self.stats["signals_rejected"] = 0
         self.stats["trades_opened"] = 0
         self.stats["rejection_by_gate"] = {}
+        self.stats["scan_complete"] = False
+        self.stats["daily_date_skew"] = 0
+        snapshot_errors_before = self.stats["snapshot_errors"]
 
         all_timeframes: set[str] = set()
         for p in self._patterns:
@@ -714,6 +719,10 @@ class MarketScanner:
                                 batch, timeframe,
                                 store=self._store, mcp_session=mcp,
                             )
+                        except ConnectionError:
+                            if pending:
+                                await self._run_analyzes(pending)
+                            raise
                         except Exception as exc:
                             self.stats["snapshot_errors"] += len(batch)
                             log.warning(f"Scan | batch snapshot failed: {exc}")
@@ -732,6 +741,10 @@ class MarketScanner:
                                     symbol, timeframe,
                                     store=self._store, mcp_session=mcp,
                                 )
+                            except ConnectionError:
+                                if pending:
+                                    await self._run_analyzes(pending)
+                                raise
                             except FetchSkip as exc:
                                 self.stats["timeframe_requests"] += 1
                                 self._note_fetch_skip(symbol, exc)
@@ -759,9 +772,22 @@ class MarketScanner:
             workers = [_drain(mcp) for mcp in feed_sessions[:n_workers]]
         else:
             workers = [_owned_session_worker() for _ in range(n_workers)]
+        tasks = [asyncio.create_task(worker) for worker in workers]
         try:
-            await asyncio.gather(*workers)
+            # Applied bars must finish analysis before reconnecting; cancelling
+            # a healthy worker here would lose signals on its processed bars.
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for result in results:
+                if isinstance(result, BaseException):
+                    if self._collect_first:
+                        await self._flush_collect_first()
+                    raise result
         finally:
+            # Drain cancellation too: no workers may outlive this scan.
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
             pbar.close()
 
         if self._collect_first:
@@ -780,7 +806,10 @@ class MarketScanner:
         # stream timer would otherwise make different symbols see different
         # simulated dates within the same scan.
         advance_replay = getattr(self._tv, "advance_replay", None)
-        if advance_replay is not None:
+        self.stats["scan_complete"] = self.stats["snapshot_errors"] == snapshot_errors_before
+        if advance_replay is not None and not self.stats["scan_complete"]:
+            log.warning("Scanner | retrying replay date after incomplete snapshots")
+        elif advance_replay is not None:
             control_session = feed_sessions[0] if feed_sessions else None
             ok, reached_end = await advance_replay(control_session)
             if not ok:
@@ -813,6 +842,12 @@ class MarketScanner:
 
     def _apply_bar(self, symbol: str, timeframe: str, snapshot) -> tuple[bool, MarketSnapshot | None]:
         """Ledger + bar identity on the scan loop. Snapshot if patterns should run."""
+        candle = snapshot.candle
+        if not all(math.isfinite(price) and price > 0
+                   for price in (candle.open, candle.high, candle.low, candle.close)):
+            self.stats["snapshot_errors"] += 1
+            log.warning(f"Scan | invalid candle prices for {symbol} {timeframe}; retrying")
+            return False, None
         self.stats["timeframe_snapshots_ok"] += 1
         self._scan_snapshot_symbols.add(symbol)
 
@@ -967,15 +1002,51 @@ class MarketScanner:
                 hits.append(signal)
         return n_eval, hits
 
+    async def _guard_signal(self, signal: TradeSignal, runner, *args) -> None:
+        """One bad fill must not abort the scan.
+
+        The bar is marked processed before analyze. An exception here used to
+        restart the data sessions, and the replay then skipped that breakout.
+        """
+        try:
+            await runner(*args)
+        except Exception as exc:
+            log.exception(
+                f"Signal | {signal.symbol} {signal.timeframe} "
+                f"{signal.pattern} failed — continuing the scan"
+            )
+            self.stats["signals_rejected"] = self.stats.get("signals_rejected", 0) + 1
+            try:
+                self._append_signal_log(
+                    signal,
+                    status="rejected",
+                    reason=f"Signal handling failed: {exc}",
+                )
+            except Exception:
+                log.exception(
+                    f"Signal log | could not record failed "
+                    f"{signal.symbol} {signal.pattern}"
+                )
+
     async def _emit_signals(
         self, snapshot: MarketSnapshot, signals: list[TradeSignal],
     ) -> None:
         by_name = {p.name: p for p in self._patterns}
         for signal in signals:
             self.stats["patterns_found"] += 1
-            self._record_detection(signal)
-            await self._process_signal(
-                signal, by_name.get(signal.pattern), snapshot.candle,
+            try:
+                self._record_detection(signal)
+            except Exception:
+                log.exception(
+                    f"Signal | could not record detection "
+                    f"{signal.symbol} {signal.pattern}"
+                )
+            await self._guard_signal(
+                signal,
+                self._process_signal,
+                signal,
+                by_name.get(signal.pattern),
+                snapshot.candle,
             )
 
     async def _run_analyzes(self, snapshots: list[MarketSnapshot]) -> None:
@@ -1202,7 +1273,9 @@ class MarketScanner:
                 f"Collect-first | selected {signal.symbol} {signal.pattern} "
                 f"R:R={rr_txt}"
             )
-            await self._finish_signal(signal, pattern, candle)
+            await self._guard_signal(
+                signal, self._finish_signal, signal, pattern, candle,
+            )
 
 
     async def _finish_signal(

@@ -60,6 +60,50 @@ def test_retry_wait_is_cancellable(monkeypatch):
     assert attempts
 
 
+def test_one_failed_signal_does_not_drop_the_rest():
+    from datetime import datetime, timezone
+
+    from data.tv_client import MarketSnapshot, OHLCVCandle
+    from patterns.base_pattern import TradeSignal
+
+    scanner = _scanner()
+    scanner.stats = {"patterns_found": 0, "signals_rejected": 0}
+    seen = []
+    logged = []
+
+    async def process(signal, _pattern, _candle):
+        seen.append(signal.symbol)
+        if signal.symbol == "FGBI":
+            raise DatabaseUnavailable("PostgreSQL unavailable or operation timed out")
+
+    scanner._process_signal = process
+    scanner._record_detection = lambda _signal: None
+    scanner._append_signal_log = (
+        lambda signal, *, status, reason: logged.append((signal.symbol, status))
+    )
+    now = datetime(2026, 9, 15, tzinfo=timezone.utc)
+    snap = MarketSnapshot(
+        symbol="FGBI", timeframe="1d", timestamp=now,
+        candle=OHLCVCandle(8.42, 8.43, 8.33, 8.42, 8000, now),
+        indicators={}, summary={}, oscillators={}, moving_avgs={},
+    )
+
+    def _signal(symbol, pattern):
+        return TradeSignal(
+            symbol=symbol, action="BUY", pattern=pattern, timeframe="1d",
+            confidence=0.9, price=8.42, qty=0.0, provenance="patternsv2",
+        )
+
+    asyncio.run(scanner._emit_signals(snap, [
+        _signal("FGBI", "falling_wedge"),
+        _signal("RLAY", "double_top"),
+    ]))
+    assert seen == ["FGBI", "RLAY"]
+    assert logged == [("FGBI", "rejected")]
+    assert scanner.stats["patterns_found"] == 2
+    assert scanner.stats["signals_rejected"] == 1
+
+
 def test_stop_tolerates_database_outage(monkeypatch):
     import core.pattern_loader as loader
 
