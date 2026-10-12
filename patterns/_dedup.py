@@ -46,6 +46,11 @@ def current_bar(default: int) -> int:
     return default if _current is None else _current
 
 
+def historical_walk() -> bool:
+    """Whether the caller explicitly requested legacy full-history evaluation."""
+    return _current is not None
+
+
 def mark(*pivots: int) -> None:
     _used.update(int(p) for p in pivots if p is not None)
 

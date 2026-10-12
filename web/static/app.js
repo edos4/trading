@@ -77,12 +77,32 @@ function initExplorer() {
   const tbody = document.querySelector("#signals tbody");
   const indicatorsOnly = document.getElementById("indicators-only");
   const runPatterns = document.getElementById("run-patterns");
+  const patternsV2 = document.getElementById("patterns-v2");
   if (indicatorsOnly && runPatterns) {
     indicatorsOnly.addEventListener("change", () => {
       if (indicatorsOnly.checked) {
         runPatterns.checked = false;
         runPatterns.disabled = true;
+        if (patternsV2) {
+          patternsV2.checked = false;
+          patternsV2.disabled = true;
+        }
       } else {
+        if (patternsV2) patternsV2.disabled = false;
+        if (!(patternsV2 && patternsV2.checked)) {
+          runPatterns.disabled = false;
+          runPatterns.checked = true;
+        }
+      }
+    });
+  }
+  if (patternsV2 && runPatterns) {
+    patternsV2.addEventListener("change", () => {
+      if (patternsV2.checked) {
+        if (indicatorsOnly) indicatorsOnly.checked = false;
+        runPatterns.checked = false;
+        runPatterns.disabled = true;
+      } else if (!(indicatorsOnly && indicatorsOnly.checked)) {
         runPatterns.disabled = false;
         runPatterns.checked = true;
       }
@@ -126,8 +146,9 @@ function initExplorer() {
       symbol: row.symbol,
       exchange: row.exchange,
       timeframe: document.getElementById("timeframe").value,
-      run_patterns: !!(runPatterns && runPatterns.checked && !(indicatorsOnly && indicatorsOnly.checked)),
+      run_patterns: !!(runPatterns && runPatterns.checked && !(indicatorsOnly && indicatorsOnly.checked) && !(patternsV2 && patternsV2.checked)),
       indicators_only: !!(indicatorsOnly && indicatorsOnly.checked),
+      patterns_v2: !!(patternsV2 && patternsV2.checked && !(indicatorsOnly && indicatorsOnly.checked)),
       volume_gate: document.getElementById("volume-gate").checked,
       market: (document.getElementById("market") || {}).value || "",
     };
@@ -157,11 +178,12 @@ function initExplorer() {
       savePng.disabled = false;
       saveCsv.disabled = false;
       const indicatorScan = data.scan === "indicators";
+      const patternsV2Scan = data.scan === "patternsv2";
       const heading = document.getElementById("signals-heading");
       const col = document.getElementById("signals-col");
       if (heading) heading.textContent = indicatorScan ? "Detected indicators" : "Detected patterns";
       if (col) col.textContent = indicatorScan ? "Indicator" : "Pattern";
-      const noun = indicatorScan ? "indicator" : "pattern";
+      const noun = indicatorScan ? "indicator" : (patternsV2Scan ? "patternsv2" : "pattern");
       status.textContent = `${data.symbol}: ${data.bars} bars, ${data.signals.length} ${noun}(s).`;
     } catch (err) {
       status.textContent = String(err.message || err);
@@ -391,14 +413,25 @@ function initPaper() {
     }
     const indicatorsOnly = document.getElementById(`${id}-indicators-only`);
     const patternOnly = document.getElementById(`${id}-pattern-only`);
+    const patternsV2 = document.getElementById(`${id}-patterns-v2`);
     if (indicatorsOnly && patternOnly) {
       indicatorsOnly.addEventListener("change", () => {
         if (indicatorsOnly.checked) {
           patternOnly.checked = false;
           patternOnly.disabled = true;
+          if (patternsV2) {
+            patternsV2.checked = false;
+            patternsV2.disabled = true;
+          }
         } else {
           patternOnly.disabled = false;
+          if (patternsV2) patternsV2.disabled = false;
         }
+      });
+    }
+    if (patternsV2 && indicatorsOnly) {
+      patternsV2.addEventListener("change", () => {
+        if (patternsV2.checked) indicatorsOnly.checked = false;
       });
     }
   });
@@ -522,6 +555,8 @@ function initPaper() {
       use_stream: !!(document.getElementById(`${id}-stream`) || {}).checked,
       volume_gate: !!(document.getElementById(`${id}-volume`) || {}).checked,
       indicators_only: !!(document.getElementById(`${id}-indicators-only`) || {}).checked,
+      patterns_v2: !!(document.getElementById(`${id}-patterns-v2`) || {}).checked
+        && !(document.getElementById(`${id}-indicators-only`) || {}).checked,
       pattern_only: !!(document.getElementById(`${id}-pattern-only`) || {}).checked
         && !(document.getElementById(`${id}-indicators-only`) || {}).checked,
       collect_first: !!(document.getElementById(`${id}-collect-first`) || {}).checked,
@@ -871,10 +906,15 @@ function initPaper() {
   }
 
   async function poll() {
-    const s = await refresh();
-    const running = Object.values(s.books || {}).some((b) => b.running);
+    let running = true;
+    try {
+      const s = await refresh();
+      running = Object.values(s.books || {}).some((b) => b.running);
+    } catch (err) {
+      console.error(err);
+    }
     if (pollTimer) clearTimeout(pollTimer);
-    pollTimer = setTimeout(() => poll().catch(console.error), running ? 2000 : 5000);
+    pollTimer = setTimeout(() => poll(), running ? 2000 : 5000);
   }
 
   const chartModal = document.getElementById("paper-chart-modal");

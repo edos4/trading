@@ -16,6 +16,7 @@ from data.tv_client import TVClient
 from data.history import fetch_ohlcv_candles
 from patterns.base_pattern import TradeSignal
 from patterns.chart_scan import latest_signals_over_lookback
+from patterns_v2.signals import MIN_BARS as PATTERNS_V2_MIN_BARS, detect_trade_signals
 
 TIMEFRAMES = ["1d", "1W"]
 
@@ -82,6 +83,7 @@ class ExplorerService:
         *,
         run_patterns: bool = True,
         indicators_only: bool = False,
+        patterns_v2: bool = False,
         volume_gate: bool | None = None,
         market: str | None = None,
     ) -> dict[str, Any]:
@@ -107,12 +109,16 @@ class ExplorerService:
         # both boxes set still must not run patterns.
         if indicators_only:
             run_patterns = False
-        scanning = run_patterns or indicators_only
-        if scanning and len(candles) < PATTERN_SCAN_HISTORY_BARS:
-            kind = "indicator" if indicators_only else "pattern"
+            patterns_v2 = False
+        elif patterns_v2:
+            run_patterns = False
+        scanning = run_patterns or indicators_only or patterns_v2
+        need = PATTERNS_V2_MIN_BARS if patterns_v2 else PATTERN_SCAN_HISTORY_BARS
+        if scanning and len(candles) < need:
+            kind = "indicator" if indicators_only else ("patternsv2" if patterns_v2 else "pattern")
             raise ValueError(
                 f"{symbol} {timeframe} has {len(candles)} bars; "
-                f"need {PATTERN_SCAN_HISTORY_BARS} days of back history "
+                f"need {need} bars of history "
                 f"for {kind} scan."
             )
 
@@ -125,11 +131,20 @@ class ExplorerService:
 
         signals: list[TradeSignal] = []
         if scanning:
-            detectors = self.indicators if indicators_only else self.patterns
-            raw = latest_signals_over_lookback(
-                detectors, symbol, timeframe, candles,
-                session_tz=profile.session_tz,
-            )
+            if patterns_v2:
+                try:
+                    raw = detect_trade_signals(
+                        df, symbol=symbol, timeframe=timeframe,
+                        lookback=PATTERN_SCAN_HISTORY_BARS,
+                    )
+                except (ImportError, FileNotFoundError) as exc:
+                    raise ValueError(str(exc)) from exc
+            else:
+                detectors = self.indicators if indicators_only else self.patterns
+                raw = latest_signals_over_lookback(
+                    detectors, symbol, timeframe, candles,
+                    session_tz=profile.session_tz,
+                )
             cheap: list[TradeSignal] = []
             for sig in raw:
                 if not passes_min_confidence(sig):
@@ -172,7 +187,10 @@ class ExplorerService:
                 "change": change,
                 "change_pct": pct,
             },
-            "scan": "indicators" if indicators_only else ("patterns" if run_patterns else "none"),
+            "scan": (
+                "indicators" if indicators_only
+                else ("patternsv2" if patterns_v2 else ("patterns" if run_patterns else "none"))
+            ),
             "signals": [
                 {
                     "pattern": s.pattern,

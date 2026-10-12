@@ -137,6 +137,12 @@ class MarketBookFrame(ttk.LabelFrame):
             flags, text="Indicators only", variable=self.indicators_only_var,
             command=self._sync_indicators_only,
         ).pack(side=tk.LEFT, padx=(8, 0))
+        self.patterns_v2_var = tk.BooleanVar(value=False)
+        self._patterns_v2_cb = ttk.Checkbutton(
+            flags, text="Patternsv2", variable=self.patterns_v2_var,
+            command=self._sync_patterns_v2,
+        )
+        self._patterns_v2_cb.pack(side=tk.LEFT, padx=(8, 0))
         self._volume_gate_cb = ttk.Checkbutton(
             flags, text="Volume gate", variable=self.volume_gate_var,
         )
@@ -165,8 +171,16 @@ class MarketBookFrame(ttk.LabelFrame):
     def _sync_indicators_only(self) -> None:
         if self.indicators_only_var.get():
             self.pattern_only_var.set(False)
+            self.patterns_v2_var.set(False)
             self._pattern_only_cb.state(["disabled"])
+            self._patterns_v2_cb.state(["disabled"])
         else:
+            self._pattern_only_cb.state(["!disabled"])
+            self._patterns_v2_cb.state(["!disabled"])
+
+    def _sync_patterns_v2(self) -> None:
+        if self.patterns_v2_var.get():
+            self.indicators_only_var.set(False)
             self._pattern_only_cb.state(["!disabled"])
 
     @staticmethod
@@ -203,6 +217,7 @@ class MarketBookFrame(ttk.LabelFrame):
             "volume_gate": bool(self.volume_gate_var.get()),
             "pattern_only": bool(self.pattern_only_var.get()) and not self.indicators_only_var.get(),
             "indicators_only": bool(self.indicators_only_var.get()),
+            "patterns_v2": bool(self.patterns_v2_var.get()) and not self.indicators_only_var.get(),
             "collect_first": bool(self.collect_first_var.get()),
             "collect_first_top_n": int(self.collect_first_top_n_var.get()),
             "stream_start": stream_start,
