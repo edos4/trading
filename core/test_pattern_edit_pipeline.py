@@ -9,9 +9,6 @@ asserted separately so an unavailable sandbox can never silently fall back.
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
-import tempfile
 import threading
 import time
 from pathlib import Path
@@ -22,6 +19,7 @@ import pytest
 from ai.providers.deepseek import (
     DeepSeekProvider, EditGenerationRequest, ProviderError, ProviderUnavailable,
 )
+from conftest import InProcessEditRunner as InProcessRunner
 from core.backtest_service import BacktestService
 from core.pattern_edit_service import PatternEditService
 from core.pattern_edit_store import EditError, uid
@@ -288,66 +286,26 @@ def _Generation(**kwargs):
     return EditGeneration(**kwargs)
 
 
-class InProcessRunner:
-    """Sandbox double: runs the same trusted evaluator in a plain subprocess."""
-
-    def __init__(self, root):
-        self.root = Path(root)
-
-    def available(self):
-        return self.root, sys.executable
-
-    def run(self, files, request, cancel=None):
-        request = dict(request)
-        request["test_paths"] = [
-            str(self.root / p.removeprefix("/input/"))
-            for p in request.get("test_paths", [])
-        ]
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / "input"
-            root.mkdir(parents=True)
-            for name, data in files.items():
-                dest = root / name
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(data)
-            driver = (
-                "import contextlib, importlib.util, io, json, sys;"
-                "spec=importlib.util.spec_from_file_location('ev', sys.argv[1]);"
-                "m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);"
-                "buf=io.StringIO();ctx=contextlib.redirect_stdout(buf);"
-                "ctx.__enter__();res=m.evaluate(json.loads(sys.argv[2]));"
-                "ctx.__exit__(None,None,None);"
-                "print(json.dumps(res, default=str, allow_nan=False))"
-            )
-            script = root / "core/pattern_edit_evaluator.py"
-            out = subprocess.run(
-                [sys.executable, "-B", "-c", driver, str(script), json.dumps(request)],
-                cwd=str(root), capture_output=True, text=True, timeout=120)
-            if out.returncode:
-                tail = (out.stderr or "").strip().splitlines()[-1:] or [""]
-                raise EditError(f"candidate worker failed (exit {out.returncode}): {tail[0]}")
-            return json.loads(out.stdout)
-
-
 def _stream_preset(service, rows):
+    """Four sessions covering CDNS's fixture entry and trailing-stop exit."""
     from core.backtest_params import settings_from_values
 
     settings = settings_from_values({
         "mode": "historical-stream", "market": "us", "symbols": [SYMBOL],
-        "start_date": rows[30][0][:10], "end_date": rows[-1][0][:10],
-        "warmup_bars": 30, "initial_capital": 100000, "position_notional": 10000,
+        "start_date": rows[132][0][:10], "end_date": rows[135][0][:10],
+        "warmup_bars": 132, "initial_capital": 100000, "position_notional": 10000,
         "txn_cost_pct": 0.001, "slippage_pct": 0.0, "end_policy": "keep-open",
     })
     return service.save_preset("ai edit preset", settings)
 
 
-def _short_preset(service, rows, sessions=40):
-    """Same effective settings as the smoke preset but a much shorter window."""
+def _short_preset(service, rows, sessions=2):
+    """Exercise job transitions with a bounded number of candidate subprocesses."""
     from core.backtest_params import settings_from_values
 
     settings = settings_from_values({
         "mode": "historical-stream", "market": "us", "symbols": [SYMBOL],
-        "start_date": rows[30][0][:10], "end_date": rows[30 + sessions][0][:10],
+        "start_date": rows[30][0][:10], "session_count": sessions,
         "warmup_bars": 30, "initial_capital": 100000, "position_notional": 10000,
         "txn_cost_pct": 0.001, "slippage_pct": 0.0, "end_policy": "keep-open",
     })
@@ -386,7 +344,7 @@ def sandbox_double(monkeypatch):
 
 
 def _request(service, base_version_id, **overrides):
-    preset = overrides.pop("preset", None) or _stream_preset(service.backtests, _rows())
+    preset = overrides.pop("preset", None) or _short_preset(service.backtests, _rows())
     values = {"idempotency_key": uid(), "pattern_id": PATTERN,
               "base_version_id": base_version_id,
               "instruction": "Require two closes above the neckline.",
@@ -410,7 +368,8 @@ def test_edit_pipeline_end_to_end_with_sandbox_double(published_pattern_catalog,
                "candles": [dict(zip(("time", "open", "high", "low", "close"), [r[0][:10], *r[1:5]]))
                            for r in tape[:10]],
                "manual_corrections": [{"id": "v", "kind": "vert", "time": tape[3][0][:10], "label": "breakout"}]}
-    request = _request(service, base, chart_context=context)
+    request = _request(service, base, chart_context=context,
+                       preset=_stream_preset(service.backtests, tape))
     generated = []
     original_generate = provider.generate
     def generate(value):
@@ -444,6 +403,8 @@ def test_edit_pipeline_end_to_end_with_sandbox_double(published_pattern_catalog,
     candidate = BacktestService(store, dataset_root=BARCA).result(detail["runs"]["candidate"])
     base_run = BacktestService(store, dataset_root=BARCA).result(detail["runs"]["base"])
     assert candidate["inputs"].request.preset == base_run["inputs"].request.preset
+    assert candidate["result"].metrics.trade_count > 0
+    assert base_run["result"].metrics.trade_count > 0
     # and the default never moved
     assert PatternVersions(store).catalog()[0]["active"] is not None
     assert _base_version(store) == base

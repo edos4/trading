@@ -168,7 +168,12 @@ class InProcessEditRunner:
             script = root / "core/pattern_edit_evaluator.py"
             out = subprocess.run(
                 [sys.executable, "-B", "-c", driver, str(script), json.dumps(request)],
-                cwd=str(root), capture_output=True, text=True, timeout=120)
+                cwd=str(root), capture_output=True, text=True, timeout=120,
+                # Match CandidateRunner's fixture settings without inheriting secrets.
+                env={"PATH": "/usr/bin:/bin", "WATCHLIST": "FIXTURE",
+                     "TV_SCREENER": "america", "TV_EXCHANGE": "NASDAQ",
+                     "MPLCONFIGDIR": str(Path(tmp) / "mpl"),
+                     "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1"})
             if out.returncode:
                 tail = (out.stderr or "").strip().splitlines()[-1:] or [""]
                 raise EditError(f"candidate worker failed (exit {out.returncode}): {tail[0]}")

@@ -166,7 +166,7 @@ def test_desktop_dialog_submits_and_renders_results(desktop_editor):
         dialog._preset_name.insert(0, "desktop smoke")
         dialog._vars["symbols"].set(SYMBOL)
         dialog._vars["start_date"].set(rows()[30][0][:10])
-        dialog._vars["end_date"].set(rows()[70][0][:10])
+        dialog._vars["end_date"].set(rows()[31][0][:10])
         dialog._vars["warmup_bars"].set(30.0)
         dialog._submit()
 
