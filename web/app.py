@@ -29,6 +29,7 @@ from utils.logger import log
 from web.auth import (
     clear_session_cookie,
     current_username,
+    request_is_https,
     require_history,
     require_login,
     require_password_configured,
@@ -256,7 +257,7 @@ def create_app() -> FastAPI:
                 error="Invalid username or password.",
             )
         resp = RedirectResponse(_safe_next(next), status_code=303)
-        set_session_cookie(resp, username)
+        set_session_cookie(resp, username, secure=request_is_https(request))
         log.info(f"Web auth | login ok user={username!r}")
         return resp
 
