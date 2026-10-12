@@ -189,6 +189,7 @@ def test_export_rejects_bad_market():
 
 
 def test_export_from_paper_account():
+    import json
     from datetime import datetime, timezone
 
     from core.backtester import BacktestTrade
@@ -245,6 +246,8 @@ def test_export_from_paper_account():
     assert book["open_positions"][0]["symbol"] == "MSFT"
     assert book["open_positions"][0]["current"] == 55.0
     assert book["scan_stats"]["trades_opened"] == 2
+    assert book["metrics"]["profit_factor"] is None
+    json.dumps(payload, allow_nan=False)
 
 
 def test_export_preserves_pattern_geometry_for_replay():

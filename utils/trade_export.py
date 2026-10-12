@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any
 
 from core.market import MARKET_PH, MARKET_US, clock_payload, get_market
+from utils.json_values import json_safe
 
 BOOK_IDS = (MARKET_US, MARKET_PH)
 
@@ -303,7 +304,7 @@ def build_paper_trade_export(
 
     books_in = envelope.get("books") or {}
     books = [_book_export(books_in[mid]) for mid in ids if mid in books_in]
-    return {
+    return json_safe({
         "purpose": "paper_trade_evaluation",
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "filter": filt,
@@ -314,4 +315,4 @@ def build_paper_trade_export(
             "Identity is (market, symbol), not ticker alone.",
         ],
         "books": books,
-    }
+    })

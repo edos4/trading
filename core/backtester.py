@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import multiprocessing as mp
 import os
 from collections import defaultdict
@@ -31,6 +32,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Literal
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -44,6 +46,12 @@ from utils.logger import log
 # Legacy live-fetch cache (still used when no barcache_dir is given).
 _CACHE_DIR = Path("data/cache")
 _CACHE_TTL_SECONDS = 6 * 3600
+
+# The pre-audit engine uses the identical exit ladder. Recheck this allowance
+# whenever exit helpers change; new entries still require the current runtime.
+_COMPATIBLE_EXIT_ENGINE_HASHES = frozenset({
+    "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+})
 
 
 # ── Trade record ─────────────────────────────────────────────────────────────
@@ -145,11 +153,24 @@ class BacktestTrade:
 
 
 # ── Trade math (shared by reporting + display) ───────────────────────────────
+def _initial_stop(trade: BacktestTrade) -> float | None:
+    saved = trade.resolved_rules or {}
+    stop = saved.get("stop_loss", trade.stop_loss)
+    cap_pct = saved.get("stop_loss_pct_cap", trade.stop_loss_pct_cap)
+    if cap_pct is None:
+        return stop
+    cap = trade.entry_price * (1 + cap_pct if trade.action == "SELL" else 1 - cap_pct)
+    if stop is None:
+        return cap
+    return min(stop, cap) if trade.action == "SELL" else max(stop, cap)
+
+
 def trade_r_multiple(trade: BacktestTrade, price: float) -> float | None:
     """Gain/loss in multiples of the initial stop distance. None if no stop."""
-    if trade.stop_loss is None or trade.entry_price <= 0:
+    stop = _initial_stop(trade)
+    if stop is None or trade.entry_price <= 0:
         return None
-    risk = abs(trade.entry_price - trade.stop_loss)
+    risk = abs(trade.entry_price - stop)
     if risk <= 0:
         return None
     move = price - trade.entry_price
@@ -159,15 +180,17 @@ def trade_r_multiple(trade: BacktestTrade, price: float) -> float | None:
 
 
 def trade_risk_dollars(trade: BacktestTrade) -> float | None:
-    if trade.stop_loss is None:
+    stop = _initial_stop(trade)
+    if stop is None:
         return None
-    return abs(trade.entry_price - trade.stop_loss) * trade.qty
+    return abs(trade.entry_price - stop) * trade.qty
 
 
 def initial_risk_pct(trade: BacktestTrade) -> float | None:
-    if trade.stop_loss is None or trade.entry_price <= 0:
+    stop = _initial_stop(trade)
+    if stop is None or trade.entry_price <= 0:
         return None
-    risk_pct = abs(trade.entry_price - trade.stop_loss) / trade.entry_price
+    risk_pct = abs(trade.entry_price - stop) / trade.entry_price
     return risk_pct if risk_pct > 0 else None
 
 
@@ -583,7 +606,8 @@ def _check_exit(
     """Fixed per-pattern exit ladder — see module docstring. No engine overlays."""
     from core.pattern_provenance import engine_hash
     if position.pattern_version_id and position.resolved_rules:
-        if position.resolved_rules.get("engine_sha256") != engine_hash():
+        saved_engine = position.resolved_rules.get("engine_sha256")
+        if saved_engine != engine_hash() and saved_engine not in _COMPATIBLE_EXIT_ENGINE_HASHES:
             raise RuntimeError("Position exit runtime changed; restore its compatible engine before management")
     is_short = position.action == "SELL"
     at_close = position.exit_fill_at_close
@@ -684,7 +708,8 @@ def _apply_notional_sizing(
 ) -> None:
     """Flat notional per trade. floor(notional/price) shares, or fractional."""
     px = signal.price
-    if px is None or px <= 0:
+    if (px is None or not math.isfinite(px) or px <= 0
+            or not math.isfinite(notional) or notional <= 0):
         signal.qty = 0.0
         return
     signal.qty = (notional / px) if fractional else float(int(notional // px))
@@ -695,6 +720,13 @@ def _open_trade(
     signal: TradeSignal, candle: OHLCVCandle, bar_idx: int
 ) -> BacktestTrade:
     entry_price = candle.close
+    if signal.action not in ("BUY", "SELL"):
+        raise ValueError("Trade entries require BUY or SELL")
+    if not all(math.isfinite(value) and value > 0 for value in (entry_price, signal.qty)):
+        raise ValueError("Trade entry price and quantity must be finite and positive")
+    if any(value is not None and (not math.isfinite(value) or value <= 0)
+           for value in (signal.stop_loss, signal.take_profit)):
+        raise ValueError("Trade stop and target must be finite and positive")
     stop_loss = signal.stop_loss
     if stop_loss is not None and signal.price and signal.price > 0 and entry_price > 0:
         if signal.action == "BUY":
@@ -792,6 +824,10 @@ def _close_trade(
     candle: OHLCVCandle,
     txn_cost_pct: float = 0.0,
 ) -> None:
+    if not math.isfinite(exit_price) or exit_price <= 0:
+        raise ValueError("Trade exit price must be finite and positive")
+    if not math.isfinite(txn_cost_pct) or txn_cost_pct < 0:
+        raise ValueError("Transaction cost must be finite and nonnegative")
     pnl = exit_price - position.entry_price
     if position.action == "SELL":
         pnl = position.entry_price - exit_price
@@ -853,6 +889,7 @@ def _core_backtest_symbol(
     notional = config.get("position_notional", ENGINE.position_notional)
     txn_cost = config.get("txn_cost_pct", 0.0)
     lot_round = config.get("lot_round", False)
+    long_only = get_market(config.get("market")).long_only
     # Per-symbol consumed pivot bars (the `.cjs` usedSH1/usedSH2 dedup): a
     # signal that reuses any of them is skipped so one anchor -> one trade.
     from patterns import _dedup
@@ -906,11 +943,11 @@ def _core_backtest_symbol(
                 # `.cjs` flag/pennant keep one open trade per symbol at a time
                 # (F10); the reversal patterns simulate every anchor at once.
                 max_open = getattr(pattern, "MAX_OPEN_PER_SYMBOL", None)
-                if max_open is not None and sum(
-                    1 for p in open_positions if p.pattern == pattern.name
-                ) >= max_open:
-                    continue
                 for _ in range(8):  # safety bound on anchors per bar
+                    if max_open is not None and sum(
+                        1 for p in open_positions if p.pattern == pattern.name
+                    ) >= max_open:
+                        break
                     signal = pattern.analyze(snapshot, store)
                     if signal is None:
                         break
@@ -918,6 +955,12 @@ def _core_backtest_symbol(
                     if _dedup.any_used(key):
                         break
                     signals_count += 1
+
+                    if signal.action not in ("BUY", "SELL") or (long_only and signal.action == "SELL"):
+                        _dedup.mark(*key)
+                        if not key:
+                            break
+                        continue
 
                     if getattr(signal, "blocked_reason", None):
                         _dedup.mark(*key)
@@ -942,16 +985,21 @@ def _core_backtest_symbol(
                     signal.signal_bar_timestamp = candles[i].timestamp
                     if lot_round:
                         signal.price = signal.price or candles[i].close
-                        if not apply_lot_rounding(signal):
+                        ts = candles[i].timestamp
+                        session_date = ts.astimezone(ZoneInfo("Asia/Manila")).date() if ts else None
+                        if not apply_lot_rounding(signal, as_of=session_date):
                             _dedup.mark(*key)
                             continue
 
                     open_positions.append(_open_trade(signal, candles[i], i))
                     _dedup.mark(*key)
+                    if not key:
+                        break
 
         i += 1
 
     for pos in open_positions:
+        pos.exit_bar_idx = len(candles) - 1
         _close_trade(pos, candles[-1].close, "data_end", candles[-1], txn_cost)
         trades.append(pos)
 
