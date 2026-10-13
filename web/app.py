@@ -45,6 +45,7 @@ from web.jobs import (
 from web.runs import backtest_runs
 from web.patterns import pattern_edits, patterns_error
 from web import replay_store
+from web.documentation import build_document
 from web.hermes_proxy import HermesDashboardProxy
 from web.remote_proxy import RemotePatternProxy
 from web.services import TIMEFRAMES, get_explorer
@@ -366,6 +367,21 @@ def create_app() -> FastAPI:
             return JSONResponse(
                 {"detail": "Failed to read system stats."}, status_code=500,
             )
+
+    @app.get("/docs", response_class=HTMLResponse)
+    async def docs_page(request: Request, _user: str = Depends(require_login)):
+        try:
+            doc = await asyncio.to_thread(build_document)
+        except ImportError:
+            # markdown-it-py arrives via rich; a clone without it still works.
+            return render(request, "docs.html", active="docs",
+                          error="Markdown support is unavailable: markdown-it-py "
+                                "is not installed on the server.")
+        except Exception:
+            log.exception("Web docs | README render failed")
+            return render(request, "docs.html", active="docs",
+                          error="Could not read README.md on the server.")
+        return render(request, "docs.html", active="docs", doc=doc)
 
     @app.get("/hermes", response_class=HTMLResponse)
     async def hermes_page(request: Request, _user: str = Depends(require_login)):
