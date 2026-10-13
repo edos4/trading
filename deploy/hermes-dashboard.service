@@ -1,0 +1,30 @@
+[Unit]
+Description=Hermes Agent web dashboard (the trading UI's /hermes tab)
+Documentation=file://@ROOT_DIR@/README.md
+After=network-online.target
+Wants=network-online.target
+# Keep restarting forever: survive reboots, crashes and crash loops.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# Loopback only. The trading UI reverse-proxies this at /hermes behind its own
+# login; a non-loopback bind would engage Hermes' auth gate and fail closed.
+ExecStart=@HERMES_BIN@ dashboard --no-open --host @HERMES_HOST@ --port @HERMES_PORT@
+WorkingDirectory=%h/.hermes
+Environment="HERMES_HOME=%h/.hermes"
+# The embedded Chat tab runs the real Hermes TUI over Node, so Hermes' managed
+# tools must be on PATH — a systemd user unit starts from a minimal PATH.
+Environment="PATH=@HERMES_PATH@"
+Restart=always
+RestartSec=10
+KillMode=mixed
+TimeoutStopSec=30
+# Exit 78 = "this host is already served by another dashboard". Parking on it
+# beats an infinite restart loop with nothing listening.
+RestartPreventExitStatus=78
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
