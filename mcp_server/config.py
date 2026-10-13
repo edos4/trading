@@ -24,6 +24,18 @@ def credentials() -> tuple[str, str]:
     return user, password
 
 
+def history_credentials() -> tuple[str, str]:
+    """Basic-auth for ``/api/history/*`` — ``WEB_UI_USERNAME`` as user *and* password.
+
+    That surface verifies ``username == password == WEB_UI_USERNAME`` (see
+    ``web.auth.verify_history_credentials``), unlike the rest of ``/api/*`` which
+    checks the password. One credential therefore cannot serve both, so the
+    history calls carry their own.
+    """
+    user = (settings.web_ui_username or "").strip()
+    return user, user
+
+
 def timeout_seconds() -> float:
     return float(settings.mcp_timeout_seconds or 60.0)
 

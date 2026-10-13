@@ -32,9 +32,13 @@ def get_markets() -> dict:
 
 
 def list_symbols(n: int = 50, market: Optional[str] = None) -> dict:
-    """Top-N liquid symbols from the TradingView screener universe.
+    """Top-N symbols from the live TradingView **screener** universe (discovery only).
 
-    n is clamped by the API to 5..5000; market is "us" (default) or "ph".
+    This is a dynamic scan list, NOT the set the engine can backtest. For the
+    daily OHLCV history store — every ticker available to backtests and paper
+    trading (thousands of US + PH symbols, including large caps like AAPL) — use
+    ``get_history_symbols``. n is clamped by the API to 5..5000; market is "us"
+    (default) or "ph".
     """
     return get_client().get("/api/symbols", params={"n": n, "market": market or ""})
 
