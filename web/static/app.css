@@ -619,7 +619,7 @@ img, video, canvas, pre, table { max-width: 100%; }
  * content (code, diffs, tables) force a column wider than the viewport. Let
  * them shrink and scroll their own content instead. */
 .panel, .param, .book-card, .summary, .table-wrap,
-.param-grid > *, .book-grid > *, .perf-grid > *, .split > * { min-width: 0; }
+.param-grid > *, .book-grid > *, .perf-grid > *, .split > *, .stat-grid > * { min-width: 0; }
 
 @media (max-width: 900px) {
   .blotter-head { flex-wrap: wrap; align-items: flex-start; }
@@ -659,5 +659,100 @@ img, video, canvas, pre, table { max-width: 100%; }
   .panel { padding: 0.7rem; }
   .topbar nav { gap: 0.3rem 0.75rem; font-size: 0.92rem; }
   .topbar-right { font-size: 0.9rem; }
+}
+
+/* Hermes tab: the proxy serves the Hermes Agent dashboard in a full-height
+ * frame, so this page opts out of the usual padded <main>. */
+.hermes-main { padding-bottom: 0; }
+.hermes-main .page-head { margin: 1rem 1.25rem 0.75rem; }
+.hermes-frame {
+  display: block;
+  width: 100%;
+  height: min(900px, calc(100vh - 9rem));
+  min-height: 420px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: #0b0f14;
+}
+@media (max-width: 600px) {
+  .hermes-main .page-head { margin: 0.85rem 0.85rem 0.6rem; }
+  .hermes-frame { height: calc(100vh - 12rem); min-height: 360px; }
+}
+
+/* ── System page ─────────────────────────────────────────────────────────
+ * A phone-first read of the host: big numbers, one glance per resource. */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+}
+.stat-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+}
+.stat-card h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.stat-value {
+  font-size: 1.65rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.stat-value-sm { font-size: 1.05rem; word-break: break-word; }
+.stat-sub {
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.35;
+  margin-top: 0.25rem;
+  overflow-wrap: anywhere;
+}
+.meter {
+  height: 0.5rem;
+  border-radius: 999px;
+  background: #111821;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  margin-top: 0.5rem;
+}
+.meter > span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+.meter.warn > span { background: var(--ph); }
+.meter.crit > span { background: var(--danger); }
+.core-bars {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12px, 1fr));
+  gap: 4px;
+  margin-top: 0.4rem;
+}
+.core-bars .core {
+  height: 46px;
+  display: flex;
+  align-items: flex-end;
+  background: #111821;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.core-bars .core > i { display: block; width: 100%; background: var(--accent); }
+.core-bars .core[data-level="warn"] > i { background: var(--ph); }
+.core-bars .core[data-level="crit"] > i { background: var(--danger); }
+
+@media (max-width: 600px) {
+  .stat-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.6rem; }
+  .stat-value { font-size: 1.35rem; }
+  .core-bars .core { height: 34px; }
 }
 

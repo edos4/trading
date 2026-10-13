@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, Form, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -45,8 +45,10 @@ from web.jobs import (
 from web.runs import backtest_runs
 from web.patterns import pattern_edits, patterns_error
 from web import replay_store
+from web.hermes_proxy import HermesDashboardProxy
 from web.remote_proxy import RemotePatternProxy
 from web.services import TIMEFRAMES, get_explorer
+from web.system_stats import snapshot as system_snapshot
 
 ROOT = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(ROOT / "templates"))
@@ -219,6 +221,9 @@ def create_app() -> FastAPI:
     # Inert unless PATTERN_API_URL is set: a client with no editor database has
     # the registry endpoints served by the host that owns the database.
     app.add_middleware(RemotePatternProxy)
+    # Inert unless HERMES_DASHBOARD_URL is set: proxies the Hermes Agent
+    # dashboard same-origin at /hermes so it is reachable over the tunnel.
+    app.add_middleware(HermesDashboardProxy)
 
     app.mount("/static", StaticFiles(directory=str(ROOT / "static")), name="static")
 
@@ -226,6 +231,7 @@ def create_app() -> FastAPI:
         return {
             "request": request,
             "user": current_username(request),
+            "hermes_enabled": bool((settings.hermes_dashboard_url or "").strip()),
             **extra,
         }
 
@@ -340,6 +346,32 @@ def create_app() -> FastAPI:
     @app.get("/indicators", response_class=HTMLResponse)
     async def indicators_page(request: Request, _user: str = Depends(require_login)):
         return render(request, "indicators.html", active="indicators")
+
+    @app.get("/system", response_class=HTMLResponse)
+    async def system_page(request: Request, _user: str = Depends(require_login)):
+        return render(request, "system.html", active="system")
+
+    @app.get("/api/system")
+    async def api_system(top: int = 6, _user: str = Depends(require_login)):
+        try:
+            return await asyncio.to_thread(system_snapshot, top)
+        except ImportError:
+            # psutil is optional at runtime: a clone that never reinstalled
+            # dependencies keeps every other tab and only this one degrades.
+            return JSONResponse(
+                {"detail": "psutil is not installed on the server."}, status_code=503,
+            )
+        except Exception:
+            log.exception("Web system | snapshot failed")
+            return JSONResponse(
+                {"detail": "Failed to read system stats."}, status_code=500,
+            )
+
+    @app.get("/hermes", response_class=HTMLResponse)
+    async def hermes_page(request: Request, _user: str = Depends(require_login)):
+        if not (settings.hermes_dashboard_url or "").strip():
+            raise HTTPException(status_code=404, detail="Hermes dashboard not configured")
+        return render(request, "hermes.html", active="hermes")
 
     # ── Explorer API ──────────────────────────────────────────────────────
     @app.get("/api/markets")

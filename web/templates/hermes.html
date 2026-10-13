@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Hermes — Trading Bot{% endblock %}
+{% block main_class %}hermes-main{% endblock %}
+{% block content %}
+<section class="panel page-head">
+  <div class="page-head-title">
+    <h1>Hermes</h1>
+    <p class="muted small">Nous Research Hermes Agent's own dashboard, served same-origin under this
+      UI's login (so it also works through the HTTPS tunnel).</p>
+    <p id="hermes-status" class="status">Checking the Hermes dashboard…</p>
+  </div>
+  <div class="page-head-controls">
+    <button type="button" class="btn" id="hermes-reload">Reload</button>
+    <a class="btn ghost" href="/hermes/" target="_blank" rel="noopener">Open in a new tab</a>
+  </div>
+</section>
+
+<iframe id="hermes-frame" class="hermes-frame" src="/hermes/"
+        title="Hermes Agent dashboard"></iframe>
+{% endblock %}
+{% block scripts %}
+<script src="/static/hermes.js?v=1"></script>
+{% endblock %}

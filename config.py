@@ -193,6 +193,16 @@ class Settings(BaseSettings):
     # Idle session lifetime (hours).
     web_ui_session_hours: int = 12
 
+    # ── Hermes Agent dashboard (optional) ───────────────────────────────────
+    # Nous Research Hermes Agent ships its own web dashboard (React SPA behind
+    # FastAPI) on 127.0.0.1:9119. Bound to loopback it has no auth of its own,
+    # so when this is set the UI reverse-proxies it same-origin at /hermes and
+    # shows a Hermes tab — reachable through the existing login, and over the
+    # HTTPS tunnel where an http://127.0.0.1 iframe would be mixed content.
+    # Empty (default) leaves the tab out entirely; a clone without Hermes
+    # behaves exactly as before.
+    hermes_dashboard_url: str = ""
+
     # ── MCP server (python main.py --mcp / python -m mcp_server) ────────────
     # A local, stdio MCP server so an AI agent can operate the bot. It is a
     # thin typed client over the running web UI's /api/* surface (one owner of

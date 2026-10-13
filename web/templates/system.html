@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}System — Trading Bot{% endblock %}
+{% block content %}
+<section class="panel page-head">
+  <div class="page-head-title">
+    <h1>System</h1>
+    <p class="muted small">Live CPU, memory, disk and load for the host running this UI.</p>
+    <p id="sys-status" class="status">Loading…</p>
+  </div>
+  <div class="page-head-controls">
+    <label class="check"><input type="checkbox" id="sys-auto" checked /> Auto-refresh</label>
+    <button type="button" class="btn" id="sys-refresh">Refresh</button>
+  </div>
+</section>
+
+<section class="stat-grid">
+  <div class="stat-card">
+    <h3>CPU</h3>
+    <div class="stat-value" id="sys-cpu">—</div>
+    <div class="meter" id="sys-cpu-meter"><span></span></div>
+    <div class="stat-sub" id="sys-cpu-sub">—</div>
+  </div>
+  <div class="stat-card">
+    <h3>Load average</h3>
+    <div class="stat-value" id="sys-load">—</div>
+    <div class="stat-sub" id="sys-load-sub">1 / 5 / 15 min</div>
+  </div>
+  <div class="stat-card">
+    <h3>Memory</h3>
+    <div class="stat-value" id="sys-mem">—</div>
+    <div class="meter" id="sys-mem-meter"><span></span></div>
+    <div class="stat-sub" id="sys-mem-sub">—</div>
+  </div>
+  <div class="stat-card">
+    <h3>Swap</h3>
+    <div class="stat-value" id="sys-swap">—</div>
+    <div class="meter" id="sys-swap-meter"><span></span></div>
+    <div class="stat-sub" id="sys-swap-sub">—</div>
+  </div>
+  <div class="stat-card">
+    <h3>Disk</h3>
+    <div class="stat-value" id="sys-disk">—</div>
+    <div class="meter" id="sys-disk-meter"><span></span></div>
+    <div class="stat-sub" id="sys-disk-sub">—</div>
+  </div>
+  <div class="stat-card">
+    <h3>Uptime</h3>
+    <div class="stat-value" id="sys-uptime">—</div>
+    <div class="stat-sub" id="sys-uptime-sub">—</div>
+  </div>
+  <div class="stat-card">
+    <h3>Network</h3>
+    <div class="stat-value" id="sys-net">—</div>
+    <div class="stat-sub" id="sys-net-sub">since boot</div>
+  </div>
+  <div class="stat-card">
+    <h3>Host</h3>
+    <div class="stat-value stat-value-sm" id="sys-host">—</div>
+    <div class="stat-sub" id="sys-host-sub">—</div>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Per-core CPU</h2>
+  <div class="core-bars" id="sys-cores"></div>
+  <div class="stat-sub" id="sys-temp"></div>
+</section>
+
+<div class="split">
+  <div class="panel grow">
+    <h2>Top processes by CPU</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>PID</th><th>Process</th><th class="num">CPU %</th><th class="num">Mem %</th><th class="num">RSS</th></tr>
+        </thead>
+        <tbody id="sys-proc-cpu"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="panel grow">
+    <h2>Top processes by memory</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>PID</th><th>Process</th><th class="num">CPU %</th><th class="num">Mem %</th><th class="num">RSS</th></tr>
+        </thead>
+        <tbody id="sys-proc-mem"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/system.js?v=1"></script>
+{% endblock %}
