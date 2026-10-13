@@ -37,11 +37,11 @@ def owns_local_stocks_history() -> bool:
         host = f"{socket.gethostname()} {socket.getfqdn()}".lower()
     except OSError:
         host = ""
-    return "33ai.edos.uk" in host
+    return "33ai.rootlabs.dev" in host
 
 
 def enable_ui_web_history() -> None:
-    """--ui / --web / paper stream: facade history, no Yahoo. Laptops hit 33ai.edos.uk."""
+    """--ui / --web / paper stream: facade history, no Yahoo. Laptops hit 33ai.rootlabs.dev."""
     global _ui_web_mode
     _ui_web_mode = True
     _apply_local_remote_history_url()
@@ -286,7 +286,7 @@ def fetch_ohlcv_candles(
     """Daily (or weekly resampled from daily) from GET /api/history, then optional TV.
 
     --ui/--web never fall back to Yahoo/TV: charts and OHLCV come from
-    33ai.edos.uk.
+    33ai.rootlabs.dev.
     """
     daily = load_daily_candles(symbol, market=market)
     if daily:

@@ -427,7 +427,7 @@ def test_ensure_stream_server_passes_history_url() -> None:
     prev = settings.stocks_history_url
     book = PaperBook("us")
     try:
-        settings.stocks_history_url = "https://33ai.edos.uk"
+        settings.stocks_history_url = "https://33ai.rootlabs.dev"
         with patch("core.paper_books.subprocess.Popen") as popen, \
              patch("core.paper_books.time.sleep"), \
              patch.object(book, "_kill_whatever_is_on"), \
@@ -436,7 +436,7 @@ def test_ensure_stream_server_passes_history_url() -> None:
             err = book._ensure_stream_server("2025-01-02")
         assert err is None
         env = popen.call_args.kwargs["env"]
-        assert env["STOCKS_HISTORY_URL"] == "https://33ai.edos.uk"
+        assert env["STOCKS_HISTORY_URL"] == "https://33ai.rootlabs.dev"
         cmd = popen.call_args.args[0]
         assert "--papertrade-stream" in cmd
         assert "--market" in cmd

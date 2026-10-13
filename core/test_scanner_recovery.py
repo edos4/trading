@@ -161,3 +161,60 @@ def test_invalid_bar_retries_before_recording_processed_watermark(monkeypatch, b
     asyncio.run(scanner._scan_all(feed_sessions=[object()]))
     assert "AAA|1d" in scanner._persisted_bar_ids
     assert len(analyzed) == feed.advances == 1
+
+
+def test_repeated_invalid_bar_does_not_stall_replay(monkeypatch):
+    from datetime import datetime, timezone
+
+    from data.tv_client import MarketSnapshot, OHLCVCandle
+
+    stamp = datetime(2024, 1, 2, 21, 5, tzinfo=timezone.utc)
+
+    class Feed:
+        advances = 0
+
+        async def fetch_snapshot(self, symbol, timeframe, **kwargs):
+            return MarketSnapshot(
+                symbol, timeframe, stamp,
+                OHLCVCandle(100, 101, 99, float("nan"), 1000, stamp), {}, {}, {}, {},
+            )
+
+        async def advance_replay(self, session):
+            self.advances += 1
+            return True, False
+
+    feed = Feed()
+    scanner = MarketScanner(symbols=["GTVH"], data_feed=feed, market="ph")
+    scanner._patterns = [SimpleNamespace(timeframes=["1d"])]
+    monkeypatch.setattr(scanner, "_note_worker", lambda: None)
+    analyzed = []
+
+    async def analyze(snapshots):
+        analyzed.extend(snapshots)
+
+    monkeypatch.setattr(scanner, "_run_analyzes", analyze)
+    asyncio.run(scanner._scan_all(feed_sessions=[object()]))
+    assert feed.advances == 0
+    assert scanner.stats["scan_complete"] is False
+    asyncio.run(scanner._scan_all(feed_sessions=[object()]))
+    assert feed.advances == 1
+    assert scanner.stats["scan_complete"] is True
+    assert not analyzed
+    assert not scanner._persisted_bar_ids
+
+
+def test_incomplete_scan_paced_replay_waits(monkeypatch):
+    scanner = MarketScanner(
+        symbols=["AAPL"], scan_interval_seconds=0, market="us",
+    )
+    slept = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    monkeypatch.setattr("core.scanner.asyncio.sleep", fake_sleep)
+    scanner.stats["scan_complete"] = False
+    asyncio.run(scanner._sleep_until_next_scan())
+    scanner.stats["scan_complete"] = True
+    asyncio.run(scanner._sleep_until_next_scan())
+    assert slept == [1.0]

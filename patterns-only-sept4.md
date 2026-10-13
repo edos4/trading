@@ -10,7 +10,7 @@ double-top ruleset, `patterns/_rounding.py` ≈ `backtest_rb_v3.cjs`, etc.). Wha
 
 | Concern | `.cjs` method (what we want) | Python bot today |
 |---|---|---|
-| Data | offline, one JSON/symbol, daily bars, skip `<100` bars | live fetch (`33ai.edos.uk`/Yahoo) + 6h-TTL cache |
+| Data | offline, one JSON/symbol, daily bars, skip `<100` bars | live fetch (`33ai.rootlabs.dev`/Yahoo) + 6h-TTL cache |
 | Sizing | flat **$10,000** per trade, independent, no compounding | risk-based (0.75% of 100k / stop distance) |
 | Portfolio | none — every trade stands alone | compounding capital ledger, max-concurrent cap, MTM equity curve |
 | Exit | fixed per-pattern ladder: hard stop → target → reclaim → trail → time → data_end | that ladder **plus** engine overlays: `breakeven_stop`, `profit_lock`, `first_bar_invalidation`, `dead_trade_exit`, synthetic ATR stop |
@@ -336,7 +336,7 @@ a small case.
 
 ### Expected drift (document, don't chase)
 - **Data source** — `.cjs` caches were built from TradingView desktop; Python uses
-  `33ai.edos.uk`/Yahoo. Split/adjust and last-bar differences shift pivots ±1–2 bars → a few
+  `33ai.rootlabs.dev`/Yahoo. Split/adjust and last-bar differences shift pivots ±1–2 bars → a few
   trades appear/disappear. **Pin the fixture barcache in git** so golden tests are deterministic.
 - **Per-bar `analyze()` vs `.cjs` full-history pivot scan** — usually lands on the same
   last-completed pattern (both iterate most-recent-first); add a `setup_key` + per-symbol

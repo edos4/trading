@@ -11,7 +11,7 @@ from urllib.parse import quote
 from config import settings
 from utils.logger import log
 
-DEFAULT_STOCKS_HISTORY_URL = "https://33ai.edos.uk"
+DEFAULT_STOCKS_HISTORY_URL = "https://33ai.rootlabs.dev"
 # Connect includes TLS. 10s was firing handshake timeouts to 33ai and then
 # the retry path used to close the shared Client, which killed in-flight
 # requests and stamped out more handshake failures.

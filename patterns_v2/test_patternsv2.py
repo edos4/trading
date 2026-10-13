@@ -59,6 +59,11 @@ def test_adapts_breakout_into_trade_signal():
     assert sig.stop_loss == 120.0
     assert sig.take_profit == 180.0
     assert sig.provenance == "patternsv2"
+    assert sig.stop_loss_pct_cap == 0.05
+    assert sig.trailing_stop_pct == 0.025
+    assert sig.trailing_activation_pct == 0.05
+    assert sig.trailing_stop_mode == "highest_close"
+    assert sig.trailing_ref_after_check
     assert any(a.get("pattern_version_id") == "patternsv2" for a in sig.chart_annotations)
     assert "Patternsv2 double_bottom" in sig.notes
 
@@ -118,11 +123,12 @@ def test_channel_stop_is_the_unbroken_rail():
     )
     hits = detect_trade_signals(df, symbol="AAPL", timeframe="1d", detect=lambda h, l, c: [raw])
     assert hits[0].action == "SELL"
+    assert hits[0].trailing_stop_mode == "lowest_close"
     assert hits[0].stop_loss == 140.0
     assert hits[0].take_profit == 80.0
 
 
-def test_overshoot_under_one_r_is_dropped():
+def test_breakout_under_one_r_keeps_structural_levels():
     df = _frame()
     # Close 150 is already through level 140, so the measured height (20)
     # no longer covers the stop at 120.
@@ -130,7 +136,42 @@ def test_overshoot_under_one_r_is_dropped():
         df, symbol="AAPL", timeframe="1d",
         detect=lambda h, l, c: [_raw(level=140.0)],
     )
-    assert hits == []
+    assert len(hits) == 1
+    assert hits[0].stop_loss == 120.0
+    assert hits[0].take_profit == 170.0
+
+
+@pytest.mark.parametrize("bear", [False, True])
+def test_actual_double_breakout_survives_on_signal_bar(bear):
+    close = np.interp(np.arange(80), [0, 20, 35, 50, 65, 80],
+                      [100, 140, 90, 110, 91, 115])
+    if bear:
+        close = 250 - close
+    df = pd.DataFrame({"open": close, "high": close + 1, "low": close - 1,
+                       "close": close, "volume": 1000.0},
+                      index=pd.bdate_range("2024-01-02", periods=len(close)))
+    hits = detect_trade_signals(df, symbol="TEST", timeframe="1d", latest_bar_only=True)
+    name = "double_top" if bear else "double_bottom"
+    signal = next(s for s in hits if s.pattern == name)
+    assert signal.action == ("SELL" if bear else "BUY")
+    assert signal.price == pytest.approx(136.6 if bear else 113.4)
+    assert signal.stop_loss == pytest.approx(161.0 if bear else 89.0)
+    assert signal.take_profit == pytest.approx(114.6 if bear else 135.4)
+    assert 0 < abs(signal.take_profit - signal.price) < abs(signal.stop_loss - signal.price)
+
+
+@pytest.mark.parametrize("raw", [
+    _raw(points=[]),
+    _raw(level=float("nan")),
+    _raw(points=[(10, -1.0, "low 1")]),
+    _raw(level=100.0),  # Failure pivot is on the wrong side of the neckline.
+    _raw(pattern="double_top", direction=-1, level=151.0,
+         points=[(10, 400.0, "high 1")]),  # Measured target is below zero.
+])
+def test_invalid_structural_levels_are_still_dropped(raw):
+    assert detect_trade_signals(
+        _frame(), symbol="TEST", timeframe="1d", detect=lambda *args: [raw],
+    ) == []
 
 
 @pytest.mark.parametrize("bear", [False, True])

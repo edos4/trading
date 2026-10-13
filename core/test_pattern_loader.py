@@ -95,6 +95,7 @@ class Detector(BasePattern):
         return None
 """
     files = {'patterns/001_test.py': source, 'config.py': b'# old settings\n',
+             'core/market.py': b'# old market profile\n',
              'patterns/base_pattern.py': (ROOT / 'patterns/base_pattern.py').read_bytes()}
     for name, data in files.items():
         path = tmp_path / name
@@ -109,6 +110,7 @@ class Detector(BasePattern):
     store = SimpleNamespace(root=tmp_path, get=lambda *args: version,
                             read_blob=lambda ref: blobs[ref['sha256']])
     (tmp_path / 'config.py').write_text('# changed settings\n')
+    (tmp_path / 'core/market.py').write_text('# live market profile\n')
     assert VersionPattern('test', store).name == 'pattern_001_test'
     if provenance == 'file-import':
         (tmp_path / 'patterns/base_pattern.py').write_text('# incompatible interface\n')

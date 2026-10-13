@@ -5,8 +5,11 @@ same signal-bar entry the scanner uses for the built-in patterns. Stop is the
 price that cancels the pattern: the failure pivots for reversals, or the
 unbroken rail on the breakout bar for flags, pennants, triangles, wedges,
 channels, and rectangles. Target uses the full measured move (pole, bowl, or
-pattern width) from the fill. A signal whose reward does not cover the stop
-(under 1R) is dropped; a full-depth reversal stop can therefore reject a break.
+pattern width) from the fill. Keep those structural levels even when the
+breakout close makes the measured reward smaller than the full-depth risk.
+Execution also caps the initial stop distance at 5% and trails prior closes
+by 2.5% after a 5% favorable close, so activation does not give back the
+entire initial gain. Structural levels remain available for charting.
 """
 
 from __future__ import annotations
@@ -177,7 +180,9 @@ def _levels(raw: dict, entry: float) -> tuple[float | None, float | None]:
         return None, None
     risk = (entry - stop) if direction > 0 else (stop - entry)
     reward = (target - entry) if direction > 0 else (entry - target)
-    if risk <= 0 or reward < risk:
+    # A confirmed reversal closes beyond the neckline, so its full-depth
+    # risk necessarily exceeds its measured height. A 1R floor disables it.
+    if risk <= 0 or reward <= 0:
         return None, None
     return stop, target
 
@@ -244,6 +249,11 @@ def _to_signal(df: pd.DataFrame, raw: dict, *, symbol: str, timeframe: str, late
         qty=0.0,
         stop_loss=None if stop is None else round(stop, 4),
         take_profit=None if target is None else round(target, 4),
+        stop_loss_pct_cap=0.05,
+        trailing_stop_pct=0.025,
+        trailing_stop_mode="highest_close" if direction > 0 else "lowest_close",
+        trailing_activation_pct=0.05,
+        trailing_ref_after_check=True,
         setup_key=(int(raw.get("start") or 0), int(raw.get("end") or 0), idx),
         notes=notes,
         chart_annotations=_annotations(df, raw, idx, entry, stop, target),
