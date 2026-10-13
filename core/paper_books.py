@@ -55,7 +55,7 @@ from utils.json_values import json_safe
 def _chart_history_frame(scanner, symbol: str, timeframe: str, *, market: str):
     """Bars for a double-clicked row.
 
-    A laptop reads GET /api/history on https://33ai.edos.uk. The scanner's
+    A laptop reads GET /api/history on https://33ai.rootlabs.dev. The scanner's
     in-memory tape is not a substitute: it can be a partial replay or a
     different scale than the saved detection. The VPS that owns Postgres
     may still use the live scanner frame, then its local history.
@@ -120,6 +120,8 @@ class PaperBook:
         self.use_stream = False
         self._stream_proc: Optional[subprocess.Popen] = None
         self.error: Optional[str] = None
+        self.tv_stack_id = ""
+        self.tv_stack_name = ""
         self._thread: Optional[threading.Thread] = None
         self._stop_requested = threading.Event()
         self._chart_key: tuple[int, float] | None = None
@@ -246,6 +248,9 @@ class PaperBook:
         display_status = status
         if session_idle and not error:
             display_status = "PH session closed — scanner idle until AM/PM"
+        tv_error = (stats or {}).get("tv_error") or ""
+        if tv_error:
+            display_status = f"{display_status} — {tv_error}"
         return json_safe({
             "running": running,
             "status": display_status,
@@ -476,7 +481,21 @@ class PaperBook:
         collect_first: bool = False,
         collect_first_top_n: int = 4,
         stream_start: Optional[str] = None,
+        tv_stack_id: str = "",
     ) -> str | None:
+        stack_name = ""
+        tv_stack_id = (tv_stack_id or "").strip()
+        if tv_stack_id:
+            from data.tv_stacks import get_stack, require_stack_ready
+
+            refused = require_stack_ready(tv_stack_id)
+            if refused:
+                return refused
+            stack = get_stack(tv_stack_id)
+            stack_name = stack["name"] if stack else tv_stack_id
+            indicators_only = True
+            pattern_only = False
+            patterns_v2 = False
         with self.lock:
             if self.running:
                 return f"{self.market.upper()} paper session already running."
@@ -484,13 +503,15 @@ class PaperBook:
             self._stop_requested.clear()
             self.error = None
             self.use_stream = use_stream
+            self.tv_stack_id = tv_stack_id
+            self.tv_stack_name = stack_name
             self.status = "Fetching symbols..."
         self._thread = threading.Thread(
             target=self._thread_main,
             args=(
                 n_symbols, extra_symbols, use_stream, volume_gate, pattern_only,
                 indicators_only, patterns_v2, collect_first, collect_first_top_n,
-                stream_start,
+                stream_start, tv_stack_id,
             ),
             name=f"paper-{self.market}",
             daemon=True,
@@ -513,6 +534,8 @@ class PaperBook:
                 self.loop = None
                 self.task = None
                 self.running = False
+                self.tv_stack_id = ""
+                self.tv_stack_name = ""
                 if self._stop_requested.is_set() and not self.error:
                     self.status = "Stopped."
             if loop is not None and not loop.is_closed():
@@ -696,6 +719,7 @@ class PaperBook:
         collect_first: bool,
         collect_first_top_n: int,
         stream_start: Optional[str],
+        tv_stack_id: str = "",
     ) -> None:
         data_feed = None
         profile = get_market(self.market)
@@ -766,6 +790,7 @@ class PaperBook:
                 collect_first=collect_first,
                 collect_first_top_n=collect_first_top_n,
                 market=profile.id,
+                tv_stack_id=tv_stack_id,
             )
             self.scanner = scanner
             self.task = loop.create_task(scanner.run())
@@ -790,6 +815,7 @@ class PaperBook:
                 f", Volume gate={'ON' if volume_gate else 'OFF'}"
                 f", Pattern-only={'ON' if pattern_only and not indicators_only else 'OFF'}"
                 f", Indicators-only={'ON' if indicators_only else 'OFF'}"
+                f"{', TradingView=' + self.tv_stack_name if self.tv_stack_name else ''}"
                 f", Patternsv2={'ON' if patterns_v2 and not indicators_only else 'OFF'}"
                 f", Collect-first={'ON' if collect_first else 'OFF'}"
                 f", session={session_label(profile.id)}"
@@ -904,6 +930,7 @@ class PaperBookManager:
         collect_first: bool = False,
         collect_first_top_n: int = 4,
         stream_start: Optional[str] = None,
+        tv_stack_id: str = "",
     ) -> str | None:
         with self._start_lock:
             book = self._book(market)
@@ -925,6 +952,7 @@ class PaperBookManager:
                 collect_first=collect_first,
                 collect_first_top_n=collect_first_top_n,
                 stream_start=stream_start,
+                tv_stack_id=tv_stack_id,
             )
 
     def start_both(self, specs: dict[str, dict[str, Any]]) -> dict[str, str]:
@@ -946,6 +974,7 @@ class PaperBookManager:
                 collect_first=bool(payload.get("collect_first")),
                 collect_first_top_n=int(payload.get("collect_first_top_n") or 4),
                 stream_start=payload.get("stream_start"),
+                tv_stack_id=payload.get("tv_stack_id") or "",
             )
             if err:
                 errors[mid] = err

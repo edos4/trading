@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Indicators — Trading Bot{% endblock %}
+{% block content %}
+<section class="panel page-head">
+  <div>
+    <h1>Indicators</h1>
+    <p class="muted small">TradingView studies whose source is another study. Paper fills show on the Paper tab.</p>
+    <p id="ind-session" class="status">Checking the TradingView session…</p>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Stack</h2>
+  <div class="toolbar">
+    <label>Saved
+      <select id="ind-saved"><option value="">New stack</option></select>
+    </label>
+    <label>Name <input id="ind-name" type="text" maxlength="80" placeholder="SMA of RSI" /></label>
+    <label>Timeframe
+      <select id="ind-tf"><option value="1d">1d</option><option value="1W">1W</option></select>
+    </label>
+    <button type="button" class="btn" id="ind-add">Add study</button>
+    <button type="button" class="btn primary" id="ind-save">Save stack</button>
+    <button type="button" class="btn ghost" id="ind-delete">Delete</button>
+  </div>
+  <div id="ind-studies"></div>
+  <div class="toolbar">
+    <label>Signal
+      <select id="ind-signal">
+        <option value="cross">Cross</option>
+        <option value="threshold">Threshold</option>
+        <option value="strategy">Strategy order</option>
+      </select>
+    </label>
+    <label>Direction
+      <select id="ind-direction">
+        <option value="above">Above</option>
+        <option value="below">Below</option>
+      </select>
+    </label>
+    <label>Level <input id="ind-level" type="number" step="any" value="50" /></label>
+    <label>Plot <input id="ind-plot" type="text" value="plot_0" size="10" /></label>
+    <label>Stop
+      <select id="ind-stop">
+        <option value="percent">Percent</option>
+        <option value="atr">ATR</option>
+        <option value="plot">Plot</option>
+      </select>
+    </label>
+    <label>Stop % <input id="ind-stop-pct" type="number" min="0.1" max="50" step="0.1" value="2" /></label>
+    <label class="check"><input id="ind-exit" type="checkbox" checked /> Exit on opposite</label>
+  </div>
+  <p id="ind-stack-status" class="status"></p>
+</section>
+
+<section class="panel">
+  <h2>Preview</h2>
+  <div class="toolbar">
+    <label>Symbol <input id="ind-symbol" type="text" value="AAPL" size="8" /></label>
+    <label>Exchange <input id="ind-exchange" type="text" value="NASDAQ" size="8" /></label>
+    <button type="button" class="btn" id="ind-preview">Preview</button>
+  </div>
+  <pre id="ind-preview-out" class="muted small"></pre>
+</section>
+
+<section class="panel">
+  <h2>Paper</h2>
+  <div class="toolbar">
+    <label>Market
+      <select id="ind-market"><option value="us">US</option><option value="ph">PH</option></select>
+    </label>
+    <label>Symbols <input id="ind-n" type="number" min="5" max="5000" step="5" value="50" /></label>
+    <label>Additional <input id="ind-extra" type="text" placeholder="tickers" /></label>
+    <label class="check"><input id="ind-stream" type="checkbox" /> Stream</label>
+    <label>Start <input id="ind-stream-start" type="date" /></label>
+    <button type="button" class="btn primary" id="ind-paper">Start paper</button>
+  </div>
+  <p id="ind-paper-status" class="status"></p>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="/static/indicators.js?v=1"></script>
+{% endblock %}

@@ -141,7 +141,7 @@ def test_remote_mode_needs_a_url_and_not_being_the_serving_host(monkeypatch):
     monkeypatch.setattr(settings, "pattern_api_owner", False)
     assert remote_patterns_enabled() is False
 
-    monkeypatch.setattr(settings, "pattern_api_url", "https://33ai.edos.uk")
+    monkeypatch.setattr(settings, "pattern_api_url", "https://33ai.rootlabs.dev")
     assert remote_patterns_enabled() is True
 
     # The host that serves the API must never proxy to itself.
@@ -156,7 +156,7 @@ def test_open_pattern_store_follows_configuration(monkeypatch):
     monkeypatch.setattr(settings, "pattern_api_url", "")
     assert isinstance(open_pattern_store(), EditStore)
 
-    monkeypatch.setattr(settings, "pattern_api_url", "https://33ai.edos.uk")
+    monkeypatch.setattr(settings, "pattern_api_url", "https://33ai.rootlabs.dev")
     assert isinstance(open_pattern_store(), RemotePatternStore)
 
 

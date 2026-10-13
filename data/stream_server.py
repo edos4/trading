@@ -6,7 +6,7 @@ US markets are closed. Each symbol gets its own cursor into its data. The
 scanner advances the entire replay atomically once a complete scan cycle
 finishes, so all symbols in a cycle see the same simulated market bar.
 
-Bars come from GET /api/history (STOCKS_HISTORY_URL, default 33ai.edos.uk).
+Bars come from GET /api/history (STOCKS_HISTORY_URL, default 33ai.rootlabs.dev).
 No CSV files and no local Postgres.
 
 Optional start_date (YYYY-MM-DD) sets the initial cursor to the first bar
@@ -687,6 +687,6 @@ async def run_stream_server(
 ) -> None:
     from data.history import enable_ui_web_history
 
-    # Child process of --web/--ui: inject https://33ai.edos.uk when URL is empty.
+    # Child process of --web/--ui: inject https://33ai.rootlabs.dev when URL is empty.
     enable_ui_web_history()
     await StreamServer(start_date=start_date, market=market).run()

@@ -358,14 +358,14 @@ journalctl --user -u trading-web.service -f
 **One history database (VPS).** Contabo runs Postgres `stocks_history` and
 serves `GET /api/history/symbols`, `GET /api/history/{symbol}`, and
 `GET /api/history/{symbol}/meta`. Local `--ui` / `--web` **always** read
-backtest prefetch) from `https://33ai.edos.uk` — `STOCKS_HISTORY_URL` is
+backtest prefetch) from `https://33ai.rootlabs.dev` — `STOCKS_HISTORY_URL` is
 applied automatically if empty. They do **not** use Yahoo/TV for history, and do **not** need
 `DATABASE_URL`. History API Basic auth is
 `WEB_UI_USERNAME` / `WEB_UI_USERNAME` (default `admin`:`admin`), not the
 dashboard password. On the VPS set `STOCKS_HISTORY_OWNER=true` and leave
 `STOCKS_HISTORY_URL` empty so `--web` still **writes** local Postgres via
 `--update-db` and **serves** `GET /api/history`. All OHLCV **reads**
-(default `https://33ai.edos.uk`), never local Postgres or CSV.
+(default `https://33ai.rootlabs.dev`), never local Postgres or CSV.
 
 What both UIs support:
 

@@ -82,6 +82,7 @@ class PaperStartRequest(BaseModel):
     collect_first_top_n: int = 4
     stream_start: Optional[str] = None
     market: Optional[Literal["us", "ph"]] = None
+    tv_stack_id: str = ""
 
 
 class PaperStopRequest(BaseModel):
@@ -335,6 +336,10 @@ def create_app() -> FastAPI:
             markets=markets,
             book_cards=markets,
         )
+
+    @app.get("/indicators", response_class=HTMLResponse)
+    async def indicators_page(request: Request, _user: str = Depends(require_login)):
+        return render(request, "indicators.html", active="indicators")
 
     # ── Explorer API ──────────────────────────────────────────────────────
     @app.get("/api/markets")
@@ -840,6 +845,96 @@ def create_app() -> FastAPI:
             "generation": int(result["generation"]),
         }}
 
+    # ── TradingView indicator stacks ──────────────────────────────────────
+    def _stack_error(exc: Exception):
+        text = str(exc)
+        code = 409 if text.startswith("Stop the paper") else 400
+        return JSONResponse({"detail": text}, status_code=code)
+
+    @app.get("/api/indicators/session")
+    async def api_indicators_session(_user: str = Depends(require_login)):
+        from data.tv_studies import get_client
+
+        client = get_client()
+        return await asyncio.to_thread(client.session)
+
+    @app.get("/api/indicators/catalog")
+    async def api_indicators_catalog(_user: str = Depends(require_login)):
+        from data.tv_studies import TvStudyError, get_client
+
+        client = get_client()
+        try:
+            return await asyncio.to_thread(client.catalog)
+        except TvStudyError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=502)
+
+    @app.get("/api/indicators/stacks")
+    async def api_indicators_stacks(_user: str = Depends(require_login)):
+        from data.tv_stacks import load_stacks
+
+        return {"stacks": load_stacks()}
+
+    @app.post("/api/indicators/stacks")
+    async def api_indicators_save_stack(request: Request, _user: str = Depends(require_login)):
+        from data.tv_stacks import save_stack
+
+        try:
+            body = await _json_body(request)
+            stack = save_stack(body)
+        except ValueError as exc:
+            return _stack_error(exc)
+        except (TypeError, json.JSONDecodeError) as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        return stack
+
+    @app.delete("/api/indicators/stacks/{stack_id}")
+    async def api_indicators_delete_stack(stack_id: str, _user: str = Depends(require_login)):
+        from data.tv_stacks import delete_stack
+
+        try:
+            delete_stack(stack_id)
+        except ValueError as exc:
+            return _stack_error(exc)
+        return {"ok": True}
+
+    @app.post("/api/indicators/preview")
+    async def api_indicators_preview(request: Request, _user: str = Depends(require_login)):
+        from data.tv_stacks import evaluate, get_stack
+        from data.tv_studies import TvStudyError, get_client
+
+        try:
+            body = await _json_body(request)
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        stack = get_stack(str(body.get("stack_id") or ""))
+        if stack is None:
+            return JSONResponse({"detail": "Unknown TradingView stack."}, status_code=404)
+        symbol = str(body.get("symbol") or "").strip().upper()
+        exchange = str(body.get("exchange") or "NASDAQ").strip().upper()
+        if not symbol:
+            return JSONResponse({"detail": "Symbol is required."}, status_code=400)
+
+        def _run():
+            fetched = get_client().fetch(symbol, exchange, stack["timeframe"], stack["studies"])
+            last_time = None
+            plots = []
+            for study in fetched.get("studies") or []:
+                rows = study.get("plots") or []
+                last = rows[-1] if rows else {}
+                if last.get("time") is not None:
+                    last_time = last["time"]
+                plots.append({
+                    "id": study.get("id"),
+                    "values": {key: value for key, value in last.items() if key != "time"},
+                })
+            fired = evaluate(stack, fetched, last_time) if last_time is not None else None
+            return {"symbol": symbol, "bar_time": last_time, "plots": plots, "signal": fired}
+
+        try:
+            return await asyncio.to_thread(_run)
+        except TvStudyError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=502)
+
     # ── Paper API ─────────────────────────────────────────────────────────
     @app.get("/api/paper/status")
     async def api_paper_status(
@@ -856,18 +951,20 @@ def create_app() -> FastAPI:
         return await asyncio.to_thread(paper_books.snapshot_all)
 
     def _start_book(payload: PaperStartRequest, market: str) -> str | None:
+        indicators_only = payload.indicators_only or bool((payload.tv_stack_id or "").strip())
         return paper_books.start(
             market,
             payload.n_symbols,
             extra_symbols=payload.extra_symbols,
             use_stream=payload.use_stream,
             volume_gate=payload.volume_gate,
-            pattern_only=payload.pattern_only and not payload.indicators_only,
-            indicators_only=payload.indicators_only,
-            patterns_v2=payload.patterns_v2 and not payload.indicators_only,
+            pattern_only=payload.pattern_only and not indicators_only,
+            indicators_only=indicators_only,
+            patterns_v2=payload.patterns_v2 and not indicators_only,
             collect_first=payload.collect_first,
             collect_first_top_n=payload.collect_first_top_n,
             stream_start=payload.stream_start,
+            tv_stack_id=payload.tv_stack_id,
         )
 
     @app.post("/api/paper/start")

@@ -72,6 +72,14 @@ def load_version_source(store, version, *, check_runtime=True):
                 load(target) if target.startswith('patterns.') else importlib.import_module(target, package))
             return proxy
         if name == 'patterns.base_pattern':
+            if check_runtime:
+                from core.pattern_edit_store import digest
+                ref = version['files'].get('patterns/base_pattern.py')
+                current = store.root / 'patterns/base_pattern.py'
+                if (ref is None or not current.is_file()
+                        or digest(current.read_bytes()) != ref['sha256']):
+                    raise ValueError(
+                        'Baseline runtime dependency changed: patterns/base_pattern.py')
             return original_import(name,globals,locals,fromlist,0)
         if name == 'patterns' or name.startswith('patterns.'):
             module = load(name)
@@ -84,14 +92,9 @@ def load_version_source(store, version, *, check_runtime=True):
             if name != 'patterns':
                 setattr(package,name.split('.')[1],module)
             return package
-        # Shared runtime dependencies are checked, never silently substituted.
-        relative = name.replace('.', '/') + '.py'
-        # Settings remain live, just like their environment-variable values.
-        if check_runtime and relative != 'config.py' and relative in version['files']:
-            from core.pattern_edit_store import digest
-            current = store.root / relative
-            if not current.exists() or digest(current.read_bytes()) != version['files'][relative]['sha256']:
-                raise ValueError('Baseline runtime dependency changed: ' + relative)
+        # Market profile, history, and data clients load live. A settings edit
+        # must not crash every pinned baseline. The detector interface is
+        # checked on patterns.base_pattern above and in PatternVersions.verify.
         return original_import(name,globals,locals,fromlist,level)
 
     try:

@@ -640,7 +640,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--papertrade-stream",
         action="store_true",
         help="Run the paper trade stream server: replays daily bars from "
-        "GET /api/history (https://33ai.edos.uk by default) over a local "
+        "GET /api/history (https://33ai.rootlabs.dev by default) over a local "
         "WebSocket so paper trading (--paper / --ui) can run with the "
         "'Use paper trade stream' option even when US markets are closed.",
     )

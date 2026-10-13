@@ -105,15 +105,14 @@ class PatternVersions:
         for ref in version['files'].values():
             self.store.read_blob(ref)
         if runtime and version.get('provenance') == 'file-import':
-            for name, ref in version['files'].items():
-                # Application settings are live inputs, not frozen detector code.
-                if name == 'config.py':
-                    continue
-                if name.startswith('patterns/') and name != 'patterns/base_pattern.py':
-                    continue
-                path = self.store.root / name
-                if not path.is_file() or digest(path.read_bytes()) != ref['sha256']:
-                    raise EditError('Version runtime dependency is incompatible: ' + name)
+            # The snapshot keeps the whole import closure for audit. Execution
+            # only refuses a changed detector interface. Settings, market
+            # profiles, and data clients stay live: a hostname or profile edit
+            # must not brick every pinned baseline.
+            ref = version['files'].get('patterns/base_pattern.py')
+            path = self.store.root / 'patterns/base_pattern.py'
+            if ref is None or not path.is_file() or digest(path.read_bytes()) != ref['sha256']:
+                raise EditError('Version runtime dependency is incompatible: patterns/base_pattern.py')
         if runtime:
             recorded = version['runtime']
             current = runtime_manifest(self.store.root)
@@ -122,8 +121,8 @@ class PatternVersions:
             # change to code the detector never imports does not make the
             # interface incompatible, and every candidate is validated against
             # the current environment in the sandbox anyway. The Python build is
-            # still enforced here, and the version's own trusted files are
-            # checked above.
+            # still enforced here. The detector interface
+            # (patterns/base_pattern.py) is checked above.
             if (recorded.get('python') != current.get('python')
                     or recorded.get('cache_tag') != current.get('cache_tag')):
                 raise EditError('Version runtime is incompatible; restore its runtime before execution')

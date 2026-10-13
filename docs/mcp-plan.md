@@ -43,7 +43,7 @@ HTML or shelling out to `main.py`.
 - `patterns/chart_scan.py::latest_signals_over_lookback(...)`; `analysis/chart_renderer.py`, `vision_checker.py`, `price_volume.py`.
 
 **Data layer** (`data/`): `tv_client.py::TVClient` (TradingView screener + **client** to a stdio `tradingview-mcp`
-subprocess via the `mcp` SDK), `history_client.py` (HTTP client for `https://33ai.edos.uk` `/api/history`),
+subprocess via the `mcp` SDK), `history_client.py` (HTTP client for `https://33ai.rootlabs.dev` `/api/history`),
 `history.py` (unified daily OHLCV facade), `stream_client.py`/`stream_server.py` (local WebSocket replay),
 `db.py`/`update.py`/`check.py`/`pse_ingest.py` (Postgres), `universes/`, `barcache.py`.
 

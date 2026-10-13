@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deploy the Trading Bot web UI (python main.py --web) to Contabo.
 #
-# Serves: https://33ai.edos.uk  (Cloudflare DNS -> kamal-proxy -> trading-web.service)
+# Serves: https://33ai.rootlabs.dev  (Cloudflare DNS -> kamal-proxy -> trading-web.service)
 #
 # Usage:
 #   ./deploy_to_contabo.sh

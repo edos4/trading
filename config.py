@@ -122,6 +122,14 @@ class Settings(BaseSettings):
     # Retries after HTTP 429 from scanner.tradingview.com (exponential backoff).
     tv_screener_max_retries: int = 5
     tv_screener_retry_backoff_seconds: float = 2.0
+    # Logged-in chart session for indicator-on-indicator studies.
+    # Cookie values from tradingview.com, not the account password.
+    # Empty disables the Indicators tab's TradingView client.
+    tv_sessionid: str = ""
+    tv_sessionid_sign: str = ""
+    # Caps from the TradingView plan. Plus is 9 and 20; Ultimate is 49 and 200.
+    tv_indicator_on_indicator_limit: int = 9
+    tv_chart_connections: int = 20
 
     # ── Volume confirm gate (analysis/price_volume.py) ─────────────────────
     # After a chart pattern fires, require relative volume (signal bar /
@@ -151,7 +159,7 @@ class Settings(BaseSettings):
     db_password: str = ""
 
     # ── Remote stocks_history API (local --ui / --web) ──────────────────────
-    # Local --ui/--web auto-use https://33ai.edos.uk when this is empty (charts
+    # Local --ui/--web auto-use https://33ai.rootlabs.dev when this is empty (charts
     # included; no Yahoo). All OHLCV reads use this API, never local Postgres.
     # VPS --web must leave this empty and set owner so it still writes Postgres
     # via --update-db and serves GET /api/history.
@@ -287,6 +295,21 @@ class Settings(BaseSettings):
     @classmethod
     def _clamp_screener_backoff(cls, value: float) -> float:
         return max(0.1, value)
+
+    @field_validator("tv_sessionid", "tv_sessionid_sign")
+    @classmethod
+    def _strip_tv_cookie(cls, value: str) -> str:
+        return (value or "").strip()
+
+    @field_validator("tv_indicator_on_indicator_limit")
+    @classmethod
+    def _clamp_tv_study_limit(cls, value: int) -> int:
+        return max(1, min(int(value), 49))
+
+    @field_validator("tv_chart_connections")
+    @classmethod
+    def _clamp_tv_chart_connections(cls, value: int) -> int:
+        return max(1, min(int(value), 200))
 
     @field_validator("collect_first_top_n")
     @classmethod

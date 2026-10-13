@@ -51,6 +51,7 @@ _CACHE_TTL_SECONDS = 6 * 3600
 # whenever exit helpers change; new entries still require the current runtime.
 _COMPATIBLE_EXIT_ENGINE_HASHES = frozenset({
     "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
+    "87b3f4d03c1825250fe848ba8291ee48eb0ad94f26c4dfac38e44bc06036c4bc",
 })
 
 
@@ -611,6 +612,29 @@ def _check_exit(
             raise RuntimeError("Position exit runtime changed; restore its compatible engine before management")
     is_short = position.action == "SELL"
     at_close = position.exit_fill_at_close
+    if position.provenance == "patternsv2":
+        # Only prior closes can arm/ratchet today's resting stop.
+        stop = _effective_stop(position)
+        trail = _trailing_stop_price(position, is_short)
+        reason = "stop_loss"
+        if trail is not None and (stop is None or (trail < stop if is_short else trail > stop)):
+            stop, reason = trail, "trailing_stop"
+        target = position.take_profit
+        # A target marketable at the open fills before later intrabar moves.
+        if target is not None and (candle.open <= target if is_short else candle.open >= target):
+            position.exit_bar_idx = bar_idx
+            return candle.open, "take_profit"
+        for trigger, favorable, exit_reason in ((stop, False, reason), (target, True, "take_profit")):
+            if trigger is None:
+                continue
+            fill = _gap_aware_trigger_fill(candle, trigger, is_short=is_short, favorable=favorable)
+            if fill is not None:
+                position.exit_bar_idx = bar_idx
+                return fill, exit_reason
+        # OHLC cannot establish intrabar order: stop wins if both were touched.
+        _update_trailing_reference(position, candle)
+        _trailing_stop_price(position, is_short)
+        return None, ""
     _update_best_pnl(position, candle)
     # `.cjs` flag updates the trailing extreme AFTER the stop check (so a new
     # high-close bar isn't stopped out by its own wide range); every other

@@ -775,7 +775,7 @@ class TVClient:
     ) -> list[OHLCVCandle]:
         """Fetch OHLCV history. PH uses PSE Edge (Yahoo *.PS is a YHD stub).
 
-        Local --ui/--web read 33ai.edos.uk (or VPS Postgres) and never Yahoo.
+        Local --ui/--web read 33ai.rootlabs.dev (or VPS Postgres) and never Yahoo.
         Ingest (`live=True`) always hits Yahoo/PSE so 33ai cannot hairpin
         GET /api/history onto itself during --update-db.
         """

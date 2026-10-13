@@ -156,6 +156,7 @@ class MarketScanner:
         collect_first: bool | None = None,
         collect_first_top_n: int | None = None,
         duration_days: int | None = None,
+        tv_stack_id: str = "",
     ):
         self._symbols = symbols or settings.symbols
         self._disabled_patterns = set(disabled_patterns or [])
@@ -174,7 +175,8 @@ class MarketScanner:
         # are removed from the money path. Accept the kwargs for API
         # compatibility but hard-disable them.
         self._volume_gate = False
-        self._indicators_only = bool(indicators_only)
+        self._tv_stack_id = (tv_stack_id or "").strip()
+        self._indicators_only = bool(indicators_only) or bool(self._tv_stack_id)
         self._patterns_v2 = bool(patterns_v2) and not self._indicators_only
         self._pattern_only = bool(pattern_only) and not self._indicators_only
         self._collect_first = False
@@ -230,6 +232,9 @@ class MarketScanner:
         self._sim_days: int = 0
         self._dead_symbols: set[str] = set()
         self._thin_logged: set[tuple[str, str]] = set()
+        # One retry per symbol/timeframe/session day. A bar that is still
+        # invalid on the next pass must not freeze the whole replay.
+        self._invalid_bar_tries: dict[tuple[str, str, str], int] = {}
         # Same (symbol, pattern) → (exit_bar_count, was_loss) cooldown map the
         # backtester uses — without this, paper re-entered losers immediately
         # while backtests waited cooldown_bars. Seed from the persisted ledger
@@ -458,6 +463,8 @@ class MarketScanner:
         long scan just idles the replay.
         """
         if self._scan_interval <= 0:
+            if not self.stats.get("scan_complete", True):
+                await asyncio.sleep(1.0)
             return
         elapsed = float(self.stats.get("scan_duration_s") or 0.0)
         remaining = self._scan_interval - elapsed
@@ -845,8 +852,20 @@ class MarketScanner:
         candle = snapshot.candle
         if not all(math.isfinite(price) and price > 0
                    for price in (candle.open, candle.high, candle.low, candle.close)):
-            self.stats["snapshot_errors"] += 1
-            log.warning(f"Scan | invalid candle prices for {symbol} {timeframe}; retrying")
+            stamp = candle.timestamp
+            day = stamp.date().isoformat() if stamp is not None else ""
+            key = (symbol, timeframe, day)
+            tries = self._invalid_bar_tries.get(key, 0) + 1
+            self._invalid_bar_tries[key] = tries
+            if tries == 1:
+                self.stats["snapshot_errors"] += 1
+                log.warning(
+                    f"Scan | invalid candle prices for {symbol} {timeframe}; retrying"
+                )
+            elif tries == 2:
+                log.warning(
+                    f"Scan | skip {symbol} {timeframe} — invalid candle prices after retry"
+                )
             return False, None
         self.stats["timeframe_snapshots_ok"] += 1
         self._scan_snapshot_symbols.add(symbol)
@@ -922,6 +941,7 @@ class MarketScanner:
             indicator = by_name.get(position.pattern)
             if indicator is None or not getattr(indicator, "trails", False):
                 continue
+            self._bind_indicator(indicator, symbol)
             min_bars = int(getattr(indicator, "MIN_BARS", 2) or 2)
             df = self._store.get_df(symbol, timeframe, min_bars=min_bars)
             if df is None:
@@ -932,6 +952,8 @@ class MarketScanner:
                 log.exception(
                     f"Scanner | {symbol} {timeframe} {position.pattern} trail failed"
                 )
+                if getattr(indicator, "error", ""):
+                    self.stats["tv_error"] = indicator.error
                 continue
             if (
                 state is None
@@ -991,6 +1013,7 @@ class MarketScanner:
             if n_bars < min_bars:
                 continue
             n_eval += 1
+            self._bind_indicator(pattern, symbol)
             try:
                 signal = pattern.analyze(snapshot, self._store)
             except Exception:
@@ -998,6 +1021,8 @@ class MarketScanner:
                     f"Scan | {pattern.name} {symbol} {timeframe}"
                 )
                 continue
+            if hasattr(pattern, "error"):
+                self.stats["tv_error"] = pattern.error or ""
             if signal:
                 hits.append(signal)
         return n_eval, hits
@@ -1453,7 +1478,33 @@ class MarketScanner:
             return 1, []
         return 1, hits
 
+    def _bind_indicator(self, indicator, symbol: str) -> None:
+        bind = getattr(indicator, "bind", None)
+        if bind is None:
+            return
+        exchange = "NASDAQ"
+        finder = getattr(self._tv, "_exchange_for", None)
+        if finder is not None:
+            exchange = finder(symbol)
+        bind(symbol, getattr(indicator, "timeframes", ["1d"])[0], exchange)
+
     def _discover_patterns(self) -> None:
+        if getattr(self, "_tv_stack_id", ""):
+            from data.tv_stacks import TvStackIndicator, get_stack
+
+            self._version_set = {}
+            stack = get_stack(self._tv_stack_id)
+            self._indicators_only = True
+            if self._paper is not None:
+                self._paper.indicators_only = True
+            if stack is None:
+                self._patterns = []
+                self._pattern_files = {}
+                self.stats["tv_error"] = "Unknown TradingView stack."
+                return
+            self._patterns = [TvStackIndicator(stack)]
+            self._pattern_files = {stack["name"]: "tv_indicator"}
+            return
         if self._indicators_only:
             from indicators import discover as discover_indicators
             self._version_set = {}

@@ -101,7 +101,7 @@ def test_fetch_tv_fallback_when_empty() -> None:
 
 def test_local_backfill_only_on_history_owner() -> None:
     with patch("config.settings") as s:
-        s.stocks_history_url = "https://33ai.edos.uk"
+        s.stocks_history_url = "https://33ai.rootlabs.dev"
         assert local_history_backfill_enabled() is False
     with patch("data.history.owns_local_stocks_history", return_value=False):
         with patch("config.settings") as s:
