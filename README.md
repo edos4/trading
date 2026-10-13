@@ -635,6 +635,359 @@ Once connected, just ask the agent in natural language:
 | HTTP 409 on `paper_start` / `backtest_quick_run` | That book is already running / a quick backtest is already in flight. |
 | "Destructive/Maintenance/Deploy MCP tools are disabled" | Set the matching `MCP_ALLOW_*` flag in `.env` and restart the client session. |
 
+## Run the agent on a local model — Hermes + FreeToken
+
+The MCP server above is client-agnostic: any MCP client can drive the bot. This
+section wires up [Nous Research **Hermes Agent**](https://hermes-agent.nousresearch.com/)
+— a self-hosted agent with persistent memory, auto-skills, subagents, a scheduler,
+and a messaging gateway — running entirely on a **local** model served by
+[**FreeToken**](https://github.com/FlashML-org/FreeToken)
+(`Qwen/Qwen3.6-35B-A3B-FP8`), with **no cloud API key in the agent loop**. It also
+makes the whole stack (model server + web UI + agent) come back by itself after a
+reboot.
+
+> Full deep-dive, including the exact verified commands and every gotcha:
+> [`docs/hermes-integration.md`](docs/hermes-integration.md).
+
+### Two layers — model client vs. bot operator
+
+It is easy to conflate these; they are configured separately:
+
+1. **Hermes as a model client** — Hermes needs an LLM. That LLM is FreeToken's local
+   endpoint (`http://127.0.0.1:1919/v1`), which speaks **both** the OpenAI and
+   Anthropic APIs. FreeToken ships `ft launch hermes`, which writes Hermes' provider
+   config for you.
+2. **Hermes as an operator of the bot** — Hermes drives this repo's MCP server
+   (`mcp_server/`, stdio) exactly like any other MCP client (see
+   [Operate via MCP](#operate-via-mcp-ai-agent)), plus its own shell/file tools.
+
+Neither replaces the app's *internal* AI (Claude vision, DeepSeek pattern editor) —
+see [Relationship to the in-app models](#relationship-to-the-in-app-models).
+
+```
+┌───────────────────────────┐
+│  FreeToken   ft serve     │  OpenAI + Anthropic compatible
+│  127.0.0.1:1919           │  /v1/chat/completions, /v1/models
+└─────────────┬─────────────┘
+              │  model.base_url (OpenAI wire)
+┌─────────────▼─────────────┐
+│  Hermes Agent             │  memory · skills · scheduler · subagents
+│  ~/.hermes/config.yaml    │  terminal + file tools
+└───┬───────────────────┬───┘
+    │ stdio MCP          │ shell / filesystem / git
+    │ (JSON-RPC)         │
+┌───▼──────────────┐  ┌──▼───────────────────────┐
+│  mcp_server/     │  │  python main.py --web     │
+│  (run_mcp.sh)    │─▶│  single state owner      │
+└──────────────────┘  └──────────────────────────┘
+        proxies /api/* over HTTP + Basic auth
+```
+
+Two hard prerequisites, same as the MCP section:
+
+- **FreeToken must be serving the model** — `curl 127.0.0.1:1919/v1/models` returns it.
+- **The web UI must be running** — it is the sole owner of the paper books and
+  backtest jobs the tools mutate. `curl 127.0.0.1:8080/health` → `{"ok":true}`.
+
+### Prerequisites
+
+| Need | Check / install |
+|---|---|
+| Hermes installed | `hermes doctor`; install: `curl -fsSL https://hermes-agent.nousresearch.com/install.sh \| bash --non-interactive` |
+| FreeToken installed | `ft --version` |
+| A GPU that can hold the model | `nvidia-smi -L` — a 16 GB card runs the 35B-A3B MoE with CPU expert offload |
+| Repo venv + deps | `.venv/bin/python -c "import mcp_server"` from the repo root |
+| Filled `.env` (min `WEB_UI_PASSWORD`) | `python main.py --web` starts cleanly |
+| Web UI running | `curl -fsS http://127.0.0.1:8080/health` → `{"ok":true}` |
+
+### Step 1 — Serve the model locally (FreeToken)
+
+```bash
+# dtype / attention / MoE backend / tool-call + reasoning parsers resolve
+# automatically from the checkpoint and the GPU.
+ft serve --model Qwen/Qwen3.6-35B-A3B-FP8
+# → wait for: "API server is ready to serve on 127.0.0.1:1919"
+
+curl -s http://127.0.0.1:1919/v1/models    # exact served model id
+curl -s http://127.0.0.1:1919/v1/stats     # ctx, throughput, input_modalities
+```
+
+#### ⚠ The KV-cache gotcha (the one that actually bites)
+
+On a 16 GB card the engine's **auto** sizing favors a large MoE expert cache and gives
+the KV pool only **~8,000 tokens** — far below Hermes' **64K agent minimum**. Hermes
+will still *start* (it reads the model's advertised 256K window) and then fail at
+runtime as soon as the conversation grows past the real KV pool.
+
+Pin the split explicitly, sized to the card's cache budget (~7.8 GiB on a 16 GB card):
+
+```bash
+ft serve --model Qwen/Qwen3.6-35B-A3B-FP8 \
+  --num-tokens 131072 \
+  --moe-cache-size 1200
+```
+
+- `--num-tokens N` pins the KV pool. KV is ~20 KB/token, and the GPU also holds the
+  attention weights, the MoE expert cache, and Mamba state.
+- **`--num-tokens` alone OOMs**: it pins KV *without* shrinking the expert cache.
+  Always pair it with a smaller `--moe-cache-size`.
+- KV is cheap relative to experts, so trading expert slots for context is a good deal —
+  e.g. 128K KV + 1200 slots (~7.4 GiB) vs. auto's 8K KV + 2607 slots (~7.8 GiB).
+- You can also resize a *running* server, budget-aware, with no restart:
+  `ft ctl cache --kv 131072 --moe 1200`. It returns **HTTP 503** and keeps the old
+  cache if the request does not fit — use it to find a working split, then bake it into
+  the startup flags. `ft ctl cache` reports the live `kv`/`moe`/`mamba` table.
+
+#### Verify tool calling
+
+FreeToken auto-infers a tool-call parser per model family (`qwen3_coder` here) and a
+reasoning parser (`qwen3`). Sanity-check before trusting multi-step loops:
+
+```bash
+curl -s http://127.0.0.1:1919/v1/chat/completions -H 'Content-Type: application/json' -d '{
+  "model": "Qwen3.6-35B-A3B-FP8",
+  "messages": [{"role":"user","content":"Weather in Tokyo? Use the tool."}],
+  "tools": [{"type":"function","function":{"name":"get_weather",
+             "parameters":{"type":"object","properties":{"city":{"type":"string"}}}}}],
+  "max_tokens": 800 }'
+# → choices[0].message.tool_calls should be populated (finish_reason "tool_calls").
+```
+
+If instead you get raw JSON printed as `content`, the parser is off — set
+`ft serve --tool-call-parser <name>` explicitly and restart.
+
+#### Vision
+
+`GET /v1/stats` reports `model.input_modalities` (`["text","image"]` when a vision
+encoder is registered). Hermes does not know this model from models.dev, so set
+`model.supports_vision: true` (below) or it will *pre-describe* images instead of
+sending them natively — and the chart PNGs this repo renders
+(`analyze_symbol(save_chart=true)`, `paper_trade_chart`, `get_pattern_run_chart`) go
+unread.
+
+#### Reasoning output
+
+Qwen's thinking lands in `reasoning_content`, separate from the visible `content`.
+With a tiny `max_tokens` the whole budget can be spent on reasoning and `content`
+comes back **empty** — a budget artifact, not a failure. FreeToken's default output
+budget (32,768) is ample, and Hermes does not cap output for custom endpoints.
+
+### Step 2 — Install Hermes and point it at the model
+
+```bash
+hermes --version            # confirm the CLI is on PATH (~/.local/bin)
+ft launch hermes            # discovers the model, writes Hermes' config, launches it
+ft launch hermes --dry-run  # preview the changes first; -y auto-approves
+```
+
+`ft launch` reads `/v1/models`, writes the provider config, installs the Hermes CLI if
+missing, and **clears cloud keys** (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …) out of the
+child environment so Hermes cannot silently fall back to a paid endpoint.
+
+The equivalent manual config (`~/.hermes/config.yaml`):
+
+```yaml
+model:
+  provider: custom
+  default: Qwen3.6-35B-A3B-FP8            # id from /v1/models
+  base_url: http://127.0.0.1:1919/v1
+  context_length: 131072                  # match the KV pool from Step 1 (≥ 65536)
+  supports_vision: true                    # FreeToken serves image input
+```
+
+> **Context length is a contract, not a wish.** Set `model.context_length` to the KV
+> pool you actually allocated. Hermes compresses history before that limit; if it is
+> set higher than the server can hold, long turns fail at runtime. `hermes config set
+> model.context_length 131072` edits it in place.
+
+### Step 3 — Register the trading MCP server
+
+`mcp_server/` is **stdio**, so Hermes spawns it as a child process — no port, no
+firewall, secrets stay in `.env`:
+
+```bash
+hermes mcp add trading-bot --command /path/to/trading/run_mcp.sh
+hermes mcp test  trading-bot          # connects, lists tools, non-zero exit on failure
+hermes mcp list                       # show configured servers + status
+hermes mcp configure trading-bot      # toggle which tools are exposed
+```
+
+Or write it into `~/.hermes/config.yaml` directly:
+
+```yaml
+mcp_servers:
+  trading-bot:
+    command: "/path/to/trading/run_mcp.sh"   # cds to the repo root first
+    args: []
+```
+
+The discovered tools appear in the model's toolset as **`mcp_trading-bot_<tool>`**
+(e.g. `mcp_trading-bot_server_health`, `mcp_trading-bot_paper_status`). Reload a live
+session with `/reload-mcp`. The full 52-tool surface (market, patterns, backtest, paper,
+kronos, replay, maintenance, deploy) is the same one documented in
+[Tool reference](#tool-reference).
+
+To shrink the surface for a financial system, add an allowlist under the server:
+
+```yaml
+mcp_servers:
+  trading-bot:
+    command: "/path/to/trading/run_mcp.sh"
+    tools:
+      include: [server_health, get_markets, list_symbols, analyze_symbol,
+                paper_status, paper_start, paper_stop, submit_backtest_run,
+                get_backtest_run]
+```
+
+### Step 4 — Make it survive reboots
+
+The bot's web UI already ships as a systemd **user** service with `Restart=always`
+(see [Keep it running across restarts](#keep-it-running-across-restarts-systemd)), and
+user-systemd **linger** is enabled, so user services start at boot with no login. Give
+the model server the same treatment — the unit mirrors `deploy/trading-web.service`:
+
+```ini
+# ~/.config/systemd/user/freetoken.service
+[Unit]
+Description=FreeToken model server (Qwen3.6-35B-A3B-FP8)
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=%h
+# --num-tokens + --moe-cache-size pin a KV pool big enough for the agent (see Step 1).
+ExecStart=%h/.freetoken/venv/bin/ft serve --model %h/.freetoken/models/Qwen3.6-35B-A3B-FP8 \
+  --host 127.0.0.1 --port 1919 --moe-backend auto --max-running-requests 4 \
+  --memory-ratio 0.85 --num-tokens 131072 --moe-cache-size 1200
+Restart=always
+RestartSec=10
+KillMode=control-group
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
+```
+
+Install the Hermes **gateway** (its scheduler + messaging surfaces) as a user service:
+
+```bash
+hermes gateway install     # writes + enables ~/.config/systemd/user/hermes-gateway.service
+```
+
+Order it after its dependencies so it does not come up before the model server and the
+web UI:
+
+```ini
+# ~/.config/systemd/user/hermes-gateway.service.d/after-stack.conf
+[Unit]
+After=freetoken.service trading-web.service
+Wants=freetoken.service trading-web.service
+```
+
+Then enable and confirm the boot set:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now freetoken.service
+systemctl --user list-dependencies default.target      # all units pulled in at boot
+systemctl --user is-enabled freetoken hermes-gateway trading-web
+loginctl show-user "$USER" | grep Linger                # → Linger=yes
+```
+
+> **FreeToken Desktop conflict.** The Desktop app launches its *own* `ft serve` on port
+> 1919. If the systemd unit owns the port, don't also start the model from the Desktop
+> app. Killing the app alone is **not** enough — its worker children reparent to
+> `systemd --user` and keep port **1920** (the torch rendezvous store) *and* the GPU,
+> producing an `EADDRINUSE` crash loop. Reap the leftover `ft serve` / `spawn_main`
+> pids before starting the service.
+
+### Operations
+
+```bash
+systemctl --user status  freetoken hermes-gateway trading-web   # states
+systemctl --user restart freetoken.service                      # after changing flags
+journalctl --user -u freetoken -f                               # model-server log
+journalctl --user -u hermes-gateway -f                          # gateway log
+curl -s http://127.0.0.1:1919/v1/cache/status                   # KV / expert geometry
+curl -s http://127.0.0.1:1919/v1/stats                          # throughput, modalities
+hermes status                                                   # model, gateway, jobs
+hermes -z "<prompt>"                                            # one-shot, headless
+```
+
+A quick end-to-end check — ask the local model to use the tools:
+
+```bash
+hermes -z "Use the trading-bot MCP tools: call server_health, then list_symbols for the us market."
+```
+
+The MCP server also exposes a `daily_review(market="us")` prompt (paper-book summary +
+one suggested next action) — a natural cron job to run through the gateway.
+
+### Relationship to the in-app models
+
+Hermes' model and the app's internal AI are **independent**:
+
+| Caller | Model | Configured in |
+|---|---|---|
+| Hermes (the agent) | Qwen3.6-35B-A3B-FP8 via FreeToken | `~/.hermes/config.yaml` |
+| Chart vision confirmation | Anthropic Claude | repo `.env` (`VISION_CONFIRMATION_ENABLED`, `ANTHROPIC_*`) |
+| AI pattern editing | DeepSeek | repo `.env` (`DEEPSEEK_*`) |
+
+So `submit_pattern_edit` still spends DeepSeek credits and the vision gate still calls
+Claude, regardless of Hermes running on a local model. Making *those* local is separate
+work — the pattern-editor provider is a single adapter (`ai/providers/deepseek.py`) and
+vision is `analysis/vision_checker.py`.
+
+### Configuration reference
+
+**Hermes side** (`~/.hermes/config.yaml` + `~/.hermes/.env`):
+
+| Key | Meaning |
+|---|---|
+| `model.provider: custom` | Any OpenAI-compatible endpoint (FreeToken) |
+| `model.base_url` | `http://127.0.0.1:1919/v1` |
+| `model.default` | served model id from `/v1/models` |
+| `model.context_length` | pin to the allocated KV pool (e.g. `131072`; ≥ `65536`) |
+| `model.supports_vision` | `true` — FreeToken serves image input |
+| `mcp_servers.trading-bot.*` | stdio MCP server via `run_mcp.sh` |
+| `auxiliary.*` | route compression/vision to another model if the local 35B is weak there |
+
+**Repo side** — unchanged; the MCP server reads the same `.env` documented in
+[Configuration (`.env`)](#configuration-env). The relevant knobs are the `MCP_*` group,
+especially the default-deny `MCP_ALLOW_DESTRUCTIVE` / `MCP_ALLOW_MAINTENANCE` /
+`MCP_ALLOW_DEPLOY` flags.
+
+### Safety
+
+- **No live trading.** Broker/risk are unimplemented — paper and backtest only.
+- **Default-deny mutations.** Every destructive tool needs its `MCP_ALLOW_*` flag,
+  regardless of what the agent tries to call.
+- **Allowlist the MCP surface** (`tools.include`) for a financial system and add tools
+  deliberately.
+- **One state owner.** The MCP server never starts a second engine, so it cannot corrupt
+  a running book's ledger.
+- **Unattended runs need care.** Hermes can route tool-call approvals to the CLI or a
+  messaging platform. Decide which actions may auto-proceed *before* running headless —
+  `--yolo` disables approval entirely, which is unsafe for state-mutating tools.
+- **Secrets** stay in the repo `.env`; the MCP server opens no network port.
+
+### Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| `EADDRINUSE` on port **1920**, service crash-loops | Orphaned FreeToken children (from a killed Desktop app) hold the torch rendezvous port/GPU. Reap the leftover `ft serve` / `spawn_main` pids, then restart. |
+| CUDA OOM on startup after adding `--num-tokens` | KV pinned without shrinking the expert cache — add `--moe-cache-size` (Step 1). |
+| `HTTP 503` from `ft ctl cache` | Requested cache exceeds the budget; lower `--kv`/`--moe`. The old cache is kept. |
+| Hermes refuses to start: "context limit" | Local window < 64K — allocate ≥ 64K KV and pin `model.context_length` ≥ `65536`. |
+| Model prints tool calls as text | FreeToken tool-call parser off — set `--tool-call-parser` and restart. |
+| `mcp_trading-bot_*` tools missing | `hermes mcp test trading-bot`; confirm `run_mcp.sh` is absolute + executable; check no `tools.include` filtered them; `/reload-mcp`. |
+| "web service unreachable" | `python main.py --web` not running, or `MCP_API_URL` wrong — check `/health`. |
+| HTTP 401 from a tool | Bad `MCP_*` / `WEB_UI_*` credentials. |
+| Empty assistant `content`, answer in reasoning | Tiny `max_tokens` consumed by thinking — give output budget (FreeToken default 32K). |
+| Hermes won't see chart images | Set `model.supports_vision: true`. |
+| `ft launch hermes` fell back to a paid endpoint | It clears cloud keys from the child env; check the config it wrote still points at `127.0.0.1:1919`. |
+
 ## Deploying to the engine from another computer — optional, host-specific
 
 `deploy_to_engine.sh` deploys this repo to the machine that runs the deploy
