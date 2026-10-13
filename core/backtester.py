@@ -1195,7 +1195,7 @@ class Backtester:
             try:
                 candles = fetch_ohlcv_candles(symbol, "1d", market=self._market)
             except Exception:
-                log.warning(f"Backtester | fetch failed for {symbol}", exc_info=True)
+                log.opt(exception=True).warning(f"Backtester | fetch failed for {symbol}")
                 return None
             if candles:
                 _save_cached_ohlcv(symbol, "1d", candles, self._market)
@@ -1267,10 +1267,10 @@ class Backtester:
                     try:
                         _merge(await coro)
                     except Exception:
-                        log.warning("Backtester | worker failed, skipping", exc_info=True)
+                        log.opt(exception=True).warning("Backtester | worker failed, skipping")
                         completed += 1
         except Exception:
-            log.warning("Backtester | pool unavailable — running inline", exc_info=True)
+            log.opt(exception=True).warning("Backtester | pool unavailable — running inline")
             for s, tf in tasks:
                 candles = ohlcv_data.get((s, tf))
                 _merge(_core_backtest_symbol(s, tf, candles or [], self._patterns, config))
