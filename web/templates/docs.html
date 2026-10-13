@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Documentation — Trading Bot{% endblock %}
+
+{% macro render_toc(items, level) %}
+<ul class="toc-list toc-level-{{ level }}">
+  {% for item in items %}
+  <li class="toc-item">
+    <a class="toc-link" href="#{{ item.slug }}" data-level="{{ item.level }}">{{ item.title }}</a>
+    {%- if item.children %}{{ render_toc(item.children, level + 1) }}{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endmacro %}
+
+{% block content %}
+<section class="panel page-head">
+  <div class="page-head-title">
+    <h1>Documentation</h1>
+    {% if doc %}
+    <p class="muted small">{{ doc.path }} · {{ doc.headings }} sections · last changed {{ doc.updated_text }}</p>
+    {% else %}
+    <p class="muted small">The project README, rendered with a clickable contents list.</p>
+    {% endif %}
+  </div>
+</section>
+
+{% if error %}
+<section class="panel">
+  <p class="status">{{ error }}</p>
+</section>
+{% else %}
+<div class="docs-layout">
+  <aside class="docs-toc">
+    <h2>Contents</h2>
+    <nav class="docs-toc-nav">{{ render_toc(doc.toc, 1) }}</nav>
+  </aside>
+  <article class="markdown-body" id="docs-content">{{ doc.html | safe }}</article>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if not error %}<script src="/static/docs.js?v=1"></script>{% endif %}
+{% endblock %}
