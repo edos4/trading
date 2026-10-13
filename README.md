@@ -1,4 +1,4 @@
-# Trading Bot v2 — Edwin & Toby
+# Trading Bot v2 — 33AI
 
 > **Configured for swing trading**: patterns run on daily/weekly bars, the
 > scanner polls hourly (no need for minute-by-minute polling since new bars
