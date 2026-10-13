@@ -14,6 +14,12 @@ import httpx
 
 from mcp_server import config as mcp_config
 
+#: ``/api/history/*`` authenticates with ``WEB_UI_USERNAME`` as both user and
+#: password, unlike the rest of ``/api/*`` — so those calls carry their own
+#: credential. Without this, every history call 401s whenever
+#: ``WEB_UI_PASSWORD != WEB_UI_USERNAME``.
+HISTORY_AUTH_PREFIX = "/api/history"
+
 
 class TradingApiError(RuntimeError):
     """A non-2xx (or unreachable) response from the trading web service."""
@@ -43,16 +49,26 @@ class TradingApiClient:
         base_url: str,
         username: str = "",
         password: str = "",
+        history_username: str = "",
         timeout: float = 60.0,
         transport: httpx.BaseTransport | None = None,
     ):
-        auth = (username, password) if username else None
+        self._auth = (username, password) if username else None
+        # Falls back to the default credential when no history user is given.
+        self._history_auth = (
+            (history_username, history_username) if history_username else self._auth
+        )
         self._client = httpx.Client(
             base_url=base_url.rstrip("/"),
-            auth=auth,
+            auth=self._auth,
             timeout=timeout,
             transport=transport,
         )
+
+    def _auth_for(self, path: str):
+        if path.startswith(HISTORY_AUTH_PREFIX) and self._history_auth:
+            return self._history_auth
+        return self._auth
 
     def request(
         self,
@@ -63,7 +79,9 @@ class TradingApiClient:
         params: Any = None,
     ) -> Any:
         try:
-            resp = self._client.request(method, path, json=json, params=params)
+            resp = self._client.request(
+                method, path, json=json, params=params, auth=self._auth_for(path),
+            )
         except httpx.HTTPError as exc:
             raise TradingApiError(
                 0,
@@ -108,10 +126,12 @@ def get_client() -> TradingApiClient:
     global _client
     if _client is None:
         user, password = mcp_config.credentials()
+        history_user, _ = mcp_config.history_credentials()
         _client = TradingApiClient(
             base_url=mcp_config.api_base_url(),
             username=user,
             password=password,
+            history_username=history_user,
             timeout=mcp_config.timeout_seconds(),
         )
     return _client

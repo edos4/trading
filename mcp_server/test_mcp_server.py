@@ -357,3 +357,37 @@ def test_client_against_real_app(monkeypatch):
         assert exc.value.status_code == 401
     finally:
         api_client.reset_client()
+
+
+def test_history_calls_use_the_username_as_password_credential():
+    """``/api/history/*`` needs user == password; the rest of ``/api/*`` the password.
+
+    One credential cannot satisfy both, so a client with
+    ``WEB_UI_PASSWORD != WEB_UI_USERNAME`` must send the history surface its own.
+    """
+    import base64
+
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen[request.url.path] = request.headers["authorization"]
+        return httpx.Response(200, json={})
+
+    client = TradingApiClient(
+        base_url="http://testserver",
+        username="admin",
+        password="secretpw",
+        history_username="admin",
+        transport=httpx.MockTransport(handler),
+    )
+    client.get("/api/backtest/status")
+    client.get("/api/history/symbols")
+    client.get("/api/history/AAPL")
+
+    def cred(header: str) -> str:
+        return base64.b64decode(header.split(" ", 1)[1]).decode()
+
+    assert cred(seen["/api/backtest/status"]) == "admin:secretpw"
+    assert cred(seen["/api/history/symbols"]) == "admin:admin"
+    assert cred(seen["/api/history/AAPL"]) == "admin:admin"
+
