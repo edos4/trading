@@ -93,9 +93,14 @@ class PennantPattern(BasePattern):
         for consol_len in range(CONSOL_MIN_LEN, CONSOL_MAX_LEN + 1):
             consol_start = consol_end - consol_len + 1
             for flag_len in range(FLAG_MIN_LEN, FLAG_MAX_LEN + 1):
-                end_idx = consol_start - 1
-                start_idx = end_idx - flag_len + 1
-                if start_idx - 20 < 0:
+                end_idx = int(consol_start - 1)
+                start_idx = int(end_idx - flag_len + 1)
+                # ── bounds guard ─────────────────────────────────────
+                if end_idx < 0 or end_idx >= len(close):
+                    continue
+                if start_idx < 0 or start_idx >= len(close):
+                    continue
+                if start_idx < 20 or start_idx >= end_idx:
                     continue
                 post = close[end_idx]
                 start_px = close[start_idx]
