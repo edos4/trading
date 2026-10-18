@@ -126,6 +126,12 @@ class PaperBook:
         self._stop_requested = threading.Event()
         self._chart_key: tuple[int, float] | None = None
         self._chart_b64: Optional[str] = None
+        # Laya mode/policy frozen per book start (docs/laya.md section 10).
+        # Mode changes require stopping and restarting the book; no mutable
+        # global threshold while it runs.
+        self.laya_mode: str = "off"
+        self.laya_policy_id: str = ""
+        self.duration_days: int | None = None
 
     def snapshot(self, *, stream_blocked_by: Optional[str] = None) -> dict[str, Any]:
         with self.lock:
@@ -178,6 +184,9 @@ class PaperBook:
                     "sim_opened": p.sim_entry_date.isoformat() if p.sim_entry_date else None,
                     "timeframe": p.timeframe,
                     "daily_marks": list(p.position_marks or []),
+                    "laya_assessment": (
+                        dict(p.laya_assessment)
+                        if getattr(p, "laya_assessment", None) else None),
                 }
             )
 
@@ -211,6 +220,9 @@ class PaperBook:
                     "sim_closed": t.sim_exit_date.isoformat() if t.sim_exit_date else None,
                     "timeframe": t.timeframe,
                     "daily_marks": list(t.position_marks or []),
+                    "laya_assessment": (
+                        dict(t.laya_assessment)
+                        if getattr(t, "laya_assessment", None) else None),
                 }
             )
 
@@ -225,6 +237,7 @@ class PaperBook:
 
         total_pnl = snap["total_pnl_dollars"]
         metrics = {
+            "fees": snap["fees"],
             "total_pnl_dollars": total_pnl,
             "total_pnl_pct": (total_pnl / snap["initial_capital"] * 100)
             if snap["initial_capital"] else 0.0,
@@ -256,6 +269,11 @@ class PaperBook:
             "status": display_status,
             "error": error,
             "use_stream": use_stream,
+            "account_model": "independent-fixed-notional",
+            "pending_entries": [{"symbol": s.symbol, "pattern": s.pattern,
+                                 "decision_date": s.signal_bar_timestamp.isoformat()} for s in account.pending_entries],
+            "order_events": list(account.order_events),
+            "duration_days": getattr(self, "duration_days", None),
             "cash": snap["cash"],
             "equity": equity,
             "open_count": len(snap["positions"]),
@@ -279,6 +297,15 @@ class PaperBook:
             "tz_name": clock["tz_name"],
             "long_only": profile.long_only,
             "stream_blocked_by": stream_blocked_by,
+            "laya": {
+                "mode": getattr(self, "laya_mode", "off"),
+                "policy_id": getattr(self, "laya_policy_id", ""),
+                "readiness": (
+                    "off" if getattr(self, "laya_mode", "off") == "off"
+                    else "shadow-ready" if getattr(self, "laya_mode", "") == "shadow"
+                    else ("filter-ready" if getattr(self, "laya_policy_id", "") else "filter-missing-policy")
+                ),
+            },
             "defaults": {
                 "volume_gate": settings.volume_gate_enabled,
                 "n_symbols": profile.default_n_symbols,
@@ -482,6 +509,9 @@ class PaperBook:
         collect_first_top_n: int = 4,
         stream_start: Optional[str] = None,
         tv_stack_id: str = "",
+        laya_mode: str = "off",
+        laya_policy_id: str = "",
+        duration_days: int | None = None,
     ) -> str | None:
         stack_name = ""
         tv_stack_id = (tv_stack_id or "").strip()
@@ -499,19 +529,41 @@ class PaperBook:
         with self.lock:
             if self.running:
                 return f"{self.market.upper()} paper session already running."
+            laya_mode = (laya_mode or "off").strip().lower()
+            if laya_mode not in ("off", "research", "shadow", "filter"):
+                return f"Unsupported Laya mode: {laya_mode}"
+            if laya_mode == "filter" and not (laya_policy_id or "").strip():
+                return "Laya filter mode requires a policy id."
+            if laya_mode in ("shadow", "filter"):
+                # Book creation must pass readiness: starting a filtered book
+                # without a ready worker would abstain (skip) every entry.
+                from core.laya_paper import laya_readiness
+
+                ready, reason = laya_readiness()
+                if not ready:
+                    return (
+                        f"Laya {laya_mode} requested for {self.market.upper()} "
+                        f"but the assessment service is not ready: {reason}"
+                    )
+            if duration_days is not None and duration_days < 1:
+                return "Duration must be at least 1 market session."
             self.running = True
             self._stop_requested.clear()
             self.error = None
             self.use_stream = use_stream
             self.tv_stack_id = tv_stack_id
             self.tv_stack_name = stack_name
+            self.laya_mode = laya_mode
+            self.laya_policy_id = (laya_policy_id or "").strip()
+            self.duration_days = duration_days
             self.status = "Fetching symbols..."
         self._thread = threading.Thread(
             target=self._thread_main,
             args=(
                 n_symbols, extra_symbols, use_stream, volume_gate, pattern_only,
                 indicators_only, patterns_v2, collect_first, collect_first_top_n,
-                stream_start, tv_stack_id,
+                stream_start, tv_stack_id, laya_mode, laya_policy_id,
+                duration_days,
             ),
             name=f"paper-{self.market}",
             daemon=True,
@@ -720,6 +772,9 @@ class PaperBook:
         collect_first_top_n: int,
         stream_start: Optional[str],
         tv_stack_id: str = "",
+        laya_mode: str = "off",
+        laya_policy_id: str = "",
+        duration_days: int | None = None,
     ) -> None:
         data_feed = None
         profile = get_market(self.market)
@@ -770,6 +825,18 @@ class PaperBook:
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        laya_assess = None
+        if (laya_mode or "off") in ("shadow", "filter"):
+            try:
+                from core.laya_paper import make_assessor
+
+                laya_assess = make_assessor(
+                    market=profile.id, policy_id=laya_policy_id,
+                    mode=laya_mode, book_id=f"paper-{profile.id}",
+                )
+            except Exception:
+                log.exception(f"PaperBook | {profile.id} Laya assessor failed to build")
+                laya_assess = None
         with self.lock:
             self.loop = loop
             self.account = PaperAccount.load(market=profile.id)
@@ -791,6 +858,10 @@ class PaperBook:
                 collect_first_top_n=collect_first_top_n,
                 market=profile.id,
                 tv_stack_id=tv_stack_id,
+                laya_mode=(laya_mode or "off"),
+                laya_policy_id=(laya_policy_id or ""),
+                laya_assess=laya_assess,
+                duration_days=duration_days,
             )
             self.scanner = scanner
             self.task = loop.create_task(scanner.run())
@@ -818,6 +889,9 @@ class PaperBook:
                 f"{', TradingView=' + self.tv_stack_name if self.tv_stack_name else ''}"
                 f", Patternsv2={'ON' if patterns_v2 and not indicators_only else 'OFF'}"
                 f", Collect-first={'ON' if collect_first else 'OFF'}"
+                f", Laya={(laya_mode or 'off').upper()}"
+                f"{'/' + laya_policy_id if (laya_mode or 'off') != 'off' and laya_policy_id else ''}"
+                f"{', Duration=' + str(int(duration_days)) + ' sessions' if duration_days else ''}"
                 f", session={session_label(profile.id)}"
             )
 
@@ -931,6 +1005,9 @@ class PaperBookManager:
         collect_first_top_n: int = 4,
         stream_start: Optional[str] = None,
         tv_stack_id: str = "",
+        laya_mode: str = "off",
+        laya_policy_id: str = "",
+        duration_days: int | None = None,
     ) -> str | None:
         with self._start_lock:
             book = self._book(market)
@@ -953,6 +1030,9 @@ class PaperBookManager:
                 collect_first_top_n=collect_first_top_n,
                 stream_start=stream_start,
                 tv_stack_id=tv_stack_id,
+                laya_mode=laya_mode,
+                laya_policy_id=laya_policy_id,
+                duration_days=duration_days,
             )
 
     def start_both(self, specs: dict[str, dict[str, Any]]) -> dict[str, str]:
@@ -975,6 +1055,9 @@ class PaperBookManager:
                 collect_first_top_n=int(payload.get("collect_first_top_n") or 4),
                 stream_start=payload.get("stream_start"),
                 tv_stack_id=payload.get("tv_stack_id") or "",
+                laya_mode=str(payload.get("laya_mode") or "off"),
+                laya_policy_id=str(payload.get("laya_policy_id") or ""),
+                duration_days=payload.get("duration_days"),
             )
             if err:
                 errors[mid] = err

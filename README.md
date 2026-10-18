@@ -301,6 +301,45 @@ Auth: form login → signed HttpOnly session cookie (`tb_session`). All pages an
 whenever a request arrives over TLS (`X-Forwarded-Proto: https`), so no extra
 config is needed behind a TLS-terminating proxy or the Cloudflare Tunnel below.
 
+### Laya text assessment (optional, seventh tab)
+
+A local, optional assessment service with its own research workspace
+(`Explorer | Backtest | Paper | Replay | Patterns | Indicators | Laya`). Laya
+classifies pasted financial text (event review) and reviews evidence around an
+existing candidate (candidate review). It never places orders, changes
+stops/targets, or manages exits — its answer is additional evidence, not
+authority to change trading rules.
+
+```bash
+# Isolated worker env (never add laya[mcp]: it conflicts with mcp>=1.28.0,<2)
+python -m venv .venv-laya && .venv-laya/bin/pip install -r requirements-laya.txt
+# Offline smoke (no checkpoint download) + benchmark report:
+.venv-laya/bin/python scripts/laya_smoke.py --fake
+# Versioned evaluation report (model quality vs deterministic baseline):
+.venv/bin/python scripts/evaluate_laya.py --fake
+```
+
+Then provision a pinned checkpoint and set in `.env` (see `.env.example`):
+`LAYA_ENABLED=true`, `LAYA_WORKER_PYTHON`, `LAYA_MODEL_PATH`. Without these
+the tab renders an honest unavailable state and `/health` stays independent.
+`LAYA_ENABLED` enables assessment execution only — entry filtering needs an
+explicit per-book/per-run `shadow`/`filter` mode plus a validated policy, and
+is paper/simulation-only.
+
+Paper trading: each book card has a **Laya** checkbox (with Filter/Shadow mode
+and a policy id, default `laya-event-v1-default`), just like Pattern-only /
+Indicators-only / Patternsv2. Tick it and Start moves that book's entries
+through Laya: Filter gates entries (allow/veto/abstain, paper-only), Shadow
+only records assessments. The default event policy vetoes only on affirmative
+danger in recent EDGAR filings (offering/dilution or material adverse text);
+with no filing evidence it abstains. Starting a Laya book while the service
+is not ready is refused with the reason. Full design: `docs/laya.md`.
+
+Paper stream replays accept an optional **Duration** (market sessions) per
+book card: the book stops by itself after that many unique sessions instead
+of running to tape exhaustion. Blank (default) preserves the old unbounded
+behavior. The card shows live progress as `Sim days: N/M`.
+
 ### Local web with a public URL (Cloudflare Tunnel) — optional, host-specific
 
 `./run_web.sh` is a plain local server by default. On a host that opts in (by

@@ -84,8 +84,14 @@ class PaperStartRequest(BaseModel):
     collect_first: bool = False
     collect_first_top_n: int = 4
     stream_start: Optional[str] = None
+    # Stream-replay session cap: the book stops by itself after this many
+    # unique market sessions. None (default) preserves the old behavior of
+    # running until the tapes are exhausted or the operator stops it.
+    duration_days: Optional[int] = Field(None, ge=1, le=5000)
     market: Optional[Literal["us", "ph"]] = None
     tv_stack_id: str = ""
+    laya_mode: Literal["off", "research", "shadow", "filter"] = "off"
+    laya_policy_id: str = ""
 
 
 class PaperStopRequest(BaseModel):
@@ -109,7 +115,7 @@ class BacktestRunRequest(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     session_count: int = Field(0, ge=0, le=5000)
-    warmup_bars: int = Field(40, ge=0, le=400)
+    warmup_bars: int = Field(40, ge=0, le=5000)
     initial_capital: float = Field(100_000.0, gt=0)
     sizing_mode: Literal["fixed-notional", "paper-risk"] = "fixed-notional"
     position_notional: float = Field(10_000.0, gt=0)
@@ -120,6 +126,11 @@ class BacktestRunRequest(BaseModel):
     collect_first: int = Field(0, ge=0, le=50)
     end_policy: Literal["keep-open", "force-close"] = "keep-open"
     idempotency_key: Optional[str] = None
+    laya_mode: Literal["off", "shadow", "filter"] = "off"
+    laya_policy_id: Optional[str] = None
+    evaluation: Optional[dict[str, Any]] = None
+    kronos_gate: bool = False
+    kronos_rank: bool = False
 
 
 class BacktestPresetRequest(BaseModel):
@@ -1013,6 +1024,9 @@ def create_app() -> FastAPI:
             collect_first_top_n=payload.collect_first_top_n,
             stream_start=payload.stream_start,
             tv_stack_id=payload.tv_stack_id,
+            laya_mode=payload.laya_mode,
+            laya_policy_id=payload.laya_policy_id,
+            duration_days=payload.duration_days,
         )
 
     @app.post("/api/paper/start")
@@ -1244,6 +1258,11 @@ def create_app() -> FastAPI:
         except ValueError as exc:
             return JSONResponse({"detail": str(exc)}, status_code=400)
         return payload
+
+    # ── Laya assessment tab (seventh tab; optional, research-first) ─────────
+    from web.laya import register_laya_routes as _register_laya
+
+    _register_laya(app, templates, ctx)
 
     return app
 

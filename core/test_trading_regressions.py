@@ -115,8 +115,10 @@ def test_slippage_marks_and_indicator_exit_accounting_survive_restart(tmp_path, 
     account.assume_session_open = True
     account.indicators_only = True
     assert account.open_position(signal(action), candle(), None)[0]
-    assert account.equity() == pytest.approx(account.initial_capital - 100.0)
-    assert account.open_for("TEST")[0].position_marks[-1]["mtm"] == pytest.approx(-100.0)
+    # Actual-fill sizing plus slippage and the entry commission are immediate.
+    expected_drag = 108.999 if action == "BUY" else 110.999
+    assert account.equity() == pytest.approx(account.initial_capital - expected_drag)
+    assert account.open_for("TEST")[0].position_marks[-1]["mtm"] == pytest.approx(-expected_drag)
     path = tmp_path / "paper.json"
     account.save(path)
     account = PaperAccount.load(path, market="us")
@@ -124,7 +126,9 @@ def test_slippage_marks_and_indicator_exit_accounting_survive_restart(tmp_path, 
     account.indicators_only = True
     position = account.open_for("TEST")[0]
     account.on_bar("TEST", candle(110.0, 1), "1d")
-    account.exit_indicator("TEST", position, candle(110.0, 1))
+    assert account.exit_indicator("TEST", position, candle(110.0, 1)) is None
+    assert account.open_count() == 1
+    assert account.on_bar("TEST", candle(110.0, 2), "1d") == [position]
     assert position.exit_bar_idx == account.bar_count("TEST", "1d")
     assert account.cash == pytest.approx(account.initial_capital + position.pnl_usd)
     assert account.equity() == pytest.approx(account.cash)
@@ -204,7 +208,7 @@ def test_stream_force_close_uses_last_replayed_bar_and_updates_net_equity(action
                     start=45, end=49, slippage=0.01)
     artifacts = engine.run()
     trade = artifacts["trades"]["trades"][0]
-    assert trade["entryPrice"] == pytest.approx(101.0 if action == "BUY" else 99.0)
+    assert trade["entryPrice"] == pytest.approx(111.1 if action == "BUY" else 108.9)
     assert trade["exitPrice"] == pytest.approx(108.9 if action == "BUY" else 111.1)
     assert trade["exitDate"] == candle(index=49).timestamp.isoformat()
     assert trade["barsHeld"] == 4
@@ -281,4 +285,4 @@ def test_stream_regular_exit_applies_slippage(action):
     trade = artifacts["trades"]["trades"][0]
     assert trade["exitReason"] == "time_exit"
     assert trade["exitPrice"] == pytest.approx(108.9 if action == "BUY" else 111.1)
-    assert trade["barsHeld"] == 1
+    assert trade["barsHeld"] == 2  # Entry close decides; the following open executes.

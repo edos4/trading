@@ -11,6 +11,7 @@ import os
 from datetime import date, datetime
 from typing import Any, Optional
 
+from config import settings as app_settings
 from core.engine_defaults import ENGINE
 from core.market import default_market, get_market
 from core.pattern_editor_contracts import (
@@ -50,8 +51,8 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
     ),
     (
         "txn_cost_pct", "Txn cost (per leg)",
-        "0.0 = documented headline numbers; 0.001 matches the .cjs 'cost optional' mode.",
-        "spin", (0.0, 0.0, 0.01, 0.0001), None,
+        "Commission per entry/exit leg. Defaults to the selected startup market's fee schedule.",
+        "spin", (default_market().txn_cost_pct, 0.0, 0.01, 0.0001), None,
     ),
     (
         "max_workers", "CPU workers",
@@ -64,9 +65,9 @@ PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
 REPLAY_PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
     (
         "mode", "Backtest mode",
-        "Offline replays the full daily tape with the documented end-of-data "
-        "policy. Historical stream replays session-by-session like paper trading.",
-        "combo", "offline", ["offline", "historical-stream"],
+        "Offline is legacy historical replication with future-data access. "
+        "Historical stream evaluates decisions using only available bars.",
+        "combo", "historical-stream", ["offline", "historical-stream"],
     ),
     (
         "timeframe", "Timeframe",
@@ -90,8 +91,8 @@ REPLAY_PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
     ),
     (
         "warmup_bars", "Warmup bars",
-        "Bars that build indicators before the first tradable session.",
-        "spin", (40.0, 0.0, 400.0, 10.0), None,
+        "Bars before the first tradable session. Match the paper stream's initial lookback minus its signal bar.",
+        "spin", (float(app_settings.papertrade_stream_lookback_bars - 1), 0.0, 5000.0, 1.0), None,
     ),
     (
         "initial_capital", "Initial capital",
@@ -133,6 +134,17 @@ REPLAY_PARAMS: list[tuple[str, str, str, str, Any, Optional[list[str]]]] = [
         "keep-open keeps positions open at data end (paper behavior); "
         "force-close labels the resulting exits.",
         "combo", "keep-open", ["keep-open", "force-close"],
+    ),
+    (
+        "laya_mode", "Laya mode",
+        "off = baseline unchanged. shadow = assess without affecting fills. "
+        "filter = paper/simulation entries only (requires a policy).",
+        "combo", "off", ["off", "shadow", "filter"],
+    ),
+    (
+        "laya_policy_id", "Laya policy",
+        "Frozen Laya policy id for filter mode. Empty = default policy.",
+        "entry", "", None,
     ),
 ]
 
@@ -205,6 +217,8 @@ def settings_from_values(values: dict[str, Any]) -> BacktestSettings:
     Contradictory or unsupported combinations raise ``ValueError`` rather than
     silently substituting a default.
     """
+    if values.get("kronos_gate") or values.get("kronos_rank"):
+        raise ValueError("Kronos gates/ranking are unsupported in backtest evaluation")
     mode = str(values.get("mode") or "offline").strip()
     if mode not in ("offline", "historical-stream"):
         raise ValueError(f"Unsupported backtest mode: {mode}")
@@ -263,7 +277,23 @@ def settings_from_values(values: dict[str, Any]) -> BacktestSettings:
         volume_gate=bool(values.get("volume_gate")),
         collect_first=int(float(values.get("collect_first") or 0)),
         end_policy=end_policy,
+        parameters=(Parameter(name="history_window", value=max(512, app_settings.tv_history_days)),
+                    Parameter(name="vision_confirmation_enabled", value=app_settings.vision_confirmation_enabled),
+                    Parameter(name="volume_gate_rvol_min", value=app_settings.volume_gate_rvol_min),
+                    Parameter(name="volume_gate_obv_bars", value=app_settings.volume_gate_obv_bars)),
     )
+    laya = None
+    laya_mode = str(values.get("laya_mode") or "off").strip().lower()
+    laya_policy_id = str(values.get("laya_policy_id") or "").strip() or None
+    if laya_mode not in ("off", "shadow", "filter"):
+        raise ValueError(f"Unsupported Laya mode: {laya_mode}")
+    if laya_mode != "off" or laya_policy_id:
+        from core.pattern_editor_contracts import LayaExperimentSettings
+
+        laya = LayaExperimentSettings(
+            mode=laya_mode,  # type: ignore[typeddict-item]
+            policy_id=laya_policy_id,
+        )
     return BacktestSettings(
         mode=mode,
         market=str(values.get("market") or default_market().id),
@@ -272,6 +302,8 @@ def settings_from_values(values: dict[str, Any]) -> BacktestSettings:
         universe=universe,
         window=window,
         execution=execution,
+        laya=laya,
+        evaluation=values.get("evaluation"),
     )
 
 
@@ -292,6 +324,25 @@ def effective_parameters(settings: BacktestSettings, extra: dict | None = None) 
         ("timeframe", settings.timeframe),
         ("mode", settings.mode),
     ]
+    if settings.window is not None:
+        values.extend(("window_" + key, value) for key, value in settings.window.model_dump(mode="json").items())
+    values.extend([
+        ("account_model", "independent-fixed-notional"),
+        ("execution_model", "legacy" if settings.mode == "offline" else "causal-v1"),
+        ("entry_policy", "signal-close" if settings.mode == "offline" else "next-observed-open"),
+    ])
+    if settings.evaluation is not None:
+        values.extend(("evaluation_" + key, value) for key, value in
+                      settings.evaluation.model_dump(mode="json").items())
+    laya = getattr(settings, "laya", None)
+    if laya is not None:
+        values.extend([
+            ("laya_mode", laya.mode),
+            ("laya_policy_id", laya.policy_id),
+            ("laya_task_id", laya.task_id),
+            ("laya_model_id", laya.model_id),
+            ("laya_calibration_id", laya.calibration_id),
+        ])
     for param in execution.parameters:
         values.append((param.name, param.value))
     for name, value in (extra or {}).items():

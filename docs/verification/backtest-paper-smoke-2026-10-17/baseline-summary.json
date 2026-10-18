@@ -1,0 +1,87 @@
+{
+  "gated_top4": false,
+  "patterns": [
+    "pattern_002_double_top",
+    "pattern_003_double_bottom",
+    "pattern_004_rounding_bottom",
+    "pattern_005_rounding_top",
+    "pattern_008_head_and_shoulders"
+  ],
+  "symbols": [
+    "CDNS",
+    "NET",
+    "ON",
+    "TXN",
+    "SWKS",
+    "QCOM",
+    "PCAR",
+    "PYPL"
+  ],
+  "warmup_bars": 30,
+  "start": "2025-08-04T13:30:00+00:00",
+  "end": "2026-07-02T13:30:00+00:00",
+  "sessions": 260,
+  "commission_per_leg": 0.001,
+  "slippage_per_fill": 0.001,
+  "initial_capital": 100000,
+  "position_notional": 10000,
+  "metrics": {
+    "trade_count": 11,
+    "wins": 4,
+    "realized_pnl": -419.555903,
+    "unrealized_pnl": 642.834867,
+    "open_count": 1,
+    "fees": 225.894214,
+    "drawdown_pct": 1.14948556500001
+  },
+  "paper_metrics": {
+    "cash": 109388.27896493099,
+    "initial_capital": 100000,
+    "equity": 100223.27896493099,
+    "exposure": {
+      "long_pct": 0.0,
+      "short_pct": 9.144582071802814,
+      "net_pct": -9.144582071802814,
+      "gross_pct": 9.144582071802814
+    },
+    "realized_pnl_dollars": -419.55590254896146,
+    "unrealized_pnl_dollars": 642.834867480001,
+    "total_pnl_dollars": 223.27896493098524,
+    "fees": 225.8942140458668,
+    "positions": [
+      [
+        "QCOM",
+        "2026-10-17 SELL QCOM   1d entry=188.80 exit=188.80 pnl=+0.00% ()",
+        176.25,
+        642.834867480001
+      ]
+    ],
+    "closed": [
+      "2026-10-17 SELL QCOM   1d entry=155.79 exit=160.63 pnl=-3.31% (trailing_stop)",
+      "2026-10-17 SELL ON     1d entry=48.69 exit=50.20 pnl=-3.31% (trailing_stop)",
+      "2026-10-17 SELL TXN    1d entry=169.65 exit=162.50 pnl=+4.02% (time_exit)",
+      "2026-10-17 SELL PYPL   1d entry=65.43 exit=67.46 pnl=-3.31% (trailing_stop)",
+      "2026-10-17 SELL CDNS   1d entry=324.62 exit=312.46 pnl=+3.55% (time_exit)",
+      "2026-10-17 SELL CDNS   1d entry=324.62 exit=312.46 pnl=+3.55% (time_exit)",
+      "2026-10-17 SELL QCOM   1d entry=164.53 exit=164.54 pnl=-0.21% (trailing_stop)",
+      "2026-10-17 BUY  CDNS   1d entry=317.15 exit=307.32 pnl=-3.29% (trailing_stop)",
+      "2026-10-17 BUY  CDNS   1d entry=295.24 exit=288.82 pnl=-2.37% (trailing_stop)",
+      "2026-10-17 SELL PCAR   1d entry=118.58 exit=116.94 pnl=+1.19% (trailing_stop)",
+      "2026-10-17 SELL CDNS   1d entry=378.11 exit=379.66 pnl=-0.61% (trailing_stop)"
+    ]
+  },
+  "final_equity": 100223.27896493099,
+  "max_equity_difference": 4.509784048423171e-07,
+  "closed_and_open_fills_equal": true,
+  "paper_events": 25,
+  "source_sha256": {
+    "CDNS": "13977bbb6b28f5c0ab94db1f43779112d16e5ad607359fe886071b6ebad3c842",
+    "NET": "a0429363655cacc4e2b5556623fba7d2fd9db8621bc749f6fffce59a99646450",
+    "ON": "b13efc0dd2db15cccd6a6acca730f9fde0a6abbcd90e565191b0a720deda46cc",
+    "TXN": "3bf45c8cba95d7166103fb79f8cec90854438958d2eca4de91200e3e56d4852e",
+    "SWKS": "ffc52ccf435dd3159229a398fd6517948bb776d0510a01e545075b28b94468b3",
+    "QCOM": "7bf41202e3306aedf79de012540090a4f94ae32dab145e8eaaabf4a9ce58ceb4",
+    "PCAR": "3c4c54d305eaf42a23c724fb881f6a7a5c4fa944b26569790b4807ecf1f73152",
+    "PYPL": "15096415a050fdd4ac091570a121380ec348ceec09719febb354e0dd1d4c7223"
+  }
+}

@@ -183,7 +183,7 @@ class BacktestService:
         """Reject unsupported or contradictory execution settings."""
         settings = self._validate_settings(settings)
         unsupported = [name for name, flag in (
-            ("collect_first", settings.execution.collect_first),
+            ("collect_first in offline mode", settings.execution.collect_first if settings.mode == "offline" else 0),
         ) if flag]
         if unsupported:
             raise EditError("Unsupported in this release: " + ", ".join(unsupported))
@@ -192,6 +192,17 @@ class BacktestService:
         if (settings.mode == "historical-stream"
                 and settings.execution.sizing_mode != "fixed-notional"):
             raise EditError("Only fixed-notional sizing is supported for historical-stream runs")
+        if settings.mode == "historical-stream" and any(
+                p.name == "vision_confirmation_enabled" and p.value for p in settings.execution.parameters):
+            raise EditError("Historical replay does not support vision confirmation")
+        laya = getattr(settings, "laya", None)
+        if laya is not None and getattr(laya, "mode", "off") != "off":
+            if settings.mode != "historical-stream":
+                raise EditError("Laya experiments require historical-stream mode")
+            if laya.mode == "filter" and not laya.policy_id:
+                raise EditError("Laya filter mode requires a policy_id")
+            if settings.execution.collect_first:
+                raise EditError("Laya experiments do not support collect-first yet")
         return settings
 
     def store_config(self) -> dict:
@@ -544,6 +555,17 @@ class BacktestService:
 
     def _build_result(self, run_id: str, inputs: FrozenRunInputs, artifacts: dict,
                       metrics: dict, settings) -> BacktestResult:
+        artifacts["logs"]["evaluation"] = {
+            "classification": "legacy-replication" if settings.mode == "offline" else "causal-research",
+            "account_model": "independent-fixed-notional",
+            "protocol": settings.evaluation.model_dump(mode="json") if settings.evaluation else None,
+            "holdout_status": "operator-declared" if settings.evaluation and settings.evaluation.purpose != "research" else "unverified",
+            "inputs_sha256": inputs.inputs_sha256, "dataset_sha256": inputs.dataset.sha256,
+            "engine_sha256": inputs.runtime.engine_sha256,
+            "symbols": list(inputs.resolved_symbols),
+            "universe_membership": "current-snapshot; point-in-time membership and delistings unverified",
+            "corporate_actions": "provider adjustments unverified",
+        }
         profile = get_market(settings.market)
         count = int(metrics["trade_count"])
         metrics_model = BacktestMetrics(

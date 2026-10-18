@@ -24,6 +24,8 @@
   </div>
 </section>
 
+<p class="muted">Pattern books model independent fixed-notional trades. Historical streams simulate next-open fills; a closed-bar live feed cannot assume an executable entry.</p>
+
 <section class="book-grid">
   {% for book in book_cards %}
   <article class="book-card book-{{ book.id }}" data-book="{{ book.id }}">
@@ -38,6 +40,7 @@
     <div class="book-controls">
       <label>Symbols <input type="number" id="{{ book.id }}-n" value="{{ book.default_n_symbols }}" min="5" max="5000" step="5" /></label>
       <label>Additional <input type="text" id="{{ book.id }}-extra" placeholder="tickers" size="12" /></label>
+      <label title="Stop the book by itself after this many market sessions (stream replay). Blank = run until stopped or tapes exhausted.">Duration <input type="number" id="{{ book.id }}-duration" placeholder="sessions" min="1" max="5000" step="1" style="width:5em" /></label>
     </div>
     <div class="book-actions">
       <button type="button" class="btn primary book-start" data-book="{{ book.id }}">Start</button>
@@ -52,6 +55,14 @@
       <label class="check">
         <input type="checkbox" id="{{ book.id }}-collect-first" /> Collect-first
         <input type="number" id="{{ book.id }}-collect-first-top-n" value="4" min="1" max="50" step="1" style="width:3.2em" />
+      </label>
+      <label class="check" title="Use Laya text assessment on candidates before paper entry. Filter gates entries (allow/veto/abstain); Shadow only records assessments. Requires a ready Laya worker (see Laya tab).">
+        <input type="checkbox" id="{{ book.id }}-laya" /> Laya
+        <select id="{{ book.id }}-laya-mode">
+          <option value="filter">Filter</option>
+          <option value="shadow">Shadow</option>
+        </select>
+        <input type="text" id="{{ book.id }}-laya-policy" value="laya-event-v1-default" size="24" title="Frozen Laya policy id" />
       </label>
       <label class="check"><input type="checkbox" id="{{ book.id }}-stream" /> Stream</label>
       <label class="stream-date" id="{{ book.id }}-stream-date-wrap" hidden>Start

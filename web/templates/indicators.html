@@ -73,6 +73,10 @@
     <label>Additional <input id="ind-extra" type="text" placeholder="tickers" /></label>
     <label class="check"><input id="ind-stream" type="checkbox" /> Stream</label>
     <label>Start <input id="ind-stream-start" type="date" /></label>
+    <label class="check" title="Use Laya text assessment on candidates before paper entry. Requires a ready Laya worker (see Laya tab)."><input id="ind-laya" type="checkbox" /> Laya</label>
+    <label>Mode
+      <select id="ind-laya-mode"><option value="filter">Filter</option><option value="shadow">Shadow</option></select>
+    </label>
     <button type="button" class="btn primary" id="ind-paper">Start paper</button>
   </div>
   <p id="ind-paper-status" class="status"></p>

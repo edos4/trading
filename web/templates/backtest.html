@@ -40,15 +40,15 @@
   <h2>Stream / pinned-version run</h2>
   <p class="muted small">
     Runs through the durable backtest service with pinned PostgreSQL versions.
-    Offline replays the full daily tape; Historical stream replays
-    session-by-session exactly like paper trading.
+    Offline is legacy historical replication with future-data access.
+    Historical stream evaluates independent trades using available bars.
   </p>
   <div class="param-grid">
     <div class="param">
       <label for="sr-mode"><strong>Mode</strong></label>
       <select id="sr-mode">
-        <option value="offline">offline</option>
-        <option value="historical-stream">historical-stream</option>
+        <option value="historical-stream">Historical stream (causal research)</option>
+        <option value="offline">Legacy historical replication</option>
       </select>
     </div>
     {% for p in replay_params %}

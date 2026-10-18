@@ -154,6 +154,7 @@ class TradeSignal:
     provenance: str = "legacy_unknown"
     requested_rules: dict | None = None
     resolved_rules: dict | None = None
+    laya_assessment: dict | None = None
 
 
 

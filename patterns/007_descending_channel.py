@@ -52,7 +52,8 @@ class DescendingChannelPattern(BasePattern):
         setup = find_channel(ind, ind.rsi_wilder(14), _dedup.current_bar(len(df) - 1), "down")
         if setup is None:
             return None
-        if earnings_blackout(df, snapshot.symbol, setup.entry, 15):
+        earnings = earnings_blackout(df, snapshot.symbol, setup.entry, 15)
+        if earnings:
             return None
         price = float(ind.close.iloc[setup.entry])
         stop = round(setup.second_price * 0.99, 4)
@@ -64,6 +65,7 @@ class DescendingChannelPattern(BasePattern):
             pattern=self.name,
             timeframe=snapshot.timeframe,
             confidence=1.0,
+            blocked_reason="Point-in-time earnings calendar unavailable" if earnings is None else None,
             price=price,
             qty=notional_qty(self.POSITION_NOTIONAL, price),
             setup_key=(setup.first, setup.second),

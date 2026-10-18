@@ -1,0 +1,3565 @@
+{
+  "trades": {
+    "meta": {
+      "mode": "historical-stream",
+      "evaluation": "causal-research-replay",
+      "account_model": "independent-fixed-notional",
+      "execution_model": "causal-v1",
+      "entry_policy": "next-observed-open",
+      "history_window": 512,
+      "sessions": 260,
+      "total_signals": 13,
+      "trades": 11,
+      "open_positions": 1,
+      "first_session": "2025-06-20",
+      "last_session": "2026-07-02",
+      "laya_mode": "off",
+      "laya_stats": {
+        "assessed": 0,
+        "allowed": 0,
+        "vetoed": 0,
+        "abstained": 0,
+        "missing": 0
+      }
+    },
+    "trades": [
+      {
+        "sym": "QCOM",
+        "pattern": "pattern_002_double_top",
+        "timeframe": "1d",
+        "action": "SELL",
+        "entryDate": "2025-10-13T13:30:00+00:00",
+        "entryPrice": 155.794,
+        "shares": 64.0,
+        "exitDate": "2025-10-13T13:30:00+00:00",
+        "exitPrice": 160.6283,
+        "exitReason": "trailing_stop",
+        "pnlPct": -3.3061,
+        "pnlUSD": -329.65,
+        "barsHeld": 1,
+        "trade_id": "75deaacaf5b14639b9a982193bc3e4ea",
+        "signal_id": null,
+        "pattern_version_id": null,
+        "provenance": "legacy_unknown",
+        "requested_rules": {
+          "schema_version": 1,
+          "stage": "signal",
+          "engine_sha256": "611204b8b775406e253b4ca661a0ad216548fa2c857a49c532cd48fbb5fbe19c",
+          "stop_loss": null,
+          "stop_loss_on_close": false,
+          "take_profit": 148.041,
+          "trailing_stop_pct": 0.03,
+          "trailing_stop_mode": "lowest_close",
+          "trailing_stop_on_close": false,
+          "stop_loss_pct_cap": null,
+          "reclaim_exit": false,
+          "reclaim_lower_rail": null,
+          "exit_fill_at_close": false,
+          "trailing_ref_after_check": false,
+          "exit_order": "trail_first",
+          "neckline": 164.49,
+          "neckline_break_direction": "below",
+          "exit_bars_after_neckline_break": 5,
+          "exit_bars_after_entry": 30,
+          "trailing_activation_pct": 0.0,
+          "time_exit_only_unfavorable": false,
+          "time_exit_min_mfe_pct": null,
+          "execution_model": null,
+          "action": "SELL",
+          "qty": 65.10840549514943,
+          "price": 153.59,
+          "entry_mode": "decision-close"
+        },
+        "resolved_rules": {
+          "schema_version": 1,
+          "stage": "fill",
+          "engine_sha256": "611204b8b775406e253b4ca661a0ad216548fa2c857a49c532cd48fbb5fbe19c",
+          "stop_loss": null,
+          "stop_loss_on_close": false,
+          "take_profit": 148.041,
+          "trailing_stop_pct": 0.03,
+          "trailing_stop_mode": "lowest_close",
+          "trailing_stop_on_close": false,
+          "stop_loss_pct_cap": null,
+          "reclaim_exit": false,
+          "reclaim_lower_rail": null,
+          "exit_fill_at_close": false,
+          "trailing_ref_after_check": false,
+          "exit_order": "trail_first",
+          "neckline": 164.49,
+          "neckline_break_direction": "below",
+          "exit_bars_after_neckline_break": 5,
+          "exit_bars_after_entry": 30,
+          "trailing_activation_pct": 0.0,
+          "time_exit_only_unfavorable": false,
+          "time_exit_min_mfe_pct": null,
+          "execution_model": "causal-v1",
+          "action": "SELL",
+          "qty": 64.0,
+          "price": 155.79405,
+          "entry_mode": "next-observed-open"
+        },
+        "execution_model": "causal-v1",
+        "decision_date": "2025-10-10T13:30:00+00:00",
+        "entry_fee_paid": 9.9708192
+      },
+      {
+        "sym": "ON",
+        "pattern": "pattern_002_double_top",
+        "timeframe": "1d",
+        "action": "SELL",
+        "entryDate": "2025-10-14T13:30:00+00:00",
+        "entryPrice": 48.6913,
+        "shares": 205.0,
+        "exitDate": "2025-10-14T13:30:00+00:00",
+        "exitPrice": 50.2021,
+        "exitReason": "trailing_stop",
+        "pnlPct": -3.3061,
+        "pnlUSD": -330.01,
+        "barsHeld": 1,
+        "trade_id": "15e85b11986d4ba68c62516445483c9a",
+        "signal_id": null,
+        "pattern_version_id": null,
+        "provenance": "legacy_unknown",
+        "requested_rules": {
+          "schema_version": 1,
+          "stage": "signal",
+          "engine_sha256": "611204b8b775406e253b4ca661a0ad216548fa2c857a49c532cd48fbb5fbe19c",
+          "stop_loss": null,
+          "stop_loss_on_close": false,
+          "take_profit": 41.7105,
+          "trailing_stop_pct": 0.03,
+          "trailing_stop_mode": "lowest_close",
+          "trailing_stop_on_close": false,
+          "stop_loss_pct_cap": null,
+          "reclaim_exit": false,
+          "reclaim_lower_rail": null,
+          "exit_fill_at_close": false,
+          "trailing_ref_after_check": false,
+          "exit_order": "trail_first",
+          "neckline": 46.345,
+          "neckline_break_direction": "below",
+          "exit_bars_after_neckline_break": 5,
+          "exit_bars_after_entry": 30,
+          "trailing_activation_pct": 0.0,
+          "time_exit_only_unfavorable": false,
+          "time_exit_min_mfe_pct": null,
+          "execution_model": null,
+          "action": "SELL",
+          "qty": 199.56096587507483,
+          "price": 50.11,
+          "entry_mode": "decision-close"
+        },
+        "resolved_rules": {
+          "schema_version": 1,
+          "stage": "fill",
+          "engine_sha256": "611204b8b775406e253b4ca661a0ad216548fa2c857a49c532cd48fbb5fbe19c",
+          "stop_loss": null,
+          "stop_loss_on_close": false,
+          "take_profit": 41.7105,
+          "trailing_stop_pct": 0.03,
+          "trailing_stop_mode": "lowest_close",
+          "trailing_stop_on_close": false,
+          "stop_loss_pct_cap": null,
+          "reclaim_exit": false,
+          "reclaim_lower_rail": null,
+          "exit_fill_at_close": false,
+          "trailing_ref_after_check": false,
+          "exit_order": "trail_first",
+          "neckline": 46.345,
+          "neckline_break_direction": "below",
+          "exit_bars_after_neckline_break": 5,
+          "exit_bars_after_entry": 30,
+          "trailing_activation_pct": 0.0,
+          "time_exit_only_unfavorable": false,
+          "time_exit_min_mfe_pct": null,
+          "execution_model": "causal-v1",
+          "action": "SELL",
+          "qty": 205.0,
+          "price": 48.69126,
+          "entry_mode": "next-observed-open"
+        },
+        "execution_model": "causal-v1",
+        "decision_date": "2025-10-13T13:30:00+00:00",
+        "entry_fee_paid": 9.981708300000001
+      },
+      {
+        "sym": "TXN",
+        "pattern": "pattern_002_double_top",
+        "timeframe": "1d",
+        "action": "SELL",
+        "entryDate": "2025-10-27T13:30:00+00:00",
+        "entryPrice": 169.6502,
+        "shares": 58.0,
+        "exitDate": "2025-11-03T14:30:00+00:00",
+        "exitPrice": 162.5023,
+        "exitReason": "time_exit",
+        "pnlPct": 4.0175,
+        "pnlUSD": 395.31,
+        "barsHeld": 6,
+        "trade_id": "a35b82eae07d468d89b693d6355974f7",
+        "signal_id": null,
+        "pattern_version_id": null,
+        "provenance": "legacy_unknown",
+        "requested_rules": {
+          "schema_version": 1,
+          "stage": "signal",
+          "engine_sha256": "611204b8b775406e253b4ca661a0ad216548fa2c857a49c532cd48fbb5fbe19c",
+          "stop_loss": null,
+          "stop_loss_on_close": false,
+          "take_profit": 154.35,
+          "trailing_stop_pct": 0.03,
+          "trailing_stop_mode": "lowest_close",
+          "trailing_stop_on_close": false,
+          "stop_loss_pct_cap": null,
+          "reclaim_exit": false,
+          "reclaim_lower_rail": null,
+          "exit_fill_at_close": false,
+          "trailing_ref_after_check": false,
+          "exit_order": "trail_first",
+          "neckline": 171.5,
+          "neckline_break_direction": "below",
+          "exit_bars_after_neckline_break": 5,
+          "exit_bars_after_entry": 30,
+          "trailing_activation_pct": 0.0,
+          "time_exit_only_unfavorable": false,
+          "time_exit_min_mfe_pct": null,
+          "execution_model": null,
+          "action": "SELL",
+          "qty": 59.126116005439606,
+          "price": 169.13,
+          "entry_mode": "decision-close"
+        },
+        "resolved_rules": {
+          "schema_version": 1,
+          "stage": "fill",
+          "engine_sha256": "611204b8b775406e253b4ca661a0ad216548fa2c857a49c532cd48fbb5fbe19c",
+          "stop_loss": null,
+          "stop_loss_on_close": false,
+          "take_profit": 154.35,
+          "trailing_stop_pct": 0.03,
+          "trailing_stop_mode": "lowest_close",
+          "trailing_stop_on_close": false,
+          "stop_loss_pct_cap": null,
+          "reclaim_exit": false,
+          "reclaim_lower_rail": null,
+          "exit_fill_at_close": false,
+          "trailing_ref_after_check": false,
+          "exit_order": "trail_first",
+          "neckline": 171.5,
+          "neckline_break_direction": "below",
+          "exit_bars_after_neckline_break": 5,
+          "exit_bars_after_entry": 30,
+          "trailing_activation_pct": 0.0,
+          "time_exit_only_unfavorable": false,
+          "time_exit_min_mfe_pct": null,
+          "execution_model": "causal-v1",
+          "action": "SELL",
+          "qty": 58.0,
+          "price": 169.65018,
+          "entry_mode": "next-observed-open"
+        },
+        "execution_model": "causal-v1",
+        "decision_date": "2025-10-24T13:30:00+00:00",
+        "entry_fee_paid": 9.839710440000001
+      },
+      {
+        "sym": "PYPL",
+        "pattern": "pattern_002_double_top",
+        "timeframe": "1d",
+        "action": "SELL",
+        "entryDate": "2025-11-07T14:30:00+00:00",
+        "entryPrice": 65.4345,
+        "shares": 152.0,
+        "exitDate": "2025-11-10T14:30:00+00:00",
+        "exitPrice": 67.4649,
+        "exitReason": "trailing_stop",
+        "pnlPct": -3.3061,
+        "pnlUSD": -328.83,
+        "barsHeld": 2,
+        "trade_id": "e6768276bf714d2aad51b0a1d9c1ceed",
+        "signal_id": null,
+        "pattern_version_id": null,
+        "provenance": "legacy_unknown",
+        "requested_rules": {
+          "schema_version": 1,
+          "stage": "signal",
+          "engine_sha256": "611204b8b775406e253b4ca661a0ad216548fa2c857a49c532cd48fbb5fbe19c",
+          "stop_loss": null,
+          "stop_loss_on_close": false,
+          "take_profit": 58.7115,
+          "trailing_stop_pct": 0.03,
+          "trailing_stop_mode": "lowest_close",
+          "trailing_stop_on_close": false,
+          "stop_loss_pct_cap": null,
+          "reclaim_exit": false,
+          "reclaim_lower_rail": null,
+          "exit_fill_at_close": false,
+          "trailing_ref_after_check": false,
+          "exit_order": "trail_first",
+          "neckline": 65.235,
+          "neckline_break_direction": "below",
+          "exit_bars_after_neckline_break": 5,
+          "exit_bars_after_entry": 30,
+          "trailing_activation_pct": 0.0,
+          "time_exit_only_unfavorable": false,
+          "time_exit_min_mfe_pct": null,
+          "execution_model": null,
+          "action": "SELL",
+          "qty": 150.92061575611228,
+          "price": 66.26,
+          "entry_mode": "decision-close"
+        },
+        "resolved_rules": {
+          "schema_version": 1,
+          "stage": "fill",
+          "engine_sha256": "611204b8b775406e253b4ca661a0ad216548fa2c857a49c532cd48fbb5fbe19c",
+          "stop_loss": null,
+          "stop_loss_on_close": false,
+          "take_profit": 58.7115,
+          "trailing_stop_pct": 0.03,
+          "trailing_stop_mode": "lowest_close",
+          "trailing_stop_on_close": false,
+          "stop_loss_pct_cap": null,
+          "reclaim_exit": false,
+          "reclaim_lower_rail": null,
+          "exit_fill_at_close": false,
+          "trailing_ref_after_check": false,
+          "exit_order": "trail_first",
+          "neckline": 65.235,
+          "neckline_break_direction": "below",
+          "exit_bars_after_neckline_break": 5,
+          "exit_bars_after_entry": 30,
+          "trailing_activation_pct": 0.0,
+          "time_exit_only_unfavorable": false,
+          "time_exit_min_mfe_pct": null,
+          "execution_model": "causal-v1",
+          "action": "SELL",
+          "qty": 152.0,
+          "price": 65.4345,
+          "entry_mode": "next-observed-open"
+        },
+        "execution_model": "causal-v1",
+        "decision_date": "2025-11-06T14:30:00+00:00",
+        "entry_fee_paid": 9.946044
+      },
+      {
+        "sym": "CDNS",
+        "pattern": "pattern_002_double_top",
+        "timeframe": "1d",
+        "action": "SELL",
+        "entryDate": "2025-11-06T14:30:00+00:00",
+        "entryPrice": 324.6151,
+        "shares": 30.0,
+        "exitDate": "2025-11-20T14:30:00+00:00",
+        "exitPrice": 312.4571,
+        "exitReason": "time_exit",
+        "pnlPct": 3.5491,
+        "pnlUSD": 345.63,
+        "barsHeld": 11,
+        "trade_id": "231e1c329e8346e99db7d7e1de1e8801",
+        "signal_id": null,
+        "pattern_version_id": null,
+        "provenance": "legacy_unknown",
+        "requested_rules": {
+          "schema_version": 1,
+          "stage": "signal",
+          "engine_sha256": "611204b8b775406e253b4ca661a0ad216548fa2c857a49c532cd48fbb5fbe19c",
+          "stop_loss": null,
+          "stop_loss_on_close": false,
+          "take_profit": 286.2181,
+          "trailing_stop_pct": 0.03,
+          "trailing_stop_mode": "lowest_close",
+          "trailing_stop_on_close": false,
+          "stop_loss_pct_cap": null,
+          "reclaim_exit": false,
+          "reclaim_lower_rail": null,
+          "exit_fill_at_close": false,
+          "trailing_ref_after_check": false,
+          "exit_order": "trail_first",
+          "neckline": 318.0201,
+          "neckline_break_direction": "below",
+          "exit_bars_after_neckline_break": 5,
+          "exit_bars_after_entry": 30,
+          "trailing_activation_pct": 0.0,
+          "time_exit_only_unfavorable": false,
+          "time_exit_min_mfe_pct": null,
+          "execution_model": null,
+          "action": "SELL",
+          "qty": 30.52223544852425,
+          "price": 327.63,
+          "entry_mode": "decision-close"
+        },
+        "resolved_rules": {
+          "schema_version": 1,
+          "stage": "fill",
+          "engine_sha256": "611204b8b775406e253b4ca661a0ad216548fa2c857a49c532cd48fbb5fbe19c",
+          "stop_loss": null,
+          "stop_loss_on_close": false,
+          "take_profit": 286.2181,
+          "trailing_stop_pct": 0.03,
+          "trailing_stop_mode": "lowest_close",
+          "trailing_stop_on_close": false,
+          "stop_loss_pct_cap": null,
+          "reclaim_exit": false,
+          "reclaim_lower_rail": null,
+          "exit_fill_at_close": false,
+          "trailing_ref_after_check": false,
+          "exit_order": "trail_first",
+          "neckline": 318.0201,
+          "neckline_break_direction": "below",
+          "exit_bars_after_neckline_break": 5,
+          "exit_bars_after_entry": 30,
+          "trailing_activation_pct": 0.0,
+          "time_exit_only_unfavorable": false,
+          "time_exit_min_mfe_pct": null,
+          "execution_model": "causal-v1",
+          "action": "SELL",
+          "qty": 30.0,
+          "price": 324.61505999999997,
+          "entry_mode": "next-observed-open"
+        },
+        "execution_model": "causal-v1",
+        "decision_date": "2025-11-05T14:30:00+00:00",
+        "entry_fee_paid": 9.7384518
+      },
+      {
+        "sym": "CDNS",
+        "pattern": "pattern_008_head_and_shoulders",
+        "timeframe": "1d",
+        "action": "SELL",
+        "entryDate": "2025-11-06T14:30:00+00:00",
+        "entryPrice": 324.6151,
+        "shares": 30.0,
+        "exitDate": "2025-11-20T14:30:00+00:00",
+        "exitPrice": 312.4571,
+        "exitReason": "time_exit",
+        "pnlPct": 3.5491,
+        "pnlUSD": 345.63,
+        "barsHeld": 11,
+        "trade_id": "dadd3514bd8a4fefaa766d73d9ff2eda",
+        "signal_id": null,
+        "pattern_version_id": null,
+        "provenance": "legacy_unknown",
+        "requested_rules": {
+          "schema_version": 1,
+          "stage": "signal",
+          "engine_sha256": "611204b8b775406e253b4ca661a0ad216548fa2c857a49c532cd48fbb5fbe19c",
+          "stop_loss": 351.4,
+          "stop_loss_on_close": true,
+          "take_profit": 289.26,
+          "trailing_stop_pct": 0.03,
+          "trailing_stop_mode": "lowest_close",
+          "trailing_stop_on_close": true,
+          "stop_loss_pct_cap": null,
+          "reclaim_exit": false,
+          "reclaim_lower_rail": null,
+          "exit_fill_at_close": false,
+          "trailing_ref_after_check": false,
+          "exit_order": "trail_first",
+          "neckline": null,
+          "neckline_break_direction": null,
+          "exit_bars_after_neckline_break": null,
+          "exit_bars_after_entry": 10,
+          "trailing_activation_pct": 0.0,
+          "time_exit_only_unfavorable": false,
+          "time_exit_min_mfe_pct": null,
+          "execution_model": null,
+          "action": "SELL",
+          "qty": 30.52223544852425,
+          "price": 327.63,
+          "entry_mode": "decision-close"
+        },
+        "resolved_rules": {
+          "schema_version": 1,
+          "stage": "fill",
+          "engine_sha256": "611204b8b775406e253b4ca661a0ad216548fa2c857a49c532cd48fbb5fbe19c",
+          "stop_loss": 351.4,
+          "stop_loss_on_close": true,
+          "take_profit": 289.26,
+          "trailing_stop_pct": 0.03,
+          "trailing_stop_mode": "lowest_close",
+          "trailing_stop_on_close": true,
+          "stop_loss_pct_cap": null,
+          "reclaim_exit": false,
+          "reclaim_lower_rail": null,
+          "exit_fill_at_close": false,
+          "trailing_ref_after_check": false,
+          "exit_order": "trail_first",
+          "neckline": null,
+          "neckline_break_direction": null,
+          "exit_bars_after_neckline_break": null,
+          "exit_bars_after_entry": 10,
+          "trailing_activation_pct": 0.0,
+          "time_exit_only_unfavorable": false,
+          "time_exit_min_mfe_pct": null,
+          "execution_model": "causal-v1",
+          "action": "SELL",
+          "qty": 30.0,
+          "price": 324.61505999999997,
+          "entry_mode": "next-observed-open"
+        },
+        "execution_model": "causal-v1",
+        "decision_date": "2025-11-05T14:30:00+00:00",
+        "entry_fee_paid": 9.7384518
+      },
+      {
+        "sym": "QCOM",
+        "pattern": "pattern_002_double_top",
+        "timeframe": "1d",
+        "action": "SELL",
+        "entryDate": "2025-11-19T14:30:00+00:00",
+        "entryPrice": 164.5253,
+        "shares": 60.0,
+        "exitDate": "2025-11-21T14:30:00+00:00",
+        "exitPrice": 164.5421,
+        "exitReason": "trailing_stop",
+        "pnlPct": -0.2102,
+        "pnlUSD": -20.75,
+        "barsHeld": 3,
+        "trade_id": "e4fb8d96c58c491ab6c14a9569a385b5",
+        "signal_id": null,
+        "pattern_version_id": null,
+        "provenance": "legacy_unknown",
+        "requested_rules": {
+          "schema_version": 1,
+          "stage": "signal",
+          "engine_sha256": "611204b8b775406e253b4ca661a0ad216548fa2c857a49c532cd48fbb5fbe19c",
+          "stop_loss": null,
+          "stop_loss_on_close": false,
+          "take_profit": 151.425,
+          "trailing_stop_pct": 0.03,
+          "trailing_stop_mode": "lowest_close",
+          "trailing_stop_on_close": false,
+          "stop_loss_pct_cap": null,
+          "reclaim_exit": false,
+          "reclaim_lower_rail": null,
+          "exit_fill_at_close": false,
+          "trailing_ref_after_check": false,
+          "exit_order": "trail_first",
+          "neckline": 168.25,
+          "neckline_break_direction": "below",
+          "exit_bars_after_neckline_break": 5,
+          "exit_bars_after_entry": 30,
+          "trailing_activation_pct": 0.0,
+          "time_exit_only_unfavorable": false,
+          "time_exit_min_mfe_pct": null,
+          "execution_model": null,
+          "action": "SELL",
+          "qty": 60.5840300496789,
+          "price": 165.06,
+          "entry_mode": "decision-close"
+        },
+        "resolved_rules": {
+          "schema_version": 1,
+          "stage": "fill",
+          "engine_sha256": "611204b8b775406e253b4ca661a0ad216548fa2c857a49c532cd48fbb5fbe19c",
+          "stop_loss": null,
+          "stop_loss_on_close": false,
+          "take_profit": 151.425,
+          "trailing_stop_pct": 0.03,
+          "trailing_stop_mode": "lowest_close",
+          "trailing_stop_on_close": false,
+          "stop_loss_pct_cap": null,
+          "reclaim_exit": false,
+          "reclaim_lower_rail": null,
+          "exit_fill_at_close": false,
+          "trailing_ref_after_check": false,
+          "exit_order": "trail_first",
+          "neckline": 168.25,
+          "neckline_break_direction": "below",
+          "exit_bars_after_neckline_break": 5,
+          "exit_bars_after_entry": 30,
+          "trailing_activation_pct": 0.0,
+          "time_exit_only_unfavorable": false,
+          "time_exit_min_mfe_pct": null,
+          "execution_model": "causal-v1",
+          "action": "SELL",
+          "qty": 60.0,
+          "price": 164.52531,
+          "entry_mode": "next-observed-open"
+        },
+        "execution_model": "causal-v1",
+        "decision_date": "2025-11-18T14:30:00+00:00",
+        "entry_fee_paid": 9.8715186
+      },
+      {
+        "sym": "CDNS",
+        "pattern": "pattern_003_double_bottom",
+        "timeframe": "1d",
+        "action": "BUY",
+        "entryDate": "2025-12-30T14:30:00+00:00",
+        "entryPrice": 317.1468,
+        "shares": 31.0,
+        "exitDate": "2026-01-02T14:30:00+00:00",
+        "exitPrice": 307.3248,
+        "exitReason": "trailing_stop",
+        "pnlPct": -3.2939,
+        "pnlUSD": -323.84,
+        "barsHeld": 3,
+        "trade_id": "8581dadb8ee246d896a8849b2156965b",
+        "signal_id": null,
+        "pattern_version_id": null,
+        "provenance": "legacy_unknown",
+        "requested_rules": {
+          "schema_version": 1,
+          "stage": "signal",
+          "engine_sha256": "611204b8b775406e253b4ca661a0ad216548fa2c857a49c532cd48fbb5fbe19c",
+          "stop_loss": null,
+          "stop_loss_on_close": false,
+          "take_profit": 365.2017,
+          "trailing_stop_pct": 0.03,
+          "trailing_stop_mode": "highest_close",
+          "trailing_stop_on_close": false,
+          "stop_loss_pct_cap": null,
+          "reclaim_exit": false,
+          "reclaim_lower_rail": null,
+          "exit_fill_at_close": false,
+          "trailing_ref_after_check": false,
+          "exit_order": "stop_first",
+          "neckline": 341.31,
+          "neckline_break_direction": "above",
+          "exit_bars_after_neckline_break": 5,
+          "exit_bars_after_entry": null,
+          "trailing_activation_pct": 0.0,
+          "time_exit_only_unfavorable": false,
+          "time_exit_min_mfe_pct": null,
+          "execution_model": null,
+          "action": "BUY",
+          "qty": 25,
+          "price": 317.71,
+          "entry_mode": "decision-close"
+        },
+        "resolved_rules": {
+          "schema_version": 1,
+          "stage": "fill",
+          "engine_sha256": "611204b8b775406e253b4ca661a0ad216548fa2c857a49c532cd48fbb5fbe19c",
+          "stop_loss": null,
+          "stop_loss_on_close": false,
+          "take_profit": 365.2017,
+          "trailing_stop_pct": 0.03,
+          "trailing_stop_mode": "highest_close",
+          "trailing_stop_on_close": false,
+          "stop_loss_pct_cap": null,
+          "reclaim_exit": false,
+          "reclaim_lower_rail": null,
+          "exit_fill_at_close": false,
+          "trailing_ref_after_check": false,
+          "exit_order": "stop_first",
+          "neckline": 341.31,
+          "neckline_break_direction": "above",
+          "exit_bars_after_neckline_break": 5,
+          "exit_bars_after_entry": null,
+          "trailing_activation_pct": 0.0,
+          "time_exit_only_unfavorable": false,
+          "time_exit_min_mfe_pct": null,
+          "execution_model": "causal-v1",
+          "action": "BUY",
+          "qty": 31.0,
+          "price": 317.14682999999997,
+          "entry_mode": "next-observed-open"
+        },
+        "execution_model": "causal-v1",
+        "decision_date": "2025-12-29T14:30:00+00:00",
+        "entry_fee_paid": 9.83155173
+      },
+      {
+        "sym": "CDNS",
+        "pattern": "pattern_003_double_bottom",
+        "timeframe": "1d",
+        "action": "BUY",
+        "entryDate": "2026-03-06T14:30:00+00:00",
+        "entryPrice": 295.2449,
+        "shares": 33.0,
+        "exitDate": "2026-03-11T13:30:00+00:00",
+        "exitPrice": 288.8194,
+        "exitReason": "trailing_stop",
+        "pnlPct": -2.3742,
+        "pnlUSD": -231.32,
+        "barsHeld": 4,
+        "trade_id": "f939cbeee3dc4ba19c1d122a7ebed76e",
+        "signal_id": null,
+        "pattern_version_id": null,
+        "provenance": "legacy_unknown",
+        "requested_rules": {
+          "schema_version": 1,
+          "stage": "signal",
+          "engine_sha256": "611204b8b775406e253b4ca661a0ad216548fa2c857a49c532cd48fbb5fbe19c",
+          "stop_loss": null,
+          "stop_loss_on_close": false,
+          "take_profit": 333.519,
+          "trailing_stop_pct": 0.03,
+          "trailing_stop_mode": "highest_close",
+          "trailing_stop_on_close": false,
+          "stop_loss_pct_cap": null,
+          "reclaim_exit": false,
+          "reclaim_lower_rail": null,
+          "exit_fill_at_close": false,
+          "trailing_ref_after_check": false,
+          "exit_order": "stop_first",
+          "neckline": 311.7,
+          "neckline_break_direction": "above",
+          "exit_bars_after_neckline_break": 5,
+          "exit_bars_after_entry": null,
+          "trailing_activation_pct": 0.0,
+          "time_exit_only_unfavorable": false,
+          "time_exit_min_mfe_pct": null,
+          "execution_model": null,
+          "action": "BUY",
+          "qty": 25,
+          "price": 299.84,
+          "entry_mode": "decision-close"
+        },
+        "resolved_rules": {
+          "schema_version": 1,
+          "stage": "fill",
+          "engine_sha256": "611204b8b775406e253b4ca661a0ad216548fa2c857a49c532cd48fbb5fbe19c",
+          "stop_loss": null,
+          "stop_loss_on_close": false,
+          "take_profit": 333.519,
+          "trailing_stop_pct": 0.03,
+          "trailing_stop_mode": "highest_close",
+          "trailing_stop_on_close": false,
+          "stop_loss_pct_cap": null,
+          "reclaim_exit": false,
+          "reclaim_lower_rail": null,
+          "exit_fill_at_close": false,
+          "trailing_ref_after_check": false,
+          "exit_order": "stop_first",
+          "neckline": 311.7,
+          "neckline_break_direction": "above",
+          "exit_bars_after_neckline_break": 5,
+          "exit_bars_after_entry": null,
+          "trailing_activation_pct": 0.0,
+          "time_exit_only_unfavorable": false,
+          "time_exit_min_mfe_pct": null,
+          "execution_model": "causal-v1",
+          "action": "BUY",
+          "qty": 33.0,
+          "price": 295.24494999999996,
+          "entry_mode": "next-observed-open"
+        },
+        "execution_model": "causal-v1",
+        "decision_date": "2026-03-05T14:30:00+00:00",
+        "entry_fee_paid": 9.74308335
+      },
+      {
+        "sym": "PCAR",
+        "pattern": "pattern_002_double_top",
+        "timeframe": "1d",
+        "action": "SELL",
+        "entryDate": "2026-05-01T13:30:00+00:00",
+        "entryPrice": 118.5813,
+        "shares": 84.0,
+        "exitDate": "2026-05-06T13:30:00+00:00",
+        "exitPrice": 116.9394,
+        "exitReason": "trailing_stop",
+        "pnlPct": 1.186,
+        "pnlUSD": 118.13,
+        "barsHeld": 4,
+        "trade_id": "a7104bda6393466d865258e6629df867",
+        "signal_id": null,
+        "pattern_version_id": null,
+        "provenance": "legacy_unknown",
+        "requested_rules": {
+          "schema_version": 1,
+          "stage": "signal",
+          "engine_sha256": "611204b8b775406e253b4ca661a0ad216548fa2c857a49c532cd48fbb5fbe19c",
+          "stop_loss": null,
+          "stop_loss_on_close": false,
+          "take_profit": 99.324,
+          "trailing_stop_pct": 0.03,
+          "trailing_stop_mode": "lowest_close",
+          "trailing_stop_on_close": false,
+          "stop_loss_pct_cap": null,
+          "reclaim_exit": false,
+          "reclaim_lower_rail": null,
+          "exit_fill_at_close": false,
+          "trailing_ref_after_check": false,
+          "exit_order": "trail_first",
+          "neckline": 110.36,
+          "neckline_break_direction": "below",
+          "exit_bars_after_neckline_break": 5,
+          "exit_bars_after_entry": 30,
+          "trailing_activation_pct": 0.0,
+          "time_exit_only_unfavorable": false,
+          "time_exit_min_mfe_pct": null,
+          "execution_model": null,
+          "action": "SELL",
+          "qty": 84.17508417508418,
+          "price": 118.8,
+          "entry_mode": "decision-close"
+        },
+        "resolved_rules": {
+          "schema_version": 1,
+          "stage": "fill",
+          "engine_sha256": "611204b8b775406e253b4ca661a0ad216548fa2c857a49c532cd48fbb5fbe19c",
+          "stop_loss": null,
+          "stop_loss_on_close": false,
+          "take_profit": 99.324,
+          "trailing_stop_pct": 0.03,
+          "trailing_stop_mode": "lowest_close",
+          "trailing_stop_on_close": false,
+          "stop_loss_pct_cap": null,
+          "reclaim_exit": false,
+          "reclaim_lower_rail": null,
+          "exit_fill_at_close": false,
+          "trailing_ref_after_check": false,
+          "exit_order": "trail_first",
+          "neckline": 110.36,
+          "neckline_break_direction": "below",
+          "exit_bars_after_neckline_break": 5,
+          "exit_bars_after_entry": 30,
+          "trailing_activation_pct": 0.0,
+          "time_exit_only_unfavorable": false,
+          "time_exit_min_mfe_pct": null,
+          "execution_model": "causal-v1",
+          "action": "SELL",
+          "qty": 84.0,
+          "price": 118.5813,
+          "entry_mode": "next-observed-open"
+        },
+        "execution_model": "causal-v1",
+        "decision_date": "2026-04-30T13:30:00+00:00",
+        "entry_fee_paid": 9.960829200000001
+      },
+      {
+        "sym": "CDNS",
+        "pattern": "pattern_002_double_top",
+        "timeframe": "1d",
+        "action": "SELL",
+        "entryDate": "2026-06-25T13:30:00+00:00",
+        "entryPrice": 378.1115,
+        "shares": 26.0,
+        "exitDate": "2026-06-26T13:30:00+00:00",
+        "exitPrice": 379.6562,
+        "exitReason": "trailing_stop",
+        "pnlPct": -0.6089,
+        "pnlUSD": -59.86,
+        "barsHeld": 2,
+        "trade_id": "e1d10ad291ce4212850d61c715f9dfa6",
+        "signal_id": null,
+        "pattern_version_id": null,
+        "provenance": "legacy_unknown",
+        "requested_rules": {
+          "schema_version": 1,
+          "stage": "signal",
+          "engine_sha256": "611204b8b775406e253b4ca661a0ad216548fa2c857a49c532cd48fbb5fbe19c",
+          "stop_loss": null,
+          "stop_loss_on_close": false,
+          "take_profit": 336.186,
+          "trailing_stop_pct": 0.03,
+          "trailing_stop_mode": "lowest_close",
+          "trailing_stop_on_close": false,
+          "stop_loss_pct_cap": null,
+          "reclaim_exit": false,
+          "reclaim_lower_rail": null,
+          "exit_fill_at_close": false,
+          "trailing_ref_after_check": false,
+          "exit_order": "trail_first",
+          "neckline": 373.54,
+          "neckline_break_direction": "below",
+          "exit_bars_after_neckline_break": 5,
+          "exit_bars_after_entry": 30,
+          "trailing_activation_pct": 0.0,
+          "time_exit_only_unfavorable": false,
+          "time_exit_min_mfe_pct": null,
+          "execution_model": null,
+          "action": "SELL",
+          "qty": 26.852846401718583,
+          "price": 372.4,
+          "entry_mode": "decision-close"
+        },
+        "resolved_rules": {
+          "schema_version": 1,
+          "stage": "fill",
+          "engine_sha256": "611204b8b775406e253b4ca661a0ad216548fa2c857a49c532cd48fbb5fbe19c",
+          "stop_loss": null,
+          "stop_loss_on_close": false,
+          "take_profit": 336.186,
+          "trailing_stop_pct": 0.03,
+          "trailing_stop_mode": "lowest_close",
+          "trailing_stop_on_close": false,
+          "stop_loss_pct_cap": null,
+          "reclaim_exit": false,
+          "reclaim_lower_rail": null,
+          "exit_fill_at_close": false,
+          "trailing_ref_after_check": false,
+          "exit_order": "trail_first",
+          "neckline": 373.54,
+          "neckline_break_direction": "below",
+          "exit_bars_after_neckline_break": 5,
+          "exit_bars_after_entry": 30,
+          "trailing_activation_pct": 0.0,
+          "time_exit_only_unfavorable": false,
+          "time_exit_min_mfe_pct": null,
+          "execution_model": "causal-v1",
+          "action": "SELL",
+          "qty": 26.0,
+          "price": 378.11151,
+          "entry_mode": "next-observed-open"
+        },
+        "execution_model": "causal-v1",
+        "decision_date": "2026-06-24T13:30:00+00:00",
+        "entry_fee_paid": 9.83089926
+      }
+    ]
+  },
+  "signals": {
+    "total_signals": 13,
+    "events": [
+      {
+        "status": "detected",
+        "symbol": "QCOM",
+        "session": "2025-10-10T13:30:00+00:00",
+        "pattern": "pattern_002_double_top",
+        "pattern_version_id": null,
+        "action": "SELL",
+        "entry": 153.59,
+        "stop": null,
+        "target": 148.041,
+        "chart_annotations": [
+          {
+            "type": "marker",
+            "date": "2025-09-24",
+            "price": 174.44,
+            "label": "H1",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "marker",
+            "date": "2025-10-01",
+            "price": 164.49,
+            "label": "valley",
+            "color": "#ffeb3b",
+            "marker": "^",
+            "label_pos": "below"
+          },
+          {
+            "type": "marker",
+            "date": "2025-10-07",
+            "price": 171.98,
+            "label": "H2",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "hline",
+            "price": 164.49,
+            "label": "neckline",
+            "color": "#ffeb3b",
+            "style": "--"
+          },
+          {
+            "type": "hline",
+            "price": 148.041,
+            "label": "target",
+            "color": "#26a69a",
+            "style": "--"
+          },
+          {
+            "type": "marker",
+            "date": "2025-10-10",
+            "price": 153.59,
+            "label": "entry",
+            "color": "#ffeb3b",
+            "marker": "o",
+            "label_pos": "above"
+          }
+        ]
+      },
+      {
+        "symbol": "QCOM",
+        "pattern": "pattern_002_double_top",
+        "session": "2025-10-10T13:30:00+00:00",
+        "status": "queued",
+        "reason": "next-observed-open"
+      },
+      {
+        "status": "detected",
+        "symbol": "ON",
+        "session": "2025-10-13T13:30:00+00:00",
+        "pattern": "pattern_002_double_top",
+        "pattern_version_id": null,
+        "action": "SELL",
+        "entry": 50.11,
+        "stop": null,
+        "target": 41.7105,
+        "chart_annotations": [
+          {
+            "type": "marker",
+            "date": "2025-07-22",
+            "price": 63.63,
+            "label": "H1",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "marker",
+            "date": "2025-08-06",
+            "price": 46.345,
+            "label": "valley",
+            "color": "#ffeb3b",
+            "marker": "^",
+            "label_pos": "below"
+          },
+          {
+            "type": "marker",
+            "date": "2025-10-08",
+            "price": 51.26,
+            "label": "H2",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "hline",
+            "price": 46.345,
+            "label": "neckline",
+            "color": "#ffeb3b",
+            "style": "--"
+          },
+          {
+            "type": "hline",
+            "price": 41.7105,
+            "label": "target",
+            "color": "#26a69a",
+            "style": "--"
+          },
+          {
+            "type": "marker",
+            "date": "2025-10-13",
+            "price": 50.11,
+            "label": "entry",
+            "color": "#ffeb3b",
+            "marker": "o",
+            "label_pos": "above"
+          }
+        ]
+      },
+      {
+        "symbol": "ON",
+        "pattern": "pattern_002_double_top",
+        "session": "2025-10-13T13:30:00+00:00",
+        "status": "queued",
+        "reason": "next-observed-open"
+      },
+      {
+        "symbol": "QCOM",
+        "pattern": "pattern_002_double_top",
+        "session": "2025-10-13T13:30:00+00:00",
+        "status": "filled",
+        "reason": "next-observed-open"
+      },
+      {
+        "symbol": "ON",
+        "pattern": "pattern_002_double_top",
+        "session": "2025-10-14T13:30:00+00:00",
+        "status": "filled",
+        "reason": "next-observed-open"
+      },
+      {
+        "status": "detected",
+        "symbol": "TXN",
+        "session": "2025-10-24T13:30:00+00:00",
+        "pattern": "pattern_002_double_top",
+        "pattern_version_id": null,
+        "action": "SELL",
+        "entry": 169.13,
+        "stop": null,
+        "target": 154.35,
+        "chart_annotations": [
+          {
+            "type": "marker",
+            "date": "2025-07-11",
+            "price": 221.69,
+            "label": "H1",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "marker",
+            "date": "2025-10-10",
+            "price": 171.5,
+            "label": "valley",
+            "color": "#ffeb3b",
+            "marker": "^",
+            "label_pos": "below"
+          },
+          {
+            "type": "marker",
+            "date": "2025-10-21",
+            "price": 181.84,
+            "label": "H2",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "hline",
+            "price": 171.5,
+            "label": "neckline",
+            "color": "#ffeb3b",
+            "style": "--"
+          },
+          {
+            "type": "hline",
+            "price": 154.35,
+            "label": "target",
+            "color": "#26a69a",
+            "style": "--"
+          },
+          {
+            "type": "marker",
+            "date": "2025-10-24",
+            "price": 169.13,
+            "label": "entry",
+            "color": "#ffeb3b",
+            "marker": "o",
+            "label_pos": "above"
+          }
+        ]
+      },
+      {
+        "symbol": "TXN",
+        "pattern": "pattern_002_double_top",
+        "session": "2025-10-24T13:30:00+00:00",
+        "status": "queued",
+        "reason": "next-observed-open"
+      },
+      {
+        "symbol": "TXN",
+        "pattern": "pattern_002_double_top",
+        "session": "2025-10-27T13:30:00+00:00",
+        "status": "filled",
+        "reason": "next-observed-open"
+      },
+      {
+        "status": "detected",
+        "symbol": "CDNS",
+        "session": "2025-11-05T14:30:00+00:00",
+        "pattern": "pattern_002_double_top",
+        "pattern_version_id": null,
+        "action": "SELL",
+        "entry": 327.63,
+        "stop": null,
+        "target": 286.2181,
+        "chart_annotations": [
+          {
+            "type": "marker",
+            "date": "2025-07-31",
+            "price": 376.445,
+            "label": "H1",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "marker",
+            "date": "2025-10-14",
+            "price": 318.0201,
+            "label": "valley",
+            "color": "#ffeb3b",
+            "marker": "^",
+            "label_pos": "below"
+          },
+          {
+            "type": "marker",
+            "date": "2025-10-27",
+            "price": 357.525,
+            "label": "H2",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "hline",
+            "price": 318.0201,
+            "label": "neckline",
+            "color": "#ffeb3b",
+            "style": "--"
+          },
+          {
+            "type": "hline",
+            "price": 286.2181,
+            "label": "target",
+            "color": "#26a69a",
+            "style": "--"
+          },
+          {
+            "type": "marker",
+            "date": "2025-11-05",
+            "price": 327.63,
+            "label": "entry",
+            "color": "#ffeb3b",
+            "marker": "o",
+            "label_pos": "above"
+          }
+        ]
+      },
+      {
+        "symbol": "CDNS",
+        "pattern": "pattern_002_double_top",
+        "session": "2025-11-05T14:30:00+00:00",
+        "status": "queued",
+        "reason": "next-observed-open"
+      },
+      {
+        "status": "detected",
+        "symbol": "CDNS",
+        "session": "2025-11-05T14:30:00+00:00",
+        "pattern": "pattern_008_head_and_shoulders",
+        "pattern_version_id": null,
+        "action": "SELL",
+        "entry": 327.63,
+        "stop": 351.4,
+        "target": 289.26,
+        "chart_annotations": [
+          {
+            "type": "marker",
+            "date": "2025-07-30",
+            "price": 371.03,
+            "label": "LS",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "marker",
+            "date": "2025-09-10",
+            "price": 338.53,
+            "label": "LN",
+            "color": "#ffeb3b",
+            "marker": "^",
+            "label_pos": "below"
+          },
+          {
+            "type": "marker",
+            "date": "2025-09-22",
+            "price": 373.37,
+            "label": "HEAD",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "marker",
+            "date": "2025-10-15",
+            "price": 324.1,
+            "label": "RN",
+            "color": "#ffeb3b",
+            "marker": "^",
+            "label_pos": "below"
+          },
+          {
+            "type": "marker",
+            "date": "2025-10-27",
+            "price": 351.4,
+            "label": "RS",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "segment",
+            "start_date": "2025-09-10",
+            "end_date": "2025-11-05",
+            "start_price": 338.53,
+            "end_price": 331.315,
+            "color": "#ffeb3b",
+            "style": "-",
+            "width": 2.0,
+            "label": ""
+          },
+          {
+            "type": "hline",
+            "price": 289.26,
+            "label": "target",
+            "color": "#26a69a",
+            "style": "--"
+          },
+          {
+            "type": "marker",
+            "date": "2025-11-05",
+            "price": 327.63,
+            "label": "entry",
+            "color": "#ffeb3b",
+            "marker": "o",
+            "label_pos": "above"
+          }
+        ]
+      },
+      {
+        "symbol": "CDNS",
+        "pattern": "pattern_008_head_and_shoulders",
+        "session": "2025-11-05T14:30:00+00:00",
+        "status": "queued",
+        "reason": "next-observed-open"
+      },
+      {
+        "symbol": "CDNS",
+        "pattern": "pattern_002_double_top",
+        "session": "2025-11-06T14:30:00+00:00",
+        "status": "filled",
+        "reason": "next-observed-open"
+      },
+      {
+        "symbol": "CDNS",
+        "pattern": "pattern_008_head_and_shoulders",
+        "session": "2025-11-06T14:30:00+00:00",
+        "status": "filled",
+        "reason": "next-observed-open"
+      },
+      {
+        "status": "detected",
+        "symbol": "PYPL",
+        "session": "2025-11-06T14:30:00+00:00",
+        "pattern": "pattern_002_double_top",
+        "pattern_version_id": null,
+        "action": "SELL",
+        "entry": 66.26,
+        "stop": null,
+        "target": 58.7115,
+        "chart_annotations": [
+          {
+            "type": "marker",
+            "date": "2025-07-28",
+            "price": 79.5,
+            "label": "H1",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "marker",
+            "date": "2025-09-10",
+            "price": 65.235,
+            "label": "valley",
+            "color": "#ffeb3b",
+            "marker": "^",
+            "label_pos": "below"
+          },
+          {
+            "type": "marker",
+            "date": "2025-10-28",
+            "price": 79.215,
+            "label": "H2",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "hline",
+            "price": 65.235,
+            "label": "neckline",
+            "color": "#ffeb3b",
+            "style": "--"
+          },
+          {
+            "type": "hline",
+            "price": 58.7115,
+            "label": "target",
+            "color": "#26a69a",
+            "style": "--"
+          },
+          {
+            "type": "marker",
+            "date": "2025-11-06",
+            "price": 66.26,
+            "label": "entry",
+            "color": "#ffeb3b",
+            "marker": "o",
+            "label_pos": "above"
+          }
+        ]
+      },
+      {
+        "symbol": "PYPL",
+        "pattern": "pattern_002_double_top",
+        "session": "2025-11-06T14:30:00+00:00",
+        "status": "queued",
+        "reason": "next-observed-open"
+      },
+      {
+        "symbol": "PYPL",
+        "pattern": "pattern_002_double_top",
+        "session": "2025-11-07T14:30:00+00:00",
+        "status": "filled",
+        "reason": "next-observed-open"
+      },
+      {
+        "status": "detected",
+        "symbol": "QCOM",
+        "session": "2025-11-18T14:30:00+00:00",
+        "pattern": "pattern_002_double_top",
+        "pattern_version_id": null,
+        "action": "SELL",
+        "entry": 165.06,
+        "stop": null,
+        "target": 151.425,
+        "chart_annotations": [
+          {
+            "type": "marker",
+            "date": "2025-10-27",
+            "price": 205.95,
+            "label": "H1",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "marker",
+            "date": "2025-11-07",
+            "price": 168.25,
+            "label": "valley",
+            "color": "#ffeb3b",
+            "marker": "^",
+            "label_pos": "below"
+          },
+          {
+            "type": "marker",
+            "date": "2025-11-13",
+            "price": 178.83,
+            "label": "H2",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "hline",
+            "price": 168.25,
+            "label": "neckline",
+            "color": "#ffeb3b",
+            "style": "--"
+          },
+          {
+            "type": "hline",
+            "price": 151.425,
+            "label": "target",
+            "color": "#26a69a",
+            "style": "--"
+          },
+          {
+            "type": "marker",
+            "date": "2025-11-18",
+            "price": 165.06,
+            "label": "entry",
+            "color": "#ffeb3b",
+            "marker": "o",
+            "label_pos": "above"
+          }
+        ]
+      },
+      {
+        "symbol": "QCOM",
+        "pattern": "pattern_002_double_top",
+        "session": "2025-11-18T14:30:00+00:00",
+        "status": "queued",
+        "reason": "next-observed-open"
+      },
+      {
+        "symbol": "QCOM",
+        "pattern": "pattern_002_double_top",
+        "session": "2025-11-19T14:30:00+00:00",
+        "status": "filled",
+        "reason": "next-observed-open"
+      },
+      {
+        "status": "detected",
+        "symbol": "CDNS",
+        "session": "2025-12-29T14:30:00+00:00",
+        "pattern": "pattern_003_double_bottom",
+        "pattern_version_id": null,
+        "action": "BUY",
+        "entry": 317.71,
+        "stop": null,
+        "target": 365.2017,
+        "chart_annotations": [
+          {
+            "type": "marker",
+            "date": "2025-11-21",
+            "price": 295.18,
+            "label": "L1",
+            "color": "#ffeb3b",
+            "marker": "^",
+            "label_pos": "below"
+          },
+          {
+            "type": "marker",
+            "date": "2025-12-10",
+            "price": 341.31,
+            "label": "neckline",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "marker",
+            "date": "2025-12-17",
+            "price": 310.94,
+            "label": "L2",
+            "color": "#ffeb3b",
+            "marker": "^",
+            "label_pos": "below"
+          },
+          {
+            "type": "hline",
+            "price": 341.31,
+            "label": "neckline",
+            "color": "#ffeb3b",
+            "style": "--"
+          },
+          {
+            "type": "hline",
+            "price": 365.2017,
+            "label": "target",
+            "color": "#26a69a",
+            "style": "--"
+          },
+          {
+            "type": "marker",
+            "date": "2025-12-29",
+            "price": 317.71,
+            "label": "entry",
+            "color": "#ffeb3b",
+            "marker": "o",
+            "label_pos": "below"
+          }
+        ]
+      },
+      {
+        "symbol": "CDNS",
+        "pattern": "pattern_003_double_bottom",
+        "session": "2025-12-29T14:30:00+00:00",
+        "status": "queued",
+        "reason": "next-observed-open"
+      },
+      {
+        "symbol": "CDNS",
+        "pattern": "pattern_003_double_bottom",
+        "session": "2025-12-30T14:30:00+00:00",
+        "status": "filled",
+        "reason": "next-observed-open"
+      },
+      {
+        "status": "detected",
+        "symbol": "CDNS",
+        "session": "2026-03-05T14:30:00+00:00",
+        "pattern": "pattern_003_double_bottom",
+        "pattern_version_id": null,
+        "action": "BUY",
+        "entry": 299.84,
+        "stop": null,
+        "target": 333.519,
+        "chart_annotations": [
+          {
+            "type": "marker",
+            "date": "2026-02-03",
+            "price": 262.749,
+            "label": "L1",
+            "color": "#ffeb3b",
+            "marker": "^",
+            "label_pos": "below"
+          },
+          {
+            "type": "marker",
+            "date": "2026-02-18",
+            "price": 311.7,
+            "label": "neckline",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "marker",
+            "date": "2026-02-24",
+            "price": 277.3,
+            "label": "L2",
+            "color": "#ffeb3b",
+            "marker": "^",
+            "label_pos": "below"
+          },
+          {
+            "type": "hline",
+            "price": 311.7,
+            "label": "neckline",
+            "color": "#ffeb3b",
+            "style": "--"
+          },
+          {
+            "type": "hline",
+            "price": 333.519,
+            "label": "target",
+            "color": "#26a69a",
+            "style": "--"
+          },
+          {
+            "type": "marker",
+            "date": "2026-03-05",
+            "price": 299.84,
+            "label": "entry",
+            "color": "#ffeb3b",
+            "marker": "o",
+            "label_pos": "below"
+          }
+        ]
+      },
+      {
+        "symbol": "CDNS",
+        "pattern": "pattern_003_double_bottom",
+        "session": "2026-03-05T14:30:00+00:00",
+        "status": "queued",
+        "reason": "next-observed-open"
+      },
+      {
+        "symbol": "CDNS",
+        "pattern": "pattern_003_double_bottom",
+        "session": "2026-03-06T14:30:00+00:00",
+        "status": "filled",
+        "reason": "next-observed-open"
+      },
+      {
+        "status": "detected",
+        "symbol": "PCAR",
+        "session": "2026-04-30T13:30:00+00:00",
+        "pattern": "pattern_002_double_top",
+        "pattern_version_id": null,
+        "action": "SELL",
+        "entry": 118.8,
+        "stop": null,
+        "target": 99.324,
+        "chart_annotations": [
+          {
+            "type": "marker",
+            "date": "2026-02-04",
+            "price": 131.875,
+            "label": "H1",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "marker",
+            "date": "2026-03-20",
+            "price": 110.36,
+            "label": "valley",
+            "color": "#ffeb3b",
+            "marker": "^",
+            "label_pos": "below"
+          },
+          {
+            "type": "marker",
+            "date": "2026-04-21",
+            "price": 129.31,
+            "label": "H2",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "hline",
+            "price": 110.36,
+            "label": "neckline",
+            "color": "#ffeb3b",
+            "style": "--"
+          },
+          {
+            "type": "hline",
+            "price": 99.324,
+            "label": "target",
+            "color": "#26a69a",
+            "style": "--"
+          },
+          {
+            "type": "marker",
+            "date": "2026-04-30",
+            "price": 118.8,
+            "label": "entry",
+            "color": "#ffeb3b",
+            "marker": "o",
+            "label_pos": "above"
+          }
+        ]
+      },
+      {
+        "symbol": "PCAR",
+        "pattern": "pattern_002_double_top",
+        "session": "2026-04-30T13:30:00+00:00",
+        "status": "queued",
+        "reason": "next-observed-open"
+      },
+      {
+        "symbol": "PCAR",
+        "pattern": "pattern_002_double_top",
+        "session": "2026-05-01T13:30:00+00:00",
+        "status": "filled",
+        "reason": "next-observed-open"
+      },
+      {
+        "status": "detected",
+        "symbol": "CDNS",
+        "session": "2026-06-24T13:30:00+00:00",
+        "pattern": "pattern_002_double_top",
+        "pattern_version_id": null,
+        "action": "SELL",
+        "entry": 372.4,
+        "stop": null,
+        "target": 336.186,
+        "chart_annotations": [
+          {
+            "type": "marker",
+            "date": "2026-06-02",
+            "price": 416.69,
+            "label": "H1",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "marker",
+            "date": "2026-06-05",
+            "price": 373.54,
+            "label": "valley",
+            "color": "#ffeb3b",
+            "marker": "^",
+            "label_pos": "below"
+          },
+          {
+            "type": "marker",
+            "date": "2026-06-17",
+            "price": 403.38,
+            "label": "H2",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "hline",
+            "price": 373.54,
+            "label": "neckline",
+            "color": "#ffeb3b",
+            "style": "--"
+          },
+          {
+            "type": "hline",
+            "price": 336.186,
+            "label": "target",
+            "color": "#26a69a",
+            "style": "--"
+          },
+          {
+            "type": "marker",
+            "date": "2026-06-24",
+            "price": 372.4,
+            "label": "entry",
+            "color": "#ffeb3b",
+            "marker": "o",
+            "label_pos": "above"
+          }
+        ]
+      },
+      {
+        "symbol": "CDNS",
+        "pattern": "pattern_002_double_top",
+        "session": "2026-06-24T13:30:00+00:00",
+        "status": "queued",
+        "reason": "next-observed-open"
+      },
+      {
+        "symbol": "CDNS",
+        "pattern": "pattern_002_double_top",
+        "session": "2026-06-25T13:30:00+00:00",
+        "status": "filled",
+        "reason": "next-observed-open"
+      },
+      {
+        "status": "detected",
+        "symbol": "QCOM",
+        "session": "2026-06-29T13:30:00+00:00",
+        "pattern": "pattern_008_head_and_shoulders",
+        "pattern_version_id": null,
+        "action": "SELL",
+        "entry": 188.72,
+        "stop": 226.11,
+        "target": 135.79,
+        "chart_annotations": [
+          {
+            "type": "marker",
+            "date": "2026-05-11",
+            "price": 237.53,
+            "label": "LS",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "marker",
+            "date": "2026-05-19",
+            "price": 195.61,
+            "label": "LN",
+            "color": "#ffeb3b",
+            "marker": "^",
+            "label_pos": "below"
+          },
+          {
+            "type": "marker",
+            "date": "2026-05-29",
+            "price": 251.02,
+            "label": "HEAD",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "marker",
+            "date": "2026-06-10",
+            "price": 191.2,
+            "label": "RN",
+            "color": "#ffeb3b",
+            "marker": "^",
+            "label_pos": "below"
+          },
+          {
+            "type": "marker",
+            "date": "2026-06-18",
+            "price": 226.11,
+            "label": "RS",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "segment",
+            "start_date": "2026-05-19",
+            "end_date": "2026-06-29",
+            "start_price": 195.61,
+            "end_price": 193.405,
+            "color": "#ffeb3b",
+            "style": "-",
+            "width": 2.0,
+            "label": ""
+          },
+          {
+            "type": "hline",
+            "price": 135.79,
+            "label": "target",
+            "color": "#26a69a",
+            "style": "--"
+          },
+          {
+            "type": "marker",
+            "date": "2026-06-29",
+            "price": 188.72,
+            "label": "entry",
+            "color": "#ffeb3b",
+            "marker": "o",
+            "label_pos": "above"
+          }
+        ]
+      },
+      {
+        "symbol": "QCOM",
+        "pattern": "pattern_008_head_and_shoulders",
+        "session": "2026-06-29T13:30:00+00:00",
+        "status": "queued",
+        "reason": "next-observed-open"
+      },
+      {
+        "symbol": "QCOM",
+        "pattern": "pattern_008_head_and_shoulders",
+        "session": "2026-06-30T13:30:00+00:00",
+        "status": "filled",
+        "reason": "next-observed-open"
+      },
+      {
+        "status": "detected",
+        "symbol": "PYPL",
+        "session": "2026-07-02T13:30:00+00:00",
+        "pattern": "pattern_003_double_bottom",
+        "pattern_version_id": null,
+        "action": "BUY",
+        "entry": 45.47,
+        "stop": null,
+        "target": 55.961,
+        "chart_annotations": [
+          {
+            "type": "marker",
+            "date": "2026-02-12",
+            "price": 38.46,
+            "label": "L1",
+            "color": "#ffeb3b",
+            "marker": "^",
+            "label_pos": "below"
+          },
+          {
+            "type": "marker",
+            "date": "2026-04-21",
+            "price": 52.3,
+            "label": "neckline",
+            "color": "#ffeb3b",
+            "marker": "v",
+            "label_pos": "above"
+          },
+          {
+            "type": "marker",
+            "date": "2026-06-23",
+            "price": 41.65,
+            "label": "L2",
+            "color": "#ffeb3b",
+            "marker": "^",
+            "label_pos": "below"
+          },
+          {
+            "type": "hline",
+            "price": 52.3,
+            "label": "neckline",
+            "color": "#ffeb3b",
+            "style": "--"
+          },
+          {
+            "type": "hline",
+            "price": 55.961,
+            "label": "target",
+            "color": "#26a69a",
+            "style": "--"
+          },
+          {
+            "type": "marker",
+            "date": "2026-07-02",
+            "price": 45.47,
+            "label": "entry",
+            "color": "#ffeb3b",
+            "marker": "o",
+            "label_pos": "below"
+          }
+        ]
+      },
+      {
+        "symbol": "PYPL",
+        "pattern": "pattern_003_double_bottom",
+        "session": "2026-07-02T13:30:00+00:00",
+        "status": "queued",
+        "reason": "next-observed-open"
+      },
+      {
+        "symbol": "PYPL",
+        "pattern": "pattern_003_double_bottom",
+        "status": "unfilled",
+        "reason": "end-of-data",
+        "session": "2026-07-02T13:30:00+00:00"
+      }
+    ]
+  },
+  "equity": [
+    {
+      "date": "2025-06-20",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-06-23",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-06-24",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-06-25",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-06-26",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-06-27",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-06-30",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-07-01",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-07-02",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-07-03",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-07-07",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-07-08",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-07-09",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-07-10",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-07-11",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-07-14",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-07-15",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-07-16",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-07-17",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-07-18",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-07-21",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-07-22",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-07-23",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-07-24",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-07-25",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-07-28",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-07-29",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-07-30",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-07-31",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-08-01",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-08-04",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-08-05",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-08-06",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-08-07",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-08-08",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-08-11",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-08-12",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-08-13",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-08-14",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-08-15",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-08-18",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-08-19",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-08-20",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-08-21",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-08-22",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-08-25",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-08-26",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-08-27",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-08-28",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-08-29",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-09-02",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-09-03",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-09-04",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-09-05",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-09-08",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-09-09",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-09-10",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-09-11",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-09-12",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-09-15",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-09-16",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-09-17",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-09-18",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-09-19",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-09-22",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-09-23",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-09-24",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-09-25",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-09-26",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-09-29",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-09-30",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-10-01",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-10-02",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-10-03",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-10-06",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-10-07",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-10-08",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-10-09",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-10-10",
+      "realized_pnl": 0,
+      "unrealized_pnl": 0.0,
+      "equity": 100000.0
+    },
+    {
+      "date": "2025-10-13",
+      "realized_pnl": -329.645553,
+      "unrealized_pnl": 0.0,
+      "equity": 99670.354447
+    },
+    {
+      "date": "2025-10-14",
+      "realized_pnl": -659.65111,
+      "unrealized_pnl": 0.0,
+      "equity": 99340.34889
+    },
+    {
+      "date": "2025-10-15",
+      "realized_pnl": -659.65111,
+      "unrealized_pnl": 0.0,
+      "equity": 99340.34889
+    },
+    {
+      "date": "2025-10-16",
+      "realized_pnl": -659.65111,
+      "unrealized_pnl": 0.0,
+      "equity": 99340.34889
+    },
+    {
+      "date": "2025-10-17",
+      "realized_pnl": -659.65111,
+      "unrealized_pnl": 0.0,
+      "equity": 99340.34889
+    },
+    {
+      "date": "2025-10-20",
+      "realized_pnl": -659.65111,
+      "unrealized_pnl": 0.0,
+      "equity": 99340.34889
+    },
+    {
+      "date": "2025-10-21",
+      "realized_pnl": -659.65111,
+      "unrealized_pnl": 0.0,
+      "equity": 99340.34889
+    },
+    {
+      "date": "2025-10-22",
+      "realized_pnl": -659.65111,
+      "unrealized_pnl": 0.0,
+      "equity": 99340.34889
+    },
+    {
+      "date": "2025-10-23",
+      "realized_pnl": -659.65111,
+      "unrealized_pnl": 0.0,
+      "equity": 99340.34889
+    },
+    {
+      "date": "2025-10-24",
+      "realized_pnl": -659.65111,
+      "unrealized_pnl": 0.0,
+      "equity": 99340.34889
+    },
+    {
+      "date": "2025-10-27",
+      "realized_pnl": -659.65111,
+      "unrealized_pnl": 4.09073,
+      "equity": 99344.439619
+    },
+    {
+      "date": "2025-10-28",
+      "realized_pnl": -659.65111,
+      "unrealized_pnl": 149.09073,
+      "equity": 99489.439619
+    },
+    {
+      "date": "2025-10-29",
+      "realized_pnl": -659.65111,
+      "unrealized_pnl": 534.79073,
+      "equity": 99875.139619
+    },
+    {
+      "date": "2025-10-30",
+      "realized_pnl": -659.65111,
+      "unrealized_pnl": 520.29073,
+      "equity": 99860.639619
+    },
+    {
+      "date": "2025-10-31",
+      "realized_pnl": -659.65111,
+      "unrealized_pnl": 465.19073,
+      "equity": 99805.539619
+    },
+    {
+      "date": "2025-11-03",
+      "realized_pnl": -264.341236,
+      "unrealized_pnl": 0.0,
+      "equity": 99735.658764
+    },
+    {
+      "date": "2025-11-04",
+      "realized_pnl": -264.341236,
+      "unrealized_pnl": 0.0,
+      "equity": 99735.658764
+    },
+    {
+      "date": "2025-11-05",
+      "realized_pnl": -264.341236,
+      "unrealized_pnl": 0.0,
+      "equity": 99735.658764
+    },
+    {
+      "date": "2025-11-06",
+      "realized_pnl": -264.341236,
+      "unrealized_pnl": -9.573304,
+      "equity": 99726.08546
+    },
+    {
+      "date": "2025-11-07",
+      "realized_pnl": -264.341236,
+      "unrealized_pnl": -174.915348,
+      "equity": 99560.743416
+    },
+    {
+      "date": "2025-11-10",
+      "realized_pnl": -593.167695,
+      "unrealized_pnl": -278.973304,
+      "equity": 99127.859001
+    },
+    {
+      "date": "2025-11-11",
+      "realized_pnl": -593.167695,
+      "unrealized_pnl": 346.826696,
+      "equity": 99753.659001
+    },
+    {
+      "date": "2025-11-12",
+      "realized_pnl": -593.167695,
+      "unrealized_pnl": 525.026696,
+      "equity": 99931.859001
+    },
+    {
+      "date": "2025-11-13",
+      "realized_pnl": -593.167695,
+      "unrealized_pnl": 498.026696,
+      "equity": 99904.859001
+    },
+    {
+      "date": "2025-11-14",
+      "realized_pnl": -593.167695,
+      "unrealized_pnl": 561.626696,
+      "equity": 99968.459001
+    },
+    {
+      "date": "2025-11-17",
+      "realized_pnl": -593.167695,
+      "unrealized_pnl": 780.026696,
+      "equity": 100186.859001
+    },
+    {
+      "date": "2025-11-18",
+      "realized_pnl": -593.167695,
+      "unrealized_pnl": 1264.826696,
+      "equity": 100671.659001
+    },
+    {
+      "date": "2025-11-19",
+      "realized_pnl": -593.167695,
+      "unrealized_pnl": 946.873778,
+      "equity": 100353.706082
+    },
+    {
+      "date": "2025-11-20",
+      "realized_pnl": 98.082872,
+      "unrealized_pnl": 286.247081,
+      "equity": 100384.329954
+    },
+    {
+      "date": "2025-11-21",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-11-24",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-11-25",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-11-26",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-11-28",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-12-01",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-12-02",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-12-03",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-12-04",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-12-05",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-12-08",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-12-09",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-12-10",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-12-11",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-12-12",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-12-15",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-12-16",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-12-17",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-12-18",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-12-19",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-12-22",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-12-23",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-12-24",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-12-26",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-12-29",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": 0.0,
+      "equity": 100077.332767
+    },
+    {
+      "date": "2025-12-30",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": -57.783282,
+      "equity": 100019.549485
+    },
+    {
+      "date": "2025-12-31",
+      "realized_pnl": 77.332767,
+      "unrealized_pnl": -151.403282,
+      "equity": 99925.929485
+    },
+    {
+      "date": "2026-01-02",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-01-05",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-01-06",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-01-07",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-01-08",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-01-09",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-01-12",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-01-13",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-01-14",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-01-15",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-01-16",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-01-20",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-01-21",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-01-22",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-01-23",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-01-26",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-01-27",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-01-28",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-01-29",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-01-30",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-02-02",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-02-03",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-02-04",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-02-05",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-02-06",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-02-09",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-02-10",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-02-11",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-02-12",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-02-13",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-02-17",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-02-18",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-02-19",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-02-20",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-02-23",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-02-24",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-02-25",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-02-26",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-02-27",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-03-02",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-03-03",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-03-04",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-03-05",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 0.0,
+      "equity": 99753.49099
+    },
+    {
+      "date": "2026-03-06",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 46.193567,
+      "equity": 99799.684556
+    },
+    {
+      "date": "2026-03-09",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": 82.823567,
+      "equity": 99836.314556
+    },
+    {
+      "date": "2026-03-10",
+      "realized_pnl": -246.50901,
+      "unrealized_pnl": -74.256433,
+      "equity": 99679.234556
+    },
+    {
+      "date": "2026-03-11",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-03-12",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-03-13",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-03-16",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-03-17",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-03-18",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-03-19",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-03-20",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-03-23",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-03-24",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-03-25",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-03-26",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-03-27",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-03-30",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-03-31",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-04-01",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-04-02",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-04-06",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-04-07",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-04-08",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-04-09",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-04-10",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-04-13",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-04-14",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-04-15",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-04-16",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-04-17",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-04-20",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-04-21",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-04-22",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-04-23",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-04-24",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-04-27",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-04-28",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-04-29",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-04-30",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 0.0,
+      "equity": 99522.173436
+    },
+    {
+      "date": "2026-05-01",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 200.148371,
+      "equity": 99722.321807
+    },
+    {
+      "date": "2026-05-04",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 343.788371,
+      "equity": 99865.961807
+    },
+    {
+      "date": "2026-05-05",
+      "realized_pnl": -477.826564,
+      "unrealized_pnl": 423.588371,
+      "equity": 99945.761807
+    },
+    {
+      "date": "2026-05-06",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-05-07",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-05-08",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-05-11",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-05-12",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-05-13",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-05-14",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-05-15",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-05-18",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-05-19",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-05-20",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-05-21",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-05-22",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-05-26",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-05-27",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-05-28",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-05-29",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-06-01",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-06-02",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-06-03",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-06-04",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-06-05",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-06-08",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-06-09",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-06-10",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-06-11",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-06-12",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-06-15",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-06-16",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-06-17",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-06-18",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-06-22",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-06-23",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-06-24",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 0.0,
+      "equity": 99640.307397
+    },
+    {
+      "date": "2026-06-25",
+      "realized_pnl": -359.692603,
+      "unrealized_pnl": 247.088361,
+      "equity": 99887.395757
+    },
+    {
+      "date": "2026-06-26",
+      "realized_pnl": -419.555903,
+      "unrealized_pnl": 0.0,
+      "equity": 99580.444097
+    },
+    {
+      "date": "2026-06-29",
+      "realized_pnl": -419.555903,
+      "unrealized_pnl": 0.0,
+      "equity": 99580.444097
+    },
+    {
+      "date": "2026-06-30",
+      "realized_pnl": -419.555903,
+      "unrealized_pnl": 198.754867,
+      "equity": 99779.198965
+    },
+    {
+      "date": "2026-07-01",
+      "realized_pnl": -419.555903,
+      "unrealized_pnl": 347.994867,
+      "equity": 99928.438965
+    },
+    {
+      "date": "2026-07-02",
+      "realized_pnl": -419.555903,
+      "unrealized_pnl": 642.834867,
+      "equity": 100223.278965
+    }
+  ],
+  "open_positions": [
+    {
+      "symbol": "QCOM",
+      "pattern": "pattern_008_head_and_shoulders",
+      "version_id": null,
+      "action": "SELL",
+      "entry_date": "2026-06-30T13:30:00+00:00",
+      "entry_price": 188.80101000000002,
+      "qty": 52.0,
+      "current_price": 176.25,
+      "position_value": 9165.0,
+      "stop_loss": 226.11,
+      "take_profit": 135.79,
+      "unrealized_pct": 6.647745,
+      "unrealized_usd": 642.834867
+    }
+  ],
+  "logs": {
+    "sessions": 260,
+    "events": 39,
+    "exposure": {
+      "gross_notional": 9165.0,
+      "net_notional": -9165.0
+    }
+  },
+  "laya": {
+    "mode": "off",
+    "stats": {
+      "assessed": 0,
+      "allowed": 0,
+      "vetoed": 0,
+      "abstained": 0,
+      "missing": 0
+    },
+    "manifest": null
+  },
+  "metrics": {
+    "trade_count": 11,
+    "wins": 4,
+    "realized_pnl": -419.555903,
+    "unrealized_pnl": 642.834867,
+    "open_count": 1,
+    "fees": 225.894214,
+    "drawdown_pct": 1.14948556500001
+  }
+}

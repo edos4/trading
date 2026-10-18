@@ -7,11 +7,12 @@ RULE_FIELDS = ('stop_loss','stop_loss_on_close','take_profit','trailing_stop_pct
                'trailing_stop_on_close','stop_loss_pct_cap','reclaim_exit','reclaim_lower_rail',
                'exit_fill_at_close','trailing_ref_after_check','exit_order','neckline',
                'neckline_break_direction','exit_bars_after_neckline_break','exit_bars_after_entry',
-               'trailing_activation_pct','time_exit_only_unfavorable','time_exit_min_mfe_pct')
+               'trailing_activation_pct','time_exit_only_unfavorable','time_exit_min_mfe_pct','execution_model')
 
 
 def engine_hash():
-    return hashlib.sha256(Path(__file__).with_name('backtester.py').read_bytes()).hexdigest()
+    return hashlib.sha256(b''.join(Path(__file__).with_name(name).read_bytes()
+                                   for name in ('backtester.py', 'execution.py'))).hexdigest()
 
 
 def rules(value, stage='signal', **extra):
@@ -21,13 +22,16 @@ def rules(value, stage='signal', **extra):
 
 
 def payload(value):
-    return {key:deepcopy(getattr(value,key,None)) for key in
-            ('trade_id','signal_id','pattern_version_id','provenance','requested_rules','resolved_rules')}
+    return {key:(getattr(value, key).isoformat() if key == 'decision_date' and getattr(value, key, None)
+                 else deepcopy(getattr(value,key,None))) for key in
+            ('trade_id','signal_id','pattern_version_id','provenance','requested_rules','resolved_rules',
+             'execution_model','decision_date','entry_fee_paid')}
 
 
 def row_payload(value):
     return {key:deepcopy(value.get(key)) for key in
-            ('trade_id','signal_id','pattern_version_id','provenance','requested_rules','resolved_rules')}
+            ('trade_id','signal_id','pattern_version_id','provenance','requested_rules','resolved_rules',
+             'execution_model','decision_date','entry_fee_paid')}
 
 
 def pattern_annotations(annotations, df=None, pattern=None):

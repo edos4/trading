@@ -201,6 +201,13 @@ function initIndicators() {
           stream_start: document.getElementById("ind-stream-start").value || null,
           volume_gate: false,
           tv_stack_id: savedEl.value,
+          laya_mode: (() => {
+            if (!document.getElementById("ind-laya").checked) return "off";
+            const m = document.getElementById("ind-laya-mode").value || "filter";
+            return (m === "shadow" || m === "filter") ? m : "filter";
+          })(),
+          laya_policy_id: "laya-event-v1-default",
+          duration_days: null,
         }),
       });
       say(el, "Paper book started. Open the Paper tab for fills.");

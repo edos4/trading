@@ -61,6 +61,10 @@ def _open_row(row: dict[str, Any]) -> dict[str, Any]:
         "opened": row.get("opened"),
         "sim_opened": row.get("sim_opened"),
         "daily_marks": [_daily_mark(m) for m in (row.get("daily_marks") or [])],
+        # Additive Laya evidence (docs/laya.md P5). Older snapshots omit it;
+        # Replay renders those as "Laya assessment unavailable" and never
+        # reruns today's model when viewing.
+        "laya_assessment": row.get("laya_assessment"),
     }
 
 
@@ -107,6 +111,8 @@ def _closed_row(row: dict[str, Any]) -> dict[str, Any]:
         "sim_opened": row.get("sim_opened"),
         "sim_closed": row.get("sim_closed"),
         "daily_marks": [_daily_mark(m) for m in (row.get("daily_marks") or [])],
+        # Additive Laya evidence; legacy exports omit it ("unavailable").
+        "laya_assessment": row.get("laya_assessment"),
     }
 
 
@@ -144,6 +150,9 @@ def _book_export(snap: dict[str, Any]) -> dict[str, Any]:
         "exposure": snap.get("exposure"),
         "metrics": metrics,
         "summary": snap.get("summary"),
+        "account_model": "independent-fixed-notional",
+        "pending_entries": snap.get("pending_entries", []),
+        "order_events": snap.get("order_events", []),
         "scan_stats": _scan_stats(snap.get("scan_stats")),
         "open_positions": [_open_row(p) for p in (snap.get("positions") or [])],
         "closed_trades": [_closed_row(t) for t in (snap.get("closed") or [])],
@@ -203,6 +212,9 @@ def snapshot_from_paper_account(
                 "sim_opened": p.sim_entry_date.isoformat() if p.sim_entry_date else None,
                 "timeframe": p.timeframe,
                 "daily_marks": list(p.position_marks or []),
+                "laya_assessment": (
+                    dict(p.laya_assessment)
+                    if getattr(p, "laya_assessment", None) else None),
             }
         )
 
@@ -236,6 +248,9 @@ def snapshot_from_paper_account(
                 "sim_closed": t.sim_exit_date.isoformat() if t.sim_exit_date else None,
                 "timeframe": t.timeframe,
                 "daily_marks": list(t.position_marks or []),
+                "laya_assessment": (
+                    dict(t.laya_assessment)
+                    if getattr(t, "laya_assessment", None) else None),
             }
         )
 
@@ -248,6 +263,10 @@ def snapshot_from_paper_account(
         "long_only": profile.long_only,
         "session": clock["session"],
         "running": False,
+        "account_model": "independent-fixed-notional",
+        "pending_entries": [{"symbol": s.symbol, "pattern": s.pattern,
+                             "decision_date": s.signal_bar_timestamp.isoformat()} for s in account.pending_entries],
+        "order_events": list(account.order_events),
         "cash": snap["cash"],
         "equity": equity,
         "open_count": len(snap["positions"]),
@@ -259,6 +278,7 @@ def snapshot_from_paper_account(
         "summary": result.summary() if result.trades else "No closed trades yet.",
         "metrics": {
             "total_pnl_dollars": total_pnl,
+            "fees": snap["fees"],
             "total_pnl_pct": (total_pnl / snap["initial_capital"] * 100)
             if snap["initial_capital"] else 0.0,
             "realized_pnl_dollars": snap["realized_pnl_dollars"],

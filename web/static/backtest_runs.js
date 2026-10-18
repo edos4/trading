@@ -78,6 +78,7 @@
     const lines = [
       "Run " + payload.run_id,
       "Mode: " + (payload.mode || "?"),
+      "Account: independent fixed-notional research; finite-account limits are not modeled",
       "State: " + payload.state,
       "End policy: " + (payload.end_policy || "?"),
       "Sessions/units: " + payload.completed_units + " / " + (payload.total_units || "?"),
