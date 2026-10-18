@@ -1,6 +1,10 @@
 # Kronos-base fine-tuning on stocks_history
 
-Status: proposed. This document plans the work; it does not change runtime behavior.
+Status: **campaign complete 2026-10-15 — fine-tune ran, evaluated, verdict recorded
+in §13.** Code (P0-01, P1-01/02, P2-01/02, P4-01/02, P5-01), env + weights
+(P0-02/03), training (P2-03/04, P3-01) and walk-forward eval (P4-03) all done.
+Verdict: direction improved (+6pp, weak-tape concentrated), magnitude
+calibration worsened — not usable as a live gate without a regime gate (§13).
 
 Decisions locked with the request:
 
@@ -240,8 +244,23 @@ journalctl --user -u kronos-finetune -f
 ```
 
 Transient unit (no boot persistence needed for a one-off), survives disconnects.
-`--resume` picks up from the last per-epoch checkpoint; the best-on-val checkpointing
-already in the ported loops is retained.
+`--resume` picks up from the per-epoch `last.pt` (model + optimizer + scheduler
+state); best-on-val `best_model` is retained as the artifact of record.
+
+### Measured 2026-10-15 (FreeToken stopped, ~15.3 GB VRAM free, RTX 5080 idle)
+
+| Stage | Measured | vs estimate |
+|---|---|---|
+| P0 env (venv + torch cu128 + clone `67b630e` + 406 MB weights) | ~30 min elapsed, network-bound | in range |
+| P1 dataset (14,946 symbols, 43,703,689 pre-cutoff bars) | **~2 min** | far under (local-socket Postgres) |
+| Smoke tokenizer / predictor | 0.115 / 0.133 s/step → 3.8 / 4.4 min/epoch projected | inside range |
+| P2 tokenizer (10 ep) | **~5 min** (well under smoke projection — small model) | under |
+| P3 predictor (10 ep, val 1.8149 → 1.8019, best saved 6×) | **~49 min** (~4.9 min/epoch, vs 4.4 projected) | in range |
+| P4 eval (50 symbols, 400 windows, `sample_count=3`, ×2 runs) | **~3 min per run** | far under |
+| **First-pass wall clock** | **55 min 48 s** (systemd `Consumed`) | well under the 2.5–6 h range |
+
+Lesson: the GPU was never the bottleneck — P0 downloads and P1 streaming
+dominate setup, and inference eval is minutes, not the budgeted 30–90 min.
 
 ## 8. Environment: why a separate venv
 
@@ -281,40 +300,40 @@ version is free.
 
 ## 9. Work packages
 
-- [ ] **P0-01** Add `requirements-kronos.txt`; create `.venv-kronos` on Python 3.14 (or 3.12
+- [x] **P0-01** Add `requirements-kronos.txt`; create `.venv-kronos` on Python 3.14 (or 3.12
       fallback); verify `torch.cuda.is_available()` is `True` and
       `torch.cuda.get_device_capability()` reports `(12, 0)`.
-- [ ] **P0-02** `git clone https://github.com/shiyu-coder/Kronos.git ~/Kronos`; record the commit SHA.
-- [ ] **P0-03** Fetch and cache weights to `~/Kronos/weights/Kronos-base` and
+- [x] **P0-02** (`67b630e`) `git clone https://github.com/shiyu-coder/Kronos.git ~/Kronos`; record the commit SHA.
+- [x] **P0-03** (406 MB, offline-load verified, 102.3M params) Fetch and cache weights to `~/Kronos/weights/Kronos-base` and
       `~/Kronos/weights/Kronos-Tokenizer-base` via `from_pretrained(...).save_pretrained(...)`
       (`token=False`); verify by loading both offline.
-- [ ] **P1-01** Write `learn/kronos_dataset.py`: single ordered scan of `daily_bars`
+- [x] **P1-01** (14,946 symbols / 43,703,689 bars, ~2 min) Write `learn/kronos_dataset.py`: single ordered scan of `daily_bars`
       (streamed, not 17,719 round-trips), `amount = volume × mean(OHLC)`, per-symbol
       chronological split at `--train-cutoff`, emit `features.f32` / `days.i32` /
       `symbols.json`.
-- [ ] **P1-02** Report the built corpus (symbols kept, bars, US/PH split, train/val sizes)
+- [x] **P1-02** Report the built corpus (symbols kept, bars, US/PH split, train/val sizes)
       to a `build_report.json` next to the dataset.
-- [ ] **P2-01** Restore `core/kronos_finetune.py` from `89240d9^`; rewire it to the lean
+- [x] **P2-01** Restore `core/kronos_finetune.py` from `89240d9^`; rewire it to the lean
       dataset, drop `_rank_liquid_symbols` from the default path, add `--all-symbols`,
       `--smoke-steps`, `--resume`.
-- [ ] **P2-02** Add `scripts/kronos_finetune.py` — argparse CLI following
+- [x] **P2-02** (+ `--compare` plot mode added during campaign) Add `scripts/kronos_finetune.py` — argparse CLI following
       `scripts/build_barcache.py` conventions (`description=__doc__`,
       `raise SystemExit(main())`, repo-root `sys.path` bootstrap). `main.py` is left untouched.
-- [ ] **P2-03** Run the 100-step smoke benchmark; record measured per-step time and the
+- [x] **P2-03** (0.115 / 0.133 s/step measured) Run the 100-step smoke benchmark; record measured per-step time and the
       projected epoch/total wall clock.
-- [ ] **P2-04** Train tokenizer → `~/Kronos/finetuned/tokenizer/best_model`.
-- [ ] **P3-01** Train predictor → `~/Kronos/finetuned/predictor/best_model`.
-- [ ] **P4-01** Restore `core/kronos_eval.py` from `89240d9^`. It needs only **two** settings
+- [x] **P2-04** (~5 min) Train tokenizer → `~/Kronos/finetuned/tokenizer/best_model`.
+- [x] **P3-01** (~49 min, val 1.8149 → 1.8019) Train predictor → `~/Kronos/finetuned/predictor/best_model`.
+- [x] **P4-01** Restore `core/kronos_eval.py` from `89240d9^`. It needs only **two** settings
       — `settings.kronos_batch_size` (`:192`) and `settings.kronos_min_move_pct` (`:723`) —
       so add just those two to `config.py` and document them in `.env.example`. Keep the
       rest of the runtime surface deleted.
-- [ ] **P4-02** Add `scripts/kronos_eval_test.py` (adapted from the deleted
+- [x] **P4-02** (+ cutoff guard, `--json-out`, `--compare`) Add `scripts/kronos_eval_test.py` (adapted from the deleted
       `scripts/kronos_1wk_test.py`) to score base vs. fine-tuned walk-forward.
-- [ ] **P4-03** Run base and fine-tuned scoring over the same windows, strictly after
+- [x] **P4-03** (400 windows ×2, ~3 min/run — see §13) Run base and fine-tuned scoring over the same windows, strictly after
       `--train-cutoff`; write the comparison report.
-- [ ] **P5-01** Restore `core/test_kronos_eval_scoring.py`; add `core/test_kronos_finetune.py`
+- [x] **P5-01** (+ eval-run, streaming-equivalence, checkpoint, fuzz tests) Restore `core/test_kronos_eval_scoring.py`; add `core/test_kronos_finetune.py`
       covering split correctness, no-lookahead, and normalization.
-- [ ] **P6-01** Commit this document once the campaign completes, replacing the estimates
+- [x] **P6-01** (this edit) Commit this document once the campaign completes, replacing the estimates
       with measured numbers.
 
 ## 10. Verification
@@ -374,3 +393,114 @@ pass as before, and `pip list` in `.venv` must still show no torch.
    404-ing. (Found during this audit.)
 3. **Using the fine-tune in the bot** — pointing a live gate at
    `~/Kronos/finetuned/predictor/best_model` requires item 1 first.
+
+---
+
+## 13. Campaign results 2026-10-15 (P6-01)
+
+First pass ran 09:17 → 10:13 (55 min 48 s wall). Base vs fine-tuned over
+**identical 400 windows** (50 liquid symbols, same seed, start 2026-06-01,
+strictly after the 2026-01-01 train cutoff, `sample_count=3`).
+Reports: `/tmp/kronos_base.md` / `/tmp/kronos_ft.md` (+ `.json` summaries).
+
+### Headline
+
+| Metric | Base | Fine-tuned |
+|---|---|---|
+| +1d direction | 48.5% | **52.5%** |
+| +3d direction | 51.7% [46.5–56.5] | **57.8% [53.0–62.5]** |
+| +3d MAE (flat-0 = 4.11%) | 4.89% | **9.09%** |
+| Gate @3% direction | 58.6% | 58.5% |
+| Gate MAE | 7.58% | **12.57%** |
+| Gate coverage | 24.8% (20 long / 79 short) | **62.8%** (27 long / 224 short) |
+| Always-long baseline | 58.2% | 58.2% |
+
+### What the follow-up analysis showed
+
+- **Direction edge is real but conditional.** Fine-tuned shorts hit 59.8%
+  (longs 48.6%); on weak-tape days 65.1% vs 49.2% on up-tape days;
+  Jun–Aug 72% vs Sep–Oct 53%. The model is a weak-tape decline predictor —
+  which is why AAPL-in-a-rally went 0/7 for *both* models (base is equally
+  bearish there: no evidence of fine-tune damage).
+- **Magnitudes are uninformative.** Optimal shrinkage hits the grid floor
+  (`alpha=0.10` → converges to flat-0, coverage collapses to 5.5%).
+  Rescaling cannot produce a usable gate.
+- **Rank-sleeve use untestable** with this eval design (only 9 asof cohorts
+  with ≥3 symbols) — needs its own backtest harness.
+- **Neither model beats always-long (58.2%)** on this bullish-tape sample.
+
+### Verdict (binding)
+
+**Not usable as a live gate.** Direction improved (+6pp, CIs barely
+overlapping), but magnitude calibration collapsed and neither model clears
+the always-long baseline. Do **not** run 30 epochs of the same recipe —
+it would deepen the same bearish groove.
+
+Named follow-ups, in order:
+
+1. **Regime-gated deployment** — trust fine-tuned shorts only on weak-tape
+   days (65.1% direction). Needs a live tape proxy: the DB carries no index
+   ETFs (no SPY/QQQ), so use internal scan-universe breadth or an external
+   feed. Then a confirming gated backtest.
+2. **Retrain only for calibration** — early-stop on direction + gate MAE
+   (not token val loss), lower predictor LR (~2e-5). ~1 h. Only after (1).
+3. **Sleeve harness** — if (1) works, test cross-sectional ranking properly.
+
+### 2026-10-15 pm — the gate rule validated and built
+
+A wider eval (50 symbols × up to 20 windows, 1,000 windows, 22 asofs,
+Exp A weights) inverted the first regime hypothesis: past-5d-weak days do
+NOT select good shorts (34.1% hit, −2.70% short PnL — the tape bounces and
+crushes them). The validated rule is the converse — **fade strength**:
+
+    STRONG past-5d tape + pred<=-0%: n=689 dir=59.1% shortPnL=+0.79%
+    STRONG past-5d tape + pred<=-3%: n=372 dir=62.1% shortPnL=+1.26%
+    STRONG past-5d tape + pred<=-5%: n=210 dir=66.7% shortPnL=+1.89%
+
+Magnitude thresholds are monotone (bigger predicted drop → bigger realized
+edge), which supersedes the earlier "magnitudes uninformative" finding —
+that pooled longs+shorts and weak+strong regimes. Longs remain a coin flip
+everywhere (~52%) and are never confirmed.
+
+Built: `core/kronos_regime_gate.py` (pure decision logic, 7 unit tests),
+`KRONOS_REGIME_ENABLED=false` + `KRONOS_REGIME_DAYS=5` in config (default
+OFF — zero runtime effect).
+
+### 2026-10-15 evening — scanner wiring reverted (focus decision)
+
+The gate was briefly wired into `MarketScanner._finish_signal` (SELL-only,
+settings-gated, 7 integration tests, 348 passed) and then fully reverted:
+`core/scanner.py` is pristine again and the wiring tests are deleted. Per
+the focus call, this project stays on fine-tuning + accuracy only — no
+live-signal integration.
+
+Retained as inert reference (zero runtime effect): `core/kronos_regime_gate.py`
++ its 7 unit tests (encode the fade-strength rule), and the
+`KRONOS_REGIME_*` config keys (default OFF). Re-wiring later means
+re-adding the `_finish_signal` hook and re-proving it; the validation
+numbers above still stand.
+
+## 14. Web UI — Kronos tab (2026-10-17)
+
+A **Kronos** tab sits next to Documentation in `main.py --web`. Symbol + days
+ahead → Submit graphs recent actual closes (white) against a forward forecast
+from Kronos-base (blue, dashed) and the fine-tuned model (red), plus a **Save
+chart** button (PNG via the chart's own screenshot).
+
+- `scripts/kronos_web_forecast.py` (runs in `.venv-kronos`): loads the last 400
+  bars, forecasts `days` **business days past the last bar** for both models,
+  writes JSON (anchor + trailing history + both paths) to a file — never stdout,
+  since loguru owns stdout.
+- `web/kronos.py` shells out to that script (one forecast at a time on the
+  16 GB GPU; 409 while busy, 503 when the venv/script is absent, 502 on model
+  failure). The app venv stays torch-free.
+- `web/app.py`: `GET /kronos` page + `POST /api/kronos/forecast`; nav link in
+  `base.html`; `web/static/kronos.js` draws it with Lightweight Charts.
+- Tests: `web/test_kronos_api.py` (9, model mocked). Verified live end-to-end:
+  AAPL +5d runs in ~3 s (both models) and Save chart downloads
+  `AAPL_kronos_5d.png`.
+
+Note the horizon is total days ahead from the latest close (not a walk-forward
+window), so there is no realized actual to score against on the chart — it is a
+forecast view, consistent with §13's finding that the fine-tune's edge is
+calibration (+3d, weak-tape regimes) rather than per-window direction.
