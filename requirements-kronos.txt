@@ -1,0 +1,34 @@
+# Fine-tuning env only — never installed by install.sh or any deploy script.
+# Created per docs/kronos-finetune.md §8 (P0-01). The app venv (.venv) stays
+# torch-free; this file is only ever installed into the disposable .venv-kronos.
+#
+# Install in TWO steps — the PyTorch CUDA index only hosts torch packages,
+# so it must not replace PyPI (that breaks einops/huggingface_hub):
+#   python3 -m venv .venv-kronos
+#   .venv-kronos/bin/pip install "torch>=2.10" \
+#     --index-url https://download.pytorch.org/whl/cu128
+#   .venv-kronos/bin/pip install -r requirements-kronos.txt   # plain PyPI
+# (torch>=2.10 below is then already satisfied and skipped.)
+# If no cp314 CUDA wheel exists for the needed torch, create .venv-kronos
+# on Python 3.12 instead — the venv is isolated so the interpreter is free.
+torch>=2.10             # from https://download.pytorch.org/whl/cu128
+einops==0.8.1           # upstream Kronos pins
+huggingface_hub==0.33.1
+safetensors==0.6.2
+tqdm>=4.67.1
+# pandas/numpy intentionally unpinned here: they follow the app's pins.
+# Do NOT pin upstream's pandas==2.2.2 — it fights the app venv's pandas 3.x.
+# Upstream Kronos source (not pip): git clone https://github.com/shiyu-coder/Kronos.git ~/Kronos
+#
+# App-light deps: the scripts import repo modules (config, data.db,
+# data.history, utils.logger), so the kronos venv needs the small subset of
+# the app stack those modules touch. Deliberately NOT the heavy app deps
+# (ib_insync, anthropic, fastapi, ...): data.tv_client's mcp/tradingview
+# imports below are only needed by scripts/kronos_eval_test.py, and
+# core.market stays lazy (never touched on the history-owner host).
+loguru==0.7.2
+pydantic>=2.7.4
+pydantic-settings>=2.5.2
+psycopg[binary]>=3.1
+mcp>=1.28.0,<2
+tradingview-screener>=3.2.0
