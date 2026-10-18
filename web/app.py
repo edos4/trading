@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Literal, Optional
@@ -399,6 +400,54 @@ def create_app() -> FastAPI:
         if not (settings.hermes_dashboard_url or "").strip():
             raise HTTPException(status_code=404, detail="Hermes dashboard not configured")
         return render(request, "hermes.html", active="hermes")
+
+    # ── Kronos ────────────────────────────────────────────────────────────
+    @app.get("/kronos", response_class=HTMLResponse)
+    async def kronos_page(request: Request, _user: str = Depends(require_login)):
+        from web import kronos
+
+        return render(request, "kronos.html", active="kronos",
+                      kronos_available=kronos.available())
+
+    @app.post("/api/kronos/forecast")
+    async def api_kronos_forecast(request: Request, _user: str = Depends(require_login)):
+        from web import kronos
+
+        try:
+            body = await _json_body(request)
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        symbol = str(body.get("symbol") or "").strip().upper()
+        if not re.fullmatch(r"[A-Z0-9.\-^]{1,12}", symbol):
+            return JSONResponse(
+                {"detail": "Enter a valid symbol (letters, digits, . - ^)."},
+                status_code=400,
+            )
+        try:
+            days = int(body.get("days"))
+        except (TypeError, ValueError):
+            return JSONResponse({"detail": "Days must be a whole number."}, status_code=400)
+        if not 1 <= days <= kronos.MAX_DAYS:
+            return JSONResponse(
+                {"detail": f"Days must be between 1 and {kronos.MAX_DAYS}."},
+                status_code=400,
+            )
+        try:
+            return await asyncio.to_thread(kronos.forecast, symbol, days)
+        except kronos.KronosBusy:
+            return JSONResponse(
+                {"detail": "A Kronos forecast is already running — wait for it to finish."},
+                status_code=409,
+            )
+        except kronos.KronosUnavailable as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=503)
+        except kronos.KronosError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=502)
+        except Exception:
+            log.exception("Web Kronos | forecast failed")
+            return JSONResponse(
+                {"detail": "Kronos forecast failed. Check server logs."}, status_code=500,
+            )
 
     # ── Explorer API ──────────────────────────────────────────────────────
     @app.get("/api/markets")
