@@ -5,6 +5,7 @@ __pycache__
 data/__pycache__
 .venv
 .venv-browseruse
+.venv-laya
 # cf CLI project-local cache (account id/name)
 .cloudflare
 logs/*.log

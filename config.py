@@ -203,6 +203,25 @@ class Settings(BaseSettings):
     # behaves exactly as before.
     hermes_dashboard_url: str = ""
 
+    # ── Laya text assessment (optional, research-only by default) ──────────────
+    # Local optional assessment service with its own research workspace. Off by
+    # default: enables assessment execution, never entry filtering on its own.
+    # Entry filtering needs an explicit per-book/per-run mode + validated policy.
+    laya_enabled: bool = False
+    # Explicit interpreter path of the isolated worker env (requirements-laya.txt).
+    # Empty = worker unavailable; tab renders an honest unavailable state.
+    laya_worker_python: str = ""
+    # Operator-provisioned pinned local checkpoint directory. Empty = no model.
+    laya_model_path: str = ""
+    # Start with explicit CPU; choose another device only after validation.
+    laya_device: str = "cpu"
+    # Small bounded queue; benchmark before selecting a production value.
+    laya_max_pending: int = 8
+    # Worker deadline (seconds); select from measured target-host latency.
+    laya_timeout_seconds: float = 60.0
+    # Local SQLite store path. A deliberate local store, not a PG fallback.
+    laya_store_path: str = "data/cache/laya.sqlite3"
+
     # ── MCP server (python main.py --mcp / python -m mcp_server) ────────────
     # A local, stdio MCP server so an AI agent can operate the bot. It is a
     # thin typed client over the running web UI's /api/* surface (one owner of

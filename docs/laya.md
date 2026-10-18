@@ -1,7 +1,48 @@
 # Laya integration plan
 
-Status: proposal; no Laya runtime, model, trading rule, or UI change implemented by this document.
+Status: implemented P0–P6 (2026-10-14), provisioned (English checkpoint below).
+This document remains the design record; behavior changes must update it.
 
+Provisioned 2026-10-14: `laya==0.4.7` in isolated `.venv-laya` (CPU torch
+2.14.1); English checkpoint `convaiinnovations/laya`
+revision `7b928d828b7b0e022f929d9bd2e44165aa270148` (~843 MB) staged at
+`/home/r00t/models/laya-en` with `MANIFEST.json` (file hashes, tokenizer,
+Apache-2.0, calibration: uncalibrated). Target-host smoke: warm ~210–260 ms
+per 3-question call, peak RSS ~2.9 GB; seed eval report at
+`/home/r00t/models/laya-en/eval-seed-v1.json` (real model 8/11 vs rule
+baseline 11/11 on 4 hand-made fixtures — not a validation verdict; filter
+promotion still needs the P3 held-out protocol).
+
+Measured 2026-10-14 (paper, Patternsv2, 500 symbols, stream from 2026-09-11,
+filter/laya-candidate-v1-default): 28/28 live assessments completed, every one
+`evidence_alignment=insufficient` (conf ~0.40) → all vetoed. Pipeline correct;
+model has no discriminating power on numbers-only snapshots. Follow-up probe
+with detector notes added: strong-confirming notes → `conflicts` (0.34),
+weak/contradictory notes → `supports` (0.35) — inverted at near-chance
+confidence. Conclusion: candidate-review-v1 is NOT promotable to filter; use
+remains text research (event-review scored 7/9 on seed fixtures). Do not
+loosen the policy to admit `insufficient` — that would make the filter random
+rather than safe.
+
+Profitable loop (2026-10-15, measured on live EDGAR data): candidate review
+abandoned as a trading gate; paper filter now runs **event review over EDGAR
+filing text** (`data/laya_filings.py`: offering/adverse forms with
+acceptanceDateTime cutoffs, deterministic excerpts, full-doc hashes). The
+event policy (`laya-event-v1-default`) is a veto-only gate — open by default,
+vetoes on financing @ conf ≥ 0.35 or material-risk yes_p ≥ 0.6, abstains only
+on broken evidence. Proven end to end: RENX S-3 shelf (filed 2026-10-08) →
+financing @ 0.40 → veto in ~5s; its same-day 424B5 pricing prospectus was
+correctly excluded as future information at the cutoff. Worker flags
+over-budget input as truncated (not gate-eligible). Thresholds remain
+unvalidated starting points pending the P3 labeled set; paper default policy
+is now `laya-event-v1-default`.
+
+Traceability (2026-10-15): gate verdicts now ride the fill —
+`TradeSignal.laya_assessment` → `BacktestTrade.laya_assessment` (copied in
+`_open_trade`) → paper snapshot open/closed rows → trade export → Paper/Replay
+blotter tooltips (`◈` marker; "Laya assessment unavailable" for legacy rows).
+Previously even properly gated fills exported `null`, making veto/fill
+attribution across Stop/Start replay cycles impossible.
 Prepared: 2026-10-13. Target: a seventh web navigation tab, **Laya**, after Indicators.
 
 ## 1. Recommendation and intended outcome
@@ -34,7 +75,7 @@ Laya is a text decision model exposing typed `choice`, `score`, and `noul` quest
 | English, multilingual, and typed-decisions checkpoints are available. | Benchmark a pinned English model for English snapshots and a pinned multilingual model for relevant non-English text. |
 | Router supports explicit models and revisions; loading is lazy and resident models are capped. | Freeze routing/model policy per experiment; start with one resident checkpoint. |
 | Typed-decisions targets specific non-trading workflows. | Do not assume its name makes it a better trading model. |
-| Package metadata inspected declares version 0.4.6 and Python >=3.10. | Treat 0.4.6 as an inspected candidate, not a verified installed release or final compatibility lock. |
+| Package metadata declares version 0.4.7 (installed release; 0.4.6 was the inspected candidate, checkpoints unchanged) and Python >=3.10. | Pinned in `requirements-laya.txt`; resolved in the isolated `.venv-laya`. |
 | Core dependencies include PyTorch, Transformers, Hugging Face Hub, Safetensors, and NumPy. | Keep installation optional and verify the full resolved stack in a separate environment. |
 | The optional `mcp` extra requires `mcp>=2.2.0`. | It conflicts with this repository's `mcp>=1.28.0,<2`; do not install that extra here. |
 
