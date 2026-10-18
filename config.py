@@ -139,6 +139,25 @@ class Settings(BaseSettings):
     volume_gate_rvol_min: float = 2.0
     volume_gate_obv_bars: int = 5
 
+    # ── Kronos evaluation (core/kronos_eval.py, scripts/kronos_eval_test.py) ──
+    # Kept minimal per docs/kronos-finetune.md P4-01: the fine-tune campaign
+    # needs only these two knobs. The full Kronos runtime (gate, forecast,
+    # rank sleeve, /api/kronos/predict) stays deleted — do not re-add it here.
+    # Series per predict_batch call on CUDA (GPU batch = this × sample_count).
+    # No CUDA: runtime caps at 4 (see effective_kronos_batch_size).
+    kronos_batch_size: int = 16
+    # Minimum |predicted 3d close-to-close| for the gate slice metrics.
+    kronos_min_move_pct: float = 0.03
+
+    # ── Kronos regime gate (core/kronos_regime_gate.py) ──────────────────────
+    # Confirms SHORT signals only, fading a strong tape (validated §13 of
+    # docs/kronos-finetune.md). Off by default: enabling requires wiring the
+    # gate into the scanner run path (named next step, not done here).
+    kronos_regime_enabled: bool = False
+    # Lookback (trading days) for the universe mean return that defines tape
+    # strength. Validated at 5; change only with a fresh walk-forward check.
+    kronos_regime_days: int = 5
+
     # ── Vision ────────────────────────────────────────────────────────────
     anthropic_api_key: str = ""
     vision_confirmation_enabled: bool = False
@@ -344,6 +363,11 @@ class Settings(BaseSettings):
     @classmethod
     def _clamp_collect_first_top_n(cls, value: int) -> int:
         return max(1, int(value))
+
+    @field_validator("kronos_batch_size")
+    @classmethod
+    def _clamp_kronos_batch_size(cls, value: int) -> int:
+        return max(1, min(int(value), 256))
 
     @property
     def stocks_history_auth(self) -> tuple[str, str]:
