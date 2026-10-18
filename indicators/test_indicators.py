@@ -226,7 +226,7 @@ def test_indicators_only_book_cap_does_not_apply_to_patterns(monkeypatch):
         def get_df(self, symbol, timeframe, min_bars=1):
             return None
 
-    capped = PaperAccount(initial_capital=100_000.0, market="us", slippage_pct=0.0)
+    capped = PaperAccount(initial_capital=100_000.0, market="us", slippage_pct=0.0, txn_cost_pct=0.0)
     capped.assume_session_open = True
     capped.indicators_only = True
     ok, _ = capped.open_position(sig("indicator_supertrend", "NVDA", 1), candle, Empty())
@@ -240,7 +240,7 @@ def test_indicators_only_book_cap_does_not_apply_to_patterns(monkeypatch):
     assert not ok and "already use the account" in message
     assert capped.open_count() == 10
 
-    plain = PaperAccount(initial_capital=100_000.0, market="us", slippage_pct=0.0)
+    plain = PaperAccount(initial_capital=100_000.0, market="us", slippage_pct=0.0, txn_cost_pct=0.0)
     plain.assume_session_open = True
     for i in range(11):
         ok, message = plain.open_position(sig("pattern_002_double_top", f"P{i}", i), candle, Empty())

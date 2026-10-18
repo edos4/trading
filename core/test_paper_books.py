@@ -130,6 +130,80 @@ def test_start_twice_returns_already_running():
         assert "already running" in err.lower()
 
 
+def test_start_laya_filter_refused_when_service_not_ready():
+    with _manager() as mgr:
+        with patch("core.laya_paper.laya_readiness",
+                   return_value=(False, "LAYA_ENABLED is false")):
+            err = mgr.start("us", 10, **{**START_KW, "laya_mode": "filter",
+                                         "laya_policy_id": "laya-candidate-v1-default"})
+        assert err is not None
+        assert "not ready" in err.lower()
+        assert not mgr.books["us"].running
+
+
+def test_start_laya_shadow_refused_when_service_not_ready():
+    with _manager() as mgr:
+        with patch("core.laya_paper.laya_readiness",
+                   return_value=(False, "missing-model")):
+            err = mgr.start("ph", 10, **{**START_KW, "laya_mode": "shadow"})
+        assert err is not None
+        assert "not ready" in err.lower()
+        assert not mgr.books["ph"].running
+
+
+def test_start_laya_shadow_freezes_mode_and_policy():
+    with _manager() as mgr:
+        with patch("core.laya_paper.laya_readiness",
+                   return_value=(True, "ready (fake)")):
+            assert mgr.start("us", 10, **{**START_KW, "laya_mode": "shadow",
+                                          "laya_policy_id": ""}) is None
+        _wait_loop(mgr.books["us"])
+        assert mgr.books["us"].laya_mode == "shadow"
+        snap = mgr.snapshot("us")
+        assert snap["laya"]["mode"] == "shadow"
+        assert snap["laya"]["readiness"] == "shadow-ready"
+
+
+def test_start_laya_rejects_unknown_mode():
+    with _manager() as mgr:
+        err = mgr.start("us", 10, **{**START_KW, "laya_mode": "autotrade"})
+        assert err is not None
+        assert "unsupported laya mode" in err.lower()
+        assert not mgr.books["us"].running
+
+
+def test_start_laya_filter_requires_policy():
+    with _manager() as mgr:
+        err = mgr.start("us", 10, **{**START_KW, "laya_mode": "filter",
+                                     "laya_policy_id": ""})
+        assert err is not None
+        assert "policy" in err.lower()
+        assert not mgr.books["us"].running
+
+
+def test_start_duration_days_freezes_and_rejects_bad_value():
+    with _manager() as mgr:
+        assert mgr.start("us", 10, **{**START_KW, "duration_days": 30}) is None
+        _wait_loop(mgr.books["us"])
+        assert mgr.books["us"].duration_days == 30
+        snap = mgr.snapshot("us")
+        assert snap["duration_days"] == 30
+        mgr.stop("us")
+        _wait_stopped(mgr.books["us"])
+    with _manager() as mgr:
+        err = mgr.start("ph", 10, **{**START_KW, "duration_days": 0})
+        assert err is not None
+        assert "duration" in err.lower()
+        assert not mgr.books["ph"].running
+
+
+def test_start_duration_defaults_to_unlimited():
+    with _manager() as mgr:
+        assert mgr.start("us", 10, **START_KW) is None
+        _wait_loop(mgr.books["us"])
+        assert mgr.books["us"].duration_days is None
+
+
 def test_reset_ph_does_not_wipe_us():
     with patch("core.paper_books.PaperAccount.save"):
         with patch("core.paper_books.reset_signal_log"):

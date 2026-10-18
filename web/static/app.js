@@ -531,6 +531,12 @@ function initPaper() {
     if (reason === "breakeven_stop") return "reason-flat";
     return "reason-muted";
   }
+  function fmtLaya(t) {
+    const l = t.laya_assessment;
+    if (!l) return "Laya assessment unavailable";
+    const aid = l.assessment_id ? ` (${l.assessment_id})` : "";
+    return `Laya ${l.mode || "?"} → ${l.outcome || "?"}${aid} [${l.policy_id || "?"}]`;
+  }
   function fmtHold(days, bars) {
     const parts = [];
     if (Number.isFinite(Number(days))) {
@@ -563,6 +569,17 @@ function initPaper() {
       collect_first_top_n: Number(
         (document.getElementById(`${id}-collect-first-top-n`) || {}).value || 4
       ),
+      laya_mode: (() => {
+        if (!(document.getElementById(`${id}-laya`) || {}).checked) return "off";
+        const m = (document.getElementById(`${id}-laya-mode`) || {}).value || "filter";
+        return (m === "shadow" || m === "filter") ? m : "filter";
+      })(),
+      laya_policy_id: ((document.getElementById(`${id}-laya-policy`) || {}).value || "").trim(),
+      duration_days: (() => {
+        const raw = (document.getElementById(`${id}-duration`) || {}).value;
+        const n = Number(raw);
+        return raw !== "" && raw != null && Number.isFinite(n) && n >= 1 ? Math.floor(n) : null;
+      })(),
       stream_start: (document.getElementById(`${id}-stream-start`) || {}).value || null,
     };
   }
@@ -628,7 +645,12 @@ function initPaper() {
           `Last scan: ${last}   Patterns found: ${st.patterns_found}   ` +
           `Trades opened: ${st.trades_opened}   Rejected: ${st.signals_rejected}   ` +
           `Scan time: ${(st.scan_duration_s || 0).toFixed(1)}s` +
-          (snap.use_stream ? `   Sim days: ${st.sim_days}` : "") +
+          (snap.use_stream || snap.duration_days
+            ? `   Sim days: ${st.sim_days}${snap.duration_days ? `/${snap.duration_days}` : ""}`
+            : "") +
+          (snap.laya && snap.laya.mode && snap.laya.mode !== "off"
+            ? `   Laya: ${snap.laya.mode}${snap.laya.policy_id ? `/${snap.laya.policy_id}` : ""} (${snap.laya.readiness || "?"})`
+            : "") +
           `   Reject gates: ${rejectGates}`;
       }
     }
@@ -742,7 +764,7 @@ function initPaper() {
         `<td class="num">${t.r == null ? "—" : fmtSigned(t.r)}</td>` +
         `<td><span class="pill ${reasonClass(t.reason)}">${esc(fmtReason(t))}</span></td>` +
         `<td class="num">${esc(fmtHold(t.days, t.bars))}</td>` +
-        `<td class="muted" title="${esc(t.pattern)}">${esc(fmtPattern(t.pattern))}</td>`;
+        `<td class="muted" title="${esc(t.pattern)} | ${esc(fmtLaya(t))}">${esc(fmtPattern(t.pattern))}${t.laya_assessment ? " ◈" : ""}</td>`;
       tr.addEventListener("dblclick", () => openTradeChart("closed", t.market, t.symbol, idx, null, t.trade_id));
       closedBody.appendChild(tr);
     });
@@ -783,7 +805,7 @@ function initPaper() {
         `<td>${fmtDays(p.days)}</td><td>${p.bars == null ? "—" : p.bars}</td>` +
         `<td>${fmtMoney(p.value, { symbol: p._sym })}</td>` +
         `<td>${p.port_pct == null ? "—" : `${Number(p.port_pct).toFixed(1)}%`}</td>` +
-        `<td>${esc(p.pattern)}</td>`;
+        `<td title="${esc(fmtLaya(p))}">${esc(p.pattern)}${p.laya_assessment ? " ◈" : ""}</td>`;
       tr.addEventListener("dblclick", () => openTradeChart("open", p.market, p.symbol, null, null, p.trade_id));
       posBody.appendChild(tr);
     }
@@ -1210,6 +1232,12 @@ function initReplay() {
     if (reason === "breakeven_stop") return "reason-flat";
     return "reason-muted";
   }
+  function fmtLaya(t) {
+    const l = t.laya_assessment;
+    if (!l) return "Laya assessment unavailable";
+    const aid = l.assessment_id ? ` (${l.assessment_id})` : "";
+    return `Laya ${l.mode || "?"} → ${l.outcome || "?"}${aid} [${l.policy_id || "?"}]`;
+  }
   function fmtHold(days, bars) {
     const parts = [];
     if (Number.isFinite(Number(days))) {
@@ -1245,6 +1273,7 @@ function initReplay() {
       opened: p.opened,
       sim_opened: p.sim_opened || p.sim_entry_date || null,
       daily_marks: p.daily_marks || [],
+      laya_assessment: p.laya_assessment || null,
     }));
     const closed = (book.closed_trades || []).map((t) => ({
       market: t.market || book.market,
@@ -1272,6 +1301,7 @@ function initReplay() {
       sim_opened: t.sim_opened || t.sim_entry_date || null,
       sim_closed: t.sim_closed || t.sim_exit_date || null,
       daily_marks: t.daily_marks || [],
+      laya_assessment: t.laya_assessment || null,
     }));
     return {
       running: !!book.running,
@@ -1440,7 +1470,7 @@ function initReplay() {
         `<td class="num">${t.r == null ? "—" : fmtSigned(t.r)}</td>` +
         `<td><span class="pill ${reasonClass(t.reason)}">${esc(fmtReason(t))}</span></td>` +
         `<td class="num">${esc(fmtHold(t.days, t.bars))}</td>` +
-        `<td class="muted" title="${esc(t.pattern)}">${esc(fmtPattern(t.pattern))}</td>`;
+        `<td class="muted" title="${esc(t.pattern)} | ${esc(fmtLaya(t))}">${esc(fmtPattern(t.pattern))}${t.laya_assessment ? " ◈" : ""}</td>`;
       tr.addEventListener("dblclick", () => openReplayTradeChart("closed", t));
       closedBody.appendChild(tr);
     });
@@ -1478,7 +1508,7 @@ function initReplay() {
         `<td>${fmtDays(p.days)}</td><td>${p.bars == null ? "—" : p.bars}</td>` +
         `<td>${fmtMoney(p.value, { symbol: p._sym })}</td>` +
         `<td>${p.port_pct == null ? "—" : `${Number(p.port_pct).toFixed(1)}%`}</td>` +
-        `<td>${esc(p.pattern)}</td>`;
+        `<td title="${esc(fmtLaya(p))}">${esc(p.pattern)}${p.laya_assessment ? " ◈" : ""}</td>`;
       tr.addEventListener("dblclick", () => openReplayTradeChart("open", p));
       posBody.appendChild(tr);
     }

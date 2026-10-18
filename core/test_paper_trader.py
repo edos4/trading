@@ -203,8 +203,9 @@ def test_paper_on_bar_closes_every_exiting_anchor_on_one_bar():
              stop_loss=106.0, stop_loss_on_close=True), _bar(100.0), store)
     assert acct.open_count() == 2
 
-    # a gap-up close above both invalidation stops exits both on the same bar
-    closed = acct.on_bar("NVDA", _bar(110.0, day=6), "1d", True)
+    # Close-confirmed invalidations queue; both execute at the following open.
+    assert acct.on_bar("NVDA", _bar(110.0, day=6), "1d", True) == []
+    closed = acct.on_bar("NVDA", _bar(112.0, day=7), "1d", True)
     assert len(closed) == 2
     assert {t.pattern for t in closed} == {
         "pattern_002_double_top", "pattern_008_head_and_shoulders",
@@ -291,5 +292,6 @@ def test_position_marks_record_exit_fill_not_bar_close():
     assert closed[0].exit_reason == "stop_loss"
     assert t.position_marks[-1]["close"] == 90.0
     assert t.position_marks[-1]["status"] == "stop_loss"
-    assert t.position_marks[-1]["unrl_pct"] == -10.0
+    assert t.position_marks[-1]["unrl_pct"] == pytest.approx(t.pnl_pct)
+    assert t.position_marks[-1]["mtm"] == pytest.approx(t.pnl_usd)
 

@@ -229,6 +229,8 @@ def test_export_from_paper_account():
         qty=10,
         stop_loss=45.0,
         take_profit=60.0,
+        laya_assessment={"assessment_id": "asm-1", "policy_id": "pol-1",
+                         "mode": "filter", "outcome": "allow"},
     )
     acct.positions["MSFT"] = [open_t]
     acct._last_price["MSFT"] = 55.0
@@ -245,6 +247,10 @@ def test_export_from_paper_account():
     assert book["closed_trades"][0]["exit_reason"] == "take_profit"
     assert book["open_positions"][0]["symbol"] == "MSFT"
     assert book["open_positions"][0]["current"] == 55.0
+    assert book["open_positions"][0]["laya_assessment"] == {
+        "assessment_id": "asm-1", "policy_id": "pol-1",
+        "mode": "filter", "outcome": "allow"}
+    assert book["closed_trades"][0]["laya_assessment"] is None
     assert book["scan_stats"]["trades_opened"] == 2
     assert book["metrics"]["profit_factor"] is None
     json.dumps(payload, allow_nan=False)

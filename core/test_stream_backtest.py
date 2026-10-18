@@ -114,13 +114,15 @@ def test_future_bar_mutation_cannot_change_earlier_fills(published_pattern_catal
     mutated = copy.deepcopy(rows)
     for row in mutated:
         if datetime.fromisoformat(row[0]).date().isoformat() > cutoff:
-            row[1] = row[3] * 0.5
-            row[2] = row[3] * 0.5
-            row[4] = row[3] * 0.5
+            for column in (1, 2, 3, 4):
+                row[column] *= 0.5
     after = _run(store, mutated)
-    assert _core({"trades": {"trades": [t for t in after["trades"]["trades"]
-                                        if t["entryDate"] <= cutoff]}}) == \
-        _core({"trades": {"trades": [t for t in trades if t["entryDate"] <= cutoff]}})
+    def entries(result):
+        return [(t["sym"], t["pattern"], t["entryDate"], t["entryPrice"], t["shares"])
+                for t in result["trades"]["trades"] if t["entryDate"] <= cutoff]
+    # Future prices may change exits/P&L; they cannot change already filled entries.
+    assert entries(after) == entries(baseline)
+
 
 
 def test_warmup_sessions_never_trade(published_pattern_catalog):

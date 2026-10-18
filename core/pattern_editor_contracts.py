@@ -171,6 +171,29 @@ class ExecutionSettings(Contract):
     parameters: tuple[Parameter, ...] = ()
 
 
+class LayaExperimentSettings(Contract):
+    """Frozen Laya experiment selection (docs/laya.md P4).
+
+    Deliberate additive extension: old payloads without this block validate
+    with mode off. Off by default; filter needs an explicit policy + readiness.
+    """
+
+    mode: Literal["off", "shadow", "filter"] = "off"
+    policy_id: Identifier | None = None
+    task_id: Identifier = "candidate-review-v1"
+    model_id: str = "pinned"
+    calibration_id: str = "uncalibrated"
+
+
+class EvaluationProtocol(Contract):
+    """Operator-declared holdout boundaries; never proof that data was unseen."""
+    purpose: Literal["research", "holdout", "final-holdout"] = "research"
+    training_end: date | None = None
+    strategy_frozen_at: AwareDatetime | None = None
+    selection_note: str = ""
+    final_holdout_start: date | None = None
+
+
 class BacktestSettings(Contract):
     mode: Literal["offline", "historical-stream"]
     market: Literal["us", "ph"]
@@ -179,6 +202,8 @@ class BacktestSettings(Contract):
     universe: Identifier | None = None
     window: ReplayWindow | None = None
     execution: ExecutionSettings
+    laya: LayaExperimentSettings | None = None
+    evaluation: EvaluationProtocol | None = None
 
     @model_validator(mode="after")
     def supported_combination(self):
@@ -191,6 +216,26 @@ class BacktestSettings(Contract):
                 raise ValueError("Stream requires a replay window and stream end policy")
         elif self.window is not None or self.execution.end_policy != "offline-legacy":
             raise ValueError("Offline mode uses its existing full-tape/end policy")
+        protocol = self.evaluation
+        if protocol is not None and protocol.purpose != "research":
+            if self.mode != "historical-stream" or self.window is None or self.window.end_date is None:
+                raise ValueError("Holdout evaluation requires historical-stream and explicit date bounds")
+            if protocol.training_end is None or protocol.training_end >= self.window.start_date:
+                raise ValueError("Training outcomes must end before holdout starts")
+            if protocol.strategy_frozen_at is None or not protocol.selection_note.strip():
+                raise ValueError("Holdout requires strategy freeze time and selection evidence")
+            if self.execution.end_policy != "force-close":
+                raise ValueError("Holdout folds must force-close at their boundary")
+            if protocol.final_holdout_start is not None:
+                if protocol.purpose == "holdout" and self.window.end_date >= protocol.final_holdout_start:
+                    raise ValueError("Development folds must not enter the reserved final holdout")
+                if protocol.purpose == "final-holdout" and self.window.start_date < protocol.final_holdout_start:
+                    raise ValueError("Final holdout starts before its reserved boundary")
+        laya = self.laya
+        if laya is not None and laya.mode != "off" and self.mode != "historical-stream":
+            raise ValueError("Laya experiments require historical-stream mode")
+        if laya is not None and laya.mode == "filter" and not laya.policy_id:
+            raise ValueError("Laya filter mode requires a policy_id")
         return self
 
 

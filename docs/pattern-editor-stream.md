@@ -18,10 +18,14 @@ from the same functions the paper account uses:
 | Flat-notional sizing | `core.backtester._apply_notional_sizing` |
 | Board-lot rounding (PH) | `core.market.apply_lot_rounding` |
 
-Ordering per session mirrors `PaperAccount.on_bar` → `open_position`: the open
-positions are managed against the bar first, then the bar's fresh signals are
-drained and opened. `core/stream_backtest.py` is the only place that decides
-*when* those shared functions are called; it never re-implements them.
+Ordering per session fills queued entries at the next observed open, manages
+positions against that bar, then queues decisions from its close. Both paths
+use `core.execution.opening_candidate` for structural-gap validation and sizing.
+Entries keep structural stop/target prices and reject openings beyond them.
+The corrected `causal-v1` exit model uses prior-bar trailing references and
+queues close-confirmed exits for the following open. Legacy trades explicitly
+retain their original ladder. See [the correctness plan](fix-backtest.md) for
+compatibility, fees, pending-order persistence, and evaluation boundaries.
 
 ## Isolation (P06-02)
 
@@ -61,9 +65,13 @@ bar on a session is simply skipped; unequal histories are normal.
 ## Effective settings, end policy and metrics (P06-05)
 
 The replay applies the frozen `ExecutionSettings`: capital, fixed-notional
-sizing, transaction costs, slippage (through the shared fill math), the version
-`collect_first` and non-fixed sizing modes are rejected at submission rather
-than silently ignored.
+sizing, transaction costs, slippage, versions, history window, volume gate and
+collect-first selection. Collect-first ranks all session candidates using the
+scanner's shared R:R/confidence/symbol ordering, then applies the volume gate
+to the selected top-N without backfilling rejections. Non-fixed sizing, vision
+confirmation, and Laya combined with collect-first are explicitly unsupported.
+Entry commissions reduce equity immediately; closed-trade P&L includes both
+legs, so reported fees must not be subtracted from net P&L again.
 
 End policy is explicit:
 

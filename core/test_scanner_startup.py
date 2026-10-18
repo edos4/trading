@@ -39,6 +39,39 @@ def test_start_retries_until_versions_resolve(monkeypatch):
     assert sleeps == [60.0, 60.0]
 
 
+def test_duration_stop_fires_on_session_count():
+    scanner = _scanner()
+    scanner._duration_days = 3
+    scanner._sim_days = 0
+    scanner._running = True
+    scanner.stats = {"scan_complete": True}
+    assert scanner._stop_if_duration_reached() is False
+    assert scanner._running is True
+    scanner._sim_days = 3
+    assert scanner._stop_if_duration_reached() is True
+    assert scanner._running is False
+
+
+def test_duration_unlimited_never_stops():
+    scanner = _scanner()
+    scanner._duration_days = None
+    scanner._sim_days = 10_000
+    scanner._running = True
+    scanner.stats = {"scan_complete": True}
+    assert scanner._stop_if_duration_reached() is False
+    assert scanner._running is True
+
+
+def test_duration_waits_for_complete_scan():
+    scanner = _scanner()
+    scanner._duration_days = 3
+    scanner._sim_days = 5
+    scanner._running = True
+    scanner.stats = {"scan_complete": False}
+    assert scanner._stop_if_duration_reached() is False
+    assert scanner._running is True
+
+
 def test_retry_wait_is_cancellable(monkeypatch):
     scanner = _scanner()
     attempts = []

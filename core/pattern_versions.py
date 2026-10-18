@@ -22,6 +22,9 @@ def runtime_manifest(root):
             for dependency, data in collect_sources(root, name, paired=False, prune_package='patterns').items():
                 if not dependency.startswith('patterns/') or dependency == 'patterns/base_pattern.py':
                     files[dependency] = digest(data)
+    for name in ('core/execution.py', 'core/paper_trader.py', 'core/stream_backtest.py', 'core/scanner.py'):
+        if (root / name).exists():
+            files[name] = digest((root / name).read_bytes())
     return {'python':sys.version, 'cache_tag':sys.implementation.cache_tag, 'files':files,
             'packages':{d.metadata['Name']: d.version for d in importlib.metadata.distributions()
                         if d.metadata['Name']}}

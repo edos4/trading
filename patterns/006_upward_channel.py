@@ -85,7 +85,11 @@ class UpwardChannelPattern(BasePattern):
             return self._stub(snapshot, price, setup,
                               filtered_reason=f"C23 chasing ({drop * 100:.1f}%)")
         # v9 earnings blackout.
-        if earnings_blackout(df, snapshot.symbol, setup.entry, EARNINGS_WINDOW_BARS):
+        earnings = earnings_blackout(df, snapshot.symbol, setup.entry, EARNINGS_WINDOW_BARS)
+        if earnings is None:
+            return self._stub(snapshot, price, setup,
+                              blocked_reason="Point-in-time earnings calendar unavailable")
+        if earnings:
             return self._stub(snapshot, price, setup, blocked_reason="earnings")
 
         stop = round(setup.second_price * STOP_MULT, 4)

@@ -100,6 +100,7 @@ def submit_backtest_run(
     preset_id: Optional[str] = None,
     preset_name: Optional[str] = None,
     idempotency_key: Optional[str] = None,
+    evaluation: Optional[dict[str, Any]] = None,
 ) -> dict:
     """Submit a durable shared-service backtest run; returns {"run_id", "state"}.
 
@@ -132,6 +133,7 @@ def submit_backtest_run(
         ("preset_id", preset_id),
         ("preset_name", preset_name),
         ("idempotency_key", idempotency_key),
+        ("evaluation", evaluation),
     ):
         if value is not None:
             body[key] = value

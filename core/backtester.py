@@ -52,6 +52,10 @@ _CACHE_TTL_SECONDS = 6 * 3600
 _COMPATIBLE_EXIT_ENGINE_HASHES = frozenset({
     "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
     "87b3f4d03c1825250fe848ba8291ee48eb0ad94f26c4dfac38e44bc06036c4bc",
+    # 2026-10-15: BacktestTrade gained the additive laya_assessment evidence
+    # field (no exit-logic change). Positions saved under the pre-change hash
+    # keep the identical ladder, so they stay manageable.
+    "367dfba2afae440b1f4a2dc3783f4c40ff7cc022d456d2b9fcc06fb46c6db104",
 })
 
 
@@ -132,6 +136,16 @@ class BacktestTrade:
     # One mark per market session while open (paper trading).
     position_marks: list[dict] = field(default_factory=list)
     chart_annotations: list[dict] = field(default_factory=list)
+    # Laya gate verdict authorizing this entry, copied from the signal by
+    # _open_trade ({assessment_id, policy_id, mode, outcome}). Survives
+    # Paper -> export -> Replay so any fill traces back to its assessment.
+    # None when no gate ran.
+    laya_assessment: dict | None = None
+
+    execution_model: str = "legacy"
+    pending_exit_reason: str = ""
+    entry_fee_paid: float = 0.0
+    decision_date: datetime | None = None
 
     _trailing_activated: bool = False
     _best_pnl_pct: float | None = None
@@ -326,7 +340,7 @@ class BacktestResult:
     def summary(self, buckets: dict[str, frozenset[str]] | None = None) -> str:
         lines = [
             "=" * 66,
-            f"  PATTERN BACKTEST{('  -  ' + self.version) if self.version else ''}",
+            f"  {'PAPER RESEARCH' if self.version.startswith('paper/') else 'LEGACY HISTORICAL REPLICATION'} (independent trades){('  -  ' + self.version) if self.version else ''}",
             f"  ${self.position_notional:,.0f} per trade  -  {self.total_signals} signals",
             "=" * 66,
         ]
@@ -365,6 +379,8 @@ class BacktestResult:
     def to_dict(self, buckets: dict[str, frozenset[str]] | None = None) -> dict:
         return {
             "meta": {
+                "evaluation": "paper-research" if self.version.startswith("paper/") else "legacy-historical-replication",
+                "account_model": "independent-fixed-notional",
                 "date": datetime.now(timezone.utc).isoformat(),
                 "version": self.version,
                 "notional": self.position_notional,
@@ -601,7 +617,72 @@ def _time_exit_allowed(position: BacktestTrade, candle: OHLCVCandle) -> bool:
     return not (position._best_pnl_pct is not None and position._best_pnl_pct >= floor)
 
 
-def _check_exit(
+def _check_exit(candle: OHLCVCandle, position: BacktestTrade, bar_idx: int):
+    if position.execution_model == "legacy":
+        return _check_exit_legacy(candle, position, bar_idx)
+    if position.execution_model != "causal-v1":
+        raise ValueError("Unknown position execution model")
+    from core.pattern_provenance import engine_hash
+    if position.resolved_rules and position.resolved_rules.get("engine_sha256") != engine_hash():
+        raise RuntimeError("Position exit runtime changed; restore its compatible engine before management")
+    if position.pending_exit_reason:
+        position.exit_bar_idx = bar_idx
+        return candle.open, position.pending_exit_reason
+    short = position.action == "SELL"
+    stop = _effective_stop(position)
+    trail = _trailing_stop_price(position, short)
+    resting = []
+    if not (position.stop_loss_on_close or position.exit_fill_at_close):
+        if stop is not None:
+            resting.append((stop, False, "stop_loss"))
+    if not (position.trailing_stop_on_close or position.exit_fill_at_close):
+        if trail is not None:
+            resting.append((trail, False, "trailing_stop"))
+    # The nearer protective order is reached first; OHLC ties favor protection.
+    resting.sort(key=lambda order: order[0], reverse=not short)
+    if position.take_profit is not None and not position.exit_fill_at_close:
+        resting.append((position.take_profit, True, "take_profit"))
+    # Opening orders precede intrabar touches, including a gap through a target.
+    for opening_only in (True, False):
+        for trigger, favorable, reason in resting:
+            price = _gap_aware_trigger_fill(candle, trigger, is_short=short, favorable=favorable)
+            gapped = (candle.open <= trigger if short else candle.open >= trigger) if favorable else (
+                candle.open >= trigger if short else candle.open <= trigger)
+            if price is not None and (not opening_only or gapped):
+                position.exit_bar_idx = bar_idx
+                return price, reason
+    _update_best_pnl(position, candle)
+    reason = ""
+    if (position.stop_loss_on_close or position.exit_fill_at_close) and stop is not None:
+        if candle.close > stop if short else candle.close < stop:
+            reason = "stop_loss"
+    if not reason and (position.trailing_stop_on_close or position.exit_fill_at_close) and trail is not None:
+        if candle.close > trail if short else candle.close < trail:
+            reason = "trailing_stop"
+    if not reason and position.exit_fill_at_close and position.take_profit is not None:
+        if candle.close <= position.take_profit if short else candle.close >= position.take_profit:
+            reason = "take_profit"
+    if not reason and position.reclaim_exit and position.prev_high is not None:
+        rail = _reclaim_rail_at(position, bar_idx)
+        if (rail is not None and position.prev_low is not None and candle.close > rail
+                and candle.high > position.prev_high and candle.low > position.prev_low):
+            reason = "reclaim"
+    if not reason and _time_exit_allowed(position, candle):
+        clocks = ((position.exit_bars_after_entry, position.entry_bar_idx),
+                  (position.exit_bars_after_neckline_break, position.neckline_break_bar_idx))
+        for limit, start in clocks:
+            if limit is not None and start is not None and bar_idx - start >= limit:
+                reason = "time_exit"
+                position.time_exit_bars_elapsed = bar_idx - start
+                break
+    # A decision requiring this close cannot execute before the following open.
+    position.pending_exit_reason = reason
+    _update_trailing_reference(position, candle)
+    _trailing_stop_price(position, short)
+    return None, ""
+
+
+def _check_exit_legacy(
     candle: OHLCVCandle, position: BacktestTrade, bar_idx: int
 ) -> tuple[float | None, str]:
     """Fixed per-pattern exit ladder — see module docstring. No engine overlays."""
@@ -741,7 +822,7 @@ def _apply_notional_sizing(
 
 # ── Trade lifecycle ─────────────────────────────────────────────────────────
 def _open_trade(
-    signal: TradeSignal, candle: OHLCVCandle, bar_idx: int
+    signal: TradeSignal, candle: OHLCVCandle, bar_idx: int, *, execution_model: str = "legacy"
 ) -> BacktestTrade:
     entry_price = candle.close
     if signal.action not in ("BUY", "SELL"):
@@ -777,6 +858,8 @@ def _open_trade(
 
     ts = candle.timestamp or datetime.now(timezone.utc)
     position = BacktestTrade(
+        execution_model=execution_model,
+        decision_date=signal.signal_bar_timestamp,
         chart_annotations=[dict(a) for a in signal.chart_annotations],
         symbol=signal.symbol,
         timeframe=signal.timeframe,
@@ -820,6 +903,8 @@ def _open_trade(
         highest_high_since_entry=candle.high if signal.trailing_stop_mode == "highest_high" else None,
         highest_low_since_entry=candle.close if signal.trailing_stop_mode == "highest_low" else None,
         lowest_high_since_entry=candle.close if signal.trailing_stop_mode == "lowest_high" else None,
+        laya_assessment=(dict(signal.laya_assessment)
+                         if getattr(signal, "laya_assessment", None) else None),
     )
     # Start the neckline time-stop clock only once the close is actually
     # through the neckline. If entry is a day-7 fill with no break yet,
@@ -837,7 +922,8 @@ def _open_trade(
     position.requested_rules = deepcopy(signal.requested_rules) if signal.requested_rules else rules(signal)
     position.time_exit_only_unfavorable = signal.time_exit_only_unfavorable
     position.time_exit_min_mfe_pct = signal.time_exit_min_mfe_pct
-    position.resolved_rules = rules(position, "fill")
+    position.resolved_rules = rules(position, "fill", entry_mode=(
+        "next-observed-open" if execution_model == "causal-v1" else "signal-close"))
     return position
 
 
@@ -861,6 +947,8 @@ def _close_trade(
     position.pnl = pnl
     position.pnl_pct = (pnl / position.entry_price) * 100 if position.entry_price else 0.0
     position.exit_reason = reason
+    if position.position_marks:
+        position.position_marks[-1].update(mtm=position.pnl_usd, unrl_pct=position.pnl_pct, status=reason)
     log.info(
         f"Backtest | EXIT {position.symbol} {position.timeframe} "
         f"reason={reason} pnl={position.pnl_pct:+.2f}%"
@@ -899,7 +987,7 @@ def _core_backtest_symbol(
         return [], 0, [], []
 
     store = OHLCVStore(
-        window=DEFAULT_WINDOW,
+        window=max(DEFAULT_WINDOW, len(candles)),
         session_tz=config.get("session_tz") or "America/New_York",
     )
     trades: list[BacktestTrade] = []

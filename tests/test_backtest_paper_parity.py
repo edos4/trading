@@ -1,5 +1,6 @@
 """Backtest and paper share `_open_trade` / `_check_exit` / `_close_trade`; this
-proves they still produce the *same* fills.
+checks legacy helper/fill equivalence, not causal scanner signal parity.
+The paper side deliberately supplies full history and historical-walk state.
 
 The backtester's walk over a fixture symbol yields the golden trade; the same
 bars are then streamed one-by-one through a `PaperAccount` (open on the bar the
@@ -62,6 +63,7 @@ def _paper_trade(pattern, symbol, candles):
     acct = PaperAccount(
         initial_capital=1_000_000.0, market="us", slippage_pct=0.0, txn_cost_pct=0.0,
     )
+    acct.execution_model = "legacy"  # This fixture checks the legacy helper ladder.
     acct.assume_session_open = True
     store = OHLCVStore(session_tz=get_market("us").session_tz)
     store.replace_all(symbol, "1d", candles)  # full history, like the walk

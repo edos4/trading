@@ -123,8 +123,8 @@ class BacktestDialog:
 
         entries = [
             ("mode", "Mode",
-             "offline replays the full tape; historical-stream replays session-by-session like paper.",
-             "combo", "offline", ["offline", "historical-stream"]),
+             "offline is legacy replication with future-data access; historical-stream is causal research.",
+             "combo", "historical-stream", ["offline", "historical-stream"]),
         ] + [
             e for e in REPLAY_PARAMS
             if e[0] not in self.STREAM_SKIP
@@ -305,7 +305,8 @@ class BacktestDialog:
             m = payload["result"].metrics
             settings = payload["inputs"].request.preset.settings
             lines += [
-                f"Mode:        {settings.mode}",
+                f"Mode:        {settings.mode} (legacy replication)" if settings.mode == "offline" else "Mode:        causal research replay",
+                "Account:     independent fixed-notional research",
                 f"End policy:  {settings.execution.end_policy}",
                 "",
                 f"Trades:      {m.trade_count}"

@@ -171,7 +171,7 @@ def test_web_rejects_malformed_and_unsupported_settings(web_env):
     bad = _body(service, rows, start_date=None)
     assert client.post("/api/backtest/runs", json=bad).status_code >= 400
     # unsupported gate combination is rejected by shared validation
-    assert client.post("/api/backtest/runs", json=_body(service, rows, collect_first=4)).status_code == 400
+    assert client.post("/api/backtest/runs", json=_body(service, rows, mode="offline", collect_first=4)).status_code == 400
     # unknown version is rejected
     unknown = _body(service, rows, versions={PATTERN: "does-not-exist"})
     assert client.post("/api/backtest/runs", json=unknown).status_code == 400

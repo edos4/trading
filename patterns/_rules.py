@@ -123,14 +123,18 @@ def _earnings_cache() -> dict[str, list[int]]:
     return _EARNINGS_CACHE
 
 
-def earnings_blackout(df: pd.DataFrame, symbol: str, entry: int, bars: int) -> bool:
-    """True if an earnings date falls inside [entry, entry+bars+1 day].
+def earnings_blackout(df: pd.DataFrame, symbol: str, entry: int, bars: int) -> bool | None:
+    """Legacy occurrence lookup; None when causal announcement evidence is absent.
 
     When the offline earnings cache is present (deterministic backtests) it is
     the sole source of truth — a symbol absent from it has no known earnings
     and is not blocked, exactly like the `.cjs` `earnMap[tk] || []`. Only when
     there is no cache at all does this fall back to a live SEC EDGAR lookup.
     """
+    from patterns import _dedup
+    if not _dedup.historical_walk():
+        # Filing occurrence dates do not prove the event was announced at entry.
+        return None
     try:
         start = as_date(df.index[entry])
         if entry + bars < len(df):

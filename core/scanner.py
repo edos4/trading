@@ -42,6 +42,7 @@ from data.tv_client import TVClient, MarketSnapshot
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
 from data.stream_client import FetchSkip
 from analysis.chart_renderer import ChartRenderer
+from analysis.price_volume import volume_confirm_gate
 from analysis.vision_checker import VisionChecker, VisionVerdict
 from core.paper_trader import PaperAccount
 from core.engine_defaults import ENGINE
@@ -100,6 +101,25 @@ def signal_reward_risk(signal) -> float | None:
     risk = abs(signal.price - signal.stop_loss)
     return abs(signal.take_profit - signal.price) / risk if risk > 0 else None
 
+
+def _tail_column(store, signal, column: str, limit: int = 60) -> list[float] | None:
+    """Last `limit` values of a store column for the Laya evidence snapshot."""
+    try:
+        df = store.get_df(signal.symbol, signal.timeframe, min_bars=2)
+    except Exception:
+        return None
+    if df is None or len(df) == 0 or column not in df.columns:
+        return None
+    out: list[float] = []
+    for value in df[column].tail(limit).tolist():
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if number == number:  # skip NaN
+            out.append(number)
+    return out or None
+
 # TODO: re-enable IBKR when TWS/Gateway is available
 # from broker.ibkr_client import IBKRClient
 # from broker.order_manager import OrderManager
@@ -157,6 +177,9 @@ class MarketScanner:
         collect_first_top_n: int | None = None,
         duration_days: int | None = None,
         tv_stack_id: str = "",
+        laya_mode: str = "off",
+        laya_policy_id: str = "",
+        laya_assess=None,
     ):
         self._symbols = symbols or settings.symbols
         self._disabled_patterns = set(disabled_patterns or [])
@@ -171,15 +194,14 @@ class MarketScanner:
             if scan_interval_seconds is None
             else int(scan_interval_seconds)
         )
-        # 2026-09 refactor: ML gate / volume gate / collect-first
-        # are removed from the money path. Accept the kwargs for API
-        # compatibility but hard-disable them.
-        self._volume_gate = False
+        self._volume_gate = settings.volume_gate_enabled if volume_gate is None else bool(volume_gate)
+        self._volume_gate_rvol_min = settings.volume_gate_rvol_min
+        self._volume_gate_obv_bars = settings.volume_gate_obv_bars
         self._tv_stack_id = (tv_stack_id or "").strip()
         self._indicators_only = bool(indicators_only) or bool(self._tv_stack_id)
         self._patterns_v2 = bool(patterns_v2) and not self._indicators_only
         self._pattern_only = bool(pattern_only) and not self._indicators_only
-        self._collect_first = False
+        self._collect_first = settings.collect_first_enabled if collect_first is None else bool(collect_first)
         self._collect_first_top_n = (
             settings.collect_first_top_n
             if collect_first_top_n is None
@@ -282,6 +304,17 @@ class MarketScanner:
             load_signal_log(self._market), maxlen=SIGNAL_LOG_MAX,
         )
         self._signal_log_lock = threading.Lock()
+        # Laya paper integration (docs/laya.md P5/P6). Frozen per book start;
+        # mode changes require stopping and restarting that book. Off preserves
+        # baseline behavior. Shadow snapshots eligible candidates and assesses
+        # asynchronously with no effect on fills. Filter requires a valid
+        # assessment under a pinned policy (paper/simulation entries only).
+        if laya_mode not in ("off", "research", "shadow", "filter"):
+            raise ValueError(f"Unsupported Laya mode: {laya_mode}")
+        self._laya_mode = laya_mode
+        self._laya_policy_id = (laya_policy_id or "").strip()
+        self._laya_assess = laya_assess
+        self._laya_shadow: list[dict] = []
 
     def signal_log_snapshot(self) -> list[dict]:
         with self._signal_log_lock:
@@ -886,11 +919,6 @@ class MarketScanner:
             and self._last_bar_ts.get(bar_key) != identity
             and identity_key != persisted_key
         )
-        if identity is not None and closed_bar:
-            self._last_bar_ts[bar_key] = identity
-            if identity_key is not None and self._paper is not None:
-                self._paper.mark_bar_processed(symbol, timeframe, identity_key)
-                self._persisted_bar_ids[f"{symbol}|{timeframe}"] = identity_key
         new_closed_daily = False
         if is_new_bar and bar_ts is not None:
             self.stats["new_bars"] += 1
@@ -906,6 +934,12 @@ class MarketScanner:
                 new_closed_daily = True
 
         if self._paper is not None:
+            if is_new_bar and self._paper.assume_session_open:
+                for signal, opened, reason in self._paper.fill_pending(
+                        symbol, timeframe, snapshot.candle, self._store, recheck=self._laya_check):
+                    key = "trades_opened" if opened else "signals_rejected"
+                    self.stats[key] += 1
+                    self._append_signal_log(signal, status="filled" if opened else "rejected", reason=reason)
             for closed in self._paper.on_bar(
                 symbol, snapshot.candle, timeframe, is_new_bar,
             ):
@@ -918,6 +952,11 @@ class MarketScanner:
             if is_new_bar:
                 self._trail_indicators(symbol, timeframe, snapshot.candle)
 
+        if identity is not None and closed_bar:
+            self._last_bar_ts[bar_key] = identity
+            if identity_key is not None and self._paper is not None:
+                self._paper.mark_bar_processed(symbol, timeframe, identity_key)
+                self._persisted_bar_ids[f"{symbol}|{timeframe}"] = identity_key
         if not is_new_bar:
             return new_closed_daily, None
 
@@ -1134,6 +1173,12 @@ class MarketScanner:
             )
             signal.signal_bar_timestamp = candle.timestamp
 
+        reason = signal.blocked_reason or signal.filtered_reason
+        if reason:
+            self.stats["signals_rejected"] += 1
+            self._append_signal_log(signal, status="rejected", reason=reason)
+            return
+
         # Execution risk gates — enforced regardless of Pattern-only.
         # Pattern-only exists to isolate raw pattern edge from *signal-quality*
         # filters (confidence / regime / long-only) below, but the min-price
@@ -1246,31 +1291,9 @@ class MarketScanner:
         pool = self._collect_pool
         self._collect_pool = []
 
-        # One entry per (symbol, timeframe) — keep the highest R:R signal.
-        best: dict[tuple[str, str], tuple[TradeSignal, BasePattern | None, object]] = {}
-        for signal, pattern, candle in pool:
-            key = (signal.symbol, signal.timeframe)
-            rr = signal_reward_risk(signal)
-            existing = best.get(key)
-            if existing is None:
-                best[key] = (signal, pattern, candle)
-                continue
-            existing_rr = signal_reward_risk(existing[0])
-            if rr is not None and (existing_rr is None or rr > existing_rr):
-                best[key] = (signal, pattern, candle)
-
-        def _sort_key(item):
-            rr = signal_reward_risk(item[0])
-            return (
-                rr is None,
-                -(rr if rr is not None else 0.0),
-                -float(item[0].confidence),
-                item[0].symbol,
-            )
-
-        ranked = sorted(best.values(), key=_sort_key)
-        selected = ranked[: self._collect_first_top_n]
-        rejected = ranked[self._collect_first_top_n :]
+        from core.execution import rank_candidates
+        selected, rejected = rank_candidates(pool, self._collect_first_top_n)
+        ranked = selected + rejected
 
         self.stats["collect_first_ranked"] = self.stats.get("collect_first_ranked", 0) + len(ranked)
         self.stats["collect_first_selected"] = self.stats.get("collect_first_selected", 0) + len(selected)
@@ -1307,7 +1330,8 @@ class MarketScanner:
         self, signal: TradeSignal, pattern: BasePattern | None = None, candle=None,
     ) -> None:
         if self._volume_gate:
-            vgate = volume_confirm_gate(signal, self._store)
+            vgate = volume_confirm_gate(signal, self._store,
+                                       rvol_min=self._volume_gate_rvol_min, obv_bars=self._volume_gate_obv_bars)
             if not vgate.passed:
                 reason = (
                     f"Volume confirm gate vetoed this {signal.action}: {vgate.reason}. "
@@ -1366,17 +1390,58 @@ class MarketScanner:
                 self._append_signal_log(signal, status="rejected", reason=reason)
                 return
 
-        # Step 3 — Place the order (disabled while IBKR is commented out).
-        # Fill on the signal bar's close — same signal-bar entry as the
-        # backtester (not next-bar deferred entry).
+        # Laya paper check (docs/laya.md section 10). Runs after the existing
+        # volume/vision requirements and before the paper entry call, scoped
+        # explicitly to paper execution. Shadow snapshots the immutable
+        # candidate context immediately before the entry attempt and enqueues
+        # without awaiting inference (no latency/fill change). Filter rechecks
+        # book liveness, eligibility, and deadline before entry. Mandatory
+        # position management and CLOSE/exit handling continue on model failure.
+        if self._laya_mode in ("shadow", "filter") and self._paper is not None and candle is not None:
+            verdict = self._laya_check(signal, candle,
+                                       closes=_tail_column(self._store, signal, "close"),
+                                       volumes=_tail_column(self._store, signal, "volume"))
+            # Stamp the verdict on the signal: _open_trade copies it onto the
+            # trade, so fills trace back to their assessment in Paper/export.
+            signal.laya_assessment = {
+                "assessment_id": verdict.get("assessment_id"),
+                "policy_id": self._laya_policy_id or "laya-event-v1-default",
+                "mode": self._laya_mode,
+                "outcome": verdict.get("outcome", "abstain"),
+            }
+            if self._laya_mode == "shadow":
+                # Shadow: record only, including on errors. Never affects fills.
+                self._laya_shadow.append(verdict)
+                self.stats["laya_shadow"] = self.stats.get("laya_shadow", 0) + 1
+            else:
+                outcome = verdict.get("outcome", "abstain")
+                if outcome != "allow":
+                    reason = (
+                        f"Laya filter {outcome}: "
+                        + "; ".join(verdict.get("reasons") or ["no reason"])
+                        + f" (assessment {verdict.get('assessment_id') or 'missing'})"
+                    )
+                    log.info(f"Laya FILTER | {signal.symbol} {signal.pattern} | {reason}")
+                    self.stats["signals_rejected"] += 1
+                    self.stats["laya_filtered"] = self.stats.get("laya_filtered", 0) + 1
+                    self._append_signal_log(signal, status="rejected", reason=reason)
+                    return
+
+        # Completed-bar decisions queue for retrospective next-open simulation.
         if self._paper is not None and candle is not None:
-            opened, fill_reason = self._paper.open_position(
+            if not self._paper.assume_session_open:
+                self._append_signal_log(signal, status="rejected", reason=(
+                    "Closed-bar feed has no executable live quote; enable historical replay "
+                    "for retrospective next-open simulation."))
+                self.stats["signals_rejected"] += 1
+                return
+            opened, fill_reason = self._paper.queue_position(
                 signal, candle, self._store,
             )
             if opened:
-                self.stats["trades_opened"] += 1
+                self.stats["orders_queued"] = self.stats.get("orders_queued", 0) + 1
                 self._append_signal_log(
-                    signal, status="filled", reason=fill_reason,
+                    signal, status="queued", reason=fill_reason,
                 )
             else:
                 self.stats["signals_rejected"] += 1
@@ -1411,6 +1476,59 @@ class MarketScanner:
     def ohlcv_frame(self, symbol: str, timeframe: str, min_bars: int = 2):
         """OHLCV for on-demand chart rendering (open/closed row click)."""
         return self._store.get_df(symbol, timeframe, min_bars=min_bars)
+
+    def _laya_check(self, signal: TradeSignal, candle,
+                    *, closes=None, volumes=None) -> dict:
+        """Synchronous deterministic policy gate for paper entries.
+
+        Captures the immutable candidate context after deterministic
+        eligibility checks. Without a configured assessor, shadow records an
+        operational note (drops the assessment, fills unchanged) while filter
+        must not execute an unaudited entry (abstain → skip). Inference
+        timeout/malformed/stale/missing are abstentions, not positive votes.
+        """
+        ts = getattr(candle, "timestamp", None)
+        snapshot = {
+            "symbol": signal.symbol,
+            "timeframe": signal.timeframe,
+            "market": self._market,
+            "pattern": signal.pattern,
+            "pattern_version_id": getattr(signal, "pattern_version_id", None),
+            "action": signal.action,
+            "price": signal.price,
+            "stop": signal.stop_loss,
+            "target": signal.take_profit,
+            "confidence": signal.confidence,
+            "bar_close": getattr(candle, "close", None),
+            "bar_ts": ts.isoformat() if ts is not None else None,
+            "closes": list(closes) if closes else None,
+            "volumes": list(volumes) if volumes else None,
+            "mode": self._laya_mode,
+            "policy_id": self._laya_policy_id or "laya-candidate-v1-default",
+        }
+        if self._laya_assess is None:
+            if self._laya_mode == "shadow":
+                return {"outcome": "allow", "reasons": ["shadow: no assessor; baseline fill"],
+                        "assessment_id": None, "snapshot": snapshot}
+            return {"outcome": "abstain", "reasons": ["filter: missing Laya assessment"],
+                    "assessment_id": None, "snapshot": snapshot}
+        try:
+            verdict = self._laya_assess(deepcopy(snapshot))
+        except Exception as exc:  # noqa: BLE001 - model failure never blocks exits
+            log.warning(f"Laya | assessor failed for {signal.symbol}: {exc}")
+            if self._laya_mode == "shadow":
+                return {"outcome": "allow", "reasons": [f"shadow assessor error: {exc}"],
+                        "assessment_id": None, "snapshot": snapshot}
+            return {"outcome": "abstain", "reasons": [f"assessor error: {exc}"],
+                    "assessment_id": None, "snapshot": snapshot}
+        if not isinstance(verdict, dict) or verdict.get("outcome") not in ("allow", "veto", "abstain"):
+            if self._laya_mode == "shadow":
+                return {"outcome": "allow", "reasons": ["shadow: malformed verdict; baseline fill"],
+                        "assessment_id": None, "snapshot": snapshot}
+            return {"outcome": "abstain", "reasons": ["malformed Laya verdict"],
+                    "assessment_id": None, "snapshot": snapshot}
+        verdict.setdefault("snapshot", snapshot)
+        return verdict
 
     async def _run_vision_check(
         self, signal: TradeSignal, pattern: BasePattern

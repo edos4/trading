@@ -162,6 +162,68 @@ class WebPaperApiTests(unittest.TestCase):
         self.assertTrue(start.call_args.kwargs.get("indicators_only"))
         self.assertFalse(start.call_args.kwargs.get("patterns_v2"))
 
+    def test_laya_checkbox_reaches_paper_start(self) -> None:
+        self._login()
+        body = {
+            "market": "us",
+            "n_symbols": 10,
+            "use_stream": False,
+            "laya_mode": "filter",
+            "laya_policy_id": "laya-candidate-v1-default",
+        }
+        with patch("web.app.paper_books.start", return_value=None) as start:
+            r = self.client.post("/api/paper/start", json=body)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(start.call_args.kwargs.get("laya_mode"), "filter")
+        self.assertEqual(
+            start.call_args.kwargs.get("laya_policy_id"),
+            "laya-candidate-v1-default",
+        )
+
+    def test_laya_defaults_to_off(self) -> None:
+        self._login()
+        body = {"market": "us", "n_symbols": 10, "use_stream": False}
+        with patch("web.app.paper_books.start", return_value=None) as start:
+            r = self.client.post("/api/paper/start", json=body)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(start.call_args.kwargs.get("laya_mode"), "off")
+        self.assertEqual(start.call_args.kwargs.get("laya_policy_id"), "")
+
+    def test_laya_rejects_unknown_mode(self) -> None:
+        self._login()
+        r = self.client.post(
+            "/api/paper/start",
+            json={"market": "us", "n_symbols": 10, "use_stream": False,
+                  "laya_mode": "autotrade"},
+        )
+        self.assertEqual(r.status_code, 400)
+
+    def test_duration_days_reaches_paper_start(self) -> None:
+        self._login()
+        body = {"market": "us", "n_symbols": 10, "use_stream": True,
+                "duration_days": 30}
+        with patch("web.app.paper_books.start", return_value=None) as start:
+            r = self.client.post("/api/paper/start", json=body)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(start.call_args.kwargs.get("duration_days"), 30)
+
+    def test_duration_days_defaults_to_unlimited(self) -> None:
+        self._login()
+        body = {"market": "us", "n_symbols": 10, "use_stream": True}
+        with patch("web.app.paper_books.start", return_value=None) as start:
+            r = self.client.post("/api/paper/start", json=body)
+        self.assertEqual(r.status_code, 200)
+        self.assertIsNone(start.call_args.kwargs.get("duration_days"))
+
+    def test_duration_days_rejects_zero(self) -> None:
+        self._login()
+        r = self.client.post(
+            "/api/paper/start",
+            json={"market": "us", "n_symbols": 10, "use_stream": True,
+                  "duration_days": 0},
+        )
+        self.assertEqual(r.status_code, 400)
+
     def test_export_envelope(self) -> None:
         self._login()
         r = self.client.get("/api/paper/export")

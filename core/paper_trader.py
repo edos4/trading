@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import math
 import threading
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -71,7 +71,7 @@ def _max_open_per_symbol(pattern_name: str) -> int | None:
 
 
 def book_has_trades(account: PaperAccount) -> bool:
-    return bool(account.positions) or bool(account.closed)
+    return bool(account.positions) or bool(account.closed) or bool(account.pending_entries)
 
 
 def resolve_stream_start(
@@ -184,6 +184,7 @@ def _trade_to_dict(t: BacktestTrade) -> dict:
     d = asdict(t)
     d["entry_date"] = t.entry_date.isoformat()
     d["exit_date"] = t.exit_date.isoformat()
+    d["decision_date"] = t.decision_date.isoformat() if t.decision_date else None
     d["sim_entry_date"] = t.sim_entry_date.isoformat() if t.sim_entry_date else None
     d["sim_exit_date"] = t.sim_exit_date.isoformat() if t.sim_exit_date else None
     return d
@@ -199,6 +200,11 @@ def _trade_from_dict(d: dict) -> BacktestTrade:
         import hashlib
         d["trade_id"] = "legacy-" + hashlib.sha256(json.dumps(d,sort_keys=True,default=str).encode()).hexdigest()[:32]
     d.setdefault("provenance", "legacy_unknown")
+    fee = d.get("entry_fee_paid", 0.0)
+    if not isinstance(fee, (int, float)) or isinstance(fee, bool) or not math.isfinite(fee) or fee < 0:
+        raise ValueError("Paper position entry fee must be finite and nonnegative")
+    if d.get("decision_date"):
+        d["decision_date"] = datetime.fromisoformat(d["decision_date"])
     d["entry_date"] = datetime.fromisoformat(d["entry_date"])
     d["exit_date"] = datetime.fromisoformat(d["exit_date"])
     if d.get("sim_entry_date"):
@@ -229,6 +235,7 @@ def _position_mark_row(
         mtm = (price - position.entry_price) * position.qty
     else:
         mtm = (position.entry_price - price) * position.qty
+    mtm -= position.entry_fee_paid
     r_val = r_multiple(position, price)
     return {
         "date": session_date,
@@ -288,6 +295,10 @@ class PaperAccount:
         self.max_daily_loss = float("inf") if max_daily_loss is None else max_daily_loss
         self.positions: dict[str, list[BacktestTrade]] = {}
         self.closed: list[BacktestTrade] = []
+        self.pending_entries: list[TradeSignal] = []
+        self.consumed_anchors: set[tuple] = set()
+        self.order_events: list[dict] = []
+        self.execution_model = "causal-v1"
         self.equity_curve: list[tuple[str, float]] = []
         self._last_price: dict[str, float] = {}
         self._tick = 0
@@ -516,6 +527,7 @@ class PaperAccount:
             else:
                 mtm = (p.entry_price - current) * p.qty
                 short_value += current * p.qty
+            mtm -= p.entry_fee_paid
             unrealized += mtm
             rows.append((sym, p, current, mtm))
 
@@ -547,6 +559,9 @@ class PaperAccount:
             "realized_pnl_dollars": realized,
             "unrealized_pnl_dollars": unrealized,
             "total_pnl_dollars": total_pnl,
+            "fees": sum(p.entry_fee_paid for _, p in positions) + sum(
+                max(0.0, ((t.entry_price - t.exit_price) if t.action == "SELL" else
+                          (t.exit_price - t.entry_price)) * t.qty - t.pnl_usd) for t in closed),
             "positions": rows,  # [(symbol, BacktestTrade, current_price, mtm), ...]
             "closed": closed,
         }
@@ -584,6 +599,62 @@ class PaperAccount:
         self._tick += 1
 
     # ── Signal → simulated fill ──────────────────────────────────────────
+    def queue_position(self, signal: TradeSignal, candle: OHLCVCandle, store: OHLCVStore):
+        from copy import deepcopy
+        from core.execution import stable_anchors
+        with self._lock:
+            if signal.action not in ("BUY", "SELL"):
+                return False, "Trade entries require BUY or SELL."
+            if candle.timestamp is None or candle.timestamp.tzinfo is None:
+                return False, "Pending entry requires an aware signal timestamp."
+            candidate = deepcopy(signal)
+            candidate.signal_bar_timestamp = candle.timestamp
+            from core.pattern_provenance import rules
+            candidate.requested_rules = candidate.requested_rules or rules(candidate, entry_mode="decision-close")
+            stable_anchors(candidate, store)
+            key = (candidate.symbol, candidate.timeframe, candidate.pattern, _setup_key(candidate))
+            if key in self.consumed_anchors or any(
+                (p.symbol, p.timeframe, p.pattern, _setup_key(p)) == key for p in self.pending_entries
+            ):
+                return False, "Duplicate consumed or pending setup."
+            self.pending_entries.append(candidate)
+            self.consumed_anchors.add(key)
+            return True, "Queued for the next observed bar open (historical simulation)."
+
+    def fill_pending(self, symbol, timeframe, candle, store, recheck=None):
+        from core.execution import opening_candidate, opening_observation
+        outcomes = []
+        with self._lock:
+            for signal in list(self.pending_entries):
+                if signal.symbol != symbol or signal.timeframe != timeframe:
+                    continue
+                if candle.timestamp <= signal.signal_bar_timestamp:
+                    continue
+                try:
+                    candidate = opening_candidate(signal, candle, ENGINE.position_notional, self.market, self.slippage_pct)
+                    if candidate is None:
+                        continue
+                    assessment = signal.laya_assessment or {}
+                    if assessment.get("mode") == "filter":
+                        if recheck is None:
+                            raise ValueError("Laya filter requires a fresh execution assessment")
+                        verdict = recheck(candidate, opening_observation(candle, self.market))
+                        if verdict.get("outcome") != "allow":
+                            raise ValueError("Laya execution assessment did not allow this entry")
+                        candidate.laya_assessment = {**assessment, **verdict}
+                    point = replace(candle, open=candle.open, high=candle.open,
+                                    low=candle.open, close=candle.open)
+                    ok, reason = self._open_position_locked(candidate, point, store)
+                except Exception as exc:
+                    ok, reason = False, str(exc)
+                # Assessor failures are explicit rejections; they never skip position management.
+                self.pending_entries.remove(signal)
+                self.order_events.append({"symbol": symbol, "pattern": signal.pattern,
+                                          "status": "filled" if ok else "rejected",
+                                          "session": candle.timestamp.isoformat(), "reason": reason})
+                outcomes.append((signal, ok, reason))
+        return outcomes
+
     def open_position(
         self,
         signal: TradeSignal,
@@ -663,7 +734,7 @@ class PaperAccount:
                     f"use the account (${ENGINE.position_notional:,.0f} each)."
                 )
 
-        signal.price = candle.close
+        signal.price = candle.close * (1 + self.slippage_pct if signal.action == "BUY" else 1 - self.slippage_pct)
         _apply_notional_sizing(
             signal, ENGINE.position_notional,
             fractional=is_fractional_qty(signal.pattern),
@@ -696,7 +767,7 @@ class PaperAccount:
             )
 
         position = _open_trade(
-            signal, fill_candle, self.bar_count(signal.symbol, signal.timeframe),
+            signal, fill_candle, self.bar_count(signal.symbol, signal.timeframe), execution_model=self.execution_model,
         )
         # _open_trade stamps entry_date from the bar timestamp; a live paper
         # fill needs the real wall-clock moment. Keep the bar time in
@@ -704,6 +775,8 @@ class PaperAccount:
         position.sim_entry_date = position.entry_date
         position.entry_date = datetime.now(timezone.utc)
         position.exit_date = position.entry_date
+        position.entry_fee_paid = position.entry_price * position.qty * self.txn_cost_pct
+        self.cash -= position.entry_fee_paid
         notional = position.entry_price * position.qty
         if signal.action == "BUY":
             self.cash -= notional
@@ -750,7 +823,7 @@ class PaperAccount:
         return False
 
     def exit_indicator(self, symbol: str, position, candle: OHLCVCandle, reason: str = "trailing_stop"):
-        """Close one indicators-only trade at the bar close.
+        """Queue a close-confirmed indicator exit; legacy trades retain close fills.
 
         Used when the indicator's own trend has flipped. Pattern exits stay
         on the fixed ladder in ``on_bar``.
@@ -762,6 +835,9 @@ class PaperAccount:
         with self._lock:
             open_list = self.positions.get(symbol) or []
             if position not in open_list:
+                return None
+            if position.execution_model == "causal-v1":
+                position.pending_exit_reason = reason
                 return None
             now = candle.timestamp or datetime.now(timezone.utc)
             bar_idx = self.bar_count(symbol, position.timeframe)
@@ -780,7 +856,8 @@ class PaperAccount:
             position.sim_exit_date = position.exit_date
             position.exit_date = datetime.now(timezone.utc)
             notional_out = exit_price * position.qty
-            cost = (position.entry_price * self.txn_cost_pct + exit_price * self.txn_cost_pct) * position.qty
+            cost = ((position.entry_price + exit_price) * self.txn_cost_pct * position.qty
+                    - position.entry_fee_paid)
             if position.action == "BUY":
                 self.cash += notional_out - cost
             else:
@@ -909,7 +986,8 @@ class PaperAccount:
         # Commission cost mirrors _close_trade's pnl deduction (entry + exit
         # legs) so cash/equity stay in lockstep with the reported trade pnl —
         # otherwise cash silently overstates the account by the cost drag.
-        cost = (position.entry_price * self.txn_cost_pct + exit_price * self.txn_cost_pct) * position.qty
+        cost = ((position.entry_price + exit_price) * self.txn_cost_pct * position.qty
+                    - position.entry_fee_paid)
         if position.action == "BUY":
             self.cash += notional_out - cost
         else:
@@ -969,7 +1047,7 @@ class PaperAccount:
                     self._last_price.get(sym, p.entry_price) - p.entry_price
                     if p.action == "BUY"
                     else p.entry_price - self._last_price.get(sym, p.entry_price)
-                ) * p.qty
+                ) * p.qty - p.entry_fee_paid
                 for sym, p in self._all_open()
             )
 
@@ -988,6 +1066,12 @@ class PaperAccount:
     def save(self, path: str | Path | None = None) -> None:
         with self._lock:
             payload = {
+                "execution_model": self.execution_model,
+                "account_model": "independent-fixed-notional",
+                "pending_entries": [asdict(v) | {"signal_bar_timestamp": v.signal_bar_timestamp.isoformat()}
+                                    for v in self.pending_entries],
+                "consumed_anchors": [list(k[:3]) + [list(k[3])] for k in sorted(self.consumed_anchors)],
+                "order_events": list(self.order_events),
                 "market": self.market,
                 "initial_capital": self.initial_capital,
                 "cash": self.cash,
@@ -1042,6 +1126,21 @@ class PaperAccount:
             txn_cost_pct=data.get("txn_cost_pct", acct.txn_cost_pct),
             slippage_pct=data.get("slippage_pct", acct.slippage_pct),
         )
+        model = data.get("execution_model", "legacy")
+        if model not in ("legacy", "causal-v1"):
+            raise ValueError("Unsupported paper execution model")
+        # Old positions retain their trade-level legacy model; all new entries use causal rules.
+        acct.execution_model = "causal-v1"
+        for raw in data.get("pending_entries", []):
+            raw = dict(raw)
+            raw["signal_bar_timestamp"] = datetime.fromisoformat(raw["signal_bar_timestamp"])
+            if raw["signal_bar_timestamp"].tzinfo is None:
+                raise ValueError("Pending entry timestamp must be aware")
+            if raw.get("setup_key"):
+                raw["setup_key"] = tuple(raw["setup_key"])
+            acct.pending_entries.append(TradeSignal(**raw))
+        acct.consumed_anchors = {(a, b, c, tuple(d)) for a, b, c, d in data.get("consumed_anchors", [])}
+        acct.order_events = list(data.get("order_events", []))
         acct.cash = data.get("cash", acct.initial_capital)
         if not math.isfinite(acct.cash):
             raise ValueError(f"Paper account cash must be finite: {p}")
