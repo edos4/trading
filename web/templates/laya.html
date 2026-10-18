@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Laya — Trading Bot{% endblock %}
+{% block content %}
+<section class="panel page-head">
+  <div>
+    <h1>Laya</h1>
+    <p class="muted small">Local, optional text assessment. Laya classifies supplied financial text and
+      reviews evidence around an existing candidate. It never places orders, changes stops/targets,
+      or manages exits. <span id="laya-state-pill" class="status">Checking status…</span></p>
+    <p id="laya-status-detail" class="muted small"></p>
+  </div>
+</section>
+
+<div class="tabs" role="tablist" aria-label="Laya sections">
+  <button type="button" class="tab active" data-ltab="assess" role="tab" aria-selected="true">Assess</button>
+  <button type="button" class="tab" data-ltab="history" role="tab" aria-selected="false">History</button>
+  <button type="button" class="tab" data-ltab="evaluation" role="tab" aria-selected="false">Evaluation</button>
+  <button type="button" class="tab" data-ltab="model" role="tab" aria-selected="false">Model status</button>
+</div>
+
+<section class="panel" data-lpanel="assess">
+  <h2>Assess</h2>
+  <div class="toolbar">
+    <label>Market
+      <select id="laya-market"><option value="us">US</option><option value="ph">PH</option></select>
+    </label>
+    <label>Symbol <input id="laya-symbol" type="text" value="AAPL" size="10" /></label>
+    <label>Exchange <input id="laya-exchange" type="text" value="NASDAQ" size="10" /></label>
+    <label>Timeframe
+      <select id="laya-timeframe"><option value="1d">1d</option><option value="1W">1W</option></select>
+    </label>
+    <label>Task
+      <select id="laya-task">
+        <option value="event-review-v1">event-review-v1 (text)</option>
+        <option value="candidate-review-v1">candidate-review-v1 (candidate)</option>
+      </select>
+    </label>
+  </div>
+  <div id="laya-text-fields">
+    <div class="toolbar">
+      <label>Title <input id="laya-title" type="text" size="30" placeholder="Announcement title" /></label>
+      <label>Publisher <input id="laya-publisher" type="text" size="16" placeholder="Publisher" /></label>
+      <label>Language <input id="laya-language" type="text" value="en" size="6" /></label>
+    </div>
+    <label for="laya-text">Source text (operator-supplied; no news feed is purchased)</label>
+    <textarea id="laya-text" rows="6" cols="80" placeholder="Paste the announcement here…"></textarea>
+  </div>
+  <div id="laya-candidate-fields" hidden>
+    <div class="toolbar">
+      <label>Candidate index <input id="laya-candidate-index" type="number" value="0" min="0" step="1" /></label>
+      <span class="muted small">Loads the existing Explorer candidate snapshot server-side. “No candidate” when the loader finds no signal.</span>
+    </div>
+  </div>
+  <div class="toolbar">
+    <button type="button" class="btn primary" id="laya-run">Run assessment</button>
+    <button type="button" class="btn ghost" id="laya-cancel" disabled>Cancel</button>
+  </div>
+  <p id="laya-job-status" class="status" role="status"></p>
+  <h3>Evidence preview</h3>
+  <pre id="laya-preview" class="muted small">Run an assessment to see exactly what Laya received.</pre>
+  <h3>Result</h3>
+  <div id="laya-result" class="muted small">No result yet. Model assessment, engine eligibility, and policy outcome are shown separately.</div>
+</section>
+
+<section class="panel" data-lpanel="history" hidden>
+  <h2>History</h2>
+  <div class="toolbar">
+    <label>Market <select id="laya-h-market"><option value="">All</option><option value="us">US</option><option value="ph">PH</option></select></label>
+    <label>Symbol <input id="laya-h-symbol" type="text" size="10" /></label>
+    <label>Task <select id="laya-h-task"><option value="">All</option><option value="event-review-v1">event-review-v1</option><option value="candidate-review-v1">candidate-review-v1</option></select></label>
+    <button type="button" class="btn" id="laya-h-refresh">Refresh</button>
+  </div>
+  <div class="table-wrap"><table id="laya-h-table">
+    <thead><tr><th>Assessment</th><th>Market</th><th>Symbol</th><th>Task</th><th>As of</th><th>Status</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <div class="toolbar">
+    <button type="button" class="btn ghost" id="laya-h-prev">Prev</button>
+    <span id="laya-h-page" class="muted small"></span>
+    <button type="button" class="btn ghost" id="laya-h-next">Next</button>
+  </div>
+  <h3>Detail</h3>
+  <pre id="laya-detail" class="muted small">Select a row. Detail reproduces saved evidence without calling the model. Rerunning creates a new linked assessment.</pre>
+  <div class="toolbar">
+    <button type="button" class="btn ghost" id="laya-export">Export JSON</button>
+    <button type="button" class="btn ghost" id="laya-rerun">Rerun as new assessment</button>
+  </div>
+</section>
+
+<section class="panel" data-lpanel="evaluation" hidden>
+  <h2>Evaluation</h2>
+  <p class="muted small">Paired baseline vs Laya-filtered historical-stream runs. Submit from the
+    Backtest tab with a frozen Laya policy; this section links those runs and reports
+    filtered-out candidates alongside accepted ones. Interactive submission arrives with
+    historical integration — unsupported combinations are rejected with reasons.</p>
+  <p id="laya-eval-note" class="status">Evaluation harness: see scripts/evaluate_laya.py for the versioned offline report.</p>
+</section>
+
+<section class="panel" data-lpanel="model" hidden>
+  <h2>Model status</h2>
+  <pre id="laya-model-pre" class="muted small">Loading…</pre>
+  <p class="muted small">Page load and status polling never download models. Setup guidance:
+    create the isolated worker env from requirements-laya.txt, provision a pinned checkpoint
+    into LAYA_MODEL_PATH, then set LAYA_ENABLED=true. /health stays independent of model readiness.</p>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="/static/laya.js?v=1"></script>
+{% endblock %}

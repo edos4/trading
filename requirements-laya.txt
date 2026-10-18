@@ -1,0 +1,17 @@
+# Laya optional worker (pinned candidate, not a final compatibility lock).
+# Base web install must stay usable WITHOUT torch. Install only in an isolated env:
+#   python -m venv .venv-laya && .venv-laya/bin/pip install -r requirements-laya.txt
+# Do NOT install laya[mcp]: it requires mcp>=2.2.0 which conflicts with this repo's mcp>=1.28.0,<2.
+# Inspected upstream candidate was laya==0.4.6; chosen release is 0.4.7
+# (checkpoints unchanged, runtime fixes). Python >=3.10. Resolve + verify in
+# isolation before enabling the tab (see scripts/laya_smoke.py).
+laya==0.4.7
+torch>=2.0
+transformers>=4.40.0
+huggingface-hub>=0.23.0
+safetensors>=0.4.0
+numpy>=2.0.0
+# Needed by scripts/laya_smoke.py + scripts/evaluate_laya.py, which import the
+# repo's core/laya_contracts for question schemas. The bot itself never imports
+# this env; inference crosses the worker pipe as JSON.
+pydantic>=2.7.4
