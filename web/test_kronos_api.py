@@ -135,6 +135,42 @@ class WebKronosApiTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         called.assert_called_once_with(["AAPL", "NVDA"], 5)
 
+    def test_top_resolves_nasdaq_and_forecasts(self) -> None:
+        self._login()
+        with patch("web.kronos.top_symbols", return_value=["AAPL", "NVDA"]) as top, \
+                patch("web.kronos.forecast", return_value=PAYLOAD) as called:
+            r = self.client.post("/api/kronos/forecast", json={"top": 2, "days": 5})
+        self.assertEqual(r.status_code, 200)
+        top.assert_called_once_with(2)
+        called.assert_called_once_with(["AAPL", "NVDA"], 5)
+
+    def test_top_rejects_bad_count(self) -> None:
+        self._login()
+        from web import kronos
+
+        for top in (0, kronos.MAX_SYMBOLS + 1, "x"):
+            r = self.client.post("/api/kronos/forecast", json={"top": top, "days": 5})
+            self.assertEqual(r.status_code, 400, top)
+
+    def test_top_resolution_failure_is_502(self) -> None:
+        self._login()
+        with patch("web.kronos.top_symbols", side_effect=RuntimeError("screener down")):
+            r = self.client.post("/api/kronos/forecast", json={"top": 5, "days": 5})
+        self.assertEqual(r.status_code, 502)
+        self.assertIn("NASDAQ", r.json()["detail"])
+
+    def test_explicit_symbols_ignore_top(self) -> None:
+        self._login()
+        with patch("web.kronos.top_symbols") as top, \
+                patch("web.kronos.forecast", return_value=PAYLOAD) as called:
+            r = self.client.post(
+                "/api/kronos/forecast",
+                json={"symbols": "AAPL", "top": 50, "days": 5},
+            )
+        self.assertEqual(r.status_code, 200)
+        top.assert_not_called()
+        called.assert_called_once_with(["AAPL"], 5)
+
     def test_unavailable_is_503(self) -> None:
         self._login()
         from web import kronos

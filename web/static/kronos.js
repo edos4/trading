@@ -12,9 +12,14 @@
   const symbolEl = document.getElementById("kronos-symbol");
   const daysEl = document.getElementById("kronos-days");
   const submitEl = document.getElementById("kronos-submit");
+  const topForm = document.getElementById("kronos-top-form");
+  const topNEl = document.getElementById("kronos-top-n");
+  const topDaysEl = document.getElementById("kronos-top-days");
+  const topSubmitEl = document.getElementById("kronos-top-submit");
   const statusEl = document.getElementById("kronos-status");
   const resultsEl = document.getElementById("kronos-results");
 
+  const MAX_TOP = 100;
   let charts = [];
 
   function setStatus(text) {
@@ -173,35 +178,70 @@
     return seen;
   }
 
-  async function submit(event) {
-    if (event) event.preventDefault();
-    const symbols = parseSymbols(symbolEl.value);
-    const days = parseInt(daysEl.value, 10);
-    if (!symbols.length) { setStatus("Enter at least one symbol."); return; }
+  function readDays(el) {
+    const input = el || daysEl;
+    const days = parseInt(input.value, 10);
     if (!Number.isFinite(days) || days < 1 || days > 60) {
-      setStatus("Days must be between 1 and 60."); return;
+      setStatus("Days must be between 1 and 60.");
+      return null;
     }
+    return days;
+  }
+
+  async function run(body, label) {
     submitEl.disabled = true;
+    if (topSubmitEl) topSubmitEl.disabled = true;
     unmountAll();
-    setStatus(`Running Kronos for ${symbols.join(", ")} (+${days}d)… this can take a minute.`);
+    setStatus(`${label}… this can take a minute.`);
     try {
       const res = await fetch("/api/kronos/forecast", {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbols, days }),
+        body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.detail || data.message || `Request failed (${res.status})`);
       }
       render(data);
+      return data;
     } catch (err) {
       setStatus(String(err.message || err));
+      return null;
     } finally {
       submitEl.disabled = false;
+      if (topSubmitEl) topSubmitEl.disabled = false;
+    }
+  }
+
+  async function submit(event) {
+    if (event) event.preventDefault();
+    const symbols = parseSymbols(symbolEl.value);
+    if (!symbols.length) { setStatus("Enter at least one symbol."); return; }
+    const days = readDays(daysEl);
+    if (days === null) return;
+    await run({ symbols, days }, `Running Kronos for ${symbols.join(", ")} (+${days}d)`);
+  }
+
+  async function submitTop(event) {
+    if (event) event.preventDefault();
+    const n = parseInt(topNEl.value, 10);
+    if (!Number.isFinite(n) || n < 1 || n > MAX_TOP) {
+      setStatus(`Top must be between 1 and ${MAX_TOP}.`);
+      return;
+    }
+    const days = readDays(topDaysEl || daysEl);
+    if (days === null) return;
+    const data = await run(
+      { top: n, days },
+      `Running Kronos for the top ${n} NASDAQ stocks (+${days}d)`,
+    );
+    if (data && Array.isArray(data.symbols) && data.symbols.length) {
+      symbolEl.value = data.symbols.join(", ");
     }
   }
 
   if (form) form.addEventListener("submit", submit);
+  if (topForm) topForm.addEventListener("submit", submitTop);
 })();
