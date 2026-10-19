@@ -216,6 +216,14 @@ class Settings(BaseSettings):
     # Idle session lifetime (hours).
     web_ui_session_hours: int = 12
 
+    # ── Web UI · Tasks (Kanban) tab ─────────────────────────────────────────
+    # Empty reuses the existing PostgreSQL DATABASE_URL / db_* settings.
+    task_database_url: str = ""
+    # Tasks schema. Production uses `tasks`; tests point this at tasks_test_<uuid>.
+    task_schema: str = "tasks"
+    # Show the Tasks tab (a clone that never wants a board can hide it).
+    tasks_enabled: bool = True
+
     # ── Hermes Agent dashboard (optional) ───────────────────────────────────
     # Nous Research Hermes Agent ships its own web dashboard (React SPA behind
     # FastAPI) on 127.0.0.1:9119. Bound to loopback it has no auth of its own,

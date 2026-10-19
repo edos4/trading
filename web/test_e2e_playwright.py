@@ -435,6 +435,42 @@ def run_e2e(base_url: str, headed: bool = False) -> None:
         assert paper_hits["reset"] >= 1
         checks.append("paper_flow")
 
+        # Tasks (Kanban) — requires the PostgreSQL `tasks` schema
+        # (python scripts/setup_tasks_db.py). Creates and then removes a board.
+        page.goto(f"{base}/tasks", wait_until="networkidle")
+        expect(page.locator("#kanban-board")).to_be_visible(timeout=10000)
+        page.get_by_role("button", name="+ Add list").click()
+        page.fill('.kanban-add-list input[placeholder="List name"]', "E2E Tasks")
+        page.keyboard.press("Enter")
+        page.wait_for_selector('.kanban-list:has-text("E2E Tasks")', timeout=10000)
+        col = page.locator('.kanban-list:has-text("E2E Tasks")').first
+        col.locator('button:has-text("+ Add a card")').first.click()
+        col.locator("textarea").first.fill("E2E card")
+        page.keyboard.press("Enter")
+        card = col.locator('.kanban-card:has-text("E2E card")').first
+        expect(card).to_be_visible(timeout=10000)
+        card.click()
+        expect(page.locator("#kd-comments")).to_be_visible(timeout=10000)
+        page.fill("#kd-subtask-input", "do it")
+        page.click("#kd-subtask-add")
+        expect(page.locator("#kd-subtasks li")).to_have_count(1, timeout=10000)
+        page.fill("#kd-comment-input", "hello")
+        page.click("#kd-comment-add")
+        expect(page.locator("#kd-comments .kanban-comment")).to_have_count(1, timeout=10000)
+        page.locator('#kd-comments .kanban-comment button:has-text("Reply")').first.click()
+        page.fill("#kd-comment-input", "a reply")
+        page.click("#kd-comment-add")
+        expect(page.locator("#kd-comments .kanban-comment.reply")).to_have_count(1, timeout=10000)
+        page.click("#kd-close")
+        checks.append("tasks_board")
+        # Clean up the created board through the API.
+        _, board = _api_json(base, jar, "GET", "/api/tasks/board")
+        for lst in (board or {}).get("lists", []):
+            if lst.get("title") == "E2E Tasks":
+                for card_obj in lst.get("cards", []):
+                    _api_json(base, jar, "DELETE", f"/api/tasks/cards/{card_obj['id']}")
+                _api_json(base, jar, "DELETE", f"/api/tasks/lists/{lst['id']}")
+
         page.click('form[action="/logout"] button')
         page.wait_for_url("**/login**", timeout=10000)
         checks.append("logout")

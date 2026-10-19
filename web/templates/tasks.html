@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Tasks — Trading Bot{% endblock %}
+{% block main_class %}kanban-main{% endblock %}
+{% block content %}
+<section class="panel page-head kanban-head">
+  <div class="page-head-title">
+    <h1>Tasks</h1>
+    <p class="muted small">A small Trello-style board. Cards carry a description, a
+      subtask checklist, and comments (flat, with one level of replies).</p>
+  </div>
+  <div class="toolbar">
+    <button type="button" class="btn ghost" id="kanban-toggle-archived">Archived lists</button>
+    <button type="button" class="btn ghost" id="kanban-export">Export JSON</button>
+  </div>
+</section>
+
+{% if tasks_error %}
+<section class="panel">
+  <p class="status">{{ tasks_error }}</p>
+  <p class="muted small">Create or migrate the Tasks schema:
+    <code>python scripts/setup_tasks_db.py</code></p>
+</section>
+{% else %}
+<p id="kanban-status" class="status" role="status" aria-live="polite"></p>
+<div id="kanban-board" class="kanban-board" aria-label="Tasks board"></div>
+
+<section class="panel kanban-archived" id="kanban-archived" hidden>
+  <h2>Archived lists</h2>
+  <div id="kanban-archived-list" class="kanban-archived-list"></div>
+</section>
+
+<dialog id="kanban-dialog" class="kanban-dialog" aria-label="Card detail">
+  <div class="kanban-dialog-head">
+    <input id="kd-title" class="kanban-dialog-title" type="text" maxlength="200"
+           aria-label="Card title" />
+    <button type="button" class="btn ghost" id="kd-close" aria-label="Close">✕</button>
+  </div>
+  <div class="kanban-dialog-body">
+    <label>Description
+      <textarea id="kd-description" rows="4" maxlength="20000"></textarea>
+    </label>
+    <p class="muted small" id="kd-meta"></p>
+
+    <h3>Subtasks <span id="kd-sub-progress" class="muted small"></span></h3>
+    <ul id="kd-subtasks" class="kanban-subtasks"></ul>
+    <div class="toolbar">
+      <input id="kd-subtask-input" type="text" maxlength="500" placeholder="Add subtask" />
+      <button type="button" class="btn" id="kd-subtask-add">Add</button>
+    </div>
+
+    <h3>Comments</h3>
+    <div id="kd-comments" class="kanban-comments"></div>
+    <p id="kd-reply-note" class="muted small" hidden></p>
+    <textarea id="kd-comment-input" rows="2" maxlength="20000"
+      placeholder="Write a comment (Ctrl/Cmd+Enter to post)"></textarea>
+    <div class="toolbar">
+      <button type="button" class="btn primary" id="kd-comment-add">Comment</button>
+      <button type="button" class="btn ghost" id="kd-reply-cancel" hidden>Cancel reply</button>
+    </div>
+
+    <div class="toolbar kanban-dialog-actions">
+      <label>Move to
+        <select id="kd-move"></select>
+      </label>
+      <button type="button" class="btn ghost" id="kd-archive">Archive card</button>
+      <button type="button" class="btn danger" id="kd-delete">Delete card</button>
+    </div>
+  </div>
+</dialog>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if not tasks_error %}
+<script src="/static/vendor/sortable.min.js?v=1.15.6"></script>
+<script src="/static/tasks.js?v=1"></script>
+{% endif %}
+{% endblock %}

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{% block title %}Trading Bot{% endblock %}</title>
-  <link rel="stylesheet" href="/static/app.css?v=25" />
+  <link rel="stylesheet" href="/static/app.css?v=26" />
 </head>
 <body>
   {% if user %}
@@ -21,6 +21,7 @@
       {% if hermes_enabled %}<a href="/hermes" class="{% if active == 'hermes' %}active{% endif %}">Hermes</a>{% endif %}
       <a href="/kronos" class="{% if active == 'kronos' %}active{% endif %}">Kronos</a>
       <a href="/docs" class="{% if active == 'docs' %}active{% endif %}">Documentation</a>
+      {% if tasks_enabled %}<a href="/tasks" class="{% if active == 'tasks' %}active{% endif %}">Tasks</a>{% endif %}
     </nav>
     <div class="topbar-right">
       <a href="/paper" class="book-lamps" id="book-lamps" title="Paper books">

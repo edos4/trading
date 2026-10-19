@@ -882,3 +882,82 @@ img, video, canvas, pre, table { max-width: 100%; }
   .markdown-body h2 { font-size: 1.12rem; }
 }
 
+/* ── Tasks (Kanban) tab — additive, prefixed (.kanban-* / .kcard-* / .klist-*) ── */
+.kanban-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+.kanban-board {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  overflow-x: auto;
+  padding: 0.25rem 0.25rem 1rem;
+}
+.kanban-list {
+  flex: 0 0 280px;
+  width: 280px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.6rem;
+}
+.kanban-list-head { display: flex; align-items: center; justify-content: space-between; gap: 0.4rem; }
+.kanban-list-title { font-weight: 600; font-size: 0.92rem; cursor: pointer; flex: 1; }
+.kanban-list-title input { width: 100%; }
+.kanban-list-menu { position: relative; }
+.kanban-list-menu > .menu {
+  position: absolute; right: 0; top: 1.4rem; z-index: 5;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 0.3rem; display: grid; gap: 0.15rem; min-width: 9rem;
+}
+.kanban-list-menu > .menu[hidden] { display: none; }
+.kanban-cards { display: flex; flex-direction: column; gap: 0.5rem; margin: 0.5rem 0; min-height: 6px; }
+.kanban-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.5rem 0.6rem;
+  cursor: pointer;
+}
+.kanban-card:hover { border-color: var(--accent); }
+.kanban-card-title { font-size: 0.88rem; line-height: 1.25; word-break: break-word; }
+.kanban-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.35rem; align-items: center; }
+.kanban-chip {
+  font-size: 0.7rem; color: var(--muted); border: 1px solid var(--border);
+  border-radius: 999px; padding: 0 0.4rem; line-height: 1.5;
+}
+.kanban-chip.done { color: var(--ok); border-color: var(--ok); }
+.kanban-avatar {
+  font-size: 0.68rem; font-weight: 600; text-transform: uppercase;
+  background: var(--accent); color: #fff; border-radius: 999px;
+  width: 1.2rem; height: 1.2rem; display: inline-flex;
+  align-items: center; justify-content: center;
+}
+.kanban-empty { color: var(--muted); font-size: 0.8rem; padding: 0.5rem 0; }
+.kanban-add-card, .kanban-add-list { text-align: left; width: 100%; }
+.kanban-add-list { flex: 0 0 220px; align-self: flex-start; }
+.kanban-sortable-ghost { opacity: 0.4; }
+.kanban-dragging { opacity: 0.6; }
+.kanban-archived-list { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.kanban-archived-item { border: 1px solid var(--border); border-radius: 8px; padding: 0.4rem 0.6rem; display: flex; gap: 0.6rem; align-items: center; }
+
+.kanban-dialog { width: min(620px, 94vw); background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 0; }
+.kanban-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+.kanban-dialog-head { display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 0.9rem; border-bottom: 1px solid var(--border); }
+.kanban-dialog-title { flex: 1; font-size: 1rem; font-weight: 600; }
+.kanban-dialog-body { padding: 0.9rem; display: grid; gap: 0.75rem; max-height: 72vh; overflow-y: auto; }
+.kanban-dialog-actions { border-top: 1px solid var(--border); padding-top: 0.75rem; }
+.kanban-subtasks { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; }
+.kanban-subtasks li { display: flex; align-items: center; gap: 0.5rem; }
+.kanban-subtasks li label { display: flex; align-items: center; gap: 0.5rem; flex: 1; font-size: 0.86rem; }
+.kanban-subtasks .done { color: var(--muted); text-decoration: line-through; }
+.kanban-comments { display: grid; gap: 0.5rem; }
+.kanban-comment { border-left: 2px solid var(--border); padding: 0.15rem 0 0.15rem 0.6rem; }
+.kanban-comment.reply { margin-left: 1.2rem; }
+.kanban-comment-head { display: flex; align-items: center; gap: 0.5rem; font-size: 0.74rem; color: var(--muted); }
+.kanban-comment-author { color: var(--text); font-weight: 600; }
+.kanban-comment-body { font-size: 0.86rem; white-space: pre-wrap; word-break: break-word; }
+.kanban-comment-actions { display: flex; gap: 0.5rem; margin-top: 0.15rem; }
+.kanban-comment-actions button { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 0.72rem; padding: 0; }
+.kanban-comment-actions button:hover { color: var(--accent); }
+#kd-comment-input { resize: vertical; }
+
+
