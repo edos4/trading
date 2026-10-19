@@ -92,6 +92,11 @@ python main.py
 (simulated fills, no broker). Universe size can be `--paper 50` or
 `--paper --symbols=500`. Add `--paper-reset` to wipe the saved ledger first.
 
+Universe size is not capped at an arbitrary ceiling: request as many names as
+the market quotes (US ≈7.9k, PH ≈244) and the screener returns what it has.
+Existing liquidity/ADV floors still trim the tradeable set. The web Paper tab's
+**Symbols** field honors the same range.
+
 Historical replay (markets closed, or a dated walk-forward) uses `--stream`.
 That flag starts the paper-trade stream server if needed, then the scanner
 reads bars from it instead of live TradingView. Dates are **US `MM/DD/YYYY`**
