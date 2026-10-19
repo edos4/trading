@@ -4,10 +4,11 @@
 <section class="panel page-head">
   <div class="page-head-title">
     <h1>Kronos</h1>
-    <p class="muted small">Forecast a symbol <strong>N trading days ahead</strong> from its most
-      recent close with Kronos-base (blue, dashed) and the fine-tuned model (red). The white
-      line is the actual close over the trailing window. Runs on the host GPU and can take a
-      minute.</p>
+    <p class="muted small">Forecast one or more symbols <strong>N trading days ahead</strong> from their
+      most recent close with Kronos-base (blue, dashed) and the fine-tuned model (red). Enter
+      symbols <strong>comma-separated</strong> (<code>AAPL, NVDA, MSFT</code>) — spaces are
+      ignored — and one chart is drawn per symbol. The white line is the actual close over the
+      trailing window. Runs on the host GPU and can take a minute.</p>
     <p id="kronos-status" class="status">
       {% if not kronos_available %}Kronos forecasting is unavailable on this host (needs the
         isolated <code>.venv-kronos</code> venv and scripts/kronos_web_forecast.py).{% endif %}
@@ -17,19 +18,16 @@
 
 <section class="panel">
   <form id="kronos-form" class="toolbar" autocomplete="off">
-    <label>Symbol <input id="kronos-symbol" type="text" value="AAPL" maxlength="12" size="10" /></label>
+    <label>Symbols <input id="kronos-symbol" type="text" value="AAPL" maxlength="200" size="28"
+      placeholder="AAPL, NVDA, MSFT" /></label>
     <label>Days ahead <input id="kronos-days" type="number" min="1" max="60" step="1" value="5" /></label>
     <button type="submit" class="btn primary" id="kronos-submit">Submit</button>
-    <button type="button" class="btn" id="kronos-save" disabled>Save chart</button>
   </form>
 </section>
 
-<section class="panel">
-  <h2 id="kronos-title">Chart</h2>
-  <div id="kronos-chart" class="tv-chart-host" style="min-height:460px"></div>
-</section>
+<section id="kronos-results"></section>
 {% endblock %}
 {% block scripts %}
 <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
-<script src="/static/kronos.js?v=1"></script>
+<script src="/static/kronos.js?v=2"></script>
 {% endblock %}

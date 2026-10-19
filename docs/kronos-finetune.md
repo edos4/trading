@@ -482,21 +482,27 @@ numbers above still stand.
 
 ## 14. Web UI — Kronos tab (2026-10-17)
 
-A **Kronos** tab sits next to Documentation in `main.py --web`. Symbol + days
-ahead → Submit graphs recent actual closes (white) against a forward forecast
-from Kronos-base (blue, dashed) and the fine-tuned model (red), plus a **Save
-chart** button (PNG via the chart's own screenshot).
+A **Kronos** tab sits next to Documentation in `main.py --web`. One or more
+symbols (comma-separated, spaces ignored) + days ahead → Submit graphs recent
+actual closes (white) against a forward forecast from Kronos-base (blue,
+dashed) and the fine-tuned model (red), **one chart per symbol**, each with its
+own **Save chart** button (PNG via the chart's own screenshot).
 
 - `scripts/kronos_web_forecast.py` (runs in `.venv-kronos`): loads the last 400
-  bars, forecasts `days` **business days past the last bar** for both models,
-  writes JSON (anchor + trailing history + both paths) to a file — never stdout,
-  since loguru owns stdout.
-- `web/kronos.py` shells out to that script (one forecast at a time on the
-  16 GB GPU; 409 while busy, 503 when the venv/script is absent, 502 on model
-  failure). The app venv stays torch-free.
-- `web/app.py`: `GET /kronos` page + `POST /api/kronos/forecast`; nav link in
-  `base.html`; `web/static/kronos.js` draws it with Lightweight Charts.
-- Tests: `web/test_kronos_api.py` (9, model mocked). Verified live end-to-end:
+  bars per symbol, forecasts `days` **business days past the last bar** for both
+  models, writes JSON (`{days, lookback, symbols, results:[{symbol, anchor,
+  history, base, finetuned, errors?}]}`) to a file — never stdout, since loguru
+  owns stdout. Each model is loaded **once per run and reused across every
+  symbol** (2 loads total, not 2 × symbols); a symbol with no bars or a failed
+  model path gets an `errors` entry and does not sink the rest of the batch.
+- `web/kronos.py` shells out to that script (one run at a time on the 16 GB GPU;
+  409 while busy, 503 when the venv/script is absent, 502 on model failure;
+  `MAX_SYMBOLS` caps the batch). The app venv stays torch-free.
+- `web/app.py`: `GET /kronos` page + `POST /api/kronos/forecast` (accepts
+  `symbols` as a list or a comma string, uppercased, spaces stripped, de-duped);
+  nav link in `base.html`; `web/static/kronos.js` draws one Lightweight Charts
+  panel per symbol.
+- Tests: `web/test_kronos_api.py` (14, model mocked). Verified live end-to-end:
   AAPL +5d runs in ~3 s (both models) and Save chart downloads
   `AAPL_kronos_5d.png`.
 
