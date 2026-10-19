@@ -295,7 +295,8 @@ python main.py --web
 
 Auth: form login → signed HttpOnly session cookie (`tb_session`). All pages and
 `/api/*` routes require a valid session **or HTTP Basic** (same
-`WEB_UI_USERNAME` / `WEB_UI_PASSWORD`). `/login`, `/logout`, `/health`, and
+`WEB_UI_USERNAME` / `WEB_UI_PASSWORD`, plus any extra named logins in
+`WEB_UI_USERS`). `/login`, `/logout`, `/health`, and
 `/static/*` are public. Put nginx/Caddy TLS in front for VPS deploys and set
 `WEB_UI_HTTPS=true`. The session cookie is also flagged `Secure` automatically
 whenever a request arrives over TLS (`X-Forwarded-Proto: https`), so no extra

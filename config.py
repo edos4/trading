@@ -204,6 +204,10 @@ class Settings(BaseSettings):
     web_ui_port: int = 8080
     web_ui_username: str = "admin"
     web_ui_password: str = ""
+    # Optional extra named logins, comma-separated "user:password" (e.g. "ed:TBY").
+    # Adds to WEB_UI_USERNAME/WEB_UI_PASSWORD, which stays the primary used for
+    # derived credentials (stocks-history / pattern API / MCP).
+    web_ui_users: str = ""
     # Signing key for session cookies. If empty, derived from password at boot
     # (set an explicit long random string in production).
     web_ui_secret_key: str = ""
