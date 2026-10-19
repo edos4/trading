@@ -413,9 +413,13 @@ class TVClient:
                 exchange=exchange,
             )
 
+        # Fetch the whole requested slice. The old 500-row ceiling silently
+        # truncated large universes (US lists ~7.9k quoted names); oversample
+        # only so the post-query ADV/exchange filter can still fill the request,
+        # and never cap below `want_n`.
         fetch_n = want_n
         if min_value or exchange:
-            fetch_n = min(max(want_n * 4, want_n), 500)
+            fetch_n = max(want_n, min(want_n * 4, 10_000))
 
         select_cols = ["name", "exchange"]
         if rank in ("value", "volume") or min_value:
@@ -473,7 +477,10 @@ class TVClient:
         exchange: str | None,
     ) -> list[tuple[str, str]]:
         """Top PSE names by peso ADV. TV `value` is always None on this market."""
-        fetch_n = min(max(want_n * 5, 120), 280)
+        # Same contract as the US path: oversample for the ADV/exchange filter
+        # but never cap the fetch below the request. PSE currently lists ~244
+        # names, so a full-universe request must not be bounded by the old 280.
+        fetch_n = max(want_n, min(max(want_n * 5, 120), 2_000))
         select_cols = [
             "name", "exchange", "close", "volume",
             _PH_TRADED_COL, _PH_AVG_VOL_COL,

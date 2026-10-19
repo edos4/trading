@@ -225,3 +225,41 @@ def test_ph_universe_drops_share_volume_pennies(monkeypatch):
     names = [s for s, _ex in rows]
     assert names[0] in {"ICT", "BDO", "SMPH"}
     assert "C" not in names and "VVT" not in names
+
+
+def test_us_universe_fetch_is_not_capped_below_request(monkeypatch):
+    """The old 500-row ceiling silently truncated full-universe requests."""
+    seen: dict[str, int] = {}
+    df = pd.DataFrame(
+        {"name": ["AAA", "BBB"], "exchange": ["NASDAQ", "NYSE"],
+         "value": [9e9, 8e9], "volume": [1e6, 2e6]}
+    )
+
+    def fake(_q):
+        seen["limit"] = _q.query["range"][1]
+        return len(df), df.copy()
+
+    monkeypatch.setattr(tv_client, "_get_scanner_data", fake)
+    TVClient.fetch_top_symbols_with_exchanges(
+        2000, "america", min_value=20_000_000,
+    )
+    assert seen["limit"] >= 2000
+
+
+def test_ph_universe_fetch_is_not_capped_below_request(monkeypatch):
+    seen: dict[str, int] = {}
+    df = pd.DataFrame(
+        {"name": ["BDO"], "exchange": ["PSE"], "close": [126.0],
+         "volume": [1_000_000], "Value.Traded": [100_000_000],
+         "average_volume_10d_calc": [2_000_000]}
+    )
+
+    def fake(_q):
+        seen["limit"] = _q.query["range"][1]
+        return len(df), df.copy()
+
+    monkeypatch.setattr(tv_client, "_get_scanner_data", fake)
+    TVClient.fetch_top_symbols_with_exchanges(
+        1000, "philippines", min_value=5_000_000, exchange="PSE",
+    )
+    assert seen["limit"] >= 1000

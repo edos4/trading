@@ -75,7 +75,8 @@ class SymbolRequest(BaseModel):
 
 
 class PaperStartRequest(BaseModel):
-    n_symbols: int = Field(50, ge=5, le=5000)
+    # Ceiling covers the full quoted US (~7.9k) and PH (~244) universes.
+    n_symbols: int = Field(50, ge=5, le=20000)
     extra_symbols: str = ""
     use_stream: bool = False
     volume_gate: bool = True

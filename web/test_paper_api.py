@@ -118,6 +118,17 @@ class WebPaperApiTests(unittest.TestCase):
             self.assertTrue(call.kwargs.get("pattern_only"))
             self.assertFalse(call.kwargs.get("indicators_only"))
 
+    def test_start_accepts_full_universe_count(self) -> None:
+        """The web ceiling must cover the whole US (~7.9k) and PH (~244) lists."""
+        self._login()
+        with patch("web.app.paper_books.start", return_value=None) as start:
+            r = self.client.post(
+                "/api/paper/start",
+                json={"market": "us", "n_symbols": 8000, "use_stream": False},
+            )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(start.call_args.args[1], 8000)
+
     def test_indicators_only_replaces_pattern_only(self) -> None:
         self._login()
         body = {
