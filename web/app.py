@@ -439,9 +439,33 @@ def create_app() -> FastAPI:
                 )
             if sym not in symbols:
                 symbols.append(sym)
+
+        top = body.get("top")
+        if not symbols and top is not None:
+            try:
+                top_n = int(top)
+            except (TypeError, ValueError):
+                return JSONResponse(
+                    {"detail": "Top must be a whole number."}, status_code=400,
+                )
+            if not 1 <= top_n <= kronos.MAX_SYMBOLS:
+                return JSONResponse(
+                    {"detail": f"Top must be between 1 and {kronos.MAX_SYMBOLS}."},
+                    status_code=400,
+                )
+            try:
+                symbols = await asyncio.to_thread(kronos.top_symbols, top_n)
+            except Exception:
+                log.exception("Web Kronos | top NASDAQ resolved failed")
+                return JSONResponse(
+                    {"detail": "Could not resolve the top NASDAQ symbols."},
+                    status_code=502,
+                )
+
         if not symbols:
             return JSONResponse(
-                {"detail": "Enter at least one symbol."}, status_code=400,
+                {"detail": "Enter at least one symbol or a Top count."},
+                status_code=400,
             )
         if len(symbols) > kronos.MAX_SYMBOLS:
             return JSONResponse(

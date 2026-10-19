@@ -24,7 +24,7 @@ VENV_PYTHON = ROOT / ".venv-kronos" / "bin" / "python"
 FORECAST_SCRIPT = ROOT / "scripts" / "kronos_web_forecast.py"
 
 MAX_DAYS = 60
-MAX_SYMBOLS = 12
+MAX_SYMBOLS = 100
 TIMEOUT_S = 900
 
 # One forecast at a time: each run loads Kronos-base + tokenizer twice onto the
@@ -46,6 +46,21 @@ class KronosError(RuntimeError):
 
 def available() -> bool:
     return VENV_PYTHON.exists() and FORECAST_SCRIPT.exists()
+
+
+def top_symbols(n: int) -> list[str]:
+    """Top ``n`` NASDAQ names by dollar volume (cached screener query).
+
+    Backs the tab's "Top X NASDAQ" mode so the browser never talks to the
+    screener itself. Returns fewer rows if the market has fewer names.
+    """
+    from core.market import US
+    from data.tv_client import TVClient
+
+    rows = TVClient.fetch_top_symbols_with_exchanges_cached(
+        int(n), US.tv_screener, order_by="Value.Traded", exchange=US.tv_exchange,
+    )
+    return [sym for sym, _exchange in rows][: int(n)]
 
 
 def forecast(symbols: list[str], days: int) -> dict:

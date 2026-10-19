@@ -7,7 +7,8 @@
     <p class="muted small">Forecast one or more symbols <strong>N trading days ahead</strong> from their
       most recent close with Kronos-base (blue, dashed) and the fine-tuned model (red). Enter
       symbols <strong>comma-separated</strong> (<code>AAPL, NVDA, MSFT</code>) — spaces are
-      ignored — and one chart is drawn per symbol. The white line is the actual close over the
+      ignored — or enter a number to chart the <strong>top X NASDAQ stocks</strong> by dollar
+      volume. One chart is drawn per symbol. The white line is the actual close over the
       trailing window. Runs on the host GPU and can take a minute.</p>
     <p id="kronos-status" class="status">
       {% if not kronos_available %}Kronos forecasting is unavailable on this host (needs the
@@ -23,11 +24,17 @@
     <label>Days ahead <input id="kronos-days" type="number" min="1" max="60" step="1" value="5" /></label>
     <button type="submit" class="btn primary" id="kronos-submit">Submit</button>
   </form>
+  <form id="kronos-top-form" class="toolbar" autocomplete="off" style="margin-top:0.6rem">
+    <label>Top <input id="kronos-top-n" type="number" min="1" max="100" step="1" value="10" />
+      NASDAQ stocks</label>
+    <label>Days ahead <input id="kronos-top-days" type="number" min="1" max="60" step="1" value="5" /></label>
+    <button type="submit" class="btn" id="kronos-top-submit">Forecast top</button>
+  </form>
 </section>
 
 <section id="kronos-results"></section>
 {% endblock %}
 {% block scripts %}
 <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
-<script src="/static/kronos.js?v=2"></script>
+<script src="/static/kronos.js?v=5"></script>
 {% endblock %}
