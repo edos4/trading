@@ -279,7 +279,9 @@ Local desktop app on Windows/macOS/Linux. No browser required.
 
 ### Web (VPS)
 
-Authenticated browser UI with the same Explorer / Backtest / Paper surfaces:
+Authenticated browser UI with the same Explorer / Backtest / Paper surfaces (plus
+Patterns, Indicators, Laya, Kronos, Documentation, and a Trello-style **Tasks**
+board):
 
 ```bash
 # Required in .env — server refuses to start if WEB_UI_PASSWORD is empty
@@ -287,6 +289,7 @@ WEB_UI_USERNAME=admin
 WEB_UI_PASSWORD=change-me-to-a-long-random-secret
 # WEB_UI_SECRET_KEY=...   # recommended in production
 # WEB_UI_HTTPS=true       # set when behind TLS so the session cookie is Secure
+# TASKS_ENABLED=true      # Trello-style Tasks tab (PostgreSQL-backed)
 
 pip install -r requirements.txt
 python main.py --web
@@ -340,6 +343,26 @@ Paper stream replays accept an optional **Duration** (market sessions) per
 book card: the book stops by itself after that many unique sessions instead
 of running to tape exhaustion. Blank (default) preserves the old unbounded
 behavior. The card shows live progress as `Sim days: N/M`.
+
+### Tasks (Kanban) board (optional, PostgreSQL)
+
+A small Trello-style board on the **Tasks** tab: addable/renameable lists,
+cards with a description and subtask checklist, and comments (flat, one level of
+replies). Cards and comments are stamped with the **logged-in username** as
+their author.
+
+Storage is PostgreSQL in its own `tasks` schema (`TASKS_DATABASE_URL` /
+`TASKS_SCHEMA`; empty reuses `DATABASE_URL` / `db_*`). Create or migrate the
+schema before first use:
+
+```bash
+python scripts/setup_tasks_db.py
+```
+
+Drag and drop is touch-friendly (vendored SortableJS) with click/keyboard
+equivalents. When PostgreSQL is unavailable the tab shows a readable error and
+every other tab keeps serving; `TASKS_ENABLED=false` hides it. Whole board as
+JSON: `GET /api/tasks/export`. Full design: `docs/kanban-plan.md`.
 
 ### Local web with a public URL (Cloudflare Tunnel) — optional, host-specific
 

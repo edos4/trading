@@ -69,6 +69,45 @@ def editor_store_factory():
 
 
 @pytest.fixture
+def task_store_factory(monkeypatch):
+    """Disposable PostgreSQL schema for the Tasks board store.
+
+    The DSN is opt-in only: ``TASKS_TEST_DATABASE_URL`` must point at a
+    disposable database (skip otherwise). Never derived from application
+    settings or the developer's .env.
+    """
+    from psycopg import sql
+
+    from core.task_db import connection, migrate
+    from core.task_store import TaskStore
+
+    dsn = os.environ.get('TASKS_TEST_DATABASE_URL')
+    if not dsn:
+        pytest.skip('Set TASKS_TEST_DATABASE_URL to a disposable PostgreSQL database')
+    schema = 'tasks_test_' + uuid.uuid4().hex
+    migrate(dsn, schema)
+
+    def factory(**kwargs):
+        kwargs.setdefault('dsn', dsn)
+        kwargs.setdefault('schema', schema)
+        return TaskStore(**kwargs)
+
+    factory.dsn = dsn
+    factory.schema = schema
+    # Route the default store at the disposable schema for web-layer tests too.
+    from config import settings
+
+    monkeypatch.setattr(settings, 'task_database_url', dsn)
+    monkeypatch.setattr(settings, 'task_schema', schema)
+    try:
+        yield factory
+    finally:
+        # Generated name only; never clean up the application's tasks schema.
+        with connection(dsn, schema) as con:
+            con.execute(sql.SQL('DROP SCHEMA {} CASCADE').format(sql.Identifier(schema)))
+
+
+@pytest.fixture
 def published_pattern_catalog(editor_store_factory, monkeypatch):
     """Consumer fixture: real storage; parity is tested separately by P03's full gate."""
     from core.pattern_bootstrap import Bootstrap, freeze

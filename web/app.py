@@ -245,6 +245,7 @@ def create_app() -> FastAPI:
             "request": request,
             "user": current_username(request),
             "hermes_enabled": bool((settings.hermes_dashboard_url or "").strip()),
+            "tasks_enabled": bool(getattr(settings, "tasks_enabled", True)),
             **extra,
         }
 
@@ -1312,6 +1313,12 @@ def create_app() -> FastAPI:
     from web.laya import register_laya_routes as _register_laya
 
     _register_laya(app, templates, ctx)
+
+    # ── Tasks (Kanban) tab (optional, PostgreSQL-backed) ────────────────────
+    if getattr(settings, "tasks_enabled", True):
+        from web.tasks import register_task_routes as _register_tasks
+
+        _register_tasks(app, templates, ctx)
 
     return app
 
