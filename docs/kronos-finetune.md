@@ -505,7 +505,10 @@ screenshot).
 - `web/app.py`: `GET /kronos` page + `POST /api/kronos/forecast` (accepts
   `symbols` as a list or a comma string, uppercased, spaces stripped, de-duped,
   or `top: N` to resolve the NASDAQ leaders); nav link in `base.html`;
-  `web/static/kronos.js` draws one Lightweight Charts panel per symbol.
+  `web/static/kronos.js` draws one Lightweight Charts panel per symbol. Each
+  chart opens on the **last two trading weeks plus the forecast horizon**
+  (`VISIBLE_HISTORY_BARS = 10`); the full ~5-month history stays loaded so the
+  view can still be zoomed out.
 - Tests: `web/test_kronos_api.py` (18, model and screener mocked). Verified live
   end-to-end: AAPL +5d runs in ~3 s (both models) and Save chart downloads
   `AAPL_kronos_5d.png`.

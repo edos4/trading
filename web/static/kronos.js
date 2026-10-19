@@ -20,6 +20,9 @@
   const resultsEl = document.getElementById("kronos-results");
 
   const MAX_TOP = 100;
+  // Two trading weeks of actual closes are visible on open; the rest of the
+  // ~5-month history stays loaded so the chart can still be zoomed out.
+  const VISIBLE_HISTORY_BARS = 10;
   let charts = [];
 
   function setStatus(text) {
@@ -87,7 +90,19 @@
       ));
     });
 
-    chart.timeScale().fitContent();
+    // Open on the last two trading weeks plus the full forecast horizon rather
+    // than fitting the whole ~5-month history, which starts far too zoomed out.
+    const historyLen = (data.history || []).length;
+    const forecastLen = Math.max(
+      (data.base || []).length,
+      (data.finetuned || []).length,
+    );
+    if (historyLen || forecastLen) {
+      chart.timeScale().setVisibleLogicalRange({
+        from: Math.max(0, historyLen - VISIBLE_HISTORY_BARS),
+        to: historyLen + forecastLen + 1,
+      });
+    }
     return chart;
   }
 
