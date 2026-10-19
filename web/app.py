@@ -418,10 +418,33 @@ def create_app() -> FastAPI:
             body = await _json_body(request)
         except ValueError as exc:
             return JSONResponse({"detail": str(exc)}, status_code=400)
-        symbol = str(body.get("symbol") or "").strip().upper()
-        if not re.fullmatch(r"[A-Z0-9.\-^]{1,12}", symbol):
+        raw = body.get("symbols")
+        if raw is None:
+            raw = body.get("symbol")
+        if isinstance(raw, str):
+            raw = raw.split(",")
+        elif not isinstance(raw, (list, tuple)):
+            raw = []
+        symbols: list[str] = []
+        for item in raw:
+            sym = str(item).replace(" ", "").strip().upper()
+            if not sym:
+                continue
+            if not re.fullmatch(r"[A-Z0-9.\-^]{1,12}", sym):
+                return JSONResponse(
+                    {"detail": "Enter valid symbols (letters, digits, . - ^), "
+                               "comma-separated."},
+                    status_code=400,
+                )
+            if sym not in symbols:
+                symbols.append(sym)
+        if not symbols:
             return JSONResponse(
-                {"detail": "Enter a valid symbol (letters, digits, . - ^)."},
+                {"detail": "Enter at least one symbol."}, status_code=400,
+            )
+        if len(symbols) > kronos.MAX_SYMBOLS:
+            return JSONResponse(
+                {"detail": f"Enter at most {kronos.MAX_SYMBOLS} symbols."},
                 status_code=400,
             )
         try:
@@ -434,7 +457,7 @@ def create_app() -> FastAPI:
                 status_code=400,
             )
         try:
-            return await asyncio.to_thread(kronos.forecast, symbol, days)
+            return await asyncio.to_thread(kronos.forecast, symbols, days)
         except kronos.KronosBusy:
             return JSONResponse(
                 {"detail": "A Kronos forecast is already running — wait for it to finish."},

@@ -281,7 +281,9 @@ Local desktop app on Windows/macOS/Linux. No browser required.
 
 Authenticated browser UI with the same Explorer / Backtest / Paper surfaces (plus
 Patterns, Indicators, Laya, Kronos, Documentation, and a Trello-style **Tasks**
-board):
+board). The **Kronos** tab forecasts N trading days ahead for one or more
+symbols — comma-separated (`AAPL, NVDA, MSFT`, spaces ignored) — and draws one
+chart per symbol:
 
 ```bash
 # Required in .env — server refuses to start if WEB_UI_PASSWORD is empty

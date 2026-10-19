@@ -3,8 +3,10 @@ web/kronos.py — GPU forecast bridge for the web UI's Kronos tab.
 
 The app venv (``.venv``) is deliberately torch-free, so the model only resolves
 inside the isolated ``.venv-kronos`` venv. This module shells out to
-``scripts/kronos_web_forecast.py`` there, one forecast at a time (two model
-loads on a 16 GB GPU must not overlap), and returns the parsed JSON payload.
+``scripts/kronos_web_forecast.py`` there, one run at a time (two model loads on
+a 16 GB GPU must not overlap), and returns the parsed JSON payload. One run
+handles every requested symbol — each model is loaded once and reused — so a
+long comma-separated symbol list still costs just the two loads.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ VENV_PYTHON = ROOT / ".venv-kronos" / "bin" / "python"
 FORECAST_SCRIPT = ROOT / "scripts" / "kronos_web_forecast.py"
 
 MAX_DAYS = 60
+MAX_SYMBOLS = 12
 TIMEOUT_S = 900
 
 # One forecast at a time: each run loads Kronos-base + tokenizer twice onto the
@@ -45,8 +48,8 @@ def available() -> bool:
     return VENV_PYTHON.exists() and FORECAST_SCRIPT.exists()
 
 
-def forecast(symbol: str, days: int) -> dict:
-    """Run a base + fine-tuned forecast; return the parsed JSON payload.
+def forecast(symbols: list[str], days: int) -> dict:
+    """Run base + fine-tuned forecasts for every symbol; return the JSON payload.
 
     Raises KronosUnavailable / KronosBusy / KronosError.
     """
@@ -62,11 +65,12 @@ def forecast(symbol: str, days: int) -> dict:
     )
     tmp_path = Path(tmp.name)
     tmp.close()
+    label = ",".join(symbols)
     try:
         proc = subprocess.run(
             [
                 str(VENV_PYTHON), str(FORECAST_SCRIPT),
-                "--symbol", symbol, "--days", str(int(days)),
+                "--symbols", *symbols, "--days", str(int(days)),
                 "--out", str(tmp_path),
             ],
             cwd=str(ROOT),
@@ -77,7 +81,7 @@ def forecast(symbol: str, days: int) -> dict:
         if proc.returncode != 0 or not tmp_path.exists() or tmp_path.stat().st_size == 0:
             detail = (proc.stderr or proc.stdout or "").strip().splitlines()
             tail = " | ".join(detail[-3:]) if detail else "no output"
-            log.error(f"Kronos-web | {symbol} +{days}d failed: {tail}")
+            log.error(f"Kronos-web | {label} +{days}d failed: {tail}")
             raise KronosError(f"Kronos forecast failed: {tail}")
         payload = json.loads(tmp_path.read_text(encoding="utf-8"))
         if not isinstance(payload, dict):

@@ -8,13 +8,20 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 PAYLOAD = {
-    "symbol": "AAPL",
     "days": 5,
     "lookback": 400,
-    "anchor": {"time": "2026-10-14", "value": 250.0},
-    "history": [{"time": "2026-10-13", "value": 245.0}],
-    "base": [{"time": "2026-10-15", "value": 249.0}],
-    "finetuned": [{"time": "2026-10-15", "value": 247.5}],
+    "symbols": ["AAPL"],
+    "results": [
+        {
+            "symbol": "AAPL",
+            "days": 5,
+            "lookback": 400,
+            "anchor": {"time": "2026-10-14", "value": 250.0},
+            "history": [{"time": "2026-10-13", "value": 245.0}],
+            "base": [{"time": "2026-10-15", "value": 249.0}],
+            "finetuned": [{"time": "2026-10-15", "value": 247.5}],
+        },
+    ],
 }
 
 
@@ -59,11 +66,11 @@ class WebKronosApiTests(unittest.TestCase):
         self._login()
         page = self.client.get("/kronos")
         self.assertEqual(page.status_code, 200)
-        self.assertIn('id="kronos-chart"', page.text)
+        self.assertIn('id="kronos-results"', page.text)
         self.assertIn('href="/kronos"', self.client.get("/").text)
 
     def test_forecast_requires_login(self) -> None:
-        r = self.client.post("/api/kronos/forecast", json={"symbol": "AAPL", "days": 5})
+        r = self.client.post("/api/kronos/forecast", json={"symbols": ["AAPL"], "days": 5})
         self.assertEqual(r.status_code, 401)
 
     def test_forecast_rejects_bad_symbol(self) -> None:
@@ -72,26 +79,68 @@ class WebKronosApiTests(unittest.TestCase):
         self.assertEqual(r.status_code, 400)
         self.assertIn("symbol", r.json()["detail"].lower())
 
+    def test_forecast_rejects_bad_symbol_in_list(self) -> None:
+        self._login()
+        r = self.client.post(
+            "/api/kronos/forecast", json={"symbols": "AAPL, A B;RM", "days": 5},
+        )
+        self.assertEqual(r.status_code, 400)
+
     def test_forecast_rejects_bad_days(self) -> None:
         self._login()
         for days in (0, 61, "x"):
-            r = self.client.post("/api/kronos/forecast", json={"symbol": "AAPL", "days": days})
+            r = self.client.post("/api/kronos/forecast", json={"symbols": ["AAPL"], "days": days})
             self.assertEqual(r.status_code, 400, days)
+
+    def test_forecast_rejects_empty_symbols(self) -> None:
+        self._login()
+        for body in ("", "  , ", [], None):
+            r = self.client.post("/api/kronos/forecast", json={"symbols": body, "days": 5})
+            self.assertEqual(r.status_code, 400, body)
+            self.assertIn("at least one", r.json()["detail"].lower())
+
+    def test_forecast_rejects_too_many_symbols(self) -> None:
+        self._login()
+        from web import kronos
+
+        many = [f"S{i}" for i in range(kronos.MAX_SYMBOLS + 1)]
+        r = self.client.post("/api/kronos/forecast", json={"symbols": many, "days": 5})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("at most", r.json()["detail"].lower())
 
     def test_forecast_returns_payload(self) -> None:
         self._login()
         with patch("web.kronos.forecast", return_value=PAYLOAD) as called:
             r = self.client.post("/api/kronos/forecast", json={"symbol": "aapl", "days": 5})
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.json()["symbol"], "AAPL")
-        called.assert_called_once_with("AAPL", 5)
+        self.assertEqual(r.json()["results"][0]["symbol"], "AAPL")
+        called.assert_called_once_with(["AAPL"], 5)
+
+    def test_forecast_parses_comma_separated_symbols(self) -> None:
+        self._login()
+        with patch("web.kronos.forecast", return_value=PAYLOAD) as called:
+            r = self.client.post(
+                "/api/kronos/forecast", json={"symbols": "aapl, nvda ,msft", "days": 5},
+            )
+        self.assertEqual(r.status_code, 200)
+        called.assert_called_once_with(["AAPL", "NVDA", "MSFT"], 5)
+
+    def test_forecast_accepts_list_and_dedupes(self) -> None:
+        self._login()
+        with patch("web.kronos.forecast", return_value=PAYLOAD) as called:
+            r = self.client.post(
+                "/api/kronos/forecast",
+                json={"symbols": [" aapl ", "AAPL", "nvda"], "days": 5},
+            )
+        self.assertEqual(r.status_code, 200)
+        called.assert_called_once_with(["AAPL", "NVDA"], 5)
 
     def test_unavailable_is_503(self) -> None:
         self._login()
         from web import kronos
 
         with patch("web.kronos.forecast", side_effect=kronos.KronosUnavailable("no venv")):
-            r = self.client.post("/api/kronos/forecast", json={"symbol": "AAPL", "days": 5})
+            r = self.client.post("/api/kronos/forecast", json={"symbols": ["AAPL"], "days": 5})
         self.assertEqual(r.status_code, 503)
         self.assertIn("no venv", r.json()["detail"])
 
@@ -100,7 +149,7 @@ class WebKronosApiTests(unittest.TestCase):
         from web import kronos
 
         with patch("web.kronos.forecast", side_effect=kronos.KronosBusy()):
-            r = self.client.post("/api/kronos/forecast", json={"symbol": "AAPL", "days": 5})
+            r = self.client.post("/api/kronos/forecast", json={"symbols": ["AAPL"], "days": 5})
         self.assertEqual(r.status_code, 409)
 
     def test_model_failure_is_502(self) -> None:
@@ -108,7 +157,7 @@ class WebKronosApiTests(unittest.TestCase):
         from web import kronos
 
         with patch("web.kronos.forecast", side_effect=kronos.KronosError("boom")):
-            r = self.client.post("/api/kronos/forecast", json={"symbol": "AAPL", "days": 5})
+            r = self.client.post("/api/kronos/forecast", json={"symbols": ["AAPL"], "days": 5})
         self.assertEqual(r.status_code, 502)
 
 

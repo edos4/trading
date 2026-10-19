@@ -1,4 +1,4 @@
-/* Kronos tab: symbol + days → actual vs base vs fine-tuned forecast chart. */
+/* Kronos tab: comma-separated symbols + days → one forecast chart per symbol. */
 (function () {
   const BG = "#131722";
   const GRID = "#2a2e39";
@@ -12,23 +12,21 @@
   const symbolEl = document.getElementById("kronos-symbol");
   const daysEl = document.getElementById("kronos-days");
   const submitEl = document.getElementById("kronos-submit");
-  const saveEl = document.getElementById("kronos-save");
   const statusEl = document.getElementById("kronos-status");
-  const titleEl = document.getElementById("kronos-title");
-  const hostEl = document.getElementById("kronos-chart");
+  const resultsEl = document.getElementById("kronos-results");
 
-  let chart = null;
-  let last = null;
+  let charts = [];
 
   function setStatus(text) {
     if (statusEl) statusEl.textContent = text || "";
   }
 
-  function unmount() {
-    if (chart) {
-      chart.remove();
-      chart = null;
-    }
+  function unmountAll() {
+    charts.forEach((c) => {
+      try { c.chart.remove(); } catch (err) { /* already detached */ }
+    });
+    charts = [];
+    if (resultsEl) resultsEl.innerHTML = "";
   }
 
   function pct(anchor, value) {
@@ -36,13 +34,8 @@
     return ((value / anchor - 1) * 100).toFixed(2);
   }
 
-  function render(data) {
-    if (typeof LightweightCharts === "undefined") {
-      throw new Error("chart library failed to load");
-    }
-    unmount();
-    hostEl.innerHTML = "";
-    chart = LightweightCharts.createChart(hostEl, {
+  function chartOptions() {
+    return {
       autoSize: true,
       layout: {
         background: { color: BG },
@@ -60,7 +53,14 @@
       timeScale: { borderColor: GRID, rightOffset: 3, barSpacing: 7, minBarSpacing: 0.5 },
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true },
       handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
-    });
+    };
+  }
+
+  function drawChart(hostEl, data) {
+    if (typeof LightweightCharts === "undefined") {
+      throw new Error("chart library failed to load");
+    }
+    const chart = LightweightCharts.createChart(hostEl, chartOptions());
 
     const actualSeries = chart.addLineSeries({ color: ACTUAL, lineWidth: 2, title: "actual" });
     actualSeries.setData((data.history || []).map((r) => ({ time: r.time, value: r.value })));
@@ -83,9 +83,11 @@
     });
 
     chart.timeScale().fitContent();
+    return chart;
   }
 
   function describe(data) {
+    if (data.errors && data.errors.data) return `${data.symbol}: ${data.errors.data}`;
     const bits = [];
     const a = data.anchor ? data.anchor.value : null;
     ["base", "finetuned"].forEach((tag) => {
@@ -98,36 +100,102 @@
       bits.push(`${tag} +${data.days}d ${lastValue.toFixed(2)} (${pct(a, lastValue)}%)`);
     });
     const anchorTxt = data.anchor ? `anchor ${data.anchor.time} @ ${data.anchor.value.toFixed(2)}` : "";
-    return `${data.symbol} ${anchorTxt} • ${bits.join(" • ")}`;
+    return [anchorTxt, bits.join(" • ")].filter(Boolean).join(" • ") || "no forecast";
+  }
+
+  function makePanel(data) {
+    const section = document.createElement("section");
+    section.className = "panel";
+
+    const head = document.createElement("div");
+    head.className = "toolbar";
+    const title = document.createElement("h2");
+    title.style.margin = "0";
+    title.textContent = `${data.symbol} — ${data.days} trading days ahead`;
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "btn";
+    save.textContent = "Save chart";
+    save.disabled = true;
+    head.appendChild(title);
+    head.appendChild(save);
+
+    const status = document.createElement("p");
+    status.className = "status";
+    status.textContent = describe(data);
+
+    const host = document.createElement("div");
+    host.className = "tv-chart-host";
+    host.style.minHeight = "460px";
+
+    section.appendChild(head);
+    section.appendChild(status);
+    section.appendChild(host);
+    return { section, host, save };
+  }
+
+  function saveChart(symbol, days, chart) {
+    try {
+      const url = chart.takeScreenshot().toDataURL("image/png");
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${symbol}_kronos_${days}d.png`;
+      a.click();
+    } catch (err) {
+      setStatus(`Could not save ${symbol} chart: ${err.message || err}`);
+    }
+  }
+
+  function render(payload) {
+    unmountAll();
+    const results = payload.results || [];
+    results.forEach((data) => {
+      const { section, host, save } = makePanel(data);
+      resultsEl.appendChild(section);
+      if ((data.base || []).length || (data.finetuned || []).length) {
+        const chart = drawChart(host, data);
+        charts.push({ chart, symbol: data.symbol, days: data.days });
+        save.disabled = false;
+        save.addEventListener("click", () => saveChart(data.symbol, data.days, chart));
+      }
+    });
+    const failed = results.filter((r) => !(r.base || []).length && !(r.finetuned || []).length);
+    const summary = `${results.length} symbol(s) rendered`;
+    setStatus(failed.length ? `${summary} • ${failed.length} failed` : summary);
+  }
+
+  function parseSymbols(raw) {
+    const seen = [];
+    (raw || "").split(",").forEach((chunk) => {
+      const sym = chunk.replace(/\s+/g, "").toUpperCase();
+      if (sym && seen.indexOf(sym) === -1) seen.push(sym);
+    });
+    return seen;
   }
 
   async function submit(event) {
     if (event) event.preventDefault();
-    const symbol = (symbolEl.value || "").trim().toUpperCase();
+    const symbols = parseSymbols(symbolEl.value);
     const days = parseInt(daysEl.value, 10);
-    if (!symbol) { setStatus("Enter a symbol."); return; }
+    if (!symbols.length) { setStatus("Enter at least one symbol."); return; }
     if (!Number.isFinite(days) || days < 1 || days > 60) {
       setStatus("Days must be between 1 and 60."); return;
     }
     submitEl.disabled = true;
-    saveEl.disabled = true;
-    setStatus(`Running Kronos for ${symbol} (+${days}d)… this can take a minute.`);
+    unmountAll();
+    setStatus(`Running Kronos for ${symbols.join(", ")} (+${days}d)… this can take a minute.`);
     try {
       const res = await fetch("/api/kronos/forecast", {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbol, days }),
+        body: JSON.stringify({ symbols, days }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.detail || data.message || `Request failed (${res.status})`);
       }
       render(data);
-      last = data;
-      titleEl.textContent = `${data.symbol} — ${data.days} trading days ahead`;
-      setStatus(describe(data));
-      saveEl.disabled = false;
     } catch (err) {
       setStatus(String(err.message || err));
     } finally {
@@ -135,19 +203,5 @@
     }
   }
 
-  function saveChart() {
-    if (!chart || !last) return;
-    try {
-      const url = chart.takeScreenshot().toDataURL("image/png");
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${last.symbol}_kronos_${last.days}d.png`;
-      a.click();
-    } catch (err) {
-      setStatus(`Could not save chart: ${err.message || err}`);
-    }
-  }
-
   if (form) form.addEventListener("submit", submit);
-  if (saveEl) saveEl.addEventListener("click", saveChart);
 })();
