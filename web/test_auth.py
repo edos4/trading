@@ -24,9 +24,30 @@ class WebAuthTests(unittest.TestCase):
         with patch("web.auth.settings") as s:
             s.web_ui_username = "admin"
             s.web_ui_password = "s3cret"
+            s.web_ui_users = ""
             self.assertTrue(verify_credentials("admin", "s3cret"))
             self.assertFalse(verify_credentials("admin", "wrong"))
             self.assertFalse(verify_credentials("other", "s3cret"))
+
+    def test_verify_credentials_accepts_configured_users(self) -> None:
+        with patch("web.auth.settings") as s:
+            s.web_ui_username = "admin"
+            s.web_ui_password = "s3cret"
+            s.web_ui_users = "ed:TBY, extra:pass"
+            self.assertTrue(verify_credentials("admin", "s3cret"))
+            self.assertTrue(verify_credentials("ed", "TBY"))
+            self.assertTrue(verify_credentials("extra", "pass"))
+            self.assertFalse(verify_credentials("ed", "wrong"))
+            self.assertFalse(verify_credentials("nobody", "TBY"))
+
+    def test_verify_credentials_ignores_malformed_entries(self) -> None:
+        with patch("web.auth.settings") as s:
+            s.web_ui_username = "admin"
+            s.web_ui_password = "s3cret"
+            s.web_ui_users = "ed, :pw, ,good:pw"
+            self.assertTrue(verify_credentials("admin", "s3cret"))
+            self.assertTrue(verify_credentials("good", "pw"))
+            self.assertFalse(verify_credentials("ed", "pw"))
 
     def test_session_roundtrip(self) -> None:
         with patch("web.auth.settings") as s:

@@ -68,10 +68,24 @@ def _digest_eq(left: str, right: str) -> bool:
     return hmac.compare_digest(lb, rb)
 
 
+def _configured_users() -> list[tuple[str, str]]:
+    primary = ((settings.web_ui_username or "").strip(), settings.web_ui_password or "")
+    users = [primary]
+    raw = getattr(settings, "web_ui_users", "") or ""
+    if isinstance(raw, str):  # tolerate mocked settings that are not real strings
+        for entry in raw.split(","):
+            name, sep, secret = entry.strip().partition(":")
+            if sep and name.strip():
+                users.append((name.strip(), secret))
+    return users
+
+
 def verify_credentials(username: str, password: str) -> bool:
-    expected_user = settings.web_ui_username
-    expected_pass = settings.web_ui_password
-    return _digest_eq(username, expected_user) and _digest_eq(password, expected_pass)
+    ok = False
+    for name, secret in _configured_users():
+        match = _digest_eq(username, name) and _digest_eq(password, secret)
+        ok = match or ok  # compare every candidate; no early return
+    return ok
 
 
 def verify_history_credentials(username: str, password: str) -> bool:
