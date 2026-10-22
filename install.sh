@@ -136,6 +136,11 @@ if [[ "$DO_DB" -eq 1 ]]; then
       warn "setup_editor_db.py did not complete — run it later after fixing DATABASE_URL."
     fi
 
+    say "Migrating Kronos forecast-history tables (non-fatal if DB unreachable)"
+    if ! .venv/bin/python scripts/setup_kronos_db.py; then
+      warn "setup_kronos_db.py did not complete — run it later after fixing DATABASE_URL."
+    fi
+
     say "Migrating visual-indicator rules tables (non-fatal if DB unreachable)"
     if ! .venv/bin/python scripts/setup_rules_db.py; then
       warn "setup_rules_db.py did not complete — run it later after fixing DATABASE_URL."

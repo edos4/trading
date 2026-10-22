@@ -13,6 +13,10 @@ from enum import Enum
 # (not only today's exact trigger bar) can be recognized.
 PATTERN_SCAN_HISTORY_BARS = 30
 
+# Bound for the daily Kronos forecast snapshot. Keep in sync with
+# web/kronos.py::MAX_SYMBOLS (the GPU batch endpoint's own cap).
+KRONOS_MAX_TRACKED_SYMBOLS = 100
+
 
 class TradingMode(str, Enum):
     PAPER = "paper"
@@ -224,6 +228,17 @@ class Settings(BaseSettings):
     # Show the Tasks tab (a clone that never wants a board can hide it).
     tasks_enabled: bool = True
 
+    # ── Web UI · Kronos forecast history (PostgreSQL) ───────────────────────
+    # Empty reuses the existing PostgreSQL DATABASE_URL / db_* settings.
+    kronos_database_url: str = ""
+    # Kronos schema. Production uses `kronos`; tests point this at kronos_test_<uuid>.
+    kronos_schema: str = "kronos"
+    # Fixed daily forecast set. Empty falls back to the first
+    # KRONOS_MAX_TRACKED_SYMBOLS WATCHLIST names.
+    kronos_tracked_symbols: str = ""
+    # Default forecast horizon for the "Save today's forecasts" button.
+    kronos_save_days: int = 5
+
     # ── Web UI · Builder (visual indicator rules, PostgreSQL) ───────────────
     # Empty reuses the existing PostgreSQL DATABASE_URL / db_* settings.
     rules_database_url: str = ""
@@ -387,6 +402,11 @@ class Settings(BaseSettings):
     def _clamp_kronos_batch_size(cls, value: int) -> int:
         return max(1, min(int(value), 256))
 
+    @field_validator("kronos_save_days")
+    @classmethod
+    def _clamp_kronos_save_days(cls, value: int) -> int:
+        return max(1, min(int(value), 60))
+
     @property
     def stocks_history_auth(self) -> tuple[str, str]:
         """Basic auth for GET /api/history. Password defaults to WEB_UI_USERNAME."""
@@ -414,6 +434,23 @@ class Settings(BaseSettings):
     @property
     def symbols(self) -> list[str]:
         return [s.strip().upper() for s in self.watchlist.split(",") if s.strip()]
+
+    @property
+    def kronos_symbols(self) -> list[str]:
+        explicit = (self.kronos_tracked_symbols or "").strip()
+        raw = explicit or self.watchlist
+        seen: list[str] = []
+        for item in raw.split(","):
+            symbol = item.replace(" ", "").strip().upper()
+            if symbol and symbol not in seen:
+                seen.append(symbol)
+        # WATCHLIST is the full scanned universe (thousands of names), not a
+        # curated daily set. Bound the fallback to the forecast engine's cap
+        # (web.kronos.MAX_SYMBOLS); an explicit list is never truncated here so
+        # an oversized configuration surfaces as an error instead.
+        if not explicit:
+            seen = seen[:KRONOS_MAX_TRACKED_SYMBOLS]
+        return seen
 
     @property
     def symbol_exchange_overrides(self) -> dict[str, str]:
