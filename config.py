@@ -224,6 +224,12 @@ class Settings(BaseSettings):
     # Show the Tasks tab (a clone that never wants a board can hide it).
     tasks_enabled: bool = True
 
+    # ── Web UI · Builder (visual indicator rules, PostgreSQL) ───────────────
+    # Empty reuses the existing PostgreSQL DATABASE_URL / db_* settings.
+    rules_database_url: str = ""
+    # Rules schema. Production uses `rules`; tests point this at rules_test_<uuid>.
+    rules_schema: str = "rules"
+
     # ── Hermes Agent dashboard (optional) ───────────────────────────────────
     # Nous Research Hermes Agent ships its own web dashboard (React SPA behind
     # FastAPI) on 127.0.0.1:9119. Bound to loopback it has no auth of its own,

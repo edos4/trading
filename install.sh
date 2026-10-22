@@ -135,6 +135,11 @@ if [[ "$DO_DB" -eq 1 ]]; then
     if ! .venv/bin/python scripts/setup_editor_db.py; then
       warn "setup_editor_db.py did not complete — run it later after fixing DATABASE_URL."
     fi
+
+    say "Migrating visual-indicator rules tables (non-fatal if DB unreachable)"
+    if ! .venv/bin/python scripts/setup_rules_db.py; then
+      warn "setup_rules_db.py did not complete — run it later after fixing DATABASE_URL."
+    fi
   fi
 else
   say "Skipping PostgreSQL setup (--no-db)"
