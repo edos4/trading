@@ -357,6 +357,13 @@ class MarketScanner:
         payload["name"] = row.get("name") or payload.get("name") or "rule filter"
         payload.setdefault("schema_version", 1)
         self._rule_filter = RulePayload.model_validate(payload)
+        self._rule_filter_pattern = (
+            self._rule_filter.attachments.patternsv2.pattern or "all"
+        ).strip() or "all"
+
+    def _rule_filter_matches_pattern(self, pattern: str) -> bool:
+        target = getattr(self, "_rule_filter_pattern", "all")
+        return target in ("", "all") or pattern == target
 
     def _rule_filter_evidence(self, symbol: str, timeframe: str) -> dict:
         from analysis.rule_engine import evaluate_bar, required_bars
@@ -1124,9 +1131,23 @@ class MarketScanner:
     def _analyze_local(self, snapshot: MarketSnapshot) -> tuple[int, list[TradeSignal]]:
         """Inline analyze on this loop — tests, workers=1, or pool fallback."""
         if getattr(self, "_patterns_v2", False) and not getattr(self, "_indicators_only", False):
-            if not self._rule_prefilter(snapshot.symbol, snapshot.timeframe):
-                return 0, []
-            return self._analyze_patterns_v2(snapshot)
+            target = getattr(self, "_rule_filter_pattern", "all") or "all"
+            before = (
+                getattr(self, "_rule_filter", None) is not None
+                and getattr(self, "_rule_filter_mode", "off") == "filter"
+                and getattr(self, "_rule_filter_position", "after") == "before"
+            )
+            if before and target == "all":
+                if not self._rule_prefilter(snapshot.symbol, snapshot.timeframe):
+                    return 0, []
+                return self._analyze_patterns_v2(snapshot)
+            n_eval, hits = self._analyze_patterns_v2(snapshot)
+            if before and target != "all":
+                # Patternsv2 detects every shape in one shared pass. Evaluate
+                # first, then drop only the attached pattern's signals.
+                if not self._rule_prefilter(snapshot.symbol, snapshot.timeframe):
+                    hits = [h for h in hits if getattr(h, "pattern", "") != target]
+            return n_eval, hits
         symbol, timeframe = snapshot.symbol, snapshot.timeframe
         n_bars = self._store.available(symbol, timeframe)
         n_eval = 0
@@ -1446,6 +1467,7 @@ class MarketScanner:
         if (self._rule_filter is not None
                 and self._rule_filter_position == "after"
                 and signal.provenance != "visual_rule"
+                and self._rule_filter_matches_pattern(signal.pattern)
                 and signal.timeframe == self._rule_filter.timeframe):
             evidence = self._rule_filter_evidence(signal.symbol, signal.timeframe)
             if self._rule_filter_mode == "shadow":

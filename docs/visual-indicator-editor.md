@@ -77,7 +77,7 @@ rows live in `indicator_rules`.
     "max_hold_bars": 60                                     // optional safety time stop
   },
   "attachments": {
-    "patternsv2": {"position": "off", "mode": "filter"}     // off | before | after
+    "patternsv2": {"pattern": "all", "position": "off", "mode": "filter"}
   }
 }
 ```
@@ -188,11 +188,14 @@ detector all call both, so a hand-crafted JSON body cannot bypass the editor.
 
 `attachments.patternsv2` is the saved relationship to Patternsv2:
 
+- `pattern: "all"` targets every active Patternsv2 detector; otherwise it names
+  one detector (`double_bottom`, `bull_flag`, `symmetrical_triangle`, `rectangle`, …).
 - `position: "off"` — no attachment.
-- `position: "before"` — evaluate the rule first and skip Patternsv2 detection when it fails
-  (filter mode only).
-- `position: "after"` — let Patternsv2 detect, then filter (`mode: "filter"`) or record
-  (`mode: "shadow"`) the signals.
+- `position: "before"` — evaluate the rule first. With a specific pattern, drop
+  that pattern's signals before they enter the pipeline; with `all`, skip
+  Patternsv2 detection entirely when the rule fails (filter mode only).
+- `position: "after"` — let Patternsv2 detect, then filter (`mode: "filter"`) or
+  record (`mode: "shadow"`) the selected pattern's signals.
 
 ---
 
@@ -301,7 +304,7 @@ Mirror `tv_stack_id` at every hop:
 | `core/paper_books.py:PaperBook.start` | accept `rule_id`, `rule_filter_id`, `rule_filter_mode`, `rule_filter_position`; when `rule_id` is set force `indicators_only=True; pattern_only=False; patterns_v2=False` (inside `PaperBook.start`) and validate the rule exists. Follow the existing convention: return a refusal **string** (e.g. `"Unknown indicator rule."`) instead of raising. |
 | `core/paper_books.py:_thread_main` / `_run_thread` | `start()` passes its worker arguments **positionally** (`core/paper_books.py:start`); add the four rule kwargs to that tuple and to `_run_thread`'s signature, or the thread starts with shifted arguments. Pass them into `MarketScanner` inside `_run_thread`. |
 | `core/paper_books.py` lifecycle | set `self.rule_id` / `self.rule_filter_id` on start and **clear them in the `finally` block** (`core/paper_books.py:630`), otherwise `rule_in_use()` blocks deletion forever after a stopped book. Add the rule name to the running status string. |
-| `core/scanner.py:MarketScanner` | `rule_id: str = ""`, `rule_filter_id: str = ""`, `rule_filter_mode: str = "off"`, `rule_filter_position: str = "after"`; `_indicators_only = ... or bool(rule_id)` |
+| `core/scanner.py:MarketScanner` | `rule_id: str = ""`, `rule_filter_id: str = ""`, `rule_filter_mode: str = "off"`, `rule_filter_position: str = "after"`; loads `attachments.patternsv2.pattern` into `_rule_filter_pattern`; `_indicators_only = ... or bool(rule_id)` |
 | `core/scanner.py:_discover_patterns` | new first branch: `if self._rule_id: self._patterns = [VisualRuleIndicator(get_rule(self._rule_id))]` |
 | `web/templates/paper.html` + `web/static/app.js` | per-book "Rule" select (`/api/rules`) and "Rule filter: off/shadow/filter" select; include them in `bookStartBody()` (`app.js:585`), which is the actual payload builder. |
 | `web/templates/builder.html` | "Start paper book" panel (market, symbols, rule) → `POST /api/paper/start`, copied from `indicators.html:66-83` |
@@ -314,14 +317,16 @@ open position per symbol (`core/paper_trader.py:723-735`) — a rule strategy in
 
 ## 6. Integration B — filter (context gate)
 
-A rule can be attached to Patternsv2 in two places:
+A rule can be attached to one Patternsv2 pattern (or all of them) in two places:
 
-- **Before detection** (`rule_filter_position="before"`): `_analyze_local` evaluates the rule on
-  the symbol/bar and skips `_analyze_patterns_v2` when it fails. Only Patternsv2 uses this path;
-  on other detector families the scanner degrades the position to `after`. It requires
-  `mode="filter"` (there is no signal to shadow yet).
-- **After detection** (`rule_filter_position="after"`, the default): the gate below runs on the
-  signals Patternsv2 emitted.
+- **Before detection** (`rule_filter_position="before"`): `_analyze_local` evaluates the rule
+  before accepting output. With `pattern="all"`, `_analyze_patterns_v2` is skipped entirely when
+  the rule fails. With a specific pattern, Patternsv2 still runs (its shapes share one pass), but
+  only that pattern's signals are dropped when the rule fails. On other detector families the
+  scanner degrades the position to `after`. It requires `mode="filter"` (there is no signal to
+  shadow yet).
+- **After detection** (`rule_filter_position="after"`, the default): the gate below runs on
+  signals whose `signal.pattern` matches the attachment (`"all"` matches everything).
 
 - Insert into `_finish_signal` **after** the volume gate (`core/scanner.py:1402`) and before
   vision/Laya, only for `after` placement. Apply it only when the signal's timeframe matches the
@@ -398,7 +403,7 @@ sub-second per symbol on this box; cap a run at 200 symbols and run it in
 | `GET /api/rules/{id}` | full rule |
 | `POST /api/rules` | `{name, payload, rule_id?, expected_generation?}` → 201/409 on stale generation |
 | `DELETE /api/rules/{id}` | `{"ok": true}`; 409 if a running paper book uses it |
-| `GET /api/rules/catalog` | indicator/operator catalog for the picker |
+| `GET /api/rules/catalog` | indicator/operator catalog plus `patternsv2_patterns` for the attachment picker |
 | `POST /api/rules/validate` | validate a draft tree; per-node `{ok:false, errors:[{loc,msg}]}` |
 | `POST /api/rules/preview` | `{rule_id | payload, symbol, market, bars}` → per-bar table + condition evidence |
 | `POST /api/rules/{id}/backtest` | run `rule_backtest`, return trades + summary + matches |
@@ -466,10 +471,11 @@ full-width panels below. All existing CSS primitives are used (`.panel`,
   operator `<select>`, and an operand control that is a number input by default with a
   "vs indicator" toggle.
 - **Connector chip**: one per group, click toggles AND↔OR, label shows the current operator.
-- **Attach to Patternsv2**: a saved placement (`Off`, `Before detection`, `After detection`) and
-  mode (`Filter`, `Shadow`). `Before` forces filter mode and disables the mode select. The
-  attachment is stored in `payload.attachments.patternsv2`; Paper applies it when the rule is
-  selected, and the Builder's start panel starts a Patternsv2 book instead of a rule-only one.
+- **Attach to Patternsv2**: a saved target (`All Patternsv2 patterns` or one specific pattern),
+  placement (`Off`, `Before detection`, `After detection`) and mode (`Filter`, `Shadow`).
+  `Before` forces filter mode and disables the mode select. The attachment is stored in
+  `payload.attachments.patternsv2`; Paper applies it when the rule is selected, and the Builder's
+  start panel starts a Patternsv2 book instead of a rule-only one.
 - **Dirty guard**: `beforeunload` + confirm on switching rules.
 - **Safety**: rule names, indicator labels and condition text go into the DOM with
   `textContent` (never `innerHTML`); ids/operators/params are validated server-side against
@@ -577,11 +583,12 @@ The engine/detector tests are pure pandas and need no database.
     breakouts, and that the same signals pass when the rule is removed.
 12. Switch mode to `shadow`: signals still fill, but each logged signal carries
     `rule_evidence` — a measured comparison, no behaviour change.
-13. Save the rule with Attach to Patternsv2 = `Before detection`; reload the rule and confirm
-    the placement survives. Start a Patternsv2 book from Builder: the request must carry
-    `patterns_v2=true`, the rule filter id, `mode=filter`, and `position=before`. On a bar where
-    the rule is false, Patternsv2 detection is skipped (`rule_filter_prefiltered` increments);
-    where it is true, detection runs normally.
+13. Save the rule with Attach to Patternsv2 = `Before detection`, Pattern =
+    `Double Bottom`; reload the rule and confirm both survive. Start a Patternsv2 book from
+    Builder: the request must carry `patterns_v2=true`, the rule filter id, `mode=filter`, and
+    `position=before`. On a bar where the rule is false, `double_bottom` signals are dropped
+    while other Patternsv2 shapes still run (`rule_filter_prefiltered` increments); with
+    Pattern = `All`, detection itself is skipped when the rule is false.
 
 **Backtest**
 14. Run `indicator1` over 2 symbols, 1 year → trades table, summary, and match timeline;
@@ -616,8 +623,8 @@ Verified directly against the source, not just the earlier exploration summaries
   `bookStartBody` line (`app.js:585`).
 - **Implementation checks (2026-10-22)**: `scripts/setup_rules_db.py` applied migration 0001
   and was idempotent on a second run; `rules.indicator_rules` + `schema_migrations` present.
-  The new suite passed **37 tests** with a disposable PostgreSQL database
-  (`RULES_TEST_DATABASE_URL`). The full non-slow suite: **786 passed, 1 failed** —
+  The new suite passed **39 tests** with a disposable PostgreSQL database
+  (`RULES_TEST_DATABASE_URL`). The full non-slow suite: **788 passed, 1 failed** —
   `data/test_tv_stacks.py::test_fake_series_buys_then_trails_out`, re-run in a clean `HEAD`
   worktree and failing there too (pre-existing stale test against the committed `causal-v1`
   paper model), not caused by this feature.
@@ -629,12 +636,14 @@ Verified directly against the source, not just the earlier exploration summaries
   deleted it. No page or console errors. The Paper tab loaded both rule selects, selecting a
   strategy rule auto-checked `Indicators only` and disabled `Pattern-only`, and the filter mode
   selected `shadow`.
-- **Patternsv2 attachment checks**: saved `Attach to Patternsv2 = Before detection`, confirmed
-  the placement/mode survive a reload, confirmed the Paper tab auto-applies mode `filter` and
-  placement `before` and ticks Patternsv2, and captured Builder's start payload as
-  `{patterns_v2:true, rule_filter_id, rule_filter_mode:"filter", rule_filter_position:"before"}`.
-  Scanner tests cover the pre-scan skip (`rule_filter_prefiltered`), the before+shadow rejection,
-  the degrade-to-after path, and the cache invalidation when the last close changes.
+- **Patternsv2 attachment checks**: saved `Attach to Patternsv2 = Before detection`,
+  `Pattern = Double Bottom`, confirmed the pattern/placement/mode survive a reload, confirmed
+  the Paper tab auto-applies mode `filter` and placement `before` and ticks Patternsv2, and
+  captured Builder's start payload as
+  `{patterns_v2:true, rule_filter_id, rule_filter_mode:"filter", rule_filter_position:"before"}`
+  (the target pattern is read from the rule). Scanner tests cover dropping only the attached
+  pattern's signals in before mode, the all-patterns pre-scan skip, the before+shadow rejection,
+  the degrade-to-after path, and cache invalidation when the last close changes.
 - **Additional fixes from this audit**: catalog ids/params/output fields are now validated at
   save, validate and detector construction (`analysis.rule_catalog.validate_rule`); filter ids
   in `off` mode no longer block deletion; delete refusals name the market; a strategy/filter

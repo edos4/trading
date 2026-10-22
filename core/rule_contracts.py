@@ -101,6 +101,9 @@ class Patternsv2Attachment(BaseModel):
 
     # before: evaluate the rule first and skip Patternsv2 detection when false.
     # after:  let Patternsv2 detect, then veto signals when the rule is false.
+    # "all" applies to every Patternsv2 pattern; otherwise one detector name
+    # such as double_bottom, bull_flag, symmetrical_triangle, rectangle.
+    pattern: str = "all"
     position: Literal["off", "before", "after"] = "off"
     mode: Literal["filter", "shadow"] = "filter"
 

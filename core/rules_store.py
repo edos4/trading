@@ -87,6 +87,7 @@ def _summary(payload: dict) -> dict:
         "blocks": counts["blocks"],
         "conditions": counts["conditions"],
         "patternsv2": {
+            "pattern": attachment.get("pattern") or "all",
             "position": attachment.get("position") or "off",
             "mode": attachment.get("mode") or "filter",
         },

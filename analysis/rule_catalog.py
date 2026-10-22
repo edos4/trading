@@ -300,6 +300,17 @@ def validate_rule(rule) -> None:
 
     walk(rule.root)
 
+    attachment = getattr(getattr(rule, "attachments", None), "patternsv2", None)
+    if attachment is not None:
+        pattern = (attachment.pattern or "all").strip()
+        if pattern != "all":
+            from patterns_v2.patterns.common import PATTERN_NAMES
+
+            if pattern not in PATTERN_NAMES:
+                raise ValueError(
+                    f"Unknown Patternsv2 pattern {pattern!r}; choose all or one of "
+                    f"{', '.join(sorted(PATTERN_NAMES))}")
+
 
 def catalog_payload() -> list[dict]:
     return [
