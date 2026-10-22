@@ -372,6 +372,115 @@ equivalents. When PostgreSQL is unavailable the tab shows a readable error and
 every other tab keeps serving; `TASKS_ENABLED=false` hides it. Whole board as
 JSON: `GET /api/tasks/export`. Full design: `docs/kanban-plan.md`.
 
+### Builder — visual indicator editor (PostgreSQL)
+
+The **Builder** tab creates named indicators from draggable condition blocks and
+uses them two ways:
+
+1. **As a strategy.** A saved indicator becomes a paper book's own detector: the
+   rule firing on a false→true edge is the entry, and it exits when the rule
+   stops matching (plus an optional stop/target and max-hold).
+2. **As a filter.** A saved indicator can gate every pattern / patterns_v2 /
+   local-indicator signal on the same bar. `filter` vetoes entries; `shadow`
+   records the evidence without changing behaviour. This is the
+   "context before the pattern" layer — e.g. require `ADX(14) >= 20` so
+   sideways breakouts are rejected.
+
+**How the editor works.** A rule is a tree of groups ("blocks"). Each block has
+one connector (`AND` / `OR`) and holds conditions; `+ Group` nests another level
+(up to four). A condition compares an indicator output to a number or another
+indicator, with `>`, `>=`, `<`, `<=`, `=`, `!=`, `crosses above`, `crosses
+below`, and an optional "bars ago" offset. Blocks and conditions reorder by drag
+handle (SortableJS) or the ▲/▼ buttons. Parameter chips edit each indicator's
+periods. The Preview panel evaluates the draft over recent bars and shows the
+raw per-condition values, so a match can be verified rather than trusted.
+
+**Prerequisites.** PostgreSQL (the same `DATABASE_URL` / `db_*` settings as the
+rest of the app). Create or migrate the schema once:
+
+```bash
+python scripts/setup_rules_db.py
+```
+
+The page degrades with that hint if the schema is missing; every other tab keeps
+serving.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `RULES_DATABASE_URL` | empty | Dedicated DSN; empty reuses `DATABASE_URL` / `db_*`. |
+| `RULES_SCHEMA` | `rules` | Schema holding `indicator_rules`. |
+
+**Rule document.** Saved in `rules.indicator_rules.payload` (JSONB), with
+`id`, `name`, `generation` and timestamps on the row. A minimal example:
+
+```json
+{
+  "schema_version": 1,
+  "name": "indicator1",
+  "timeframe": "1d",
+  "direction": "long",
+  "root": {
+    "kind": "group", "op": "AND",
+    "children": [
+      {"kind": "condition",
+       "left": {"source": "indicator", "id": "rsi", "params": {"period": 14}},
+       "operator": "gte", "right": {"source": "value", "value": 30}},
+      {"kind": "group", "op": "OR", "children": [
+        {"kind": "condition",
+         "left": {"source": "indicator", "id": "close"},
+         "operator": "crosses_above",
+         "right": {"source": "indicator", "id": "sma", "params": {"period": 50}}},
+        {"kind": "condition",
+         "left": {"source": "indicator", "id": "adx", "params": {"period": 14}},
+         "operator": "gte", "right": {"source": "value", "value": 20}}
+      ]}
+    ]
+  },
+  "exit": {
+    "on_false": true,
+    "stop": {"kind": "percent", "percent": 5},
+    "target": {"kind": "r_multiple", "r": 2},
+    "max_hold_bars": 60
+  }
+}
+```
+
+Available indicators: price series (`open`, `high`, `low`, `close`, `volume`),
+SMA/EMA/WMA, RSI (Wilder), MACD, Stochastic, ADX, ATR, ATR %, distance from SMA
+in ATR, % change, Bollinger Bands, highest high / lowest low, OBV, rolling VWAP
+and relative volume. Everything is computed locally from daily OHLCV; no
+TradingView session is required.
+
+**Paper / filter use.** On the **Paper** tab each book has a `Rule` select (runs
+that indicator as the strategy) and a `Rule filter` select with
+`Off / Shadow / Filter`. The Builder's "Start paper book" panel does the same for
+the strategy case. Filter rejections appear in the Paper → Logs tab and in
+`logs/paper_signals_*.jsonl` with the exact failing condition and its value.
+
+**API.**
+| Method + path | Purpose |
+|---|---|
+| `GET /api/rules` | Saved summaries (id, name, generation, counts). |
+| `GET /api/rules/{id}` | Full rule payload. |
+| `POST /api/rules` | Create or update; `expected_generation` enables optimistic concurrency (409 on stale). |
+| `DELETE /api/rules/{id}` | Delete; refused (409) while a paper book uses it. |
+| `GET /api/rules/catalog` | Indicator/operator catalog for the picker. |
+| `POST /api/rules/validate` | Validate a draft tree. |
+| `POST /api/rules/preview` | Per-bar matches + per-condition evidence. |
+| `POST /api/rules/{id}/backtest` | Next-open replay with stop/target/rule-false exits. |
+
+**Safety notes.** Rule names/labels are rendered with `textContent`; indicator
+ids, operators and parameter ranges are validated server-side. The database
+schema/DSN is validated, and every query is parameterized. A rule strategy uses
+the existing one-position-per-symbol paper limit and the market's long-only rule
+(PH), and a rule with neither stop nor target is rejected at validation.
+
+**Troubleshooting.** `503` + "run scripts/setup_rules_db.py" means the schema is
+missing or its checksums drifted. `409` on save means another edit advanced the
+generation — reload the rule. `409` on delete means a running book still uses it;
+stop the book first. An empty Preview means the symbol has less history than the
+rule's warmup (`required_bars` is reported by the endpoint).
+
 ### Local web with a public URL (Cloudflare Tunnel) — optional, host-specific
 
 `./run_web.sh` is a plain local server by default. On a host that opts in (by

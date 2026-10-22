@@ -434,7 +434,36 @@ function initPaper() {
         if (patternsV2.checked) indicatorsOnly.checked = false;
       });
     }
+    const rule = document.getElementById(`${id}-rule`);
+    if (rule && indicatorsOnly) {
+      rule.addEventListener("change", () => {
+        if (!rule.value) return;
+        indicatorsOnly.checked = true;
+        indicatorsOnly.dispatchEvent(new Event("change"));
+      });
+    }
   });
+
+  (async () => {
+    try {
+      const payload = await api("/api/rules");
+      const rules = payload.rules || [];
+      BOOKS.forEach((id) => {
+        ["rule", "rule-filter"].forEach((kind) => {
+          const select = document.getElementById(`${id}-${kind}`);
+          if (!select) return;
+          rules.forEach((rule) => {
+            const option = document.createElement("option");
+            option.value = rule.id;
+            option.textContent = `${rule.name} (${rule.timeframe}, ${rule.direction})`;
+            select.appendChild(option);
+          });
+        });
+      });
+    } catch (err) {
+      // Builder storage may be unmigrated; the rest of the Paper tab still works.
+    }
+  })();
 
   document.querySelectorAll(".tabs .tab").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -561,6 +590,9 @@ function initPaper() {
       use_stream: !!(document.getElementById(`${id}-stream`) || {}).checked,
       volume_gate: !!(document.getElementById(`${id}-volume`) || {}).checked,
       indicators_only: !!(document.getElementById(`${id}-indicators-only`) || {}).checked,
+      rule_id: ((document.getElementById(`${id}-rule`) || {}).value || "").trim(),
+      rule_filter_id: ((document.getElementById(`${id}-rule-filter`) || {}).value || "").trim(),
+      rule_filter_mode: ((document.getElementById(`${id}-rule-filter-mode`) || {}).value || "off"),
       patterns_v2: !!(document.getElementById(`${id}-patterns-v2`) || {}).checked
         && !(document.getElementById(`${id}-indicators-only`) || {}).checked,
       pattern_only: !!(document.getElementById(`${id}-pattern-only`) || {}).checked

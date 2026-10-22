@@ -92,6 +92,9 @@ class PaperStartRequest(BaseModel):
     duration_days: Optional[int] = Field(None, ge=1, le=5000)
     market: Optional[Literal["us", "ph"]] = None
     tv_stack_id: str = ""
+    rule_id: str = ""
+    rule_filter_id: str = ""
+    rule_filter_mode: Literal["off", "shadow", "filter"] = "off"
     laya_mode: Literal["off", "research", "shadow", "filter"] = "off"
     laya_policy_id: str = ""
 
@@ -1108,7 +1111,16 @@ def create_app() -> FastAPI:
         return await asyncio.to_thread(paper_books.snapshot_all)
 
     def _start_book(payload: PaperStartRequest, market: str) -> str | None:
-        indicators_only = payload.indicators_only or bool((payload.tv_stack_id or "").strip())
+        rule_id = (payload.rule_id or "").strip()
+        filter_id = (payload.rule_filter_id or "").strip()
+        if rule_id and filter_id and rule_id == filter_id:
+            return "A strategy rule cannot also be its own filter."
+        rule_mode = bool(rule_id)
+        indicators_only = (
+            payload.indicators_only
+            or bool((payload.tv_stack_id or "").strip())
+            or rule_mode
+        )
         return paper_books.start(
             market,
             payload.n_symbols,
@@ -1125,6 +1137,9 @@ def create_app() -> FastAPI:
             laya_mode=payload.laya_mode,
             laya_policy_id=payload.laya_policy_id,
             duration_days=payload.duration_days,
+            rule_id=payload.rule_id,
+            rule_filter_id=payload.rule_filter_id,
+            rule_filter_mode=payload.rule_filter_mode,
         )
 
     @app.post("/api/paper/start")
@@ -1367,6 +1382,11 @@ def create_app() -> FastAPI:
         from web.tasks import register_task_routes as _register_tasks
 
         _register_tasks(app, templates, ctx)
+
+    # ── Builder tab (visual indicator rules, PostgreSQL-backed) ─────────────
+    from web.rules import register_rules_routes as _register_rules
+
+    _register_rules(app, templates, ctx)
 
     return app
 
