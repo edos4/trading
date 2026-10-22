@@ -180,11 +180,13 @@
     const actions = el("span", "builder-group-actions");
     const addCondition = el("button", "btn ghost", "+ Condition");
     addCondition.type = "button";
+    addCondition.title = "Add another condition to this block.";
     addCondition.addEventListener("click", () => addConditionTo(group));
     actions.appendChild(addCondition);
     if (depth < MAX_DEPTH - 1) {
       const addGroup = el("button", "btn ghost", "+ Group");
       addGroup.type = "button";
+      addGroup.title = "Add a nested group with its own AND/OR connector.";
       addGroup.addEventListener("click", () => addGroupTo(group));
       actions.appendChild(addGroup);
     }
@@ -231,6 +233,7 @@
     const entry = entryOf(operand.id) || state.catalog[0];
 
     const select = el("select", "builder-indicator");
+    select.title = "Indicator (and output) whose value is compared on the left side.";
     const groups = {};
     state.catalog.forEach((item) => {
       if (!groups[item.group]) {
@@ -272,6 +275,7 @@
         input.max = param.max;
         input.step = param.kind === "int" ? "1" : "0.1";
         input.value = operand.params[param.name] != null ? operand.params[param.name] : param.default;
+        input.title = `${param.label} for ${entry ? entry.label : operand.id}`;
         input.addEventListener("input", () => {
           operand.params[param.name] = Number(input.value);
           summary.textContent = chipText();
@@ -286,6 +290,7 @@
     if (entry && entry.outputs && entry.outputs.length > 1) {
       const wrap = el("label", "builder-param", "output");
       const out = el("select");
+      out.title = "Which output of this indicator to compare.";
       entry.outputs.forEach((name) => {
         const option = el("option", null, name);
         option.value = name;
@@ -307,6 +312,7 @@
     shiftInput.max = "500";
     shiftInput.step = "1";
     shiftInput.value = operand.offset || 0;
+    shiftInput.title = "Compare this value N bars ago (0 = current bar).";
     shiftInput.addEventListener("input", () => {
       operand.offset = Math.max(0, Number(shiftInput.value) || 0);
       markDirty(true);
@@ -326,6 +332,7 @@
     row.appendChild(renderOperand(condition.left));
 
     const operators = el("select", "builder-operator");
+    operators.title = "Comparison: >, >=, <, <=, =, !=, or a crossing event.";
     state.operators.forEach((operator) => {
       const option = el("option", null, operator.label);
       option.value = operator.id;
@@ -339,6 +346,7 @@
     row.appendChild(operators);
 
     const mode = el("select", "builder-right-mode");
+    mode.title = "Compare the left side with a fixed number or another indicator.";
     [["value", "value"], ["indicator", "indicator"]].forEach(([value, label]) => {
       const option = el("option", null, label);
       option.value = value;
@@ -362,6 +370,7 @@
       const input = el("input", "builder-value");
       input.type = "number";
       input.step = "any";
+      input.title = "Fixed number the left side is compared with.";
       input.value = condition.right.value != null ? condition.right.value : 0;
       input.addEventListener("input", () => {
         condition.right.value = Number(input.value);
@@ -527,11 +536,31 @@
     const target = pattern.value === "all"
       ? "Patternsv2"
       : (pattern.selectedOptions[0] ? pattern.selectedOptions[0].textContent : pattern.value);
+    const allPatterns = pattern.value === "all";
     $("builder-attach-hint").textContent = position === "before"
-      ? `Before: ${target} detection is skipped on bars where this rule is false. Filter mode only.`
+      ? (allPatterns
+        ? "Before: Patternsv2 detection is skipped on bars where this rule is false. Filter mode only."
+        : `Before: ${target} signals are dropped on bars where this rule is false; other patterns still run. Filter mode only.`)
       : position === "after"
-        ? `After: ${target} detects first; this rule then filters or shadows its signals.`
+        ? (allPatterns
+          ? "After: every Patternsv2 pattern detects first; this rule then filters or shadows their signals."
+          : `After: ${target} detects first; this rule then filters or shadows its signals.`)
         : "Off: Patternsv2 runs without this rule. Paper's Rule filter can still select it manually.";
+    const modeHint = $("builder-attach-mode-hint");
+    if (modeHint) {
+      if (position === "off") {
+        modeHint.textContent = "Mode is ignored while the attachment is Off.";
+      } else if (before) {
+        modeHint.textContent =
+          "Before placement always uses Filter; there is no signal to shadow yet.";
+      } else if (mode.value === "filter") {
+        modeHint.textContent =
+          "Filter: reject the selected pattern's signals while this rule is false.";
+      } else {
+        modeHint.textContent =
+          "Shadow: never block; record rule_evidence on each signal so you can compare.";
+      }
+    }
   }
 
   function bindExitControls() {
@@ -601,6 +630,7 @@
     });
     $("builder-attach-mode").addEventListener("change", () => {
       state.rule.attachments.patternsv2.mode = $("builder-attach-mode").value;
+      updateAttachmentVisibility();
       markDirty(true);
     });
   }
