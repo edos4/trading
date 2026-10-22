@@ -118,6 +118,7 @@ class WebRulesApiTests(unittest.TestCase):
             response = self.client.post("/api/paper/start", json={
                 "market": "us", "n_symbols": 5, "rule_id": "rule-1",
                 "rule_filter_id": "rule-2", "rule_filter_mode": "shadow",
+                "rule_filter_position": "after",
             })
         self.assertEqual(response.status_code, 200, response.text)
         kwargs = start.call_args.kwargs
@@ -127,6 +128,7 @@ class WebRulesApiTests(unittest.TestCase):
         self.assertEqual(kwargs["rule_id"], "rule-1")
         self.assertEqual(kwargs["rule_filter_id"], "rule-2")
         self.assertEqual(kwargs["rule_filter_mode"], "shadow")
+        self.assertEqual(kwargs["rule_filter_position"], "after")
 
     def test_same_rule_cannot_be_its_own_filter(self) -> None:
         with patch("web.app.paper_books.start", return_value=None) as start:

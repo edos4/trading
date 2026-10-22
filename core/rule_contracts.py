@@ -94,6 +94,23 @@ class ExitPlan(BaseModel):
         return self
 
 
+class Patternsv2Attachment(BaseModel):
+    """How a saved rule is attached to the Patternsv2 detector."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # before: evaluate the rule first and skip Patternsv2 detection when false.
+    # after:  let Patternsv2 detect, then veto signals when the rule is false.
+    position: Literal["off", "before", "after"] = "off"
+    mode: Literal["filter", "shadow"] = "filter"
+
+
+class Attachments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    patternsv2: Patternsv2Attachment = Field(default_factory=Patternsv2Attachment)
+
+
 class RulePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -103,6 +120,7 @@ class RulePayload(BaseModel):
     direction: Literal["long", "short"] = "long"
     root: Group
     exit: ExitPlan = Field(default_factory=ExitPlan)
+    attachments: Attachments = Field(default_factory=Attachments)
 
     @model_validator(mode="after")
     def _limits(self):

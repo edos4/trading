@@ -451,11 +451,27 @@ in ATR, % change, Bollinger Bands, highest high / lowest low, OBV, rolling VWAP
 and relative volume. Everything is computed locally from daily OHLCV; no
 TradingView session is required.
 
+**Attaching to Patternsv2.** Each saved indicator has an **Attach to
+Patternsv2** setting, stored in `payload.attachments.patternsv2`:
+
+- **Before detection** — evaluate the rule on the bar first and skip Patternsv2
+  detection entirely when it fails. Filter mode only; this saves scan work and
+  supplies the context before a pattern is searched for.
+- **After detection** — run Patternsv2 normally, then filter (or shadow) the
+  signals it emits.
+
+Selecting the rule as a `Rule filter` on the Paper tab applies the saved mode and
+placement automatically (and ticks Patternsv2 for a `before` attachment). The
+Builder's **Start paper book** panel starts a Patternsv2 book with the attachment
+when it is not Off, or a rule-only strategy when it is Off.
+
 **Paper / filter use.** On the **Paper** tab each book has a `Rule` select (runs
 that indicator as the strategy) and a `Rule filter` select with
-`Off / Shadow / Filter`. The Builder's "Start paper book" panel does the same for
-the strategy case. Filter rejections appear in the Paper → Logs tab and in
-`logs/paper_signals_*.jsonl` with the exact failing condition and its value.
+`Off / Shadow / Filter` plus a `Before / After` placement. The Builder's "Start
+paper book" panel does the same for the attached Patternsv2 case. Filter
+rejections appear in the Paper → Logs tab and in `logs/paper_signals_*.jsonl`
+with the exact failing condition and its value.
+
 
 **API.**
 | Method + path | Purpose |

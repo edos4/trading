@@ -448,6 +448,8 @@ function initPaper() {
     try {
       const payload = await api("/api/rules");
       const rules = payload.rules || [];
+      const byId = {};
+      rules.forEach((rule) => { byId[rule.id] = rule; });
       BOOKS.forEach((id) => {
         ["rule", "rule-filter"].forEach((kind) => {
           const select = document.getElementById(`${id}-${kind}`);
@@ -459,6 +461,23 @@ function initPaper() {
             select.appendChild(option);
           });
         });
+        const filter = document.getElementById(`${id}-rule-filter`);
+        const mode = document.getElementById(`${id}-rule-filter-mode`);
+        const position = document.getElementById(`${id}-rule-filter-position`);
+        const patternsV2 = document.getElementById(`${id}-patterns-v2`);
+        if (filter && mode && position) {
+          filter.addEventListener("change", () => {
+            const rule = byId[filter.value];
+            const attachment = rule && rule.patternsv2;
+            if (!attachment || attachment.position === "off") return;
+            mode.value = attachment.mode || "filter";
+            position.value = attachment.position === "before" ? "before" : "after";
+            if (patternsV2) {
+              patternsV2.checked = true;
+              patternsV2.dispatchEvent(new Event("change"));
+            }
+          });
+        }
       });
     } catch (err) {
       // Builder storage may be unmigrated; the rest of the Paper tab still works.
@@ -593,6 +612,7 @@ function initPaper() {
       rule_id: ((document.getElementById(`${id}-rule`) || {}).value || "").trim(),
       rule_filter_id: ((document.getElementById(`${id}-rule-filter`) || {}).value || "").trim(),
       rule_filter_mode: ((document.getElementById(`${id}-rule-filter-mode`) || {}).value || "off"),
+      rule_filter_position: ((document.getElementById(`${id}-rule-filter-position`) || {}).value || "after"),
       patterns_v2: !!(document.getElementById(`${id}-patterns-v2`) || {}).checked
         && !(document.getElementById(`${id}-indicators-only`) || {}).checked,
       pattern_only: !!(document.getElementById(`${id}-pattern-only`) || {}).checked

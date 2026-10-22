@@ -7,8 +7,8 @@ from core.rules_db import RuleConflict, RulesError
 from core.rules_store import RulesStore
 
 
-def payload(name="indicator1", value=30):
-    return {
+def payload(name="indicator1", value=30, attachment=None):
+    body = {
         "schema_version": 1,
         "name": name,
         "timeframe": "1d",
@@ -25,6 +25,9 @@ def payload(name="indicator1", value=30):
             "target": {"kind": "r_multiple", "r": 2},
         },
     }
+    if attachment is not None:
+        body["attachments"] = {"patternsv2": attachment}
+    return body
 
 
 def test_save_list_get_update_delete(rules_store_factory) -> None:
@@ -62,6 +65,33 @@ def test_duplicate_name_is_a_conflict(rules_store_factory) -> None:
     store.save_rule("dup", payload("dup"))
     with pytest.raises(RuleConflict):
         store.save_rule("DUP", payload("DUP"))
+
+
+def test_patternsv2_attachment_is_saved_and_summarized(rules_store_factory) -> None:
+    store = rules_store_factory()
+    created = store.save_rule(
+        "attached",
+        payload("attached", attachment={"position": "before", "mode": "filter"}),
+    )
+    assert created["payload"]["attachments"]["patternsv2"]["position"] == "before"
+    listed = store.list_rules()
+    assert listed[0]["patternsv2"] == {"position": "before", "mode": "filter"}
+
+
+def test_invalid_attachment_is_rejected(rules_store_factory) -> None:
+    store = rules_store_factory()
+    with pytest.raises(RulesError):
+        store.save_rule(
+            "bad attachment",
+            payload("bad attachment",
+                    attachment={"position": "sideways", "mode": "filter"}),
+        )
+    with pytest.raises(RulesError):
+        store.save_rule(
+            "bad mode",
+            payload("bad mode",
+                    attachment={"position": "after", "mode": "sometimes"}),
+        )
 
 
 def test_invalid_payload_is_rejected(rules_store_factory) -> None:

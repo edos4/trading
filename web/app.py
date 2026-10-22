@@ -95,6 +95,7 @@ class PaperStartRequest(BaseModel):
     rule_id: str = ""
     rule_filter_id: str = ""
     rule_filter_mode: Literal["off", "shadow", "filter"] = "off"
+    rule_filter_position: Literal["before", "after"] = "after"
     laya_mode: Literal["off", "research", "shadow", "filter"] = "off"
     laya_policy_id: str = ""
 
@@ -1140,6 +1141,7 @@ def create_app() -> FastAPI:
             rule_id=payload.rule_id,
             rule_filter_id=payload.rule_filter_id,
             rule_filter_mode=payload.rule_filter_mode,
+            rule_filter_position=payload.rule_filter_position,
         )
 
     @app.post("/api/paper/start")

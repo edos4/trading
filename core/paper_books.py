@@ -126,6 +126,7 @@ class PaperBook:
         self.rule_name = ""
         self.rule_filter_id = ""
         self.rule_filter_mode = "off"
+        self.rule_filter_position = "after"
         self._thread: Optional[threading.Thread] = None
         self._stop_requested = threading.Event()
         self._chart_key: tuple[int, float] | None = None
@@ -519,14 +520,20 @@ class PaperBook:
         rule_id: str = "",
         rule_filter_id: str = "",
         rule_filter_mode: str = "off",
+        rule_filter_position: str = "after",
     ) -> str | None:
         stack_name = ""
         tv_stack_id = (tv_stack_id or "").strip()
         rule_id = (rule_id or "").strip()
         rule_filter_id = (rule_filter_id or "").strip()
         rule_filter_mode = (rule_filter_mode or "off").strip().lower()
+        rule_filter_position = (rule_filter_position or "after").strip().lower()
         if rule_filter_mode not in ("off", "shadow", "filter"):
             return f"Unsupported rule filter mode: {rule_filter_mode}"
+        if rule_filter_position not in ("before", "after"):
+            return f"Unsupported rule filter position: {rule_filter_position}"
+        if rule_filter_position == "before" and rule_filter_mode == "shadow":
+            return "Before-placement rule filters require filter mode."
         rule_name = ""
         try:
             if rule_id:
@@ -590,6 +597,7 @@ class PaperBook:
             self.rule_name = rule_name
             self.rule_filter_id = rule_filter_id
             self.rule_filter_mode = rule_filter_mode
+            self.rule_filter_position = rule_filter_position
             self.laya_mode = laya_mode
             self.laya_policy_id = (laya_policy_id or "").strip()
             self.duration_days = duration_days
@@ -601,6 +609,7 @@ class PaperBook:
                 indicators_only, patterns_v2, collect_first, collect_first_top_n,
                 stream_start, tv_stack_id, laya_mode, laya_policy_id,
                 duration_days, rule_id, rule_filter_id, rule_filter_mode,
+                rule_filter_position,
             ),
             name=f"paper-{self.market}",
             daemon=True,
@@ -629,6 +638,7 @@ class PaperBook:
                 self.rule_name = ""
                 self.rule_filter_id = ""
                 self.rule_filter_mode = "off"
+                self.rule_filter_position = "after"
                 if self._stop_requested.is_set() and not self.error:
                     self.status = "Stopped."
             if loop is not None and not loop.is_closed():
@@ -819,6 +829,7 @@ class PaperBook:
         rule_id: str = "",
         rule_filter_id: str = "",
         rule_filter_mode: str = "off",
+        rule_filter_position: str = "after",
     ) -> None:
         data_feed = None
         profile = get_market(self.market)
@@ -909,6 +920,7 @@ class PaperBook:
                 rule_id=rule_id,
                 rule_filter_id=rule_filter_id,
                 rule_filter_mode=rule_filter_mode,
+                rule_filter_position=rule_filter_position,
             )
             self.scanner = scanner
             self.task = loop.create_task(scanner.run())
@@ -936,6 +948,7 @@ class PaperBook:
                 f"{', TradingView=' + self.tv_stack_name if self.tv_stack_name else ''}"
                 f"{', Rule=' + self.rule_name if self.rule_name else ''}"
                 f"{', RuleFilter=' + self.rule_filter_mode if self.rule_filter_id and self.rule_filter_mode != 'off' else ''}"
+                f"{'/' + self.rule_filter_position if self.rule_filter_id and self.rule_filter_mode != 'off' else ''}"
                 f", Patternsv2={'ON' if patterns_v2 and not indicators_only else 'OFF'}"
                 f", Collect-first={'ON' if collect_first else 'OFF'}"
                 f", Laya={(laya_mode or 'off').upper()}"
@@ -1060,6 +1073,7 @@ class PaperBookManager:
         rule_id: str = "",
         rule_filter_id: str = "",
         rule_filter_mode: str = "off",
+        rule_filter_position: str = "after",
     ) -> str | None:
         with self._start_lock:
             book = self._book(market)
@@ -1088,6 +1102,7 @@ class PaperBookManager:
                 rule_id=rule_id,
                 rule_filter_id=rule_filter_id,
                 rule_filter_mode=rule_filter_mode,
+                rule_filter_position=rule_filter_position,
             )
 
     def start_both(self, specs: dict[str, dict[str, Any]]) -> dict[str, str]:
@@ -1113,6 +1128,10 @@ class PaperBookManager:
                 laya_mode=str(payload.get("laya_mode") or "off"),
                 laya_policy_id=str(payload.get("laya_policy_id") or ""),
                 duration_days=payload.get("duration_days"),
+                rule_id=str(payload.get("rule_id") or ""),
+                rule_filter_id=str(payload.get("rule_filter_id") or ""),
+                rule_filter_mode=str(payload.get("rule_filter_mode") or "off"),
+                rule_filter_position=str(payload.get("rule_filter_position") or "after"),
             )
             if err:
                 errors[mid] = err

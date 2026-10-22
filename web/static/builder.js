@@ -76,6 +76,7 @@
         target: { kind: "r_multiple", r: 2, percent: 10 },
         max_hold_bars: null,
       },
+      attachments: { patternsv2: { position: "off", mode: "filter" } },
     };
   }
 
@@ -482,6 +483,10 @@
     $("builder-target-r").value = target.r != null ? target.r : 2;
     $("builder-target-percent").value = target.percent != null ? target.percent : 10;
     $("builder-max-hold").value = exit.max_hold_bars != null ? exit.max_hold_bars : "";
+    const attach = (rule.attachments && rule.attachments.patternsv2) || {};
+    $("builder-attach-position").value = attach.position || "off";
+    $("builder-attach-mode").value = attach.mode || "filter";
+    updateAttachmentVisibility();
     updateExitVisibility();
   }
 
@@ -493,6 +498,19 @@
     const targetKind = $("builder-target-kind").value;
     $("builder-target-r").closest("label").hidden = targetKind !== "r_multiple";
     $("builder-target-percent").closest("label").hidden = targetKind !== "percent";
+  }
+
+  function updateAttachmentVisibility() {
+    const position = $("builder-attach-position").value;
+    const mode = $("builder-attach-mode");
+    const before = position === "before";
+    if (before) mode.value = "filter";
+    mode.disabled = before || position === "off";
+    $("builder-attach-hint").textContent = position === "before"
+      ? "Before: Patternsv2 detection is skipped on bars where this rule is false. Filter mode only."
+      : position === "after"
+        ? "After: Patternsv2 detects first; this rule then filters or shadows its signals."
+        : "Off: Patternsv2 runs without this rule. Paper's Rule filter can still select it manually.";
   }
 
   function bindExitControls() {
@@ -547,6 +565,18 @@
       state.rule.exit.max_hold_bars = raw === "" ? null : Number(raw);
       markDirty(true);
     });
+    $("builder-attach-position").addEventListener("change", () => {
+      state.rule.attachments.patternsv2.position = $("builder-attach-position").value;
+      if ($("builder-attach-position").value === "before") {
+        state.rule.attachments.patternsv2.mode = "filter";
+      }
+      updateAttachmentVisibility();
+      markDirty(true);
+    });
+    $("builder-attach-mode").addEventListener("change", () => {
+      state.rule.attachments.patternsv2.mode = $("builder-attach-mode").value;
+      markDirty(true);
+    });
   }
 
   // ── persistence ───────────────────────────────────────────────────────────
@@ -557,6 +587,13 @@
   }
 
   function loadRule(payload, savedId, generation) {
+    const attachment = (payload.attachments && payload.attachments.patternsv2) || {};
+    payload.attachments = {
+      patternsv2: {
+        position: attachment.position || "off",
+        mode: attachment.mode || "filter",
+      },
+    };
     state.rule = payload;
     state.savedId = savedId || "";
     state.generation = generation == null ? null : Number(generation);
@@ -719,18 +756,30 @@
       return;
     }
     try {
+      const attachment = (state.rule.attachments && state.rule.attachments.patternsv2) || {};
+      const placement = attachment.position || "off";
+      const body = {
+        market: $("builder-paper-market").value,
+        n_symbols: Number($("builder-paper-n").value || 50),
+        extra_symbols: $("builder-paper-extra").value || "",
+        use_stream: $("builder-paper-stream").checked,
+        volume_gate: false,
+      };
+      if (placement === "off") {
+        body.rule_id = state.savedId;
+      } else {
+        body.patterns_v2 = true;
+        body.rule_filter_id = state.savedId;
+        body.rule_filter_mode = attachment.mode || "filter";
+        body.rule_filter_position = placement;
+      }
       await api("/api/paper/start", {
         method: "POST",
-        body: JSON.stringify({
-          market: $("builder-paper-market").value,
-          n_symbols: Number($("builder-paper-n").value || 50),
-          extra_symbols: $("builder-paper-extra").value || "",
-          use_stream: $("builder-paper-stream").checked,
-          volume_gate: false,
-          rule_id: state.savedId,
-        }),
+        body: JSON.stringify(body),
       });
-      say(status, "Paper book started. Open the Paper tab for fills.");
+      say(status, placement === "off"
+        ? "Rule-strategy paper book started. Open the Paper tab for fills."
+        : `Patternsv2 + rule (${placement}) paper book started. Open the Paper tab for fills.`);
     } catch (err) {
       say(status, err.message, true);
     }

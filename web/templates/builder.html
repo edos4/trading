@@ -87,6 +87,29 @@
       </div>
     </div>
 
+    <div class="builder-attach">
+      <h3>Attach to Patternsv2</h3>
+      <div class="toolbar">
+        <label>Placement
+          <select id="builder-attach-position">
+            <option value="off">Off</option>
+            <option value="before">Before detection</option>
+            <option value="after">After detection</option>
+          </select>
+        </label>
+        <label>Mode
+          <select id="builder-attach-mode">
+            <option value="filter">Filter</option>
+            <option value="shadow">Shadow</option>
+          </select>
+        </label>
+      </div>
+      <p class="muted small" id="builder-attach-hint">
+        Before: evaluate this rule first and skip Patternsv2 detection when it fails.
+        After: let Patternsv2 detect, then veto its signals when the rule fails.
+      </p>
+    </div>
+
     <p id="builder-status" class="status"></p>
   </section>
 </div>

@@ -61,6 +61,10 @@
           <option value="shadow">Shadow</option>
           <option value="filter">Filter</option>
         </select>
+        <select id="{{ book.id }}-rule-filter-position" title="Before: gate Patternsv2 detection. After: detect, then gate the signals.">
+          <option value="after">After</option>
+          <option value="before">Before</option>
+        </select>
       </label>
       <label class="check"><input type="checkbox" id="{{ book.id }}-volume" {% if volume_gate %}checked{% endif %} /> Volume gate</label>
       <label class="check">

@@ -183,6 +183,7 @@ class MarketScanner:
         rule_id: str = "",
         rule_filter_id: str = "",
         rule_filter_mode: str = "off",
+        rule_filter_position: str = "after",
     ):
         self._symbols = symbols or settings.symbols
         self._disabled_patterns = set(disabled_patterns or [])
@@ -206,11 +207,20 @@ class MarketScanner:
         self._rule_filter_mode = (rule_filter_mode or "off").strip().lower()
         if self._rule_filter_mode not in ("off", "shadow", "filter"):
             raise ValueError(f"Unsupported rule filter mode: {rule_filter_mode}")
+        self._rule_filter_position = (rule_filter_position or "after").strip().lower()
+        if self._rule_filter_position not in ("before", "after"):
+            raise ValueError(f"Unsupported rule filter position: {rule_filter_position}")
+        if self._rule_filter_position == "before" and self._rule_filter_mode == "shadow":
+            raise ValueError("Before-placement rule filters require filter mode")
         self._indicators_only = (
             bool(indicators_only) or bool(self._tv_stack_id) or bool(self._rule_id)
         )
         self._patterns_v2 = bool(patterns_v2) and not self._indicators_only
         self._pattern_only = bool(pattern_only) and not self._indicators_only
+        if self._rule_filter_position == "before" and not self._patterns_v2:
+            # Before-placement is a Patternsv2 pre-scan gate. On any other
+            # detector family it degrades to the normal post-signal filter.
+            self._rule_filter_position = "after"
         self._collect_first = settings.collect_first_enabled if collect_first is None else bool(collect_first)
         self._collect_first_top_n = (
             settings.collect_first_top_n
@@ -289,6 +299,7 @@ class MarketScanner:
             "collect_first_selected": 0,
             "rule_filter_shadow": 0,
             "rule_filter_rejected": 0,
+            "rule_filter_prefiltered": 0,
             "trades_opened": 0,
             "sim_days": 0,
             # Rejection counts are grouped by the first gate that vetoed the
@@ -347,24 +358,48 @@ class MarketScanner:
         payload.setdefault("schema_version", 1)
         self._rule_filter = RulePayload.model_validate(payload)
 
-    def _rule_filter_evidence(self, signal: TradeSignal) -> dict:
+    def _rule_filter_evidence(self, symbol: str, timeframe: str) -> dict:
         from analysis.rule_engine import evaluate_bar, required_bars
 
         rule = self._rule_filter
         if rule is None:
             return {"matched": True, "warm": True, "conditions": []}
-        df = self._store.get_df(
-            signal.symbol, signal.timeframe, min_bars=required_bars(rule))
+        df = self._store.get_df(symbol, timeframe, min_bars=required_bars(rule))
         if df is None:
             return {"matched": False, "warm": False, "conditions": [],
                     "reason": "insufficient history for the rule"}
-        key = (signal.symbol, signal.timeframe, df.index[-1], len(df))
+        key = (symbol, timeframe, df.index[-1], len(df),
+               float(df["close"].iloc[-1]))
         cached = self._rule_filter_cache.get(key)
         if cached is not None:
             return cached
         evidence = evaluate_bar(rule, df, -1)
         self._rule_filter_cache[key] = evidence
         return evidence
+
+    def _rule_prefilter(self, symbol: str, timeframe: str) -> bool:
+        """Before-placement Patternsv2 gate: true when detection may run."""
+        rule = getattr(self, "_rule_filter", None)
+        if rule is None:
+            return True
+        if (getattr(self, "_rule_filter_mode", "off") != "filter"
+                or getattr(self, "_rule_filter_position", "after") != "before"):
+            return True
+        evidence = self._rule_filter_evidence(symbol, timeframe)
+        if evidence.get("matched"):
+            return True
+        self.stats["rule_filter_prefiltered"] = (
+            self.stats.get("rule_filter_prefiltered", 0) + 1)
+        failed = [
+            f"{item['label']} (got {item.get('left')})"
+            for item in evidence.get("conditions", [])
+            if not item.get("pass")
+        ] or [evidence.get("reason") or "rule not satisfied"]
+        log.debug(
+            f"Rule prefilter SKIP | {symbol} {timeframe} | "
+            + "; ".join(failed)
+        )
+        return False
 
     def signal_log_snapshot(self) -> list[dict]:
         with self._signal_log_lock:
@@ -1089,6 +1124,8 @@ class MarketScanner:
     def _analyze_local(self, snapshot: MarketSnapshot) -> tuple[int, list[TradeSignal]]:
         """Inline analyze on this loop — tests, workers=1, or pool fallback."""
         if getattr(self, "_patterns_v2", False) and not getattr(self, "_indicators_only", False):
+            if not self._rule_prefilter(snapshot.symbol, snapshot.timeframe):
+                return 0, []
             return self._analyze_patterns_v2(snapshot)
         symbol, timeframe = snapshot.symbol, snapshot.timeframe
         n_bars = self._store.available(symbol, timeframe)
@@ -1407,9 +1444,10 @@ class MarketScanner:
         # pattern gate that the deleted regime layer used to provide. Shadow
         # only records evidence; filter vetoes entries.
         if (self._rule_filter is not None
+                and self._rule_filter_position == "after"
                 and signal.provenance != "visual_rule"
                 and signal.timeframe == self._rule_filter.timeframe):
-            evidence = self._rule_filter_evidence(signal)
+            evidence = self._rule_filter_evidence(signal.symbol, signal.timeframe)
             if self._rule_filter_mode == "shadow":
                 signal.rule_evidence = evidence
                 self.stats["rule_filter_shadow"] = (
