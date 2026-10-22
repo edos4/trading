@@ -33,8 +33,79 @@
 </section>
 
 <section id="kronos-results"></section>
+
+<section class="panel" id="kronos-history">
+  <div class="toolbar">
+    <h2 style="margin:0">Forecast history / win rate</h2>
+    <label>Days ahead <input id="kronos-save-days" type="number" min="1" max="60" step="1"
+      value="{{ kronos_save_days }}" /></label>
+    <button type="button" class="btn primary" id="kronos-save">Save today's forecasts</button>
+    <button type="button" class="btn" id="kronos-winrate-refresh">Refresh win rate</button>
+  </div>
+  <p class="muted small">
+    Tracked symbols ({{ kronos_tracked_symbols | length }}):
+    {% if kronos_tracked_symbols %}<code>{{ kronos_tracked_symbols | join(', ') }}</code>{% else %}
+    none configured — set <code>KRONOS_TRACKED_SYMBOLS</code> or <code>WATCHLIST</code>.{% endif %}
+  </p>
+  <p id="kronos-history-status" class="status"></p>
+  <p id="kronos-winrate-summary" class="muted small"></p>
+  <div id="kronos-winrate-chart" class="tv-chart-host" style="min-height:320px"></div>
+  <details id="kronos-data" open>
+    <summary>Saved prediction rows <span id="kronos-predictions-count" class="muted"></span></summary>
+    <div class="table-wrap">
+      <table id="kronos-predictions">
+        <thead>
+          <tr>
+            <th>Saved</th><th>Symbol</th><th>Anchor</th><th>Model</th>
+            <th>Day</th><th>Forecast</th><th>Actual</th><th>Result</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </details>
+  <p class="muted small">Win rate compares the predicted direction from the anchor close with
+    the actual close at the same trading-bar offset. Predictions grade once those sessions print.
+    Setup: <code>python scripts/setup_kronos_db.py</code>.</p>
+</section>
+
+<section class="panel" id="kronos-experiment2">
+  <div class="toolbar">
+    <h2 style="margin:0">Experiment 2 — 5-day close accuracy</h2>
+    <button type="button" class="btn" id="kronos-exp2-run">Run now (manual fallback)</button>
+    <button type="button" class="btn" id="kronos-exp2-refresh">Refresh actuals</button>
+    <label class="muted small"><input type="checkbox" id="kronos-exp2-graded-only" />
+      Graded only</label>
+  </div>
+  <p class="muted small">
+    <strong>Fully automated — no button click is required.</strong> A weekday cron
+    entry (<code>scripts/kronos_experiment2_daily.sh</code>) runs at 17:00
+    America/New_York: it grades settled rows first, then forecasts the tracked symbols
+    for <strong>5 trading days</strong> and stores the <strong>+1D</strong> and
+    <strong>+5D</strong> rows. After the one-week save window it keeps grading daily
+    for ten more days so the final D5 rows settle, then removes itself. Accuracy is
+    <code>100 − |predicted − actual| / actual × 100</code>. Settled rows are listed
+    first; a row stays <strong>pending</strong> until its predicted date's US close
+    prints. Use <strong>Graded only</strong> to hide pending rows.
+  </p>
+  <p id="kronos-exp2-status" class="status"></p>
+  <p id="kronos-exp2-summary" class="muted small"></p>
+  <div class="table-wrap">
+    <table id="kronos-exp2">
+      <thead>
+        <tr>
+          <th>Symbol</th><th>Start Date</th><th>Predicted Date</th>
+          <th>Prediction Days</th><th>Actual Close</th><th>Base Close</th>
+          <th>Finetuned Close</th><th>Base Accuracy</th><th>Finetuned Accuracy</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <p id="kronos-exp2-avg" class="muted small"></p>
+</section>
 {% endblock %}
 {% block scripts %}
 <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
-<script src="/static/kronos.js?v=5"></script>
+<script src="/static/kronos.js?v=11"></script>
 {% endblock %}
