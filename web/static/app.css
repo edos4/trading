@@ -998,6 +998,8 @@ img, video, canvas, pre, table { max-width: 100%; }
 .builder-exit h3 { margin: 0 0 0.5rem; font-size: 0.9rem; }
 .builder-attach { border-top: 1px solid var(--border); margin-top: 0.9rem; padding-top: 0.75rem; }
 .builder-attach h3 { margin: 0 0 0.5rem; font-size: 0.9rem; }
+.builder-help { margin: 0.35rem 0 0.65rem; max-width: 78ch; line-height: 1.45; }
+.builder-help strong { color: var(--text); }
 @media (max-width: 900px) {
   .builder-grid { grid-template-columns: 1fr; }
   .builder-saved { position: static; }

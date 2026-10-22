@@ -22,96 +22,160 @@
   <section class="panel builder-saved">
     <h2>Saved</h2>
     <div class="toolbar builder-saved-tools">
-      <select id="builder-saved" aria-label="Saved indicators"></select>
-      <button type="button" class="btn" id="builder-new">New</button>
-      <button type="button" class="btn ghost" id="builder-duplicate">Duplicate</button>
-      <button type="button" class="btn danger" id="builder-delete">Delete</button>
+      <select id="builder-saved" aria-label="Saved indicators"
+              title="Choose a saved indicator to edit."></select>
+      <button type="button" class="btn" id="builder-new"
+              title="Start a new blank indicator (asks before discarding unsaved changes).">New</button>
+      <button type="button" class="btn ghost" id="builder-duplicate"
+              title="Copy the current rule under a new name; save it to keep.">Duplicate</button>
+      <button type="button" class="btn danger" id="builder-delete"
+              title="Delete the selected saved indicator. Refused while a paper book is using it.">Delete</button>
     </div>
     <p id="builder-list-status" class="status"></p>
     <p class="muted small">
-      Saved indicators live in PostgreSQL (<code>rules.indicator_rules</code>).
-      Deleting one is refused while a paper book is running it.
+      Pick a saved indicator to edit, or start a new one. Saved indicators live
+      in PostgreSQL (<code>rules.indicator_rules</code>); deleting one is refused
+      while a paper book is running it.
     </p>
   </section>
 
   <section class="panel builder-editor">
     <div class="toolbar builder-head">
-      <label>Name <input id="builder-name" type="text" maxlength="80" placeholder="indicator1" /></label>
+      <label>Name
+        <input id="builder-name" type="text" maxlength="80" placeholder="indicator1"
+               title="The name used in the saved list, Paper rule selects and logs. Must be unique." />
+      </label>
       <label>Timeframe
-        <select id="builder-timeframe">
+        <select id="builder-timeframe"
+                title="Bars the rule evaluates. A 1d rule is not applied to weekly bars.">
           <option value="1d">Daily (1d)</option>
           <option value="1W">Weekly (1W)</option>
         </select>
       </label>
       <label>Direction
-        <select id="builder-direction">
+        <select id="builder-direction"
+                title="Action taken when the rule matches: BUY for Long, SELL for Short.">
           <option value="long">Long</option>
           <option value="short">Short</option>
         </select>
       </label>
-      <button type="button" class="btn primary" id="builder-save">Save</button>
+      <button type="button" class="btn primary" id="builder-save"
+              title="Validate and save this rule (Ctrl/Cmd is not required; click Save).">Save</button>
     </div>
+    <p class="builder-help muted small">
+      <strong>Name</strong> is the label shown everywhere. <strong>Timeframe</strong> selects the
+      bars the rule reads. <strong>Direction</strong> is the action taken when the whole tree
+      matches.
+    </p>
 
     <div id="builder-root" class="builder-canvas" aria-label="Condition tree"></div>
     <div class="toolbar builder-add">
-      <button type="button" class="btn" id="builder-add-block">+ Add block</button>
-      <button type="button" class="btn ghost" id="builder-add-condition">+ Add condition</button>
+      <button type="button" class="btn" id="builder-add-block"
+              title="Add a group of conditions. Groups can be nested and combined with AND/OR.">+ Add block</button>
+      <button type="button" class="btn ghost" id="builder-add-condition"
+              title="Add one comparison to the root group.">+ Add condition</button>
     </div>
+    <p class="builder-help muted small">
+      Each <strong>condition</strong> compares an indicator value (left) with a number or another
+      indicator (right). <strong>Bars ago</strong> shifts either side back by N bars, which is how
+      you compare against a previous value. A <strong>block</strong> is a group of conditions with
+      one AND/OR connector; drag the ⠿ handle to reorder, or use ▲/▼.
+    </p>
 
     <div class="builder-exit">
       <h3>Exit</h3>
       <div class="toolbar">
-        <label class="check"><input type="checkbox" id="builder-on-false" checked /> Exit when the rule stops matching</label>
+        <label class="check" title="Close the position on the first bar where the rule no longer matches.">
+          <input type="checkbox" id="builder-on-false" checked /> Exit when the rule stops matching
+        </label>
         <label>Stop
-          <select id="builder-stop-kind">
+          <select id="builder-stop-kind"
+                  title="Protective stop: percent below entry, ATR multiple, or a default 2×ATR.">
             <option value="percent">Percent</option>
             <option value="atr">ATR</option>
             <option value="none">Default 2×ATR</option>
           </select>
         </label>
-        <label>Stop % <input id="builder-stop-percent" type="number" min="0.1" max="50" step="0.1" value="5" /></label>
-        <label>ATR mult <input id="builder-stop-atr-mult" type="number" min="0.1" max="20" step="0.1" value="2" /></label>
-        <label>ATR period <input id="builder-stop-atr-period" type="number" min="2" max="200" step="1" value="14" /></label>
+        <label>Stop %
+          <input id="builder-stop-percent" type="number" min="0.1" max="50" step="0.1" value="5"
+                 title="Percent distance from the entry price." />
+        </label>
+        <label>ATR mult
+          <input id="builder-stop-atr-mult" type="number" min="0.1" max="20" step="0.1" value="2"
+                 title="Stop distance in ATR multiples (ATR period below)." />
+        </label>
+        <label>ATR period
+          <input id="builder-stop-atr-period" type="number" min="2" max="200" step="1" value="14"
+                 title="Wilder/EMA-smoothed ATR lookback used for the stop." />
+        </label>
       </div>
       <div class="toolbar">
         <label>Target
-          <select id="builder-target-kind">
+          <select id="builder-target-kind"
+                  title="Take-profit: R multiple, fixed percent, or none (hold until the rule/stop).">
             <option value="r_multiple">R multiple</option>
             <option value="percent">Percent</option>
             <option value="none">None</option>
           </select>
         </label>
-        <label>R <input id="builder-target-r" type="number" min="0.1" max="50" step="0.1" value="2" /></label>
-        <label>Target % <input id="builder-target-percent" type="number" min="0.1" max="200" step="0.1" value="10" /></label>
-        <label>Max hold (bars) <input id="builder-max-hold" type="number" min="1" max="1000" step="1" placeholder="none" /></label>
+        <label>R
+          <input id="builder-target-r" type="number" min="0.1" max="50" step="0.1" value="2"
+                 title="Target distance as a multiple of the initial risk (entry minus stop)." />
+        </label>
+        <label>Target %
+          <input id="builder-target-percent" type="number" min="0.1" max="200" step="0.1" value="10"
+                 title="Target distance as a percent above/below entry." />
+        </label>
+        <label>Max hold (bars)
+          <input id="builder-max-hold" type="number" min="1" max="1000" step="1" placeholder="none"
+                 title="Force an exit after this many bars. Blank means no time stop." />
+        </label>
       </div>
+      <p class="builder-help muted small">
+        <strong>Exit when the rule stops matching</strong> closes on the first bar the tree becomes
+        false. <strong>Stop</strong> protects the entry (percent, ATR, or a default 2×ATR) and
+        <strong>Target</strong> is optional. <strong>Max hold</strong> forces a time exit even while
+        the rule still matches.
+      </p>
     </div>
 
     <div class="builder-attach">
       <h3>Attach to Patternsv2</h3>
       <div class="toolbar">
         <label>Placement
-          <select id="builder-attach-position">
+          <select id="builder-attach-position"
+                  title="Off: no attachment. Before: evaluate the rule before Patternsv2. After: detect first, then apply the rule.">
             <option value="off">Off</option>
             <option value="before">Before detection</option>
             <option value="after">After detection</option>
           </select>
         </label>
         <label>Pattern
-          <select id="builder-attach-pattern">
+          <select id="builder-attach-pattern"
+                  title="Which Patternsv2 detector this rule applies to, or all of them.">
             <option value="all">All Patternsv2 patterns</option>
           </select>
         </label>
         <label>Mode
-          <select id="builder-attach-mode">
+          <select id="builder-attach-mode"
+                  title="Filter rejects the selected pattern's signals while the rule is false. Shadow never blocks; it records rule_evidence for inspection.">
             <option value="filter">Filter</option>
             <option value="shadow">Shadow</option>
           </select>
         </label>
       </div>
       <p class="muted small" id="builder-attach-hint">
-        Before: evaluate this rule first and skip Patternsv2 detection when it fails.
-        After: let Patternsv2 detect, then veto its signals when the rule fails.
+        Choose Off, Before or After, then pick one Patternsv2 pattern (or All).
+      </p>
+      <p class="muted small" id="builder-attach-mode-hint">
+        <strong>Filter</strong> rejects signals while this rule is false.
+        <strong>Shadow</strong> never blocks; it records the rule evidence on each signal.
+      </p>
+      <p class="builder-help muted small">
+        <strong>Placement</strong> decides when the rule is checked relative to the detector;
+        <strong>Pattern</strong> scopes it to one specific Patternsv2 shape (or all);
+        <strong>Mode</strong> controls whether matching signals are vetoed or merely recorded.
+        The Paper tab reuses this saved attachment when the rule is selected as a filter.
       </p>
     </div>
 
@@ -122,13 +186,27 @@
 <section class="panel">
   <h2>Preview</h2>
   <div class="toolbar">
-    <label>Symbol <input id="builder-preview-symbol" type="text" value="AAPL" size="8" /></label>
-    <label>Market
-      <select id="builder-preview-market"><option value="us">US</option><option value="ph">PH</option></select>
+    <label>Symbol
+      <input id="builder-preview-symbol" type="text" value="AAPL" size="8"
+             title="Ticker to evaluate the draft rule against." />
     </label>
-    <label>Bars <input id="builder-preview-bars" type="number" min="10" max="500" step="10" value="120" /></label>
-    <button type="button" class="btn" id="builder-preview">Preview</button>
+    <label>Market
+      <select id="builder-preview-market" title="US or PH market history and session timezone.">
+        <option value="us">US</option><option value="ph">PH</option>
+      </select>
+    </label>
+    <label>Bars
+      <input id="builder-preview-bars" type="number" min="10" max="500" step="10" value="120"
+             title="How many recent bars to show (10–500)." />
+    </label>
+    <button type="button" class="btn" id="builder-preview"
+            title="Evaluate the current draft (no save required) and show every condition's value.">Preview</button>
   </div>
+  <p class="builder-help muted small">
+    Preview evaluates the <strong>current draft</strong> over the last N bars and lists each
+    condition's value, pass/fail and the final match, so you can verify the rule without saving or
+    placing a trade.
+  </p>
   <p id="builder-preview-status" class="status"></p>
   <div class="table-wrap tall" id="builder-preview-wrap" hidden>
     <table class="blotter" id="builder-preview-table">
@@ -141,15 +219,33 @@
 <section class="panel">
   <h2>Backtest</h2>
   <div class="toolbar">
-    <label>Symbols <input id="builder-bt-symbols" type="text" value="AAPL" size="24" placeholder="AAPL, NVDA" /></label>
-    <label>Market
-      <select id="builder-bt-market"><option value="us">US</option><option value="ph">PH</option></select>
+    <label>Symbols
+      <input id="builder-bt-symbols" type="text" value="AAPL" size="24" placeholder="AAPL, NVDA"
+             title="Comma-separated tickers; spaces are ignored." />
     </label>
-    <label>Start <input id="builder-bt-start" type="date" /></label>
-    <label>End <input id="builder-bt-end" type="date" /></label>
-    <label>Notional <input id="builder-bt-notional" type="number" min="100" step="100" value="10000" /></label>
-    <button type="button" class="btn primary" id="builder-bt-run">Run</button>
+    <label>Market
+      <select id="builder-bt-market" title="Market profile used for costs, lot size and long-only rules.">
+        <option value="us">US</option><option value="ph">PH</option>
+      </select>
+    </label>
+    <label>Start
+      <input id="builder-bt-start" type="date" title="First session to trade (leave blank for all history)." />
+    </label>
+    <label>End
+      <input id="builder-bt-end" type="date" title="Last session to trade (open positions close at this bar)." />
+    </label>
+    <label>Notional
+      <input id="builder-bt-notional" type="number" min="100" step="100" value="10000"
+             title="Fixed dollars per trade (fractional shares)." />
+    </label>
+    <button type="button" class="btn primary" id="builder-bt-run"
+            title="Replay the saved rule with next-open entries, stop/target/rule-false exits.">Run</button>
   </div>
+  <p class="builder-help muted small">
+    Backtest uses the <strong>saved</strong> rule (save first). Entries fill at the next bar's open;
+    exits are rule-false, stop, target, max-hold or end of data. The table is the raw trade list;
+    the second table is the rule's match timeline for reconciling the result.
+  </p>
   <p id="builder-bt-status" class="status"></p>
   <p id="builder-bt-summary" class="muted small"></p>
   <div class="table-wrap tall" id="builder-bt-wrap" hidden>
@@ -170,17 +266,29 @@
   <h2>Start paper book</h2>
   <div class="toolbar">
     <label>Market
-      <select id="builder-paper-market"><option value="us">US</option><option value="ph">PH</option></select>
+      <select id="builder-paper-market" title="Which paper book to start (US or PH).">
+        <option value="us">US</option><option value="ph">PH</option>
+      </select>
     </label>
-    <label>Symbols <input id="builder-paper-n" type="number" min="5" max="20000" step="5" value="50" /></label>
-    <label>Additional <input id="builder-paper-extra" type="text" placeholder="tickers" /></label>
-    <label class="check"><input id="builder-paper-stream" type="checkbox" /> Stream</label>
-    <button type="button" class="btn primary" id="builder-paper-start">Start paper</button>
+    <label>Symbols
+      <input id="builder-paper-n" type="number" min="5" max="20000" step="5" value="50"
+             title="How many screener symbols to scan." />
+    </label>
+    <label>Additional
+      <input id="builder-paper-extra" type="text" placeholder="tickers"
+             title="Extra tickers beyond the screener list." />
+    </label>
+    <label class="check" title="Replay stored daily bars instead of waiting for live sessions.">
+      <input id="builder-paper-stream" type="checkbox" /> Stream
+    </label>
+    <button type="button" class="btn primary" id="builder-paper-start"
+            title="Start the book using this saved rule or its Patternsv2 attachment.">Start paper</button>
   </div>
   <p class="muted small">
-    The saved indicator becomes the book's own strategy (one open position per
-    symbol). To gate existing pattern signals instead, pick it on the
-    <a href="/paper">Paper</a> tab as a rule filter.
+    With <strong>Attach to Patternsv2 = Off</strong>, the saved rule becomes the book's own
+    strategy (one open position per symbol). With an attachment, this starts a Patternsv2 book
+    with the rule applied at the saved pattern/placement/mode. To gate an existing book manually,
+    pick the rule on the <a href="/paper">Paper</a> tab as a rule filter.
   </p>
   <p id="builder-paper-status" class="status"></p>
 </section>
