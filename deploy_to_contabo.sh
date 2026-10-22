@@ -101,6 +101,10 @@ else
   fi
   echo "    ensuring the pattern-editor database (create / migrate / seed)"
   .venv/bin/python scripts/setup_editor_db.py
+  echo "    ensuring the visual-indicator rules schema (create / migrate)"
+  if ! .venv/bin/python scripts/setup_rules_db.py; then
+    echo "WARNING: setup_rules_db.py did not complete — run it later." >&2
+  fi
 fi
 
 sudo systemctl restart "$SERVICE"
