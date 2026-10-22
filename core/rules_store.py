@@ -80,11 +80,16 @@ def _summary(payload: dict) -> dict:
             walk(child)
 
     walk((payload or {}).get("root") or {})
+    attachment = (((payload or {}).get("attachments") or {}).get("patternsv2") or {})
     return {
         "timeframe": (payload or {}).get("timeframe") or "1d",
         "direction": (payload or {}).get("direction") or "long",
         "blocks": counts["blocks"],
         "conditions": counts["conditions"],
+        "patternsv2": {
+            "position": attachment.get("position") or "off",
+            "mode": attachment.get("mode") or "filter",
+        },
     }
 
 

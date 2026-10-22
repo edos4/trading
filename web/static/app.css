@@ -996,6 +996,8 @@ img, video, canvas, pre, table { max-width: 100%; }
 .builder-add { margin-top: 0.25rem; }
 .builder-exit { border-top: 1px solid var(--border); margin-top: 0.9rem; padding-top: 0.75rem; }
 .builder-exit h3 { margin: 0 0 0.5rem; font-size: 0.9rem; }
+.builder-attach { border-top: 1px solid var(--border); margin-top: 0.9rem; padding-top: 0.75rem; }
+.builder-attach h3 { margin: 0 0 0.5rem; font-size: 0.9rem; }
 @media (max-width: 900px) {
   .builder-grid { grid-template-columns: 1fr; }
   .builder-saved { position: static; }
