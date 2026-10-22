@@ -108,6 +108,44 @@ def task_store_factory(monkeypatch):
 
 
 @pytest.fixture
+def kronos_store_factory(monkeypatch):
+    """Disposable PostgreSQL schema for the Kronos forecast store.
+
+    The DSN is opt-in only: ``KRONOS_TEST_DATABASE_URL`` must point at a
+    disposable database (skip otherwise). Never derived from application
+    settings or the developer's .env.
+    """
+    from psycopg import sql
+
+    from core.kronos_db import connection, migrate
+    from core.kronos_store import KronosStore
+
+    dsn = os.environ.get('KRONOS_TEST_DATABASE_URL')
+    if not dsn:
+        pytest.skip('Set KRONOS_TEST_DATABASE_URL to a disposable PostgreSQL database')
+    schema = 'kronos_test_' + uuid.uuid4().hex
+    migrate(dsn, schema)
+
+    def factory(**kwargs):
+        kwargs.setdefault('dsn', dsn)
+        kwargs.setdefault('schema', schema)
+        return KronosStore(**kwargs)
+
+    factory.dsn = dsn
+    factory.schema = schema
+    from config import settings
+
+    monkeypatch.setattr(settings, 'kronos_database_url', dsn)
+    monkeypatch.setattr(settings, 'kronos_schema', schema)
+    try:
+        yield factory
+    finally:
+        # Generated name only; never clean up the application's kronos schema.
+        with connection(dsn, schema) as con:
+            con.execute(sql.SQL('DROP SCHEMA {} CASCADE').format(sql.Identifier(schema)))
+
+
+@pytest.fixture
 def rules_store_factory(monkeypatch):
     """Disposable PostgreSQL schema for the visual-indicator rules store.
 
