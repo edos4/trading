@@ -413,7 +413,11 @@ def create_app() -> FastAPI:
         from web import kronos
 
         return render(request, "kronos.html", active="kronos",
-                      kronos_available=kronos.available())
+                      kronos_available=kronos.available(),
+                      kronos_tracked_symbols=list(
+                          getattr(settings, "kronos_symbols", None) or []),
+                      kronos_save_days=int(
+                          getattr(settings, "kronos_save_days", 5)))
 
     @app.post("/api/kronos/forecast")
     async def api_kronos_forecast(request: Request, _user: str = Depends(require_login)):
@@ -1389,6 +1393,13 @@ def create_app() -> FastAPI:
     from web.rules import register_rules_routes as _register_rules
 
     _register_rules(app, templates, ctx)
+
+    # ── Kronos forecast history / win rate (PostgreSQL-backed) ──────────────
+    from web.kronos_history import (
+        register_kronos_history_routes as _register_kronos_history,
+    )
+
+    _register_kronos_history(app, templates, ctx)
 
     return app
 

@@ -67,6 +67,9 @@ class WebKronosApiTests(unittest.TestCase):
         page = self.client.get("/kronos")
         self.assertEqual(page.status_code, 200)
         self.assertIn('id="kronos-results"', page.text)
+        self.assertIn('id="kronos-save"', page.text)
+        self.assertIn('id="kronos-winrate-chart"', page.text)
+        self.assertIn('id="kronos-predictions"', page.text)
         self.assertIn('href="/kronos"', self.client.get("/").text)
 
     def test_forecast_requires_login(self) -> None:
