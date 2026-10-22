@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}Builder · Trading Bot{% endblock %}
+{% block content %}
+<section class="panel page-head">
+  <div class="page-head-title">
+    <h1>Builder</h1>
+    <p class="muted small">
+      Compose a named indicator from condition blocks. Run it as a paper
+      strategy, or use it as the context filter for pattern signals.
+    </p>
+  </div>
+  <div class="page-head-controls">
+    <span id="builder-session" class="chip muted">Loading catalog…</span>
+  </div>
+</section>
+
+{% if rules_error %}
+<p class="status error" id="builder-storage-error">{{ rules_error }}</p>
+{% endif %}
+
+<div class="builder-grid">
+  <section class="panel builder-saved">
+    <h2>Saved</h2>
+    <div class="toolbar builder-saved-tools">
+      <select id="builder-saved" aria-label="Saved indicators"></select>
+      <button type="button" class="btn" id="builder-new">New</button>
+      <button type="button" class="btn ghost" id="builder-duplicate">Duplicate</button>
+      <button type="button" class="btn danger" id="builder-delete">Delete</button>
+    </div>
+    <p id="builder-list-status" class="status"></p>
+    <p class="muted small">
+      Saved indicators live in PostgreSQL (<code>rules.indicator_rules</code>).
+      Deleting one is refused while a paper book is running it.
+    </p>
+  </section>
+
+  <section class="panel builder-editor">
+    <div class="toolbar builder-head">
+      <label>Name <input id="builder-name" type="text" maxlength="80" placeholder="indicator1" /></label>
+      <label>Timeframe
+        <select id="builder-timeframe">
+          <option value="1d">Daily (1d)</option>
+          <option value="1W">Weekly (1W)</option>
+        </select>
+      </label>
+      <label>Direction
+        <select id="builder-direction">
+          <option value="long">Long</option>
+          <option value="short">Short</option>
+        </select>
+      </label>
+      <button type="button" class="btn primary" id="builder-save">Save</button>
+    </div>
+
+    <div id="builder-root" class="builder-canvas" aria-label="Condition tree"></div>
+    <div class="toolbar builder-add">
+      <button type="button" class="btn" id="builder-add-block">+ Add block</button>
+      <button type="button" class="btn ghost" id="builder-add-condition">+ Add condition</button>
+    </div>
+
+    <div class="builder-exit">
+      <h3>Exit</h3>
+      <div class="toolbar">
+        <label class="check"><input type="checkbox" id="builder-on-false" checked /> Exit when the rule stops matching</label>
+        <label>Stop
+          <select id="builder-stop-kind">
+            <option value="percent">Percent</option>
+            <option value="atr">ATR</option>
+            <option value="none">Default 2×ATR</option>
+          </select>
+        </label>
+        <label>Stop % <input id="builder-stop-percent" type="number" min="0.1" max="50" step="0.1" value="5" /></label>
+        <label>ATR mult <input id="builder-stop-atr-mult" type="number" min="0.1" max="20" step="0.1" value="2" /></label>
+        <label>ATR period <input id="builder-stop-atr-period" type="number" min="2" max="200" step="1" value="14" /></label>
+      </div>
+      <div class="toolbar">
+        <label>Target
+          <select id="builder-target-kind">
+            <option value="r_multiple">R multiple</option>
+            <option value="percent">Percent</option>
+            <option value="none">None</option>
+          </select>
+        </label>
+        <label>R <input id="builder-target-r" type="number" min="0.1" max="50" step="0.1" value="2" /></label>
+        <label>Target % <input id="builder-target-percent" type="number" min="0.1" max="200" step="0.1" value="10" /></label>
+        <label>Max hold (bars) <input id="builder-max-hold" type="number" min="1" max="1000" step="1" placeholder="none" /></label>
+      </div>
+    </div>
+
+    <p id="builder-status" class="status"></p>
+  </section>
+</div>
+
+<section class="panel">
+  <h2>Preview</h2>
+  <div class="toolbar">
+    <label>Symbol <input id="builder-preview-symbol" type="text" value="AAPL" size="8" /></label>
+    <label>Market
+      <select id="builder-preview-market"><option value="us">US</option><option value="ph">PH</option></select>
+    </label>
+    <label>Bars <input id="builder-preview-bars" type="number" min="10" max="500" step="10" value="120" /></label>
+    <button type="button" class="btn" id="builder-preview">Preview</button>
+  </div>
+  <p id="builder-preview-status" class="status"></p>
+  <div class="table-wrap tall" id="builder-preview-wrap" hidden>
+    <table class="blotter" id="builder-preview-table">
+      <thead><tr><th>Date</th><th class="num">Close</th><th>Matched</th><th>Evidence</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Backtest</h2>
+  <div class="toolbar">
+    <label>Symbols <input id="builder-bt-symbols" type="text" value="AAPL" size="24" placeholder="AAPL, NVDA" /></label>
+    <label>Market
+      <select id="builder-bt-market"><option value="us">US</option><option value="ph">PH</option></select>
+    </label>
+    <label>Start <input id="builder-bt-start" type="date" /></label>
+    <label>End <input id="builder-bt-end" type="date" /></label>
+    <label>Notional <input id="builder-bt-notional" type="number" min="100" step="100" value="10000" /></label>
+    <button type="button" class="btn primary" id="builder-bt-run">Run</button>
+  </div>
+  <p id="builder-bt-status" class="status"></p>
+  <p id="builder-bt-summary" class="muted small"></p>
+  <div class="table-wrap tall" id="builder-bt-wrap" hidden>
+    <table class="blotter" id="builder-bt-table">
+      <thead><tr><th>Symbol</th><th>Entry</th><th>Exit</th><th class="num">In</th><th class="num">Out</th><th class="num">Bars</th><th>Reason</th><th class="num">P&amp;L %</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <div class="table-wrap" id="builder-bt-matches-wrap" hidden>
+    <table class="blotter" id="builder-bt-matches">
+      <thead><tr><th>Symbol</th><th>Date</th><th class="num">Close</th><th>Rule</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Start paper book</h2>
+  <div class="toolbar">
+    <label>Market
+      <select id="builder-paper-market"><option value="us">US</option><option value="ph">PH</option></select>
+    </label>
+    <label>Symbols <input id="builder-paper-n" type="number" min="5" max="20000" step="5" value="50" /></label>
+    <label>Additional <input id="builder-paper-extra" type="text" placeholder="tickers" /></label>
+    <label class="check"><input id="builder-paper-stream" type="checkbox" /> Stream</label>
+    <button type="button" class="btn primary" id="builder-paper-start">Start paper</button>
+  </div>
+  <p class="muted small">
+    The saved indicator becomes the book's own strategy (one open position per
+    symbol). To gate existing pattern signals instead, pick it on the
+    <a href="/paper">Paper</a> tab as a rule filter.
+  </p>
+  <p id="builder-paper-status" class="status"></p>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/vendor/sortable.min.js?v=1.15.6"></script>
+<script>window.TB_PAGE = "builder";</script>
+<script src="/static/builder.js?v=1"></script>
+{% endblock %}

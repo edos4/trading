@@ -51,6 +51,17 @@
       <label class="check"><input type="checkbox" id="{{ book.id }}-pattern-only" /> Pattern-only</label>
       <label class="check"><input type="checkbox" id="{{ book.id }}-indicators-only" /> Indicators only</label>
       <label class="check"><input type="checkbox" id="{{ book.id }}-patterns-v2" /> Patternsv2</label>
+      <label class="check" title="Run a saved Builder indicator as this book's own strategy. Selecting one forces Indicators only.">
+        Rule <select id="{{ book.id }}-rule"><option value="">—</option></select>
+      </label>
+      <label class="check" title="Gate every pattern/indicator signal with a saved Builder indicator evaluated on the same bar. Shadow only records evidence; Filter vetoes entries.">
+        Rule filter <select id="{{ book.id }}-rule-filter"><option value="">—</option></select>
+        <select id="{{ book.id }}-rule-filter-mode">
+          <option value="off">Off</option>
+          <option value="shadow">Shadow</option>
+          <option value="filter">Filter</option>
+        </select>
+      </label>
       <label class="check"><input type="checkbox" id="{{ book.id }}-volume" {% if volume_gate %}checked{% endif %} /> Volume gate</label>
       <label class="check">
         <input type="checkbox" id="{{ book.id }}-collect-first" /> Collect-first
