@@ -14,8 +14,8 @@ needs_db = unittest.skipUnless(
     DSN, "set RULES_TEST_DATABASE_URL to a disposable database")
 
 
-def payload(name="indicator1") -> dict:
-    return {
+def payload(name="indicator1", attachment=None):
+    body = {
         "schema_version": 1,
         "name": name,
         "timeframe": "1d",
@@ -29,6 +29,9 @@ def payload(name="indicator1") -> dict:
         "exit": {"on_false": True, "stop": {"kind": "percent", "percent": 5},
                  "target": {"kind": "r_multiple", "r": 2}},
     }
+    if attachment is not None:
+        body["attachments"] = {"patternsv2": attachment}
+    return body
 
 
 def candles(n=140):
@@ -148,16 +151,27 @@ class WebRulesApiTests(unittest.TestCase):
         ids = {item["id"] for item in catalog.json()["indicators"]}
         self.assertIn("rsi", ids)
         self.assertIn("adx", ids)
+        patterns = {item["id"] for item in catalog.json()["patternsv2_patterns"]}
+        self.assertIn("double_bottom", patterns)
+        self.assertIn("symmetrical_triangle", patterns)
 
-        created = self.client.post("/api/rules", json={"name": "indicator1",
-                                                       "payload": payload()})
+        created = self.client.post("/api/rules", json={
+            "name": "indicator1",
+            "payload": payload("indicator1", {
+                "pattern": "double_bottom", "position": "before",
+                "mode": "filter"}),
+        })
         self.assertEqual(created.status_code, 201, created.text)
         row = created.json()
         self.assertEqual(row["name"], "indicator1")
         self.assertEqual(row["generation"], 0)
+        self.assertEqual(
+            row["payload"]["attachments"]["patternsv2"]["pattern"],
+            "double_bottom")
 
         listed = self.client.get("/api/rules").json()["rules"]
         self.assertEqual([item["name"] for item in listed], ["indicator1"])
+        self.assertEqual(listed[0]["patternsv2"]["pattern"], "double_bottom")
 
         fetched = self.client.get(f"/api/rules/{row['id']}")
         self.assertEqual(fetched.status_code, 200)

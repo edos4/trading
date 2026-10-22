@@ -71,11 +71,14 @@ def test_patternsv2_attachment_is_saved_and_summarized(rules_store_factory) -> N
     store = rules_store_factory()
     created = store.save_rule(
         "attached",
-        payload("attached", attachment={"position": "before", "mode": "filter"}),
+        payload("attached",
+                attachment={"pattern": "double_bottom",
+                            "position": "before", "mode": "filter"}),
     )
-    assert created["payload"]["attachments"]["patternsv2"]["position"] == "before"
+    assert created["payload"]["attachments"]["patternsv2"]["pattern"] == "double_bottom"
     listed = store.list_rules()
-    assert listed[0]["patternsv2"] == {"position": "before", "mode": "filter"}
+    assert listed[0]["patternsv2"] == {
+        "pattern": "double_bottom", "position": "before", "mode": "filter"}
 
 
 def test_invalid_attachment_is_rejected(rules_store_factory) -> None:
@@ -91,6 +94,13 @@ def test_invalid_attachment_is_rejected(rules_store_factory) -> None:
             "bad mode",
             payload("bad mode",
                     attachment={"position": "after", "mode": "sometimes"}),
+        )
+    with pytest.raises(RulesError):
+        store.save_rule(
+            "bad pattern",
+            payload("bad pattern",
+                    attachment={"pattern": "not_a_pattern",
+                                "position": "after", "mode": "filter"}),
         )
 
 

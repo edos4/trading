@@ -121,11 +121,16 @@ def register_rules_routes(app, templates, ctx) -> None:
     @app.get("/api/rules/catalog")
     async def api_rules_catalog(_user: str = Depends(require_login)):
         from analysis.rule_catalog import GROUPS, catalog_payload
+        from patterns_v2.patterns.common import PATTERN_NAMES
 
         return {
             "indicators": catalog_payload(),
             "operators": OPERATORS,
             "groups": list(GROUPS),
+            "patternsv2_patterns": [
+                {"id": name, "label": name.replace("_", " ").title()}
+                for name in sorted(PATTERN_NAMES)
+            ],
         }
 
     @app.get("/api/rules")

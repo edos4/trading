@@ -452,18 +452,20 @@ and relative volume. Everything is computed locally from daily OHLCV; no
 TradingView session is required.
 
 **Attaching to Patternsv2.** Each saved indicator has an **Attach to
-Patternsv2** setting, stored in `payload.attachments.patternsv2`:
+Patternsv2** setting, stored in `payload.attachments.patternsv2`. Choose
+**All Patternsv2 patterns** or one specific detector (double bottom, flag,
+symmetrical triangle, rectangle, …), plus a placement:
 
-- **Before detection** — evaluate the rule on the bar first and skip Patternsv2
-  detection entirely when it fails. Filter mode only; this saves scan work and
-  supplies the context before a pattern is searched for.
+- **Before detection** — evaluate the rule on the bar first. For a specific
+  pattern, its signals are dropped before they enter the pipeline; for “All”,
+  Patternsv2 detection is skipped entirely when the rule fails. Filter mode only.
 - **After detection** — run Patternsv2 normally, then filter (or shadow) the
-  signals it emits.
+  signals from the selected pattern.
 
-Selecting the rule as a `Rule filter` on the Paper tab applies the saved mode and
-placement automatically (and ticks Patternsv2 for a `before` attachment). The
-Builder's **Start paper book** panel starts a Patternsv2 book with the attachment
-when it is not Off, or a rule-only strategy when it is Off.
+Selecting the rule as a `Rule filter` on the Paper tab applies the saved pattern,
+mode and placement automatically (and ticks Patternsv2). The Builder's **Start
+paper book** panel starts a Patternsv2 book with the attachment when it is not
+Off, or a rule-only strategy when it is Off.
 
 **Paper / filter use.** On the **Paper** tab each book has a `Rule` select (runs
 that indicator as the strategy) and a `Rule filter` select with

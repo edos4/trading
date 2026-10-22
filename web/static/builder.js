@@ -6,6 +6,7 @@
     catalog: [],
     operators: [],
     groups: [],
+    patterns: [],
     rule: null,
     savedId: "",
     generation: null,
@@ -76,7 +77,7 @@
         target: { kind: "r_multiple", r: 2, percent: 10 },
         max_hold_bars: null,
       },
-      attachments: { patternsv2: { position: "off", mode: "filter" } },
+      attachments: { patternsv2: { pattern: "all", position: "off", mode: "filter" } },
     };
   }
 
@@ -485,9 +486,24 @@
     $("builder-max-hold").value = exit.max_hold_bars != null ? exit.max_hold_bars : "";
     const attach = (rule.attachments && rule.attachments.patternsv2) || {};
     $("builder-attach-position").value = attach.position || "off";
+    $("builder-attach-pattern").value = attach.pattern || "all";
     $("builder-attach-mode").value = attach.mode || "filter";
     updateAttachmentVisibility();
     updateExitVisibility();
+  }
+
+  function populatePatternOptions() {
+    const select = $("builder-attach-pattern");
+    if (!select) return;
+    select.textContent = "";
+    const all = el("option", null, "All Patternsv2 patterns");
+    all.value = "all";
+    select.appendChild(all);
+    state.patterns.forEach((pattern) => {
+      const option = el("option", null, pattern.label || pattern.id);
+      option.value = pattern.id;
+      select.appendChild(option);
+    });
   }
 
   function updateExitVisibility() {
@@ -503,13 +519,18 @@
   function updateAttachmentVisibility() {
     const position = $("builder-attach-position").value;
     const mode = $("builder-attach-mode");
+    const pattern = $("builder-attach-pattern");
     const before = position === "before";
     if (before) mode.value = "filter";
     mode.disabled = before || position === "off";
+    pattern.disabled = position === "off";
+    const target = pattern.value === "all"
+      ? "Patternsv2"
+      : (pattern.selectedOptions[0] ? pattern.selectedOptions[0].textContent : pattern.value);
     $("builder-attach-hint").textContent = position === "before"
-      ? "Before: Patternsv2 detection is skipped on bars where this rule is false. Filter mode only."
+      ? `Before: ${target} detection is skipped on bars where this rule is false. Filter mode only.`
       : position === "after"
-        ? "After: Patternsv2 detects first; this rule then filters or shadows its signals."
+        ? `After: ${target} detects first; this rule then filters or shadows its signals.`
         : "Off: Patternsv2 runs without this rule. Paper's Rule filter can still select it manually.";
   }
 
@@ -573,6 +594,11 @@
       updateAttachmentVisibility();
       markDirty(true);
     });
+    $("builder-attach-pattern").addEventListener("change", () => {
+      state.rule.attachments.patternsv2.pattern = $("builder-attach-pattern").value;
+      updateAttachmentVisibility();
+      markDirty(true);
+    });
     $("builder-attach-mode").addEventListener("change", () => {
       state.rule.attachments.patternsv2.mode = $("builder-attach-mode").value;
       markDirty(true);
@@ -590,6 +616,7 @@
     const attachment = (payload.attachments && payload.attachments.patternsv2) || {};
     payload.attachments = {
       patternsv2: {
+        pattern: attachment.pattern || "all",
         position: attachment.position || "off",
         mode: attachment.mode || "filter",
       },
@@ -793,6 +820,8 @@
       state.catalog = catalog.indicators || [];
       state.operators = catalog.operators || [];
       state.groups = catalog.groups || [];
+      state.patterns = catalog.patternsv2_patterns || [];
+      populatePatternOptions();
       say($("builder-session"), `${state.catalog.length} indicators available`);
     } catch (err) {
       say($("builder-session"), err.message, true);

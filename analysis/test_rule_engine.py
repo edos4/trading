@@ -139,10 +139,15 @@ def test_value_operand_requires_value() -> None:
 def test_patternsv2_attachment_contract() -> None:
     base = rule([condition(right=1)]).model_dump(mode="json")
     assert base["attachments"]["patternsv2"]["position"] == "off"
+    assert base["attachments"]["patternsv2"]["pattern"] == "all"
     attached = dict(base)
-    attached["attachments"] = {"patternsv2": {"position": "before", "mode": "filter"}}
+    attached["attachments"] = {
+        "patternsv2": {"pattern": "double_bottom",
+                       "position": "before", "mode": "filter"},
+    }
     parsed = RulePayload.model_validate(attached)
     assert parsed.attachments.patternsv2.position == "before"
+    assert parsed.attachments.patternsv2.pattern == "double_bottom"
     for bad in (
         {"patternsv2": {"position": "sideways", "mode": "filter"}},
         {"patternsv2": {"position": "after", "mode": "sometimes"}},
@@ -152,6 +157,14 @@ def test_patternsv2_attachment_contract() -> None:
         broken["attachments"] = bad
         with pytest.raises(ValueError):
             RulePayload.model_validate(broken)
+
+    from analysis.rule_catalog import validate_rule
+
+    broken = dict(base)
+    broken["attachments"] = {"patternsv2": {
+        "pattern": "not_a_pattern", "position": "after", "mode": "filter"}}
+    with pytest.raises(ValueError):
+        validate_rule(RulePayload.model_validate(broken))
 
 
 def test_empty_group_rejected() -> None:
