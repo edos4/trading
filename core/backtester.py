@@ -141,6 +141,7 @@ class BacktestTrade:
     # Paper -> export -> Replay so any fill traces back to its assessment.
     # None when no gate ran.
     laya_assessment: dict | None = None
+    rule_evidence: dict | None = None
 
     execution_model: str = "legacy"
     pending_exit_reason: str = ""
@@ -905,6 +906,8 @@ def _open_trade(
         lowest_high_since_entry=candle.close if signal.trailing_stop_mode == "lowest_high" else None,
         laya_assessment=(dict(signal.laya_assessment)
                          if getattr(signal, "laya_assessment", None) else None),
+        rule_evidence=(dict(signal.rule_evidence)
+                       if getattr(signal, "rule_evidence", None) else None),
     )
     # Start the neckline time-stop clock only once the close is actually
     # through the neckline. If entry is a day-7 fill with no break yet,

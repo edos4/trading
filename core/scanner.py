@@ -180,6 +180,9 @@ class MarketScanner:
         laya_mode: str = "off",
         laya_policy_id: str = "",
         laya_assess=None,
+        rule_id: str = "",
+        rule_filter_id: str = "",
+        rule_filter_mode: str = "off",
     ):
         self._symbols = symbols or settings.symbols
         self._disabled_patterns = set(disabled_patterns or [])
@@ -198,7 +201,14 @@ class MarketScanner:
         self._volume_gate_rvol_min = settings.volume_gate_rvol_min
         self._volume_gate_obv_bars = settings.volume_gate_obv_bars
         self._tv_stack_id = (tv_stack_id or "").strip()
-        self._indicators_only = bool(indicators_only) or bool(self._tv_stack_id)
+        self._rule_id = (rule_id or "").strip()
+        self._rule_filter_id = (rule_filter_id or "").strip()
+        self._rule_filter_mode = (rule_filter_mode or "off").strip().lower()
+        if self._rule_filter_mode not in ("off", "shadow", "filter"):
+            raise ValueError(f"Unsupported rule filter mode: {rule_filter_mode}")
+        self._indicators_only = (
+            bool(indicators_only) or bool(self._tv_stack_id) or bool(self._rule_id)
+        )
         self._patterns_v2 = bool(patterns_v2) and not self._indicators_only
         self._pattern_only = bool(pattern_only) and not self._indicators_only
         self._collect_first = settings.collect_first_enabled if collect_first is None else bool(collect_first)
@@ -277,6 +287,8 @@ class MarketScanner:
             "volume_gate_rejected": 0,
             "collect_first_ranked": 0,
             "collect_first_selected": 0,
+            "rule_filter_shadow": 0,
+            "rule_filter_rejected": 0,
             "trades_opened": 0,
             "sim_days": 0,
             # Rejection counts are grouped by the first gate that vetoed the
@@ -315,6 +327,44 @@ class MarketScanner:
         self._laya_policy_id = (laya_policy_id or "").strip()
         self._laya_assess = laya_assess
         self._laya_shadow: list[dict] = []
+        # Visual rule filter (Builder tab). Off unless a rule id + non-off mode
+        # were supplied; the rule is loaded once, and per-bar evidence is cached
+        # because several pattern families can fire on the same symbol/bar.
+        self._rule_filter = None
+        self._rule_filter_cache: dict = {}
+        if self._rule_filter_id and self._rule_filter_mode != "off":
+            self._load_rule_filter()
+
+    def _load_rule_filter(self) -> None:
+        from core.rule_contracts import RulePayload
+        from core.rules_store import open_rules_store
+
+        row = open_rules_store().get_rule(self._rule_filter_id)
+        if row is None:
+            raise ValueError(f"Unknown indicator rule: {self._rule_filter_id}")
+        payload = dict(row.get("payload") or {})
+        payload["name"] = row.get("name") or payload.get("name") or "rule filter"
+        payload.setdefault("schema_version", 1)
+        self._rule_filter = RulePayload.model_validate(payload)
+
+    def _rule_filter_evidence(self, signal: TradeSignal) -> dict:
+        from analysis.rule_engine import evaluate_bar, required_bars
+
+        rule = self._rule_filter
+        if rule is None:
+            return {"matched": True, "warm": True, "conditions": []}
+        df = self._store.get_df(
+            signal.symbol, signal.timeframe, min_bars=required_bars(rule))
+        if df is None:
+            return {"matched": False, "warm": False, "conditions": [],
+                    "reason": "insufficient history for the rule"}
+        key = (signal.symbol, signal.timeframe, df.index[-1], len(df))
+        cached = self._rule_filter_cache.get(key)
+        if cached is not None:
+            return cached
+        evidence = evaluate_bar(rule, df, -1)
+        self._rule_filter_cache[key] = evidence
+        return evidence
 
     def signal_log_snapshot(self) -> list[dict]:
         with self._signal_log_lock:
@@ -920,6 +970,8 @@ class MarketScanner:
             and identity_key != persisted_key
         )
         new_closed_daily = False
+        if is_new_bar:
+            self._rule_filter_cache.clear()
         if is_new_bar and bar_ts is not None:
             self.stats["new_bars"] += 1
             if is_swing_timeframe(timeframe) and not is_weekly_timeframe(timeframe):
@@ -1351,6 +1403,33 @@ class MarketScanner:
                 f"{vgate.reason}"
             )
 
+        # Visual rule filter (Builder tab): supplies the context-before-the-
+        # pattern gate that the deleted regime layer used to provide. Shadow
+        # only records evidence; filter vetoes entries.
+        if (self._rule_filter is not None
+                and signal.provenance != "visual_rule"
+                and signal.timeframe == self._rule_filter.timeframe):
+            evidence = self._rule_filter_evidence(signal)
+            if self._rule_filter_mode == "shadow":
+                signal.rule_evidence = evidence
+                self.stats["rule_filter_shadow"] = (
+                    self.stats.get("rule_filter_shadow", 0) + 1)
+            elif not evidence.get("matched"):
+                failed = [
+                    f"{item['label']} (got {item.get('left')})"
+                    for item in evidence.get("conditions", [])
+                    if not item.get("pass")
+                ] or [evidence.get("reason") or "rule not satisfied"]
+                reason = "Rule filter: " + "; ".join(failed)
+                log.info(
+                    f"Rule filter REJECT | {signal.symbol} {signal.pattern} | {reason}"
+                )
+                self.stats["signals_rejected"] += 1
+                self.stats["rule_filter_rejected"] = (
+                    self.stats.get("rule_filter_rejected", 0) + 1)
+                self._append_signal_log(signal, status="rejected", reason=reason)
+                return
+
         # Step 1 — Vision confirmation, only when enabled. The pattern's own
         # min_confidence already gated this signal before analyze() returned
         # it — vision_min_indicator_confidence exists only to decide whether
@@ -1607,6 +1686,23 @@ class MarketScanner:
         bind(symbol, getattr(indicator, "timeframes", ["1d"])[0], exchange)
 
     def _discover_patterns(self) -> None:
+        if getattr(self, "_rule_id", ""):
+            from analysis.rule_detector import VisualRuleIndicator
+            from core.rules_store import open_rules_store
+
+            self._version_set = {}
+            self._indicators_only = True
+            if self._paper is not None:
+                self._paper.indicators_only = True
+            row = open_rules_store().get_rule(self._rule_id)
+            if row is None:
+                self._patterns = []
+                self._pattern_files = {}
+                self.stats["rule_error"] = "Unknown indicator rule."
+                return
+            self._patterns = [VisualRuleIndicator(row)]
+            self._pattern_files = {row["name"]: "visual_rule"}
+            return
         if getattr(self, "_tv_stack_id", ""):
             from data.tv_stacks import TvStackIndicator, get_stack
 
