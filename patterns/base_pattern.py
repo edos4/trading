@@ -155,6 +155,7 @@ class TradeSignal:
     requested_rules: dict | None = None
     resolved_rules: dict | None = None
     laya_assessment: dict | None = None
+    rule_evidence: dict | None = None
 
 
 

@@ -25,13 +25,13 @@ def payload(value):
     return {key:(getattr(value, key).isoformat() if key == 'decision_date' and getattr(value, key, None)
                  else deepcopy(getattr(value,key,None))) for key in
             ('trade_id','signal_id','pattern_version_id','provenance','requested_rules','resolved_rules',
-             'execution_model','decision_date','entry_fee_paid')}
+             'execution_model','decision_date','entry_fee_paid','rule_evidence')}
 
 
 def row_payload(value):
     return {key:deepcopy(value.get(key)) for key in
             ('trade_id','signal_id','pattern_version_id','provenance','requested_rules','resolved_rules',
-             'execution_model','decision_date','entry_fee_paid')}
+             'execution_model','decision_date','entry_fee_paid','rule_evidence')}
 
 
 def pattern_annotations(annotations, df=None, pattern=None):

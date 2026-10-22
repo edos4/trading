@@ -122,6 +122,10 @@ class PaperBook:
         self.error: Optional[str] = None
         self.tv_stack_id = ""
         self.tv_stack_name = ""
+        self.rule_id = ""
+        self.rule_name = ""
+        self.rule_filter_id = ""
+        self.rule_filter_mode = "off"
         self._thread: Optional[threading.Thread] = None
         self._stop_requested = threading.Event()
         self._chart_key: tuple[int, float] | None = None
@@ -512,9 +516,38 @@ class PaperBook:
         laya_mode: str = "off",
         laya_policy_id: str = "",
         duration_days: int | None = None,
+        rule_id: str = "",
+        rule_filter_id: str = "",
+        rule_filter_mode: str = "off",
     ) -> str | None:
         stack_name = ""
         tv_stack_id = (tv_stack_id or "").strip()
+        rule_id = (rule_id or "").strip()
+        rule_filter_id = (rule_filter_id or "").strip()
+        rule_filter_mode = (rule_filter_mode or "off").strip().lower()
+        if rule_filter_mode not in ("off", "shadow", "filter"):
+            return f"Unsupported rule filter mode: {rule_filter_mode}"
+        rule_name = ""
+        try:
+            if rule_id:
+                from core.rules_store import open_rules_store
+
+                row = open_rules_store().get_rule(rule_id)
+                if row is None:
+                    return "Unknown indicator rule."
+                rule_name = row["name"]
+                indicators_only = True
+                pattern_only = False
+                patterns_v2 = False
+            if rule_filter_id and rule_filter_mode != "off":
+                from core.rules_store import open_rules_store
+
+                if rule_filter_id == rule_id:
+                    return "A strategy rule cannot also be its own filter."
+                if open_rules_store().get_rule(rule_filter_id) is None:
+                    return "Unknown indicator rule filter."
+        except Exception as exc:  # DB unavailable / unmigrated -> readable refusal
+            return f"Indicator rule storage unavailable: {exc}"
         if tv_stack_id:
             from data.tv_stacks import get_stack, require_stack_ready
 
@@ -553,6 +586,10 @@ class PaperBook:
             self.use_stream = use_stream
             self.tv_stack_id = tv_stack_id
             self.tv_stack_name = stack_name
+            self.rule_id = rule_id
+            self.rule_name = rule_name
+            self.rule_filter_id = rule_filter_id
+            self.rule_filter_mode = rule_filter_mode
             self.laya_mode = laya_mode
             self.laya_policy_id = (laya_policy_id or "").strip()
             self.duration_days = duration_days
@@ -563,7 +600,7 @@ class PaperBook:
                 n_symbols, extra_symbols, use_stream, volume_gate, pattern_only,
                 indicators_only, patterns_v2, collect_first, collect_first_top_n,
                 stream_start, tv_stack_id, laya_mode, laya_policy_id,
-                duration_days,
+                duration_days, rule_id, rule_filter_id, rule_filter_mode,
             ),
             name=f"paper-{self.market}",
             daemon=True,
@@ -588,6 +625,10 @@ class PaperBook:
                 self.running = False
                 self.tv_stack_id = ""
                 self.tv_stack_name = ""
+                self.rule_id = ""
+                self.rule_name = ""
+                self.rule_filter_id = ""
+                self.rule_filter_mode = "off"
                 if self._stop_requested.is_set() and not self.error:
                     self.status = "Stopped."
             if loop is not None and not loop.is_closed():
@@ -775,6 +816,9 @@ class PaperBook:
         laya_mode: str = "off",
         laya_policy_id: str = "",
         duration_days: int | None = None,
+        rule_id: str = "",
+        rule_filter_id: str = "",
+        rule_filter_mode: str = "off",
     ) -> None:
         data_feed = None
         profile = get_market(self.market)
@@ -862,6 +906,9 @@ class PaperBook:
                 laya_policy_id=(laya_policy_id or ""),
                 laya_assess=laya_assess,
                 duration_days=duration_days,
+                rule_id=rule_id,
+                rule_filter_id=rule_filter_id,
+                rule_filter_mode=rule_filter_mode,
             )
             self.scanner = scanner
             self.task = loop.create_task(scanner.run())
@@ -887,6 +934,8 @@ class PaperBook:
                 f", Pattern-only={'ON' if pattern_only and not indicators_only else 'OFF'}"
                 f", Indicators-only={'ON' if indicators_only else 'OFF'}"
                 f"{', TradingView=' + self.tv_stack_name if self.tv_stack_name else ''}"
+                f"{', Rule=' + self.rule_name if self.rule_name else ''}"
+                f"{', RuleFilter=' + self.rule_filter_mode if self.rule_filter_id and self.rule_filter_mode != 'off' else ''}"
                 f", Patternsv2={'ON' if patterns_v2 and not indicators_only else 'OFF'}"
                 f", Collect-first={'ON' if collect_first else 'OFF'}"
                 f", Laya={(laya_mode or 'off').upper()}"
@@ -1008,6 +1057,9 @@ class PaperBookManager:
         laya_mode: str = "off",
         laya_policy_id: str = "",
         duration_days: int | None = None,
+        rule_id: str = "",
+        rule_filter_id: str = "",
+        rule_filter_mode: str = "off",
     ) -> str | None:
         with self._start_lock:
             book = self._book(market)
@@ -1033,6 +1085,9 @@ class PaperBookManager:
                 laya_mode=laya_mode,
                 laya_policy_id=laya_policy_id,
                 duration_days=duration_days,
+                rule_id=rule_id,
+                rule_filter_id=rule_filter_id,
+                rule_filter_mode=rule_filter_mode,
             )
 
     def start_both(self, specs: dict[str, dict[str, Any]]) -> dict[str, str]:
