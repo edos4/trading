@@ -72,7 +72,18 @@ class ExplorerService:
         profile = get_market(market)
         if profile.id != getattr(self, "_market", None):
             self._bind_market(profile)
-        rows = TVClient.fetch_universe_cached(n, profile.id)
+        # Explorer is a browse surface: show the whole exchange universe rather
+        # than only the names that clear the trading liquidity floor. PH lists
+        # ~244 names; the floor would cut that to ~63.
+        rows = TVClient.fetch_universe_cached(
+            n, profile.id, min_value=0 if profile.id == "ph" else None,
+        )
+        if profile.id == "ph":
+            # PSE screener rows are bare tickers; the history store and charts
+            # use the .PS-qualified key, so show the proper symbol here too.
+            from core.market import ph_history_symbol
+
+            rows = [(ph_history_symbol(s), ex) for s, ex in rows]
         return [{"symbol": s, "exchange": ex} for s, ex in rows]
 
     def load_symbol(
@@ -101,7 +112,7 @@ class ExplorerService:
 
         candles = fetch_ohlcv_candles(
             symbol, timeframe, exchange=exchange, tv_client=self._tv,
-            tv_fallback=False,
+            tv_fallback=False, market=profile.id,
         )
         if not candles:
             raise ValueError(f"No history available for {symbol} {timeframe}.")

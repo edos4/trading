@@ -589,6 +589,8 @@ class TVClient:
         market: str | None = None,
         ttl_seconds: int = _SYMBOLS_CACHE_TTL_SECONDS,
         extra_symbols: str | list[str] | None = None,
+        *,
+        min_value: float | None = None,
     ) -> list[tuple[str, str]]:
         from core.market import get_market, merge_extra_symbols
 
@@ -598,7 +600,7 @@ class TVClient:
             profile.tv_screener,
             ttl_seconds,
             order_by=profile.universe_order,
-            min_value=profile.min_adv,
+            min_value=profile.min_adv if min_value is None else min_value,
             exchange=profile.tv_exchange if profile.id == "ph" else None,
         )
         return merge_extra_symbols(rows, extra_symbols, profile.id)

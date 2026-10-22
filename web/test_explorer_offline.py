@@ -63,6 +63,34 @@ class ExplorerOfflineTests(unittest.TestCase):
         # Version resolution is deferred to the scan, never the constructor.
         self.assertFalse(resolve.called)
 
+    def test_ph_symbol_list_uses_the_history_symbol(self) -> None:
+        rows = [("BDO", "PSE"), ("ICT", "PSE")]
+        with patch("data.tv_client.TVClient.fetch_universe_cached",
+                   return_value=rows) as fetch:
+            r = self.client.get("/api/symbols?n=30&market=ph", auth=self.auth)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["symbols"], [
+            {"symbol": "BDO.PS", "exchange": "PSE"},
+            {"symbol": "ICT.PS", "exchange": "PSE"},
+        ])
+        # Explorer must not apply the PH trading liquidity floor.
+        fetch.assert_called_once_with(30, "ph", min_value=0)
+
+    def test_ph_symbols_load_with_the_ph_market_suffix(self) -> None:
+        from unittest.mock import ANY
+
+        from web.services import ExplorerService
+
+        # PSE screener rows are bare tickers (BDO); the history store keys them
+        # as BDO.PS, which only happens when the market is passed through.
+        with patch("web.services.fetch_ohlcv_candles", return_value=[]) as fetch:
+            with self.assertRaises(ValueError):
+                ExplorerService().load_symbol("BDO", "PSE", "1d", market="ph")
+        fetch.assert_called_once_with(
+            "BDO", "1d", exchange="PSE", tv_client=ANY,
+            tv_fallback=False, market="ph",
+        )
+
     def test_symbol_scan_maps_database_outage_to_503(self) -> None:
         outage = self._unavailable()
 
