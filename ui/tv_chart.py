@@ -102,9 +102,11 @@ class TradingViewChart(tk.Frame):
         self._ohlc_label.pack(fill=tk.X)
         self._legend_label = tk.Label(
             self._header, textvariable=self._legend_var, fg=TV_DIM, bg=TV_BG,
-            font=("Trebuchet MS", 9), anchor="w",
+            font=("Trebuchet MS", 9), anchor="w", justify="left", wraplength=1060,
         )
         self._legend_label.pack(fill=tk.X)
+        self._legend_label.bind("<Configure>", lambda event: self._legend_label.configure(
+            wraplength=max(event.width, 1)))
 
         tools = tk.Frame(self._header, bg=TV_BG)
         tools.pack(fill=tk.X, pady=(4, 0))
@@ -132,7 +134,7 @@ class TradingViewChart(tk.Frame):
                                ("Correct pattern…", self._correct_pattern)):
             tk.Button(actions, text=label, command=self._refocus(command), bg=TV_TOOL, fg=TV_TEXT,
                       relief=tk.FLAT, font=("Trebuchet MS", 9)).pack(side=tk.LEFT, padx=(0, 4))
-        tk.Label(actions, text="Blue: your corrections · Enter: finish · Escape: cancel",
+        tk.Label(actions, text="Your drawings: corrections · Enter: finish · Escape: cancel",
                  bg=TV_BG, fg=TV_DRAW, font=("Trebuchet MS", 9)).pack(side=tk.LEFT)
         if read_only:
             tools.pack_forget()
@@ -269,7 +271,7 @@ class TradingViewChart(tk.Frame):
         n = len(self._candles)
         extra = len(payload.get("pred_candles") or [])
         self._visible = min(max(n, 2), max(180, extra + 80))
-        if payload.get("segments"):
+        if payload.get("segments") or payload.get("trendlines"):
             self._visible = max(n, 2)
         self._start = max(0, n - self._visible)
         title = payload.get("title") or payload.get("symbol") or "Chart"
@@ -280,15 +282,16 @@ class TradingViewChart(tk.Frame):
             )
         else:
             self._legend_var.set(self._default_legend)
-        note = payload.get("pattern_note") or ""
+        pattern_note = payload.get("pattern_note") or (
+            "Yellow: detected pattern" if payload.get("segments") else ""
+        )
+        notes = [pattern_note, payload.get("trendline_note")]
+        if payload.get("trendlines"):
+            notes.append("Auto rails: solid confirmed · dashed broken · dotted unconfirmed")
+        note = " · ".join(part for part in notes if part)
         if note:
             self._legend_var.set(note + "    " + self._legend_var.get())
-            self._legend_label.configure(fg="#ffeb3b" if note.startswith("Yellow:") else TV_DIM)
-        elif payload.get("segments"):
-            self._legend_var.set("Yellow: detected pattern    " + self._legend_var.get())
-            self._legend_label.configure(fg="#ffeb3b")
-        else:
-            self._legend_label.configure(fg=TV_DIM)
+        self._legend_label.configure(fg="#ffeb3b" if pattern_note.startswith("Yellow:") else TV_DIM)
         self._set_ohlc_label(self._candles[-1] if self._candles else None, from_last=True)
         self._redraw()
 
@@ -711,8 +714,11 @@ class TradingViewChart(tk.Frame):
             self._canvas.create_line(*pts, fill=color, width=width, smooth=False)
 
     def _visible_pattern_segments(self, visible: list[dict]):
+        """Clip detected pattern paths and automatic rails to visible bars."""
         indices = {row["time"]: i for i, row in enumerate(self._candles)}
-        for segment in self._payload.get("segments") or []:
+        segments = [*(self._payload.get("segments") or []),
+                    *(self._payload.get("trendlines") or [])]
+        for segment in segments:
             points = []
             data = segment.get("data") or []
             for a, b in zip(data, data[1:]):
@@ -736,7 +742,7 @@ class TradingViewChart(tk.Frame):
             self._canvas.create_line(
                 *coords,
                 fill=segment["color"], width=segment.get("width", 2),
-                dash=(6, 4) if segment.get("style") == "--" else (),
+                dash={"--": (6, 4), ":": (1, 3)}.get(segment.get("style"), ()),
             )
             if segment.get("label"):
                 a, b = points[0], points[-1]
@@ -978,13 +984,16 @@ class TradingViewChart(tk.Frame):
         self._zoom_at(event.x, factor)
 
     def _zoom_at(self, x: int, factor: float) -> None:
-        anchor = self._index_at(x)
-        if anchor is None:
-            anchor = self._visible - 1
-        abs_i = self._start + anchor
+        # Preserve the bar position under the cursor. The fraction must use
+        # the old window width; using the new width shifts the candle and its
+        # overlays sideways while zooming.
+        x0, _, x1, _ = self._plot
+        fraction = ((x - x0) / max(x1 - x0, 1)
+                    if self._index_at(x) is not None else 1.)
+        absolute = self._start + fraction * self._visible
         self._visible = int(self._visible * factor)
         self._clamp_window()
-        self._start = abs_i - int(anchor * self._visible / max(anchor + 1, self._visible))
+        self._start = round(absolute - fraction * self._visible)
         self._clamp_window()
         self._redraw()
 

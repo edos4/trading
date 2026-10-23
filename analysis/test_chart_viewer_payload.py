@@ -3,8 +3,117 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pandas as pd
+import numpy as np
+import pytest
 
-from analysis.chart_renderer import build_trade_viewer_payload
+from analysis.chart_renderer import ChartRenderer, _chart_session_day, build_trade_viewer_payload
+from data.history import bars_to_df
+
+
+@pytest.mark.parametrize("title_case", [False, True])
+def test_date_only_history_keeps_session_candles_and_entry_pivot(title_case) -> None:
+    dates = pd.bdate_range("2024-03-04", periods=10)
+    rows = [{"date": day.date().isoformat(), "open": 100 + i, "high": 101 + i,
+             "low": 99 + i, "close": 100 + i, "volume": 1000}
+            for i, day in enumerate(dates)]
+    # The real history adapter represents date-only response rows as UTC
+    # midnights. These are session labels, including across the DST change.
+    frame = bars_to_df(rows)
+    if title_case:
+        frame.columns = frame.columns.str.title()
+    original = frame.copy()
+    payload = build_trade_viewer_payload(
+        frame, symbol="TEST", action="BUY", entry_time="2024-03-08T00:00:00+00:00",
+        annotations=[{"type": "marker", "date": "2024-03-08", "price": 104.,
+                      "label": "Saved pivot"}],
+    )
+
+    expected = dates.strftime("%Y-%m-%d").tolist()
+    assert [row["time"] for row in payload["candles"]] == expected
+    assert all(pd.Timestamp(row["time"]).dayofweek < 5 for row in payload["candles"])
+    assert ChartRenderer()._prepare_df(frame).index.equals(dates)
+    assert [_chart_session_day(stamp, "America/New_York") for stamp in frame.index] == list(dates)
+    markers = {marker["text"]: marker for marker in payload["markers"]}
+    assert markers["BUY"]["time"] == markers["Saved pivot"]["time"] == "2024-03-08"
+    candle = next(row for row in payload["candles"] if row["time"] == markers["BUY"]["time"])
+    assert candle["close"] == markers["Saved pivot"]["price"] == 104.
+    pd.testing.assert_frame_equal(frame, original)
+
+
+def test_mixed_session_labels_and_real_prints_sort_and_keep_latest_session() -> None:
+    stamps = [
+        ("2024-03-11", 10.), ("2024-03-11T13:30:00+00:00", 11.),
+        ("2024-03-12", 20.), ("2024-03-12T01:00:00+00:00", 12.),
+        ("2024-03-12T13:30:00+00:00", 21.), ("2024-03-13", 30.),
+        ("2024-03-13T13:30:00+00:00", 31.),
+    ]
+    rows = [{"date": stamp, "open": close, "high": close + 1,
+             "low": close - 1, "close": close, "volume": 1000}
+            for stamp, close in reversed(stamps)]
+    frame = bars_to_df(rows)
+    original = frame.copy()
+    payload = build_trade_viewer_payload(
+        frame, symbol="TEST", action="BUY", entry_time="2024-03-12T01:00:00+00:00",
+        annotations=[{"type": "marker", "date": "2024-03-11", "price": 12.,
+                      "label": "Saved pivot"}],
+    )
+
+    assert [(row["time"], row["close"]) for row in payload["candles"]] == [
+        ("2024-03-11", 12.), ("2024-03-12", 21.), ("2024-03-13", 31.),
+    ]
+    assert {marker["time"] for marker in payload["markers"]} == {"2024-03-11"}
+    pd.testing.assert_frame_equal(frame, original)
+
+
+def test_invalid_session_reprint_keeps_the_latest_valid_candle() -> None:
+    idx = pd.bdate_range("2024-01-02", periods=40)
+    close = 100 + np.arange(40) * .25 + np.sin(np.arange(40) / 2) * 3
+    original = pd.DataFrame({
+        "open": close - .4, "high": close + .6, "low": close - .6,
+        "close": close, "volume": 1000,
+    }, index=idx)
+    reprint = original.iloc[[10]].copy()
+    reprint.index += pd.Timedelta(hours=4)
+    reprint["close"] = np.nan
+    df = pd.concat([original, reprint])
+
+    actual = build_trade_viewer_payload(df, symbol="TEST", trendlines=True)
+    expected = build_trade_viewer_payload(original, symbol="TEST", trendlines=True)
+
+    assert actual["candles"] == expected["candles"]
+    assert actual["trendlines"] == expected["trendlines"]
+
+
+def test_trendlines_fit_only_candles_displayed_by_the_viewer() -> None:
+    idx = pd.bdate_range("2024-01-02", periods=80)
+    close = 100 + np.arange(80) * 0.25 + np.sin(np.arange(80) / 2) * 3
+    df = pd.DataFrame({
+        "open": close - 0.4, "high": close + 0.6, "low": close - 0.6,
+        "close": close, "volume": 1000,
+    }, index=idx)
+    # The viewer omits these candles. Fitting their invisible highs/lows, or
+    # including their positions in a slope, moves the rail on its time scale.
+    df.loc[idx[12:28], "open"] = np.nan
+    charted = build_trade_viewer_payload(df, symbol="TEST", trendlines=True)
+    expected = build_trade_viewer_payload(df.dropna(), symbol="TEST", trendlines=True)
+
+    assert charted["candles"] == expected["candles"]
+    assert expected["trendlines"]
+    assert charted["trendlines"] == expected["trendlines"]
+
+
+def test_duplicate_trade_level_retains_saved_annotation_reason() -> None:
+    idx = pd.bdate_range("2024-01-02", periods=20)
+    df = pd.DataFrame({
+        "open": 1.0, "high": 1.1, "low": 0.9, "close": 1.0, "volume": 1000,
+    }, index=idx)
+    payload = build_trade_viewer_payload(df, symbol="TEST", stop=0.86, annotations=[{
+        "type": "hline", "price": 0.8600000143051147, "label": "stop",
+        "reason": "Below the saved swing low.", "color": "#ef5350",
+    }])
+
+    assert len(payload["levels"]) == 1
+    assert payload["levels"][0]["reason"] == "Below the saved swing low."
 
 
 def test_pattern_hlines_do_not_duplicate_trade_levels() -> None:

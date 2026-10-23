@@ -4,7 +4,7 @@ window.ChartDraw = (function () {
   const copy = value => JSON.parse(JSON.stringify(value));
 
   function attach({host, panes, times = [], shapes = [], onChange = () => {}, onCorrect,
-                   readOnly = false}) {
+                   readOnly = false, guidance = 'Blue: your corrections (point handles).'}) {
     let drawings = copy(shapes), draft = null, selected = null, tool = null, drag = null;
     const history = [], cleanup = [], painters = [];
     const originalScroll = panes.map(p => ({...(p.chart.options?.().handleScroll || {})}));
@@ -81,7 +81,7 @@ window.ChartDraw = (function () {
     const status = document.createElement('span');
     status.style.cssText = 'color:#90caf9;font:11px sans-serif';
     status.setAttribute('role', 'status');
-    status.textContent = 'Blue: solid confirmed · dashed broken · dotted <3 touches.';
+    status.textContent = guidance;
     function applyScroll() {
       panes.forEach((p, i) => {
         const base = {...(originalScroll[i] || {mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true})};
@@ -97,7 +97,7 @@ window.ChartDraw = (function () {
         b.style.backgroundColor = key === tool ? BLUE : '';
         b.style.color = key === tool ? '#131722' : '';
       });
-      status.textContent = tool === 'pattern' ? 'Click price pivots left to right; Enter to finish.' : 'Blue: solid confirmed · dashed broken · dotted <3 touches.';
+      status.textContent = tool === 'pattern' ? 'Click price pivots left to right; Enter to finish.' : guidance;
     }
     function cancel() {
       if (drag?.before) drawings = drag.before;

@@ -37,20 +37,24 @@ def _column(df: pd.DataFrame, *names: str) -> np.ndarray:
 
 
 def _pivots(values: np.ndarray, left: int, right: int, high: bool) -> list[tuple[int, float]]:
-    """Swing extremes: the bar is the highest/lowest in its surrounding window."""
+    """Swing extremes confirmed on both sides of the entire flat-price run."""
     points: list[tuple[int, float]] = []
-    for i in range(left, len(values) - right):
+    i = 0
+    while i < len(values):
         value = values[i]
-        window = values[i - left:i + right + 1]
-        if not np.isfinite(value) or not np.isfinite(window).any():
-            continue
-        edge = np.nanmax(window) if high else np.nanmin(window)
-        if (high and value >= edge) or (not high and value <= edge):
-            # A flat top/bottom spans adjacent bars with the same extreme;
-            # counting each bar would falsely confirm the line more than once.
-            if points and i - points[-1][0] <= 1 and value == points[-1][1]:
-                continue
-            points.append((i, float(value)))
+        end = i
+        while end + 1 < len(values) and values[end + 1] == value:
+            end += 1
+        if i >= left and end + right < len(values) and np.isfinite(value):
+            before = values[i - left:i]
+            after = values[end + 1:end + right + 1]
+            if np.isfinite(before).all() and np.isfinite(after).all():
+                edge = max(np.max(before), np.max(after)) if high else min(np.min(before), np.min(after))
+                if (high and value >= edge) or (not high and value <= edge):
+                    # Interior bars of a long plateau are not separate swings,
+                    # and a plateau needs the reversal after its final bar.
+                    points.append((i, float(value)))
+        i = end + 1
     return points
 
 
@@ -67,6 +71,17 @@ def _atr(df: pd.DataFrame) -> float:
     )
     true_range = true_range[np.isfinite(true_range)]
     return float(np.median(true_range)) if len(true_range) else 0.0
+
+
+def _plateau_endpoints(values: np.ndarray, points: list[tuple[int, float]]) -> dict[int, int]:
+    """The final bar of each confirmed equal-price swing run."""
+    ends = {}
+    for start, price in points:
+        end = start
+        while end + 1 < len(values) and values[end + 1] == price:
+            end += 1
+        ends[start] = end
+    return ends
 
 
 def _line_value(index: int, i0: int, p0: float, slope: float) -> float:
@@ -120,19 +135,34 @@ def _evaluate(
             violation_weight += (abs(delta) - tol) / unit
 
     span_bars = max(1, n - i0)
+    last_touch = max(touches)
     wick_penetrated = 0
     body_penetrated = 0
+    anchor_wick_penetrated = 0
+    anchor_body_penetrated = 0
     for i in range(i0, n):
         value = _line_value(i, i0, p0, slope)
         if (bars[i] > value + tol) if high else (bars[i] < value - tol):
             wick_penetrated += 1
+            if i <= last_touch:
+                anchor_wick_penetrated += 1
         if (bodies[i] > value + tol) if high else (bodies[i] < value - tol):
             body_penetrated += 1
+            if i <= last_touch:
+                anchor_body_penetrated += 1
     wick_ratio = wick_penetrated / span_bars
     body_ratio = body_penetrated / span_bars
+    anchor_bars = last_touch - i0 + 1
+    anchor_wick_ratio = anchor_wick_penetrated / anchor_bars
+    anchor_body_ratio = anchor_body_penetrated / anchor_bars
     # A rail repeatedly cut by candle bodies is not a usable boundary. Wicks
     # may pierce it occasionally, but bodies should not.
-    if wick_ratio > MAX_WICK_PENETRATION_RATIO or body_ratio > MAX_BODY_PENETRATION_RATIO:
+    # Also check the actual anchored segment: later clean bars must not dilute
+    # violations in the shorter segment that will be drawn when clipped.
+    if (
+        max(wick_ratio, anchor_wick_ratio) > MAX_WICK_PENETRATION_RATIO
+        or max(body_ratio, anchor_body_ratio) > MAX_BODY_PENETRATION_RATIO
+    ):
         return None
 
     span = i1 - i0
@@ -147,6 +177,7 @@ def _evaluate(
         "violation_weight": violation_weight,
         "wick_penetration": wick_ratio,
         "body_penetration": body_ratio,
+        "anchor_body_penetration": anchor_body_ratio,
         "span": span,
     }
 
@@ -163,30 +194,59 @@ def _best_line(
     end_tolerance: float,
     atr: float,
     start_floor: int = 0,
+    require_current: bool = False,
+    plateau_ends: dict[int, int] | None = None,
 ) -> dict | None:
     best: dict | None = None
+    last_points = [(plateau_ends.get(i, i), price) for i, price in points] if plateau_ends else points
     for a in range(len(points)):
-        i0, p0 = points[a]
-        if i0 < start_floor:
-            continue
         for b in range(a + 1, len(points)):
-            i1, p1 = points[b]
-            if i1 - i0 < min_span:
+            p0, p1 = points[a][1], points[b][1]
+            # Use the edge that leaves the full plateau on the correct side:
+            # rising support and falling resistance need the final flat bar.
+            # Resolve every touch the same way so a plateau still counts once.
+            # Horizontal touches use final bars for recency, while the first
+            # anchor stays at its earliest edge to preserve the full span.
+            use_last = (p1 <= p0) if high else (p1 >= p0)
+            candidate_points = last_points if use_last else points
+            if p1 == p0 and plateau_ends:
+                origin = max(points[a][0], start_floor)
+                if origin > plateau_ends.get(points[a][0], points[a][0]):
+                    continue
+                candidate_points = list(last_points)
+                # A plateau crossing the refit floor remains a valid origin;
+                # retain all of its clean horizontal span inside that window.
+                candidate_points[a] = (origin, p0)
+            i0, p0 = candidate_points[a]
+            i1, p1 = candidate_points[b]
+            if i0 < start_floor or i1 - i0 < min_span:
                 continue
             candidate = _evaluate(
-                points, i0, p0, i1, p1, bars, bodies, high, tol, n,
+                candidate_points, i0, p0, i1, p1, bars, bodies, high, tol, n,
                 last_close, end_tolerance, atr,
             )
             if candidate is None:
                 continue
+            candidate = {**candidate, "i0": i0, "p0": p0, "i1": i1, "p1": p1}
+            if (
+                require_current
+                and n - 1 - max(candidate["touches"]) > MAX_STALE_BARS
+                and not _can_extend(
+                    candidate, candidate["touches"], bars, bodies, high, tol, n, last_close, atr,
+                )
+            ):
+                # A stale high-scoring rail must not hide a lower-scoring
+                # current rail during the refit search.
+                continue
             if best is None or candidate["score"] > best["score"]:
-                best = {**candidate, "i0": i0, "p0": p0, "i1": i1, "p1": p1}
+                best = candidate
     return best
 
 
 def _can_extend(
     best: dict,
     touches: list[int],
+    bars: np.ndarray,
     bodies: np.ndarray,
     high: bool,
     tol: float,
@@ -204,12 +264,18 @@ def _can_extend(
     if abs(projected - last_close) > EXTENSION_MAX_ATR * atr:
         return False
     wrong = 0
+    wick_wrong = 0
     total = n - 1 - end
     for i in range(end + 1, n):
         value = _line_value(i, i0, p0, slope)
         if (bodies[i] > value + tol) if high else (bodies[i] < value - tol):
             wrong += 1
-    return wrong / max(1, total) <= EXTENSION_WRONG_SIDE_MAX
+        if (bars[i] > value + tol) if high else (bars[i] < value - tol):
+            wick_wrong += 1
+    return (
+        wrong / total <= EXTENSION_WRONG_SIDE_MAX
+        and wick_wrong / total <= MAX_WICK_PENETRATION_RATIO
+    )
 
 
 def _select_line(
@@ -223,32 +289,41 @@ def _select_line(
     last_close: float,
     end_tolerance: float,
     atr: float,
+    plateau_ends: dict[int, int] | None = None,
 ) -> tuple[dict, list[int], int] | None:
     """Pick a rail, extending or refitting it when its anchors are stale."""
     best = _best_line(
         points, bars, bodies, high, tol, n, min_span,
         last_close, end_tolerance, atr,
+        plateau_ends=plateau_ends,
     )
-    if best is None:
+    recent_min_span = min(min_span, max(6, int(min(n, RECENT_BARS) * MIN_SPAN_FRACTION)))
+    if best is not None:
+        touches = sorted(best["touches"])
+        end = touches[-1]
+        if n - 1 - end <= MAX_STALE_BARS:
+            return best, touches, end
+        if _can_extend(best, touches, bars, bodies, high, tol, n, last_close, atr):
+            return best, touches, n - 1
+    elif recent_min_span == min_span:
+        # Searching a subset with the same span cannot rescue a missing fit.
         return None
-    touches = sorted(best["touches"])
-    end = touches[-1]
-    if n - 1 - end <= MAX_STALE_BARS:
-        return best, touches, end
-    if _can_extend(best, touches, bodies, high, tol, n, last_close, atr):
-        return best, touches, n - 1
 
+    # An old trade can keep thousands of bars in view. The recent search needs
+    # a span relative to its own window, even when no full-window fit exists.
     recent = _best_line(
-        points, bars, bodies, high, tol, n, min_span,
+        points, bars, bodies, high, tol, n, recent_min_span,
         last_close, end_tolerance, atr,
         start_floor=max(0, n - RECENT_BARS),
+        require_current=True,
+        plateau_ends=plateau_ends,
     )
     if recent is not None:
         recent_touches = sorted(recent["touches"])
         recent_end = recent_touches[-1]
         if n - 1 - recent_end <= MAX_STALE_BARS:
             return recent, recent_touches, recent_end
-        if _can_extend(recent, recent_touches, bodies, high, tol, n, last_close, atr):
+        if _can_extend(recent, recent_touches, bars, bodies, high, tol, n, last_close, atr):
             return recent, recent_touches, n - 1
     # No current rail: drop it rather than project an old regime.
     return None
@@ -298,21 +373,30 @@ def detect_trendlines(
 
     Each rail is clipped to its last confirming pivot, extended only across
     clean nearby price action, and refit on the recent regime when stale.
-    Lines are independent, so a channel is never forced.
+    Lines are independent, so a channel is never forced. Incomplete or
+    inconsistent OHLC frames cannot validate a rail and return no lines.
     """
-    if len(df) < lookback * 2 + 3:
-        return []
     left = lookback if left is None else left
     right = lookback if right is None else right
+    if left < 1 or right < 1:
+        raise ValueError("trend line pivot windows must be positive")
+    if tolerance is not None and (not np.isfinite(tolerance) or tolerance < 0):
+        raise ValueError("trend line tolerance must be finite and nonnegative")
+    if len(df) < left + right + 3:
+        return []
     n = len(df)
     highs = _column(df, "High", "high")
     lows = _column(df, "Low", "low")
     close = _column(df, "Close", "close")
     opens = _column(df, "Open", "open")
+    if not np.isfinite(np.column_stack((highs, lows, close, opens))).all():
+        return []
+    if np.any(lows > np.minimum(opens, close)) or np.any(highs < np.maximum(opens, close)):
+        return []
     atr = _atr(df)
-    last_close = float(close[-1]) if np.isfinite(close[-1]) else float(np.nanmedian(close))
+    last_close = float(close[-1])
     if tolerance is None:
-        scale = float(np.nanmedian(close)) * 0.002 if np.isfinite(close).any() else 0.0
+        scale = float(np.median(close)) * 0.002
         tolerance = max(atr * ATR_TOLERANCE, scale)
     end_tolerance = max(last_close * MAX_END_DISTANCE_FRACTION, atr * MAX_END_DISTANCE_ATR)
     min_span = max(6, int(n * MIN_SPAN_FRACTION))
@@ -324,6 +408,7 @@ def detect_trendlines(
         selected = _select_line(
             points, bars, bodies, high, tolerance, n, min_span,
             last_close, end_tolerance, atr,
+            plateau_ends=_plateau_endpoints(bars, points),
         )
         if selected is None:
             continue
@@ -332,10 +417,11 @@ def detect_trendlines(
         start = touches[0]
         start_price = _line_value(start, best["i0"], best["p0"], slope)
         end_price = _line_value(end, best["i0"], best["p0"], slope)
+        current_price = _line_value(n - 1, best["i0"], best["p0"], slope)
         broken = (
-            kind == "support" and end_price > last_close + BROKEN_SIDE_ATR * atr
+            kind == "support" and current_price > last_close + BROKEN_SIDE_ATR * atr
         ) or (
-            kind == "resistance" and end_price < last_close - BROKEN_SIDE_ATR * atr
+            kind == "resistance" and current_price < last_close - BROKEN_SIDE_ATR * atr
         )
         lines.append({
             "kind": kind,
@@ -344,10 +430,14 @@ def detect_trendlines(
             "start_price": start_price,
             "end_price": end_price,
             "slope": slope,
-            "r2": _r2_against_line(points, touches, best["i0"], best["p0"], slope),
+            "r2": _r2_against_line(
+                [(i, float(bars[i])) for i in touches], touches, best["i0"], best["p0"], slope,
+            ),
             "pivots": len(touches),
             "violations": best["violations"],
-            "body_penetration": best["body_penetration"],
+            "body_penetration": (
+                best["body_penetration"] if end == n - 1 else best["anchor_body_penetration"]
+            ),
             "stale_bars": int(n - 1 - end),
             "broken": bool(broken),
             "confirmed": len(touches) >= 3,

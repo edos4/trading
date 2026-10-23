@@ -380,7 +380,7 @@ class PatternEditor:
             timeframe=settings.timeframe, session_tz=get_market(settings.market).session_tz,
             action=event.get("action"), entry=event.get("entry"), stop=event.get("stop"),
             target=event.get("target"), entry_time=event["session"],
-            annotations=event.get("chart_annotations") or [])
+            annotations=event.get("chart_annotations") or [], trendlines=True)
 
     def submit_from_values(self, values: dict, **kwargs) -> dict:
         return self.submit_edit(edit_request_from_values(self, values, **kwargs))
