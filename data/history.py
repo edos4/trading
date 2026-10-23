@@ -13,6 +13,7 @@ from typing import Any
 import pandas as pd
 
 from data.history_client import DEFAULT_STOCKS_HISTORY_URL
+from data.chart_dates import chart_session_index
 from data.tv_client import OHLCVCandle, TVClient
 from utils.logger import log
 
@@ -168,6 +169,38 @@ def resample_weekly(daily: list[OHLCVCandle]) -> list[OHLCVCandle]:
         )
         for idx, row in weekly.iterrows()
     ]
+
+
+def resample_chart_frame(
+    daily: pd.DataFrame | None,
+    timeframe: str,
+    *,
+    session_tz: str,
+) -> pd.DataFrame | None:
+    """Aggregate daily chart history into weekly bars in market session dates.
+
+    This is a chart boundary adapter. Existing scanner/history candle timestamps
+    remain unchanged. A partial final week contains only the daily observations
+    supplied by its source, with the usual Friday weekly label.
+    """
+    if daily is None or not _is_weekly(timeframe):
+        return daily
+    frame = daily.rename(columns={c: c.lower() for c in daily.columns}).copy()
+    if not isinstance(frame.index, pd.DatetimeIndex):
+        raise ValueError("Weekly chart history needs dated daily bars")
+    frame = frame.loc[frame.index.notna()].sort_index(kind="stable")
+    frame.index = chart_session_index(frame.index, session_tz)
+    frame = frame.sort_index(kind="stable")
+    columns = ["open", "high", "low", "close", "volume"]
+    frame = frame.loc[:, columns].apply(pd.to_numeric, errors="coerce")
+    frame = frame.replace([float("inf"), float("-inf")], float("nan"))
+    frame = frame.dropna(subset=columns[:4])
+    # An invalid reprint must not hide an earlier valid observation for the
+    # same session. Deduplicate only after validating the price fields.
+    frame = frame.loc[~frame.index.duplicated(keep="last")]
+    return frame.resample("W-FRI", label="right", closed="right").agg({
+        "open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum",
+    }).dropna(subset=columns[:4])
 
 
 def _is_weekly(timeframe: str) -> bool:

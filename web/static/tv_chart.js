@@ -73,6 +73,55 @@ window.TVChart = (function () {
     return String(time);
   }
 
+  /* A rail has only its two endpoint samples. Lightweight Charts autoscales
+   * samples inside the viewport, so zooming between both endpoints otherwise
+   * omits the visible rail entirely and can clip it off the price pane. Include
+   * its interpolated visible extent without extending the line. Clip in pixel
+   * coordinates: logical ranges describe bar slots, while the physical plot
+   * edges include part of the adjacent slots. */
+  function railAutoscale(timeScale, points) {
+    return original => {
+      const info = original();
+      const width = timeScale.width();
+      if (!(width > 0)) return info;
+      let minValue = info?.priceRange.minValue ?? Infinity;
+      let maxValue = info?.priceRange.maxValue ?? -Infinity;
+      for (let i = 1; i < points.length; i++) {
+        const a = points[i - 1], b = points[i];
+        const x0 = timeScale.timeToCoordinate(a.time), x1 = timeScale.timeToCoordinate(b.time);
+        if (x0 == null || x1 == null) continue;
+        if (x1 <= x0) continue;
+        const left = Math.max(0, x0), right = Math.min(width, x1);
+        if (left > right) continue;
+        const valueAt = x => a.value + (b.value - a.value) * (x - x0) / (x1 - x0);
+        const first = valueAt(left), last = valueAt(right);
+        minValue = Math.min(minValue, first, last);
+        maxValue = Math.max(maxValue, first, last);
+      }
+      if (!Number.isFinite(minValue) || !Number.isFinite(maxValue)) return info;
+      return {...info, priceRange: {minValue, maxValue}};
+    };
+  }
+
+  /* Rails are fitted in actual-candle indices. An overlay can introduce an
+   * intervening date into the library's shared time scale; preserve the fitted
+   * price at every candle rather than letting that date shift the whole rail. */
+  function railSamples(points, candles, candleIndices, extraTimes) {
+    if (!extraTimes.some(time => points[0].time < time && time < points.at(-1).time)) return points;
+    const sampled = [];
+    for (let i = 1; i < points.length; i++) {
+      const a = points[i - 1], b = points[i];
+      const start = candleIndices.get(a.time), end = candleIndices.get(b.time);
+      if (start == null || end == null || end <= start) return points;
+      if (!sampled.length) sampled.push(a);
+      for (let j = start + 1; j < end; j++) sampled.push({
+        time: candles[j].time, value: a.value + (b.value - a.value) * (j - start) / (end - start),
+      });
+      sampled.push(b);
+    }
+    return sampled;
+  }
+
   function mount(el, data, hooks) {
     unmount();
     if (!el || typeof LightweightCharts === "undefined") {
@@ -223,8 +272,20 @@ window.TVChart = (function () {
       if (notes.length) candleSeries.attachPrimitive(window.PatternNotes.create(notes, PRICE_BAND));
     }
 
-    for (const segment of [...(data.segments || []), ...(data.trendlines || [])]) {
+    const automaticRails = new Set(data.trendlines || []);
+    const overlays = [...(data.segments || []), ...automaticRails];
+    const candleIndices = new Map(candles.map((row, index) => [row.time, index]));
+    const priceTimes = [...new Set(candles.concat(
+      data.volume || [], data.pred_candles || [], data.forecast || [],
+      (data.markers || []).filter(marker => marker.price != null),
+      overlays.flatMap(segment => segment.data || []),
+    ).map(row => row.time))].sort();
+    const extraTimes = priceTimes.filter(time => !candleIndices.has(time));
+    for (const segment of overlays) {
       if (!segment.data || segment.data.length < 2) continue;
+      const points = automaticRails.has(segment)
+        ? railSamples(segment.data, candles, candleIndices, extraTimes)
+        : segment.data;
       const line = chart.addLineSeries({
         color: segment.color, lineWidth: Math.max(1, Math.min(4, Math.round(segment.width || 2))),
         lineStyle: segment.style === "--"
@@ -233,8 +294,11 @@ window.TVChart = (function () {
             ? LightweightCharts.LineStyle.Dotted
             : LightweightCharts.LineStyle.Solid,
         priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+        autoscaleInfoProvider: automaticRails.has(segment)
+          ? railAutoscale(chart.timeScale(), points)
+          : undefined,
       });
-      line.setData(segment.data);
+      line.setData(points);
       if (segment.label) {
         const point = segment.data[Math.floor((segment.data.length - 1) / 2)];
         line.setMarkers([{
@@ -246,18 +310,14 @@ window.TVChart = (function () {
       }
     }
 
-    /* RSI only starts once its warm-up window has filled, so the series has
-     * fewer bars than the candles. Pad the missing bars with whitespace: both
-     * charts then share one time scale and the panes stay aligned. */
+    /* RSI starts after warm-up and forecasts can add dates without predicted
+     * candles. Pad every price-pane date with whitespace so both panes use the
+     * same logical indices when fitting, zooming or panning the chart. */
     const rsiValues = new Map(rsi.map((row) => [row.time, row.value]));
-    const rsiData = [];
-    const rsiSeen = new Set();
-    for (const row of candles.concat(data.pred_candles || [])) {
-      if (rsiSeen.has(row.time)) continue;
-      rsiSeen.add(row.time);
-      const value = rsiValues.get(row.time);
-      rsiData.push(value == null ? { time: row.time } : { time: row.time, value });
-    }
+    const rsiData = priceTimes.map(time => {
+      const value = rsiValues.get(time);
+      return value == null ? {time} : {time, value};
+    });
 
     let predSeries = null;
     let rsiSeries = null;
@@ -391,6 +451,9 @@ window.TVChart = (function () {
         panes,
         times: candles.map((row) => row.time),
         shapes: saved, readOnly: !!hooks?.readOnly, onCorrect: correct,
+        guidance: (data.trendlines || []).some(line => line.data?.length >= 2)
+          ? 'Blue rails: solid confirmed · dashed broken · dotted <3 touches. Corrections have point handles.'
+          : undefined,
         onChange(shapes) {
           if (!draftKey || hooks?.readOnly) return;
           drafts.set(draftKey, shapes);

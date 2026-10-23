@@ -30,7 +30,7 @@ const window = {TB_PAGE:'replay', location:{}, innerWidth:1200, innerHeight:800,
   ChartDraw:{attach(options){drawMounts.push(options);return {snapshot:()=>corrections,pending:()=>false,destroy(){}}}}};
 const stored = new Map();
 const sessionStorage = {getItem:key=>stored.get(key),setItem:(key, value)=>stored.set(key,value)};
-const context = vm.createContext({window, document, sessionStorage, console, FormData, LightweightCharts:{createChart:()=>chart,CrosshairMode:{Normal:0},LineStyle:{Dashed:2,Solid:0}}, fetch: async (url, opts) => {
+const context = vm.createContext({window, document, sessionStorage, console, FormData, LightweightCharts:{createChart:()=>chart,CrosshairMode:{Normal:0},LineStyle:{Dashed:2,Dotted:1,Solid:0}}, fetch: async (url, opts) => {
   let data = {};
   if (url.endsWith('/load')) data = {replay:saved};
   if (url.endsWith('/upload')) { saved = JSON.parse(opts.body); saved.correction_replay_id = 'replay-' + (++replayGeneration); data = {replay_id:saved.correction_replay_id}; }
@@ -41,7 +41,11 @@ const context = vm.createContext({window, document, sessionStorage, console, For
     assert.equal(body.entry_time,row.sim_opened);
     data={candles:[{time:'2024-01-02',open:10,high:11,low:9,close:10},{time:'2024-01-08',open:10,high:11,low:9,close:10},{time:'2024-01-12',open:11,high:13,low:10,close:12}],markers:[{time:'2024-01-08',price:9.5,position:'belowBar',shape:'circle',color:'#ffeb3b',text:'Bottom'}],segments:[{data:[{time:'2024-01-02',value:10},{time:'2024-01-08',value:9.5},{time:'2024-01-12',value:12}],color:'#ffeb3b',label:'Rounding bottom fit'}],trendlines:[{data:[{time:'2024-01-02',value:9},{time:'2024-01-12',value:13}],color:'#42a5f5',style:'-',width:2,label:''}]};
   }
-  if (url.endsWith('/chart')) Object.assign(data, {symbol:'TEST', pattern:'test', market:'ph', pattern_version_id:'version-1'});
+  if (url.endsWith('/chart')) Object.assign(data, {
+    symbol:'TEST', pattern:'test', market:'ph', pattern_version_id:'version-1',
+    pattern_note:requests.length > 1 ? 'Yellow: detected pattern' : '',
+    trendline_note:requests.length > 1 ? 'Only the support rail is present — unconfirmed (2 touches); dotted.' : '',
+  });
   return {status:200,ok:true,headers:{get:()=> 'application/json'},json:async()=>data};
 }});
 vm.runInContext(fs.readFileSync('web/static/tv_chart.js','utf8'),context);
@@ -57,7 +61,11 @@ vm.runInContext(fs.readFileSync('web/static/app.js','utf8'),context);
     const tradeRow=get(selector).children[0];
     await tradeRow.events.dblclick();
     assert.equal(get('replay-chart-modal').hidden,false);
-    assert.equal(get('replay-chart-status').hidden,true);
+    assert.equal(get('replay-chart-status').hidden,side==='open');
+    if (side==='closed') {
+      assert.match(get('replay-chart-status').textContent,/Yellow: detected pattern · Only the support rail/);
+      assert.match(get('replay-chart-status').textContent,/unconfirmed \(2 touches\); dotted/);
+    }
     assert.equal(requests.at(-1).side,side);
     assert.equal(lines.at(-2).data.length,3);
     assert.equal(lines.at(-2).options.color,'#ffeb3b');
@@ -68,6 +76,8 @@ vm.runInContext(fs.readFileSync('web/static/app.js','utf8'),context);
     assert.equal(lines.at(-1).data.length,2);
     assert.equal(lines.at(-1).options.color,'#42a5f5');
     assert.equal(lines.at(-1).options.priceLineVisible,false);
+    assert.match(drawMounts.at(-1).guidance, /Blue rails: solid confirmed/);
+    assert.match(drawMounts.at(-1).guidance, /Corrections have point handles/);
     get('replay-chart-host').events.contextmenu?.({preventDefault(){},clientX:50,clientY:50});
     const menu = document.body.children.at(-1);
     menu.onclick();
@@ -120,5 +130,38 @@ vm.runInContext(fs.readFileSync('web/static/app.js','utf8'),context);
     symbol:'TEST', pattern:'test', market:'ph', trade_id:'early-bars', entry_time:'2024-01-04',
   });
   assert.deepEqual(Array.from(drawMounts.at(-1).times), ['2024-01-02','2024-01-03','2024-01-04']);
+  assert.equal(drawMounts.at(-1).guidance, undefined); // no rail confirmation claim on a correction-only chart
+  const data = {
+    candles:['2024-01-02','2024-01-03','2024-01-04'].map(time=>({time,open:10,high:12,low:8,close:10})),
+    rsi14:[{time:'2024-01-04', value:40}],
+    segments:[{data:[{time:'2024-01-02',value:11},{time:'2024-01-04',value:11}],style:'--',color:'#ffeb3b',label:'Pattern'}],
+    trendlines:['-','--',':'].map((style, index)=>({
+      data:[{time:'2024-01-02',value:8+index},{time:'2024-01-03',value:9+index}],
+      color:'#42a5f5',style,width:2,label:'',kind:'support',pivots:index+2,
+      confirmed:index===0,broken:index===1,
+    })),
+  };
+  const original = JSON.stringify(data);
+  const before = lines.length;
+  window.TVChart.mount(get('replay-chart-host'),data,{readOnly:true});
+  // The RSI, pattern and automatic rails stay on separate series. Sparse rail
+  // endpoints are preserved, so a clipped rail is not extrapolated to today.
+  const overlays = lines.slice(before, before+4);
+  assert.equal(overlays[0].options.color,'#ffeb3b');
+  assert.equal(overlays[0].options.lineStyle,2);
+  for (const [index,style] of [0,2,1].entries()) {
+    const rendered = overlays[index+1];
+    assert.deepEqual(rendered.data,data.trendlines[index].data);
+    assert.equal(rendered.data.at(-1).time,'2024-01-03');
+    assert.equal(rendered.options.lineStyle,style);
+    assert.equal(rendered.options.lastValueVisible,false);
+    assert.equal(rendered.options.crosshairMarkerVisible,false);
+    assert.equal(rendered.markers,undefined);
+  }
+  assert.equal(JSON.stringify(data),original);
+  assert.equal(drawMounts.at(-1).readOnly,true);
+  assert.deepEqual(Array.from(drawMounts.at(-1).times),data.candles.map(row=>row.time));
+  assert.deepEqual(JSON.parse(JSON.stringify(drawMounts.at(-1).shapes)),[]);
+  window.TVChart.unmount();
   console.log('Replay upload, reload, open/closed double-click, and pattern line rendering passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});

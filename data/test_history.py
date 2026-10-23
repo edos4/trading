@@ -5,11 +5,16 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+import pandas as pd
+import pytest
+
 from data.history import (
     bars_to_candles,
+    bars_to_df,
     fetch_ohlcv_candles,
     local_history_backfill_enabled,
     resample_weekly,
+    resample_chart_frame,
 )
 from data.tv_client import OHLCVCandle
 
@@ -35,6 +40,107 @@ def test_bars_to_candles_and_weekly() -> None:
     weekly = resample_weekly(candles)
     assert weekly
     assert weekly[-1].high >= weekly[-1].low
+
+
+def test_weekly_chart_aggregation_uses_market_dates_across_us_dst() -> None:
+    idx = (pd.bdate_range("2024-03-04", periods=10, tz="America/New_York")
+           + pd.Timedelta(hours=9, minutes=30)).tz_convert("UTC")
+    daily = pd.DataFrame({
+        "open": range(10, 20), "high": range(12, 22), "low": range(9, 19),
+        "close": range(11, 21), "volume": 100,
+    }, index=idx)
+
+    weekly = resample_chart_frame(daily, "1W", session_tz="America/New_York")
+
+    assert list(weekly.index.strftime("%Y-%m-%d")) == ["2024-03-08", "2024-03-15"]
+    assert weekly.iloc[0].to_dict() == {
+        "open": 10, "high": 16, "low": 9, "close": 15, "volume": 500,
+    }
+    assert weekly.iloc[1].to_dict() == {
+        "open": 15, "high": 21, "low": 14, "close": 20, "volume": 500,
+    }
+    assert weekly.index.tz is None  # chart labels are already market session dates
+    assert resample_chart_frame(daily, "1d", session_tz="America/New_York") is daily
+
+
+@pytest.mark.parametrize("mixed_prints", [False, True])
+def test_weekly_chart_aggregates_date_only_history_and_actual_prints(mixed_prints) -> None:
+    dates = pd.bdate_range("2024-03-04", periods=10)
+    rows = [{"date": day.date().isoformat(), "open": 10 + i, "high": 11 + i,
+             "low": 9 + i, "close": 10 + i, "volume": 100}
+            for i, day in enumerate(dates)]
+    if mixed_prints:
+        # Exchange opens span DST, and Saturday's early UTC print is still
+        # Friday in New York. Keep the latest valid print in that session.
+        rows.extend({"date": stamp, "open": close, "high": close + 1,
+                     "low": close - 1, "close": close, "volume": 100}
+                    for stamp, close in [
+                        ("2024-03-08T14:30:00+00:00", 40),
+                        ("2024-03-09T01:00:00+00:00", 50),
+                        ("2024-03-11T13:30:00+00:00", 60),
+                    ])
+    daily = bars_to_df(list(reversed(rows)))
+    original = daily.copy()
+
+    weekly = resample_chart_frame(daily, "1W", session_tz="America/New_York")
+
+    assert list(weekly.index.strftime("%Y-%m-%d")) == ["2024-03-08", "2024-03-15"]
+    assert weekly.iloc[0].to_dict() == {
+        "open": 10, "high": 51 if mixed_prints else 15, "low": 9,
+        "close": 50 if mixed_prints else 14, "volume": 500,
+    }
+    assert weekly.iloc[1].to_dict() == {
+        "open": 60 if mixed_prints else 15, "high": 61 if mixed_prints else 20,
+        "low": 15 if mixed_prints else 14, "close": 19, "volume": 500,
+    }
+    pd.testing.assert_frame_equal(daily, original)
+
+
+def test_weekly_chart_handles_ph_midnight_dates_duplicates_and_partial_source_week() -> None:
+    # Local midnight is the preceding UTC day in Manila. A chart must group by
+    # the local session, retain the latest reprint, and stop at its source tape.
+    idx = pd.bdate_range("2024-05-06", periods=8, tz="Asia/Manila").tz_convert("UTC")
+    daily = pd.DataFrame({
+        "Open": range(10, 18), "High": range(12, 20), "Low": range(9, 17),
+        "Close": range(11, 19), "Volume": 100,
+    }, index=idx)
+    reprint = daily.iloc[[4]].copy()
+    reprint.index += pd.Timedelta(hours=1)
+    reprint.loc[:, ["High", "Close"]] = [99, 98]
+    source = pd.concat([reprint, daily.iloc[::-1]])
+
+    weekly = resample_chart_frame(source, "1W", session_tz="Asia/Manila")
+
+    assert list(weekly.index.strftime("%Y-%m-%d")) == ["2024-05-10", "2024-05-17"]
+    assert weekly.iloc[0].to_dict() == {
+        "open": 10, "high": 99, "low": 9, "close": 98, "volume": 500,
+    }
+    # Only Monday through Wednesday were supplied for the final week.
+    assert weekly.iloc[1].to_dict() == {
+        "open": 15, "high": 19, "low": 14, "close": 18, "volume": 300,
+    }
+
+
+@pytest.mark.parametrize("invalid_close", [float("nan"), float("inf"), "invalid"])
+def test_weekly_chart_keeps_valid_session_when_latest_reprint_is_invalid(invalid_close) -> None:
+    idx = pd.DatetimeIndex(["2024-01-01T14:30Z", "2024-01-02T14:30Z", "2024-01-05T14:30Z"])
+    daily = pd.DataFrame({
+        "open": [10, 11, 12], "high": [11, 12, 13], "low": [9, 10, 11],
+        "close": [10, 11, 12], "volume": 100,
+    }, index=idx)
+    invalid = daily.iloc[[-1]].copy().astype({"close": object})
+    invalid.index += pd.Timedelta(hours=1)
+    invalid.loc[:, "close"] = invalid_close
+    invalid.loc[:, "volume"] = 999
+    source = pd.concat([invalid, daily])
+
+    weekly = resample_chart_frame(source, "1W", session_tz="America/New_York")
+
+    assert weekly.index[0] == pd.Timestamp("2024-01-05")
+    assert weekly.iloc[0].to_dict() == {
+        "open": 10, "high": 13, "low": 9, "close": 12, "volume": 300,
+    }
+    assert len(source) == 4
 
 
 def test_bulk_tape_rows_uses_one_http_call_when_remote() -> None:

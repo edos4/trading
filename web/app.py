@@ -1320,7 +1320,7 @@ def create_app() -> FastAPI:
 
         from analysis.chart_renderer import build_trade_viewer_payload
         from core.market import get_market
-        from data.history import load_daily_ohlcv_df
+        from data.history import load_daily_ohlcv_df, resample_chart_frame
 
         symbol = body.symbol.upper().strip()
         market = body.market or default_market().id
@@ -1329,22 +1329,25 @@ def create_app() -> FastAPI:
         side = (body.side or "open").lower()
         if side not in ("open", "closed"):
             return JSONResponse({"detail": "side must be open or closed."}, status_code=400)
+        timeframe = body.timeframe or "1d"
 
         try:
             df = await asyncio.to_thread(
                 load_daily_ohlcv_df, symbol, tv_fallback=False, market=market,
             )
+            df = resample_chart_frame(df, timeframe, session_tz=get_market(market).session_tz)
         except Exception:
             log.exception("Web | replay chart history load failed")
             return JSONResponse({"detail": "History database unavailable."}, status_code=503)
         if df is None or len(df) < 2:
-            return JSONResponse({"detail": f"No daily bars for {symbol}."}, status_code=404)
+            frequency = "daily" if timeframe == "1d" else timeframe
+            return JSONResponse({"detail": f"No {frequency} bars for {symbol}."}, status_code=404)
 
         try:
             payload = build_trade_viewer_payload(
                 df,
                 symbol=symbol,
-                timeframe=body.timeframe or "1d",
+                timeframe=timeframe,
                 annotations=body.chart_annotations,
                 pattern=body.pattern,
                 pattern_version_id=body.pattern_version_id,

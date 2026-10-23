@@ -18,10 +18,12 @@ import numpy as np
 import mplfinance as mpf
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
+from matplotlib.colors import is_color_like
 
 from utils.logger import log
 from core.pattern_provenance import pattern_annotations
 from analysis.trendlines import TRENDLINE_COLOR, detect_trendlines
+from data.chart_dates import chart_session_day, chart_session_index
 
 CHARTS_DIR = Path("charts")
 
@@ -90,11 +92,48 @@ class ChartRenderer:
         annotations: list[dict] | None = None,
         trendlines: bool = False,
     ) -> bytes:
-        if isinstance(ohlcv_df.index, pd.DatetimeIndex) and "Open" in ohlcv_df.columns:
-            df = ohlcv_df
-        else:
-            df = self._prepare_df(ohlcv_df, timeframe)
-            df = self._trim_to_visible(df, timeframe)
+        # Column casing does not imply that dates are sorted, sessions unique,
+        # or candles valid. PNGs and interactive viewers need the same tape.
+        source = ohlcv_df.copy()
+        position_key = object()
+        source[position_key] = np.arange(len(source))
+        df = self._trim_to_visible(self._prepare_df(source, timeframe), timeframe)
+        source_positions = df.pop(position_key).to_numpy(dtype=int)
+        if df.empty:
+            raise ValueError(f"no valid bars for {symbol} {timeframe}")
+
+        def align_overlay(values):
+            # mplfinance overlays are positional. Apply the candle selection
+            # to caller-supplied series as well, without mutating their data.
+            if not isinstance(values, (pd.Series, pd.DataFrame, np.ndarray, list, tuple)):
+                return values
+            if (isinstance(values, np.ndarray) and values.ndim == 0) or len(values) != len(ohlcv_df):
+                return values
+            if isinstance(values, (pd.Series, pd.DataFrame)):
+                return values.iloc[source_positions]
+            if isinstance(values, np.ndarray):
+                return values[source_positions]
+            return [values[position] for position in source_positions]
+
+        def align_plot(plot):
+            prepared = {**plot, "data": align_overlay(plot["data"])}
+            for key in ("marker", "markersize", "width", "bottom", "alpha"):
+                # A tuple marker describes a single polygon/path shape.
+                if key in plot and not (key == "marker" and isinstance(plot[key], tuple)):
+                    prepared[key] = align_overlay(plot[key])
+            if plot.get("type") in {"scatter", "bar"} and not is_color_like(plot.get("color")):
+                prepared["color"] = align_overlay(plot.get("color"))
+
+            def align_fill(spec):
+                return {key: align_overlay(value) if key in {"y1", "y2", "where"} else value
+                        for key, value in spec.items()}
+
+            fill = plot.get("fill_between")
+            if isinstance(fill, dict):
+                prepared["fill_between"] = align_fill(fill)
+            elif isinstance(fill, list) and all(isinstance(spec, dict) for spec in fill):
+                prepared["fill_between"] = [align_fill(spec) for spec in fill]
+            return prepared
 
         buf = io.BytesIO()
         style = self._tradingview_style()
@@ -119,7 +158,7 @@ class ChartRenderer:
             ylabel="",
         )
         rsi = _rsi_sma(df["Close"], RSI_PERIOD)
-        plots = list(add_plots or [])
+        plots = [align_plot(plot) for plot in add_plots or []]
         self._append_series_plot(
             plots, rsi, panel=2, color=TV_RSI, width=1.0, ylabel="RSI",
         )
@@ -132,7 +171,7 @@ class ChartRenderer:
             panel=2, color=TV_TEXT_DIM, width=0.7, linestyle="dashed",
         )
         plot_kwargs["addplot"] = plots
-        indicators = dict(indicators or {})
+        indicators = {name: align_overlay(values) for name, values in (indicators or {}).items()}
         indicators["rsi_14"] = rsi
         fig, axes = mpf.plot(df, **plot_kwargs)
         self._polish_axes(axes, timeframe)
@@ -140,7 +179,7 @@ class ChartRenderer:
         self._draw_tradingview_header(fig, axes, symbol, timeframe, df)
         self._draw_last_price_line(axes[0], df)
         if annotations:
-            self._draw_annotations(axes[0], df, annotations)
+            self._draw_annotations(axes[0], df, annotations, timeframe=timeframe)
             lo, hi = axes[0].get_ylim()
             padding = (hi - lo) * 0.10
             axes[0].set_ylim(lo - padding, hi + padding)
@@ -241,9 +280,8 @@ class ChartRenderer:
             # bogus pre-market bar at 04:00 UTC plus the real 13:30 UTC bar).
             # Duplicate dates yield non-monotonic candle times that break
             # TradingView/LightweightCharts, so they must be collapsed here.
-            out = out.sort_index()
+            out = out.loc[out.index.notna()].sort_index(kind="stable")
             out = self._normalize_session_index(out)
-            out = out[~out.index.duplicated(keep="last")]
         if not isinstance(out.index, pd.DatetimeIndex):
             end = pd.Timestamp.now().normalize()
             if timeframe == "1W":
@@ -252,6 +290,18 @@ class ChartRenderer:
                 out.index = pd.date_range(end=end, periods=len(out), freq="ME")
             else:
                 out.index = pd.bdate_range(end=end, periods=len(out))
+        # A candle with a missing/nonfinite price cannot be drawn or used as
+        # a trend-line anchor. Remove it before trimming and fitting so both
+        # renderers use the same bar spacing. Missing volume is still usable.
+        prices = ["Open", "High", "Low", "Close"]
+        out[prices] = out[prices].apply(pd.to_numeric, errors="coerce")
+        valid = np.isfinite(out[prices].to_numpy(dtype=float, na_value=np.nan)).all(axis=1)
+        out = out.loc[valid].copy()
+        # An incomplete later reprint must not erase a valid session candle.
+        out = out.loc[~out.index.duplicated(keep="last")].copy()
+        out["Volume"] = pd.to_numeric(out["Volume"], errors="coerce").replace(
+            [np.inf, -np.inf], np.nan,
+        ).fillna(0.0)
         return out
 
     @staticmethod
@@ -337,14 +387,10 @@ class ChartRenderer:
     def _normalize_session_index(self, df: pd.DataFrame) -> pd.DataFrame:
         """Session dates in this market's timezone (NY or Manila)."""
         out = df.copy()
-        idx = out.index
-        tz = self._session_tz
-        if idx.tz is not None:
-            idx = idx.tz_convert(tz)
-        else:
-            idx = idx.tz_localize(tz)
-        out.index = idx.tz_localize(None).normalize()
-        return out
+        out.index = chart_session_index(out.index, self._session_tz)
+        # UTC date labels and real prints can map into a different order.
+        # Stable sorting keeps the raw timestamp order within each session.
+        return out.sort_index(kind="stable")
 
     def _format_xaxis_months(self, axes, df: pd.DataFrame, timeframe: str) -> None:
         """
@@ -499,9 +545,11 @@ class ChartRenderer:
         return int(positions[0]) if len(positions) else None
 
     def _draw_annotations(
-        self, price_axis, df: pd.DataFrame, annotations: list[dict], pattern: str | None = None
+        self, price_axis, df: pd.DataFrame, annotations: list[dict], pattern: str | None = None,
+        *, timeframe: str = "1d",
     ) -> None:
         """Overlay pattern markers, horizontal lines, and trend segments."""
+        annotations = _align_weekly_annotations(annotations, df.index, timeframe, self._session_tz)
         for ann in pattern_annotations(annotations, df, pattern):
             kind = ann.get("type")
             if kind == "marker":
@@ -512,8 +560,8 @@ class ChartRenderer:
                 self._draw_segment(price_axis, df, ann)
             elif kind == "path":
                 points = [(self._date_to_x(df, p["date"]), p["price"]) for p in ann.get("points", [])]
-                points = [(x, y) for x, y in points if x is not None]
-                if len(points) > 1:
+                if (len(points) > 1 and all(x is not None for x, _ in points)
+                        and len({x for x, _ in points}) == len(points)):
                     price_axis.plot(*zip(*points), color=ann["color"], linewidth=ann.get("width", 2), zorder=4)
                     self._draw_geometry_label(price_axis, points, ann)
 
@@ -602,7 +650,7 @@ class ChartRenderer:
     ) -> None:
         x0 = self._date_to_x(df, ann.get("start_date", ""))
         x1 = self._date_to_x(df, ann.get("end_date", ""))
-        if x0 is None or x1 is None:
+        if x0 is None or x1 is None or x0 == x1:
             return
         y0 = float(ann["start_price"])
         y1 = float(ann["end_price"])
@@ -679,24 +727,51 @@ def _viewer_finite(value) -> float | None:
     return number
 
 
-def _nearest_viewer_time(index: pd.Index, when, session_tz: str = "America/New_York") -> str | None:
-    """Map a fill timestamp onto the session bar it belongs to.
+def _chart_session_day(when, session_tz: str) -> pd.Timestamp | None:
+    return chart_session_day(when, session_tz)
 
-    Candle indexes are session midnights. A 13:30 UTC print is closer to the
-    next midnight than to its own, so a raw nearest-midnight lookup lands the
-    BUY/SELL arrow on the following session.
-    """
-    if when is None or len(index) == 0:
+
+def _weekly_chart_time(index: pd.Index, when, session_tz: str) -> str | None:
+    """Map a saved session to its one aggregated weekly candle, never another week."""
+    if not isinstance(index, pd.DatetimeIndex) or index.empty:
         return None
-    ts = pd.Timestamp(when)
-    if ts.tzinfo is not None:
-        # Replay exports also carry date-only sessions as midnight UTC.
-        # Preserve those labels; real intraday fills use the market timezone.
-        if ts == ts.normalize() and ts.utcoffset().total_seconds() == 0:
-            ts = ts.tz_localize(None)
-        else:
-            ts = ts.tz_convert(session_tz).tz_localize(None)
-    session_day = ts.normalize()
+    day = _chart_session_day(when, session_tz)
+    if day is None:
+        return None
+    exact = np.flatnonzero(index == day)
+    if len(exact) == 1:
+        return _viewer_bar_time(index[exact[0]])
+    positions = np.flatnonzero(index.to_period("W-FRI") == day.to_period("W-FRI"))
+    return _viewer_bar_time(index[positions[0]]) if len(positions) == 1 else None
+
+
+def _align_weekly_annotations(annotations: list[dict], index: pd.Index,
+                              timeframe: str, session_tz: str) -> list[dict]:
+    if timeframe.upper() not in {"1W", "W", "1WK", "WEEKLY"}:
+        return annotations
+
+    def mapped(value):
+        return _weekly_chart_time(index, value, session_tz) or value
+
+    # Old weekly tapes may label Friday's bucket on Thursday after a timezone
+    # conversion. Match the aggregate week while preserving saved prices and
+    # caller data. Never move an anchor into a different/missing weekly bucket.
+    return [{
+        **ann,
+        **{key: mapped(ann[key]) for key in ("date", "start_date", "end_date") if ann.get(key)},
+        **({"points": [{**point, "date": mapped(point.get("date"))}
+                       for point in ann["points"]]} if ann.get("points") else {}),
+    } for ann in annotations]
+
+
+def _nearest_viewer_time(index: pd.Index, when, session_tz: str = "America/New_York",
+                         timeframe: str = "1d") -> str | None:
+    """Map a fill to its market session or aggregate weekly candle."""
+    if timeframe.upper() in {"1W", "W", "1WK", "WEEKLY"}:
+        return _weekly_chart_time(index, when, session_tz)
+    session_day = _chart_session_day(when, session_tz)
+    if session_day is None or len(index) == 0:
+        return None
     try:
         loc = index.get_indexer([session_day], method="nearest")[0]
     except Exception:
@@ -804,6 +879,7 @@ def build_trade_viewer_payload(
     """OHLCV + levels for an interactive TradingView-style viewer (no PNG)."""
     renderer = ChartRenderer(save_to_disk=False, session_tz=session_tz)
     df = renderer._prepare_df(ohlcv_df, timeframe)
+    annotations = _align_weekly_annotations(annotations or [], df.index, timeframe, session_tz)
     # Recover old ledger geometry only at the entry event, never from a newer setup.
     annotations = (pattern_annotations(annotations or [], df, pattern)
                    if annotations or not pattern_version_id else [])
@@ -826,9 +902,9 @@ def build_trade_viewer_payload(
     candles = []
     volume = []
     rsi14 = []
-    pos_times: list[str | None] = []
+    valid_positions: list[int] = []
     rsi = _rsi_sma(df["Close"], RSI_PERIOD)
-    for idx, row in df.iterrows():
+    for position, (idx, row) in enumerate(df.iterrows()):
         t = _viewer_bar_time(idx)
         o = _viewer_finite(row["Open"])
         h = _viewer_finite(row["High"])
@@ -836,9 +912,8 @@ def build_trade_viewer_payload(
         c = _viewer_finite(row["Close"])
         v = _viewer_finite(row["Volume"]) or 0.0
         if None in (o, h, low, c):
-            pos_times.append(None)
             continue
-        pos_times.append(t)
+        valid_positions.append(position)
         candles.append({"time": t, "open": o, "high": h, "low": low, "close": c})
         up = c >= o
         volume.append({
@@ -876,7 +951,7 @@ def build_trade_viewer_payload(
         levels.append({"price": float(current), "title": "last", "color": TV_TEXT})
 
     markers = []
-    entry_bar = _nearest_viewer_time(df.index, entry_time, session_tz)
+    entry_bar = _nearest_viewer_time(df.index, entry_time, session_tz, timeframe)
     if entry_bar and action:
         is_buy = str(action).upper() == "BUY"
         markers.append({
@@ -886,7 +961,7 @@ def build_trade_viewer_payload(
             "shape": "arrowUp" if is_buy else "arrowDown",
             "text": str(action).upper(),
         })
-    exit_bar = _nearest_viewer_time(df.index, exit_time, session_tz)
+    exit_bar = _nearest_viewer_time(df.index, exit_time, session_tz, timeframe)
     if exit_bar and exit_price is not None:
         markers.append({
             "time": exit_bar,
@@ -913,13 +988,23 @@ def build_trade_viewer_payload(
             price = _viewer_finite(ann.get("price"))
             # Signal annotations carry float32-precision prices (0.8600000143)
             # while trade levels carry float64 (0.86). Exact equality left two
-            # axis labels for the same stop/target; match within a tick.
-            if price is not None and not any(
-                math.isclose(level["price"], price, rel_tol=1e-6, abs_tol=1e-9)
-                for level in levels
-            ):
+            # axis labels for the same stop/target; allow rounding error.
+            if price is None:
+                continue
+            matching_level = next((
+                level for level in levels
+                if math.isclose(level["price"], price, rel_tol=1e-6, abs_tol=1e-9)
+            ), None)
+            if matching_level is None:
                 levels.append({"price": price, "title": ann.get("label", ""), "color": color,
                                "reason": ann.get("reason", "")})
+            elif ann.get("reason"):
+                # Share the axis label without losing the saved explanation.
+                reasons = (matching_level.get("reason") or "").split("\n")
+                if ann["reason"] not in reasons:
+                    matching_level["reason"] = "\n".join(filter(None, [
+                        matching_level.get("reason", ""), ann["reason"],
+                    ]))
         elif ann.get("type") in {"segment", "path"}:
             points = ann.get("points", []) if ann["type"] == "path" else [
                 {"date": ann.get("start_date"), "price": ann.get("start_price")},
@@ -964,10 +1049,13 @@ def build_trade_viewer_payload(
     markers.sort(key=lambda marker: marker["time"])
     trendline_segments = []
     if trendlines:
-        for line in detect_trendlines(df):
-            start = pos_times[line["start_index"]] if line["start_index"] < len(pos_times) else None
-            end = pos_times[line["end_index"]] if line["end_index"] < len(pos_times) else None
-            if not start or not end or start == end:
+        # Lightweight Charts spaces only the emitted candles. Fit in that
+        # same coordinate system so hidden invalid bars cannot anchor a rail
+        # or change its slope and penetration checks.
+        for line in detect_trendlines(df.iloc[valid_positions]):
+            start = candles[line["start_index"]]["time"]
+            end = candles[line["end_index"]]["time"]
+            if start == end:
                 continue
             broken = bool(line.get("broken"))
             confirmed = bool(line.get("confirmed", True))

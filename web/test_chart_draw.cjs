@@ -38,7 +38,11 @@ function down(x,y,pane=0) {panes[pane].el.events.pointerdown(event(x,y));}
 function up(x,y) {document.events.pointerup(event(x,y));}
 function key(name, other={}) {const ev={...event(0,0),key:name,...other}; document.events.keydown(ev); return ev;}
 const snapshot=()=>JSON.parse(JSON.stringify(tools.snapshot()));
+const status=()=>host.children[0].children.find(e=>e.role==='status').textContent;
+assert.match(status(), /your corrections/);
+assert.doesNotMatch(status(), /confirmed/);
 click('Draw pattern');
+assert.match(status(), /Click price pivots/);
 assert.equal(applied.at(-1).mouseWheel, true);
 assert.equal(applied.at(-1).pressedMouseMove, false);
 down(0,40); up(0,40); down(20,20); up(20,20); down(40,40); up(40,40);
@@ -46,6 +50,7 @@ assert.equal(tools.pending(),true); key('Enter');
 let original=snapshot(); assert.equal(original[0].points.length,3);
 assert.equal(original[0].points[0].time,times[0]);
 click('Select'); down(20,20); document.events.pointermove(event(30,30)); up(30,30);
+assert.match(status(), /your corrections/);
 assert.equal(snapshot()[0].points[1].time,times[3]);
 assert.equal(original[0].points[1].time,times[2]);
 click('Undo'); assert.deepEqual(snapshot(),original);
@@ -75,4 +80,8 @@ assert.equal(document.events.pointerup,undefined);assert.equal(document.events.k
 tools=window.ChartDraw.attach({host,panes,times,shapes:saved,readOnly:true});
 assert.deepEqual(snapshot(),saved);assert.equal(host.children.length,0);
 tools.destroy();assert.equal(attached,detached);assert.ok(changes.length>5);
+tools=window.ChartDraw.attach({host,panes,times,guidance:'Rails have state; corrections have point handles.'});
+assert.match(status(), /Rails have state/);
+click('Draw pattern');click('Select');assert.match(status(), /Rails have state/);
+tools.destroy();assert.equal(attached,detached);
 console.log('Drawing geometry, immutable snapshots, editing, labels, undo, cancellation, preview, and cleanup passed');

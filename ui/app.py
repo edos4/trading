@@ -404,6 +404,7 @@ class TradingBotUI:
         try:
             png = self._renderer.render(
                 symbol, timeframe, df, annotations=annotations or None,
+                trendlines=True,
             )
         except Exception as exc:
             msg = f"Chart render failed for {symbol}: {exc}"
@@ -525,6 +526,7 @@ class TradingBotUI:
             png = self._renderer.render(
                 self._current_symbol, self.tf_var.get(), df,
                 annotations=annotations or None,
+                trendlines=True,
             )
             with open(path, "wb") as f:
                 f.write(png)

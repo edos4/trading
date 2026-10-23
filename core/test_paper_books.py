@@ -453,6 +453,40 @@ def test_local_chart_ignores_scanner_tape() -> None:
     assert load.call_args.kwargs["tv_fallback"] is False
 
 
+def test_paper_weekly_chart_aggregates_only_daily_history_fallback() -> None:
+    from core.paper_books import _chart_history_frame
+
+    idx = (pd.bdate_range("2024-03-04", periods=10, tz="America/New_York")
+           + pd.Timedelta(hours=9, minutes=30)).tz_convert("UTC")
+    daily = pd.DataFrame({
+        "open": range(10, 20), "high": range(12, 22), "low": range(9, 19),
+        "close": range(11, 21), "volume": 100,
+    }, index=idx)
+    scanner = Mock()
+    scanner.ohlcv_frame.return_value = None
+    for owns_history in (False, True):
+        scanner.reset_mock()
+        with patch("data.history.owns_local_stocks_history", return_value=owns_history), \
+             patch("data.history.load_daily_ohlcv_df", return_value=daily) as load:
+            weekly = _chart_history_frame(scanner, "TEST", "1W", market="us")
+        assert list(weekly.index.strftime("%Y-%m-%d")) == ["2024-03-08", "2024-03-15"]
+        assert list(weekly["close"]) == [15, 20]
+        assert list(weekly["volume"]) == [500, 500]
+        load.assert_called_once_with("TEST", tv_fallback=False, market="us")
+        if owns_history:
+            scanner.ohlcv_frame.assert_called_once_with("TEST", "1W", min_bars=2)
+        else:
+            scanner.ohlcv_frame.assert_not_called()
+
+    # A scanner frame already has the requested frequency and its saved anchor
+    # dates. It must pass through without reaggregation or relabeling.
+    scanner.ohlcv_frame.return_value = weekly
+    with patch("data.history.owns_local_stocks_history", return_value=True), \
+         patch("data.history.load_daily_ohlcv_df") as load:
+        assert _chart_history_frame(scanner, "TEST", "1W", market="us") is weekly
+    load.assert_not_called()
+
+
 def test_stream_server_reusable_fresh_and_resume() -> None:
     from core.paper_books import stream_server_reusable
 
