@@ -1065,8 +1065,9 @@ function initPaper() {
         });
       }
       if (chartStatus) {
-        chartStatus.textContent = data.pattern_note || "";
-        chartStatus.hidden = !data.pattern_note;
+        const note = [data.pattern_note, data.trendline_note].filter(Boolean).join(" · ");
+        chartStatus.textContent = note;
+        chartStatus.hidden = !note;
         chartStatus.classList.toggle("pattern-note", Boolean(data.pattern_note));
       }
     } catch (e) {
@@ -1690,8 +1691,9 @@ function initReplay() {
       });
     }
     if (chartStatus) {
-      chartStatus.textContent = data.pattern_note || "";
-      chartStatus.hidden = !data.pattern_note;
+      const note = [data.pattern_note, data.trendline_note].filter(Boolean).join(" · ");
+      chartStatus.textContent = note;
+      chartStatus.hidden = !note;
       chartStatus.classList.toggle("pattern-note", Boolean(data.pattern_note));
     }
   }

@@ -1359,6 +1359,7 @@ def create_app() -> FastAPI:
                 current=body.current if side == "open" else None,
                 entry_time=body.entry_time,
                 exit_time=body.exit_time if side == "closed" else None,
+                trendlines=True,
             )
         except ValueError as exc:
             return JSONResponse({"detail": str(exc)}, status_code=400)
