@@ -442,6 +442,7 @@ class PaperBook:
                     None if view_side == "open"
                     else (trade.sim_exit_date or trade.exit_date)
                 ),
+                trendlines=True,
             )
             payload["trade_id"] = trade.trade_id
             return payload
@@ -492,6 +493,7 @@ class PaperBook:
                 session_tz=session_tz,
                 entry=entry,
                 entry_time=log_row.get("sim_bar") or log_row.get("ts"),
+                trendlines=True,
             )
             if log_row.get("ts"):
                 payload["trade_id"] = f"log:{log_row['ts']}:{ticker}"

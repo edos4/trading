@@ -176,6 +176,7 @@ class ExplorerService:
 
         png = self._renderer.render(
             symbol, timeframe, df, annotations=annotations or None,
+            trendlines=True,
         )
         last = df.iloc[-1]
         prev = df.iloc[-2] if len(df) > 1 else last

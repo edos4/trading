@@ -8,6 +8,7 @@ Uses mplfinance for candlestick rendering.
 from __future__ import annotations
 import io
 import json
+import math
 import textwrap
 from pathlib import Path
 from datetime import datetime
@@ -20,6 +21,7 @@ from matplotlib.ticker import FuncFormatter
 
 from utils.logger import log
 from core.pattern_provenance import pattern_annotations
+from analysis.trendlines import TRENDLINE_COLOR, detect_trendlines
 
 CHARTS_DIR = Path("charts")
 
@@ -67,11 +69,13 @@ class ChartRenderer:
         extra_plots: list | None = None,
         title: str | None = None,
         annotations: list[dict] | None = None,
+        trendlines: bool = False,
     ) -> bytes:
         """Render a TradingView-style candlestick chart and return PNG bytes."""
         return self._render_chart(
             symbol, timeframe, ohlcv_df,
             add_plots=extra_plots, title=title, annotations=annotations,
+            trendlines=trendlines,
         )
 
     # ── Internal ───────────────────────────────────────────────────────────────
@@ -84,6 +88,7 @@ class ChartRenderer:
         title: str | None = None,
         indicators: dict[str, pd.Series] | None = None,
         annotations: list[dict] | None = None,
+        trendlines: bool = False,
     ) -> bytes:
         if isinstance(ohlcv_df.index, pd.DatetimeIndex) and "Open" in ohlcv_df.columns:
             df = ohlcv_df
@@ -139,6 +144,8 @@ class ChartRenderer:
             lo, hi = axes[0].get_ylim()
             padding = (hi - lo) * 0.10
             axes[0].set_ylim(lo - padding, hi + padding)
+        if trendlines:
+            self._draw_trendlines(axes[0], df)
 
         if axes[0].get_legend() is not None:
             axes[0].get_legend().remove()
@@ -449,6 +456,36 @@ class ChartRenderer:
         )
 
     @staticmethod
+    def _draw_trendlines(price_axis, df: pd.DataFrame) -> None:
+        """Automatic support/resistance lines from the first swing pivot, in blue."""
+        lines = detect_trendlines(df)
+        if not lines:
+            return
+        values: list[float] = []
+        for line in lines:
+            xs = [line["start_index"], line["end_index"]]
+            ys = [line["start_price"], line["end_price"]]
+            broken = bool(line.get("broken"))
+            confirmed = bool(line.get("confirmed", True))
+            style = "--" if broken else (":" if not confirmed else "-")
+            width = 1.2 if line.get("close_pair") else 1.6
+            price_axis.plot(
+                xs, ys, color=TRENDLINE_COLOR, linewidth=width,
+                alpha=0.9, linestyle=style,
+                zorder=4, solid_capstyle="round",
+            )
+            values.extend(ys)
+        lo, hi = price_axis.get_ylim()
+        padding = (hi - lo) * 0.02
+        price_axis.set_ylim(min(lo, min(values)) - padding, max(hi, max(values)) + padding)
+        price_axis.text(
+            0.99, 1.02,
+            "Blue rails: solid confirmed · dashed broken · dotted <3 touches",
+            transform=price_axis.transAxes, ha="right", va="bottom",
+            fontsize=7, color=TV_TEXT_DIM, clip_on=False,
+        )
+
+    @staticmethod
     def _date_to_x(df: pd.DataFrame, date_str: str) -> int | None:
         """Integer x-position of a bar by ISO date, or None if not in view."""
         idx = df.index
@@ -687,6 +724,51 @@ def _pattern_start_point(markers: list[dict], segments: list[dict]) -> tuple[str
     return min(points, key=lambda item: item[0])
 
 
+def _trendline_style(segment: dict) -> str:
+    if segment.get("broken"):
+        return "dashed"
+    if not segment.get("confirmed", True):
+        return "dotted"
+    return "solid"
+
+
+def _trendline_state(segment: dict) -> str:
+    """Describe why a rail is not solid, in the same words as the legend."""
+    flags: list[str] = []
+    if not segment.get("confirmed", True):
+        flags.append(f"unconfirmed ({int(segment.get('pivots', 0))} touches)")
+    if segment.get("broken"):
+        flags.append("broken")
+    return " and ".join(flags)
+
+
+def _trendline_note(segments: list[dict]) -> str:
+    """Explain rail count and styling; never call a dotted rail confirmed."""
+    if not segments:
+        return "No confirmed support/resistance in this window."
+    if len(segments) == 1:
+        segment = segments[0]
+        kind = segment["kind"]
+        state = _trendline_state(segment)
+        if not state:
+            return f"Only the {kind} rail is confirmed in this window."
+        return (f"Only the {kind} rail is present — {state}; "
+                f"{_trendline_style(segment)}.")
+    notes: list[str] = []
+    channel = segments[0].get("channel", "single")
+    if channel in ("short overlap", "diverging"):
+        notes.append(
+            f"Rails are independent ({channel}); not a confirmed channel.")
+    states = [
+        f"{segment['kind']} {_trendline_state(segment)}"
+        for segment in segments
+        if _trendline_state(segment)
+    ]
+    if states:
+        notes.append("Rail state: " + "; ".join(states) + ".")
+    return " ".join(notes)
+
+
 def _pattern_note(segments: list[dict], started: tuple[str, float] | None, pattern: str | None) -> str:
     if segments or started:
         note = "Yellow: detected pattern"
@@ -717,6 +799,7 @@ def build_trade_viewer_payload(
     entry_time=None,
     exit_time=None,
     annotations: list[dict] | None = None,
+    trendlines: bool = False,
 ) -> dict:
     """OHLCV + levels for an interactive TradingView-style viewer (no PNG)."""
     renderer = ChartRenderer(save_to_disk=False, session_tz=session_tz)
@@ -743,6 +826,7 @@ def build_trade_viewer_payload(
     candles = []
     volume = []
     rsi14 = []
+    pos_times: list[str | None] = []
     rsi = _rsi_sma(df["Close"], RSI_PERIOD)
     for idx, row in df.iterrows():
         t = _viewer_bar_time(idx)
@@ -752,7 +836,9 @@ def build_trade_viewer_payload(
         c = _viewer_finite(row["Close"])
         v = _viewer_finite(row["Volume"]) or 0.0
         if None in (o, h, low, c):
+            pos_times.append(None)
             continue
+        pos_times.append(t)
         candles.append({"time": t, "open": o, "high": h, "low": low, "close": c})
         up = c >= o
         volume.append({
@@ -825,7 +911,13 @@ def build_trade_viewer_payload(
         color = ann.get("color") or "#ffeb3b"
         if ann.get("type") == "hline":
             price = _viewer_finite(ann.get("price"))
-            if price is not None and not any(level["price"] == price and level["title"] == ann.get("label") for level in levels):
+            # Signal annotations carry float32-precision prices (0.8600000143)
+            # while trade levels carry float64 (0.86). Exact equality left two
+            # axis labels for the same stop/target; match within a tick.
+            if price is not None and not any(
+                math.isclose(level["price"], price, rel_tol=1e-6, abs_tol=1e-9)
+                for level in levels
+            ):
                 levels.append({"price": price, "title": ann.get("label", ""), "color": color,
                                "reason": ann.get("reason", "")})
         elif ann.get("type") in {"segment", "path"}:
@@ -870,6 +962,39 @@ def build_trade_viewer_payload(
             "reason": "",
         })
     markers.sort(key=lambda marker: marker["time"])
+    trendline_segments = []
+    if trendlines:
+        for line in detect_trendlines(df):
+            start = pos_times[line["start_index"]] if line["start_index"] < len(pos_times) else None
+            end = pos_times[line["end_index"]] if line["end_index"] < len(pos_times) else None
+            if not start or not end or start == end:
+                continue
+            broken = bool(line.get("broken"))
+            confirmed = bool(line.get("confirmed", True))
+            style = "--" if broken else (":" if not confirmed else "-")
+            width = 1 if line.get("close_pair") else 2
+            trendline_segments.append({
+                "data": [
+                    {"time": start, "value": line["start_price"]},
+                    {"time": end, "value": line["end_price"]},
+                ],
+                "color": TRENDLINE_COLOR,
+                "style": style,
+                "width": width,
+                "label": "",
+                "kind": line["kind"],
+                "broken": broken,
+                "confirmed": confirmed,
+                "channel": line.get("channel", "single"),
+                "close_pair": bool(line.get("close_pair")),
+                "stale_bars": int(line.get("stale_bars", 0)),
+                "cut_through_pct": round(
+                    float(line.get("body_penetration", 0.0)) * 100, 1,
+                ),
+                "pivots": int(line.get("pivots", 0)),
+                "violations": int(line.get("violations", 0)),
+            })
+    trendline_note = _trendline_note(trendline_segments) if trendlines else ""
     title = f"{symbol} {renderer._tv_timeframe_label(timeframe)}"
     if pattern:
         title = f"{title} · {pattern}"
@@ -902,6 +1027,8 @@ def build_trade_viewer_payload(
         "levels": levels,
         "markers": markers,
         "segments": segments,
+        "trendlines": trendline_segments,
+        "trendline_note": trendline_note,
         "pattern_note": _pattern_note(segments, started, pattern),
     }
 

@@ -81,7 +81,7 @@ window.ChartDraw = (function () {
     const status = document.createElement('span');
     status.style.cssText = 'color:#90caf9;font:11px sans-serif';
     status.setAttribute('role', 'status');
-    status.textContent = 'Blue: your corrections.';
+    status.textContent = 'Blue: solid confirmed · dashed broken · dotted <3 touches.';
     function applyScroll() {
       panes.forEach((p, i) => {
         const base = {...(originalScroll[i] || {mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true})};
@@ -97,7 +97,7 @@ window.ChartDraw = (function () {
         b.style.backgroundColor = key === tool ? BLUE : '';
         b.style.color = key === tool ? '#131722' : '';
       });
-      status.textContent = tool === 'pattern' ? 'Click price pivots left to right; Enter to finish.' : 'Blue: your corrections.';
+      status.textContent = tool === 'pattern' ? 'Click price pivots left to right; Enter to finish.' : 'Blue: solid confirmed · dashed broken · dotted <3 touches.';
     }
     function cancel() {
       if (drag?.before) drawings = drag.before;

@@ -7,6 +7,42 @@ import pandas as pd
 from analysis.chart_renderer import build_trade_viewer_payload
 
 
+def test_pattern_hlines_do_not_duplicate_trade_levels() -> None:
+    from patterns.base_pattern import ann_hline
+
+    idx = pd.bdate_range("2024-01-02", periods=40)
+    close = pd.Series(range(100, 140), index=idx, dtype=float)
+    df = pd.DataFrame({
+        "open": close - 0.4,
+        "high": close + 0.8,
+        "low": close - 0.9,
+        "close": close,
+        "volume": 1_000_000,
+    }, index=idx)
+
+    payload = build_trade_viewer_payload(
+        df,
+        symbol="SNTI",
+        action="BUY",
+        entry=1.11,
+        stop=0.86,
+        target=1.34,
+        exit_price=1.0545,
+        exit_reason="stop_loss",
+        annotations=[
+            ann_hline(1.090000033378601, "level", "#ffeb3b"),
+            # float32 prices captured from the signal's chart annotations
+            ann_hline(0.8600000143051147, "stop", "#ef5350"),
+            ann_hline(1.340000033378601, "target", "#26a69a"),
+        ],
+    )
+
+    titles = [level["title"] for level in payload["levels"]]
+    assert titles.count("stop") == 1
+    assert titles.count("target") == 1
+    assert titles.count("level") == 1
+
+
 def test_viewer_payload_has_candles_and_levels() -> None:
     idx = pd.bdate_range("2024-01-02", periods=40)
     close = pd.Series(range(100, 140), index=idx, dtype=float)

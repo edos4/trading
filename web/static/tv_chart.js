@@ -223,11 +223,15 @@ window.TVChart = (function () {
       if (notes.length) candleSeries.attachPrimitive(window.PatternNotes.create(notes, PRICE_BAND));
     }
 
-    for (const segment of data.segments || []) {
+    for (const segment of [...(data.segments || []), ...(data.trendlines || [])]) {
       if (!segment.data || segment.data.length < 2) continue;
       const line = chart.addLineSeries({
         color: segment.color, lineWidth: Math.max(1, Math.min(4, Math.round(segment.width || 2))),
-        lineStyle: segment.style === "--" ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid,
+        lineStyle: segment.style === "--"
+          ? LightweightCharts.LineStyle.Dashed
+          : segment.style === ":"
+            ? LightweightCharts.LineStyle.Dotted
+            : LightweightCharts.LineStyle.Solid,
         priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
       });
       line.setData(segment.data);
