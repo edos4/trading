@@ -99,8 +99,10 @@ if [[ "$PORT" != "8080" ]]; then
 fi
 
 # Don't expose the tunnel until the app is actually answering.
+ready=0
 for _ in $(seq 1 30); do
   if curl -fsS --max-time 2 "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+    ready=1
     break
   fi
   if ! kill -0 "$APP_PID" 2>/dev/null; then
@@ -109,6 +111,11 @@ for _ in $(seq 1 30); do
   fi
   sleep 1
 done
+
+if [[ "$ready" -ne 1 ]]; then
+  echo "ERROR: Web UI did not become healthy; refusing to start the tunnel." >&2
+  exit 1
+fi
 
 echo "==> Cloudflare Tunnel  https://${PUBLIC_HOST}"
 cf tunnels run --token "$TOKEN" --log-level info &

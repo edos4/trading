@@ -26,8 +26,9 @@ _lock = threading.Lock()
 def ping_db() -> None:
     conn = db.get_conn()
     try:
-        db.ensure_schema(conn)
-        conn.commit()
+        # Startup health checks must not request DDL locks. A long-running
+        # history import may hold table locks while fetching remote bars.
+        # Schema changes belong to the explicit database setup/update paths.
         with conn.cursor() as cur:
             cur.execute("SELECT 1")
             cur.fetchone()
@@ -227,12 +228,18 @@ def ensure_freshness_and_cron() -> str:
 
 
 def start_web_history_backfill() -> None:
-    """Ping Postgres, ensure daily-update cron, catch up if last US close is missing."""
+    """Schedule history maintenance without delaying the HTTP listener."""
     global _started
     with _lock:
         if _started:
             return
         _started = True
+    threading.Thread(target=_web_history_maintenance, name="web-history-maintenance",
+                     daemon=True).start()
+
+
+def _web_history_maintenance() -> None:
+    """Database locks or unavailable history must not block web startup."""
     try:
         ping_db()
         log.info("Web UI | PostgreSQL connected (stocks_history)")

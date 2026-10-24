@@ -127,8 +127,32 @@ def test_start_web_history_backfill_ping_then_freshness(monkeypatch):
     monkeypatch.setattr(
         eh, "ensure_freshness_and_cron", lambda: calls.append("fresh") or "noop",
     )
-    eh.start_web_history_backfill()
+    eh._web_history_maintenance()
     assert calls == ["ping", "fresh"]
+
+
+def test_start_web_history_does_not_wait_for_database(monkeypatch):
+    import threading
+    import data.ensure_history as eh
+
+    entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+    calls = []
+    def blocked_ping():
+        calls.append("ping")
+        entered.set()
+        release.wait(5)
+    monkeypatch.setattr(eh, "_started", False)
+    monkeypatch.setattr(eh, "ping_db", blocked_ping)
+    monkeypatch.setattr(eh, "ensure_freshness_and_cron", finished.set)
+    try:
+        eh.start_web_history_backfill()
+        assert entered.wait(1)
+        assert not finished.is_set()
+        eh.start_web_history_backfill()
+        assert calls == ["ping"]
+    finally:
+        release.set()
+        assert finished.wait(2)
 
 
 def test_ensure_freshness_reads_current_stamp_no_update(monkeypatch, tmp_path):
