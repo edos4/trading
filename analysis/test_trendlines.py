@@ -56,6 +56,36 @@ def test_detect_trendlines_returns_blue_support_and_resistance() -> None:
     assert all(line["slope"] > 0 for line in lines)
 
 
+@pytest.mark.parametrize("reflected", [False, True])
+@pytest.mark.parametrize("recent", [False, True])
+def test_price_moving_away_preserves_only_recent_valid_boundary(reflected, recent):
+    n = 80
+    highs = np.full(n, 104.)
+    touches = [10, 40, 65] if recent else [10, 30, 45]
+    highs[touches] = 110.
+    frame = pd.DataFrame({"open": 100., "high": highs, "low": 96.,
+                          "close": 100., "volume": 1000.},
+                         index=pd.bdate_range("2024-01-02", periods=n))
+    frame.iloc[-3:, :4] = [80., 81., 79., 80.]
+    if reflected:
+        original = frame.copy()
+        frame["open"], frame["close"] = 200. - original["open"], 200. - original["close"]
+        frame["high"], frame["low"] = 200. - original["low"], 200. - original["high"]
+    kind = "support" if reflected else "resistance"
+    payload = build_trade_viewer_payload(frame, symbol="TEST", trendlines=True)
+    lines = [line for line in payload["trendlines"] if line["kind"] == kind]
+    if not recent:
+        assert lines == []
+        return
+    assert len(lines) == 1
+    assert lines[0]["pivots"] == 3 and lines[0]["confirmed"]
+    assert not lines[0]["broken"]
+    assert lines[0]["data"] == [
+        {"time": frame.index[10].date().isoformat(), "value": 90. if reflected else 110.},
+        {"time": frame.index[65].date().isoformat(), "value": 90. if reflected else 110.},
+    ]
+
+
 @pytest.mark.parametrize("timeframe", ["1d", "1W"])
 @pytest.mark.parametrize("reflected", [False, True])
 def test_valid_support_and_resistance_remain_visible_without_shared_anchor_span(timeframe, reflected):
@@ -100,11 +130,11 @@ def test_valid_support_and_resistance_remain_visible_without_shared_anchor_span(
         ]
 
 
-@pytest.mark.parametrize("symbol,timeframe,start,end,expected", [
-    ("ADBE", "1d", 190, 230, {"support": (21, 36), "resistance": (10, 20)}),
-    ("C", "1W", 0, 35, {"support": (16, 22), "resistance": (5, 14)}),
+@pytest.mark.parametrize("symbol,timeframe,start,end,expected,channel", [
+    ("ADBE", "1d", 190, 230, {"support": (21, 36), "resistance": (10, 20)}, "no overlap"),
+    ("C", "1W", 0, 35, {"support": (16, 22), "resistance": (5, 29)}, "short overlap"),
 ])
-def test_real_daily_and_weekly_tapes_keep_both_valid_independent_rails(symbol, timeframe, start, end, expected):
+def test_real_daily_and_weekly_tapes_keep_both_valid_independent_rails(symbol, timeframe, start, end, expected, channel):
     from data.barcache import load
     from data.history import candles_to_df, resample_chart_frame
     from analysis.chart_renderer import ChartRenderer
@@ -120,7 +150,7 @@ def test_real_daily_and_weekly_tapes_keep_both_valid_independent_rails(symbol, t
     assert {segment["label"] for segment in payload["trendlines"]} == {"Support", "Resistance"}
     for line, segment in zip(lines, payload["trendlines"]):
         assert (line["start_index"], line["end_index"]) == expected[line["kind"]]
-        assert line["channel"] == segment["channel"] == "no overlap"
+        assert line["channel"] == segment["channel"] == channel
         assert line["body_penetration"] == 0.
         assert line["stale_bars"] <= 20
         assert segment["data"] == [

@@ -122,11 +122,7 @@ def _evaluate(
         value = _line_value(i, i0, p0, slope)
         if not np.isfinite(value) or value < low_bound or value > high_bound:
             return None
-    # Score the full projected rail: a rail whose projection drifts away from
-    # today's price belongs to an older regime.
     end_value = _line_value(n - 1, i0, p0, slope)
-    if abs(end_value - last_close) > end_tolerance:
-        return None
 
     touches = [i0, i1]
     violations = 0
@@ -147,6 +143,15 @@ def _evaluate(
 
     span_bars = max(1, n - i0)
     last_touch = max(touches)
+    # Recent overhead resistance can remain valid after a selloff, as can
+    # underlying support after a rally. Distance alone does not invalidate
+    # their anchored spans. Distant stale rails and wrong-side projections
+    # still fail; extension to the current bar has its own proximity guard.
+    correct_side = end_value >= last_close if high else end_value <= last_close
+    if abs(end_value - last_close) > end_tolerance and (
+        n - 1 - last_touch > MAX_STALE_BARS or not correct_side
+    ):
+        return None
     wick_penetrated = 0
     body_penetrated = 0
     anchor_wick_penetrated = 0
