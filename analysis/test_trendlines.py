@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import warnings
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -40,6 +41,79 @@ def test_detect_trendlines_returns_blue_support_and_resistance() -> None:
     assert all(0 <= line["start_index"] < line["end_index"] <= 59 for line in lines)
     # The synthetic series rises, so both fitted lines rise with it.
     assert all(line["slope"] > 0 for line in lines)
+
+
+@pytest.mark.parametrize("timeframe", ["1d", "1W"])
+@pytest.mark.parametrize("reflected", [False, True])
+def test_valid_support_and_resistance_remain_visible_without_shared_anchor_span(timeframe, reflected):
+    n = 80
+    lows, highs = np.full(n, 97.), np.full(n, 103.)
+    lows[[55, 64]], highs[[68, 76]] = 95., 105.
+    index = (pd.bdate_range("2024-01-02", periods=n) if timeframe == "1d"
+             else pd.date_range("2024-01-05", periods=n, freq="W-FRI"))
+    df = pd.DataFrame({
+        "open": 100., "high": highs, "low": lows, "close": 100., "volume": 1000.,
+    }, index=index)
+    if reflected:
+        original = df.copy()
+        df["open"], df["close"] = 200. - original["open"], 200. - original["close"]
+        df["high"], df["low"] = 200. - original["low"], 200. - original["high"]
+
+    lines = detect_trendlines(df)
+
+    assert {line["kind"] for line in lines} == {"support", "resistance"}
+    expected = {"support": (55, 64), "resistance": (68, 76)}
+    if reflected:
+        expected = {"support": (68, 76), "resistance": (55, 64)}
+    for line in lines:
+        assert (line["start_index"], line["end_index"]) == expected[line["kind"]]
+        assert line["channel"] == "no overlap" and line["overlap_bars"] == 0
+        assert line["body_penetration"] == 0.
+        assert line["stale_bars"] <= 20
+        assert not line["crosses"] and not line["close_pair"]
+
+    # Retain the entire tape so the payload tests the same independently
+    # validated spans on both daily and weekly displays.
+    payload = build_trade_viewer_payload(
+        df, symbol="TEST", timeframe=timeframe, entry_time=index[0], trendlines=True,
+    )
+    assert {segment["kind"] for segment in payload["trendlines"]} == {"support", "resistance"}
+    assert {segment["label"] for segment in payload["trendlines"]} == {"Support", "Resistance"}
+    assert "independent (no overlap)" in payload["trendline_note"]
+    for line, segment in zip(lines, payload["trendlines"]):
+        assert segment["data"] == [
+            {"time": index[line["start_index"]].date().isoformat(), "value": line["start_price"]},
+            {"time": index[line["end_index"]].date().isoformat(), "value": line["end_price"]},
+        ]
+
+
+@pytest.mark.parametrize("symbol,timeframe,start,end,expected", [
+    ("ADBE", "1d", 190, 230, {"support": (21, 36), "resistance": (10, 20)}),
+    ("C", "1W", 0, 35, {"support": (16, 22), "resistance": (5, 14)}),
+])
+def test_real_daily_and_weekly_tapes_keep_both_valid_independent_rails(symbol, timeframe, start, end, expected):
+    from data.barcache import load
+    from data.history import candles_to_df, resample_chart_frame
+    from analysis.chart_renderer import ChartRenderer
+
+    candles = load("us", symbol, root=Path(__file__).parents[1] / "tests/fixtures/barcache")
+    daily = ChartRenderer()._prepare_df(candles_to_df(candles)).rename(columns=str.lower)
+    df = resample_chart_frame(daily, timeframe, session_tz="America/New_York").iloc[start:end]
+
+    lines = detect_trendlines(df)
+    payload = build_trade_viewer_payload(df, symbol=symbol, timeframe=timeframe, trendlines=True)
+
+    assert {line["kind"] for line in lines} == {"support", "resistance"}
+    assert {segment["label"] for segment in payload["trendlines"]} == {"Support", "Resistance"}
+    for line, segment in zip(lines, payload["trendlines"]):
+        assert (line["start_index"], line["end_index"]) == expected[line["kind"]]
+        assert line["channel"] == segment["channel"] == "no overlap"
+        assert line["body_penetration"] == 0.
+        assert line["stale_bars"] <= 20
+        assert segment["data"] == [
+            {"time": df.index[line["start_index"]].date().isoformat(), "value": line["start_price"]},
+            {"time": df.index[line["end_index"]].date().isoformat(), "value": line["end_price"]},
+        ]
 
 
 @pytest.mark.parametrize("high", [False, True])

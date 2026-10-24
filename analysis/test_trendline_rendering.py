@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 from copy import deepcopy
 
-from analysis.chart_renderer import ChartRenderer, _nearest_viewer_time, build_trade_viewer_payload
+from analysis.chart_renderer import ChartRenderer, _nearest_viewer_time, _trendline_note, build_trade_viewer_payload
 from analysis.trendlines import TRENDLINE_COLOR
 from patterns.base_pattern import ANN_PATTERN
 
@@ -56,6 +56,50 @@ def test_png_and_viewer_share_sorted_visible_candles_and_rail_geometry(monkeypat
         assert xs == [times.index(point["time"]) for point in rail["data"]]
         assert ys == pytest.approx([point["value"] for point in rail["data"]])
         assert style == rail["style"]
+
+
+def test_png_names_support_and_resistance_at_their_fitted_endpoints(monkeypatch):
+    df = _frame(100)
+    payload = build_trade_viewer_payload(df, symbol="TEST", trendlines=True)
+    rails = {rail["kind"]: rail for rail in payload["trendlines"]}
+    assert set(rails) == {"support", "resistance"}
+    times = [row["time"] for row in payload["candles"]]
+
+    def inspect_figure(self, fig, buf, symbol, timeframe, frame, indicators=None):
+        axis = fig.axes[0]
+        labels = {text.get_text(): text for text in axis.texts
+                  if text.get_text() in {"Support", "Resistance"}}
+        assert set(labels) == {"Support", "Resistance"}
+        fig.canvas.draw()
+        for kind, rail in rails.items():
+            label = labels[kind.title()]
+            end = rail["data"][-1]
+            endpoint = (times.index(end["time"]), end["value"])
+            assert label.xy == pytest.approx(endpoint)
+            assert label.get_color() == TRENDLINE_COLOR
+            box = label.get_window_extent(fig.canvas.get_renderer())
+            assert axis.bbox.x0 <= box.x0 < box.x1 <= axis.bbox.x1
+            assert axis.bbox.y0 <= box.y0 < box.y1 <= axis.bbox.y1
+            endpoint_y = axis.transData.transform(endpoint)[1]
+            if kind == "support":
+                assert box.y1 < endpoint_y
+            else:
+                assert box.y0 > endpoint_y
+        plt.close(fig)
+        return b""
+
+    monkeypatch.setattr(ChartRenderer, "_save_figure", inspect_figure)
+    ChartRenderer().render("TEST", "1d", df, trendlines=True)
+
+
+def test_disjoint_support_and_resistance_are_described_as_independent():
+    note = _trendline_note([
+        {"kind": kind, "confirmed": True, "channel": "no overlap"}
+        for kind in ("support", "resistance")
+    ])
+
+    assert "independent (no overlap)" in note
+    assert "not a confirmed channel" in note
 
 
 def test_png_and_viewer_drop_invalid_bars_before_fitting(monkeypatch):

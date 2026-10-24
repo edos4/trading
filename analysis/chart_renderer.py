@@ -522,8 +522,20 @@ class ChartRenderer:
             )
             values.extend(ys)
         lo, hi = price_axis.get_ylim()
-        padding = (hi - lo) * 0.02
+        # Leave room for the endpoint names below support and above resistance.
+        axis_height_pt = price_axis.bbox.height * 72 / price_axis.figure.dpi
+        padding = (hi - lo) * max(0.02, 18 / max(axis_height_pt, 1))
         price_axis.set_ylim(min(lo, min(values)) - padding, max(hi, max(values)) + padding)
+        for line in lines:
+            support = line["kind"] == "support"
+            price_axis.annotate(
+                line["kind"].title(),
+                xy=(line["end_index"], line["end_price"]),
+                xytext=(-4, -6 if support else 6), textcoords="offset points",
+                ha="right", va="top" if support else "bottom",
+                fontsize=8, color=TRENDLINE_COLOR, clip_on=True,
+                bbox=dict(facecolor=TV_BG, edgecolor="none", pad=1, alpha=0.9),
+            )
         price_axis.text(
             0.99, 1.02,
             "Blue rails: solid confirmed · dashed broken · dotted <3 touches",
@@ -831,7 +843,7 @@ def _trendline_note(segments: list[dict]) -> str:
                 f"{_trendline_style(segment)}.")
     notes: list[str] = []
     channel = segments[0].get("channel", "single")
-    if channel in ("short overlap", "diverging"):
+    if channel in ("no overlap", "short overlap", "diverging"):
         notes.append(
             f"Rails are independent ({channel}); not a confirmed channel.")
     states = [
@@ -1069,7 +1081,7 @@ def build_trade_viewer_payload(
                 "color": TRENDLINE_COLOR,
                 "style": style,
                 "width": width,
-                "label": "",
+                "label": line["kind"].title(),
                 "kind": line["kind"],
                 "broken": broken,
                 "confirmed": confirmed,
