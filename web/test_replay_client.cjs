@@ -25,7 +25,10 @@ const corrections = [{id:'drawn',kind:'pattern',label:'correct trough',points:[
 const drawMounts = [];
 const requests = [], lines = [];
 const series = () => ({setData(data){this.data=data;}, applyOptions(){}, priceScale(){return {applyOptions(){}};}, createPriceLine(){}, setMarkers(markers){this.markers=markers;}});
-const chart = {addCandlestickSeries:series, addHistogramSeries:series, addLineSeries(options){const s=series();s.options=options;lines.push(s);return s;}, subscribeCrosshairMove(){}, timeScale(){return {fitContent(){}, subscribeVisibleLogicalRangeChange(){}, setVisibleLogicalRange(){}};}, remove(){}};
+const chart = {addCandlestickSeries:series, addHistogramSeries:series, addLineSeries(options){const s=series();s.options=options;lines.push(s);return s;}, subscribeCrosshairMove(){},
+  priceScale(){return {width:()=>40,options:()=>({minimumWidth:40})};},
+  paneSize(){return {width:800,height:460};},
+  timeScale(){return {fitContent(){}, subscribeVisibleLogicalRangeChange(){}, unsubscribeVisibleLogicalRangeChange(){}, setVisibleLogicalRange(){}, getVisibleLogicalRange:()=>null, subscribeSizeChange(){}, unsubscribeSizeChange(){}};}, remove(){}};
 const window = {TB_PAGE:'replay', location:{}, innerWidth:1200, innerHeight:800,
   ChartDraw:{attach(options){drawMounts.push(options);return {snapshot:()=>corrections,pending:()=>false,destroy(){}}}}};
 const stored = new Map();

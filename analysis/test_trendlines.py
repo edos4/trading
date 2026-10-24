@@ -186,10 +186,10 @@ def test_horizontal_origin_preserves_span_between_unequal_length_plateaus(resist
 
 @pytest.mark.parametrize("resistance", [False, True])
 def test_recent_refit_keeps_a_horizontal_plateau_crossing_its_window(resistance: bool) -> None:
-    lows = np.full(400, 101.)
-    lows[250:] = 111.
+    lows = np.full(1250, 101.)
+    lows[1100:] = 111.
     lows[np.arange(10, 231, 20)] = 100.
-    lows[270:331], lows[360:366] = 110., 110.
+    lows[1120:1181], lows[1210:1216] = 110., 110.
     df = pd.DataFrame({"open": lows + 1., "high": lows + 2., "low": lows, "close": lows + 1.5})
     if resistance:
         original = df.copy()
@@ -199,10 +199,11 @@ def test_recent_refit_keeps_a_horizontal_plateau_crossing_its_window(resistance:
     line = next(line for line in detect_trendlines(df)
                 if line["kind"] == ("resistance" if resistance else "support"))
 
-    # The many older touches win the initial search but cannot extend. The
-    # recent plateau starts before bar 280 and stays flat through bar 330, so
-    # its horizontal origin can be clipped to the recent window and refit.
-    assert (line["start_index"], line["end_index"]) == (280, 399)
+    # The old rail cannot extend, and the 95-bar recent horizontal span is
+    # shorter than the full-window minimum of 100 bars. The recent plateau
+    # starts before bar 1130 and stays flat through bar 1180, so its origin
+    # can be clipped to the recent window and fit with the shorter minimum.
+    assert (line["start_index"], line["end_index"]) == (1130, 1249)
     assert line["start_price"] == (140. if resistance else 110.)
     assert line["slope"] == 0.
     assert line["pivots"] == 2
@@ -323,6 +324,43 @@ def test_stale_refit_can_choose_a_lower_scoring_current_rail(offset: int) -> Non
     assert line["p0"] == 110.
     assert touches == [80 + offset, 90 + offset]
     assert end == 90 + offset
+
+
+@pytest.mark.parametrize("resistance", [False, True])
+def test_a_current_rail_can_keep_an_anchor_before_the_recent_refit_window(resistance: bool) -> None:
+    lows = np.full(200, 101.)
+    lows[75:] = np.linspace(101., 111., 125)
+    lows[np.arange(10, 71, 10)], lows[190] = 100., 110.
+    df = pd.DataFrame({
+        "open": lows + .5, "high": lows + 1., "low": lows, "close": lows + 1.,
+        "volume": 1000.,
+    }, index=pd.bdate_range("2024-01-02", periods=len(lows)))
+    if resistance:
+        original = df.copy()
+        df["open"], df["close"] = 250. - original["open"], 250. - original["close"]
+        df["high"], df["low"] = 250. - original["low"], 250. - original["high"]
+    kind = "resistance" if resistance else "support"
+
+    # Seven old horizontal touches outrank the two current sloping touches,
+    # but their rail cannot extend near today's price. The clean current rail
+    # starts at bar 70, before the recent refit floor at bar 80.
+    line = next(line for line in detect_trendlines(df) if line["kind"] == kind)
+
+    assert (line["start_index"], line["end_index"]) == (70, 190)
+    assert line["start_price"] == (150. if resistance else 100.)
+    assert line["end_price"] == (140. if resistance else 110.)
+    assert line["pivots"] == 2
+    assert line["stale_bars"] == 9
+    assert line["body_penetration"] == 0.
+    assert not line["broken"]
+
+    payload = build_trade_viewer_payload(df, symbol="TEST", trendlines=True)
+    segment = next(line for line in payload["trendlines"] if line["kind"] == kind)
+    assert segment["data"] == [
+        {"time": df.index[70].date().isoformat(), "value": line["start_price"]},
+        {"time": df.index[190].date().isoformat(), "value": line["end_price"]},
+    ]
+    assert segment["style"] == ":"
 
 
 @pytest.mark.parametrize("high", [False, True])

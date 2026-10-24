@@ -295,6 +295,9 @@ def _select_line(
     best = _best_line(
         points, bars, bodies, high, tol, n, min_span,
         last_close, end_tolerance, atr,
+        # Filter unusable stale rails before ranking. A valid current rail
+        # may still need its first anchor before the recent refit window.
+        require_current=True,
         plateau_ends=plateau_ends,
     )
     recent_min_span = min(min_span, max(6, int(min(n, RECENT_BARS) * MIN_SPAN_FRACTION)))
