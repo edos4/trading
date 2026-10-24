@@ -44,19 +44,61 @@ window.TVChart = (function () {
     }
   }
 
-  /* Keep the price pane and the RSI pane on the same bars. */
+  /* Matching logical ranges also need matching plot widths: each chart sizes
+   * its price axis from its own labels, otherwise the same bar has a different
+   * pixel x in each pane. Recheck after labels or the host size change. */
   function linkTimeScales(from, to) {
-    let syncing = false;
-    from.timeScale().subscribeVisibleLogicalRangeChange((range) => {
-      if (!range || syncing) return;
+    let syncing = false, aligning = false;
+    const charts = [from, to], scales = charts.map(chart => chart.timeScale());
+    const widths = charts.map(chart => chart.paneSize().width);
+    const pending = new Map();
+    const sameRange = (a, b) => a && b &&
+      Math.abs(a.from - b.from) < 1e-9 && Math.abs(a.to - b.to) < 1e-9;
+    let linkedRange = scales[0].getVisibleLogicalRange();
+    function syncRange(scale, range, force = false) {
+      if (!range || syncing || aligning) return;
+      const current = scale.getVisibleLogicalRange();
+      const queued = pending.get(scale);
+      if (!force && (sameRange(queued, range) || (!queued && sameRange(current, range)))) return;
+      pending.set(scale, range);
       syncing = true;
-      try { to.timeScale().setVisibleLogicalRange(range); } finally { syncing = false; }
+      try { scale.setVisibleLogicalRange(range); } finally { syncing = false; }
+    }
+    function alignWidths() {
+      if (aligning) return;
+      aligning = true;
+      try {
+        const axes = [from.priceScale("right"), to.priceScale("right")];
+        const width = Math.max(...axes.map(axis => axis.width()));
+        if (width > 0) for (const axis of axes) {
+          if (axis.options().minimumWidth < width) axis.applyOptions({minimumWidth: width});
+        }
+        charts.forEach((chart, index) => { widths[index] = chart.paneSize().width; });
+      } finally { aligning = false; }
+      scales.forEach(scale => syncRange(scale, linkedRange));
+    }
+    const handlers = charts.map((chart, index) => range => {
+      if (!range || syncing || aligning) return;
+      const width = chart.paneSize().width;
+      const queued = pending.get(scales[index]);
+      const reflected = sameRange(queued, range);
+      pending.delete(scales[index]);
+      // Axis/host resizing changes the native range at the old bar spacing.
+      // Keep the user's last range while both panes adopt their new widths.
+      // A mirrored API range is applied on a later paint; its callback must
+      // not replace a newer user pan on the other pane.
+      if (!reflected && (width === widths[index] || !linkedRange)) linkedRange = range;
+      widths[index] = width;
+      alignWidths();
+      // A user can move this pane before its queued mirror has painted.
+      // Replace that older action even when the current range already fits.
+      if (queued && !reflected) syncRange(scales[index], linkedRange, true);
     });
-    to.timeScale().subscribeVisibleLogicalRangeChange((range) => {
-      if (!range || syncing) return;
-      syncing = true;
-      try { from.timeScale().setVisibleLogicalRange(range); } finally { syncing = false; }
-    });
+    scales.forEach((scale, index) => scale.subscribeVisibleLogicalRangeChange(handlers[index]));
+    alignWidths();
+    return () => {
+      scales.forEach((scale, index) => scale.unsubscribeVisibleLogicalRangeChange(handlers[index]));
+    };
   }
 
   function fmtTime(time) {
@@ -79,13 +121,16 @@ window.TVChart = (function () {
    * its interpolated visible extent without extending the line. Clip in pixel
    * coordinates: logical ranges describe bar slots, while the physical plot
    * edges include part of the adjacent slots. */
-  function railAutoscale(timeScale, points) {
+  function railAutoscale(chart, points) {
+    const timeScale = chart.timeScale();
     return original => {
       const info = original();
-      const width = timeScale.width();
+      // timeScale.width() is zero while this pane's date axis is hidden.
+      const width = chart.paneSize().width;
       if (!(width > 0)) return info;
-      let minValue = info?.priceRange.minValue ?? Infinity;
-      let maxValue = info?.priceRange.maxValue ?? -Infinity;
+      // The original range rounds to bar slots and can include an endpoint
+      // already outside the physical plot. Only visible geometry sets bounds.
+      let minValue = Infinity, maxValue = -Infinity;
       for (let i = 1; i < points.length; i++) {
         const a = points[i - 1], b = points[i];
         const x0 = timeScale.timeToCoordinate(a.time), x1 = timeScale.timeToCoordinate(b.time);
@@ -98,7 +143,7 @@ window.TVChart = (function () {
         minValue = Math.min(minValue, first, last);
         maxValue = Math.max(maxValue, first, last);
       }
-      if (!Number.isFinite(minValue) || !Number.isFinite(maxValue)) return info;
+      if (!Number.isFinite(minValue) || !Number.isFinite(maxValue)) return null;
       return {...info, priceRange: {minValue, maxValue}};
     };
   }
@@ -295,7 +340,7 @@ window.TVChart = (function () {
             : LightweightCharts.LineStyle.Solid,
         priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
         autoscaleInfoProvider: automaticRails.has(segment)
-          ? railAutoscale(chart.timeScale(), points)
+          ? railAutoscale(chart, points)
           : undefined,
       });
       line.setData(points);
@@ -428,7 +473,7 @@ window.TVChart = (function () {
       }
       rsiSeries.setData(rsiData);
       rsiChart.timeScale().fitContent();
-      linkTimeScales(chart, rsiChart);
+      cleanup.push(linkTimeScales(chart, rsiChart));
       // Hovering the oscillator still reports the candle under the cursor.
       rsiChart.subscribeCrosshairMove((param) => {
         if (!hooks || typeof hooks.onCandle !== "function") return;
