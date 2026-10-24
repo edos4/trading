@@ -88,6 +88,17 @@ def _line_value(index: int, i0: int, p0: float, slope: float) -> float:
     return p0 + slope * (index - i0)
 
 
+def _rail_broken(close: np.ndarray, start: int, price: float, slope: float,
+                 high: bool, atr: float) -> bool:
+    """Keep a confirmed close break even after price recovers above the rail."""
+    projected = price + slope * (np.arange(start, len(close)) - start)
+    beyond = (close[start:] - projected) if high else (projected - close[start:])
+    breached = beyond > BROKEN_SIDE_ATR * atr
+    # Preserve the current-close warning; historical breaks require two
+    # consecutive closes, so a wick or isolated recovered close is insufficient.
+    return bool(breached[-1] or np.any(breached[:-1] & breached[1:]))
+
+
 def _evaluate(
     points: list[tuple[int, float]],
     i0: int,
@@ -420,12 +431,7 @@ def detect_trendlines(
         start = touches[0]
         start_price = _line_value(start, best["i0"], best["p0"], slope)
         end_price = _line_value(end, best["i0"], best["p0"], slope)
-        current_price = _line_value(n - 1, best["i0"], best["p0"], slope)
-        broken = (
-            kind == "support" and current_price > last_close + BROKEN_SIDE_ATR * atr
-        ) or (
-            kind == "resistance" and current_price < last_close - BROKEN_SIDE_ATR * atr
-        )
+        broken = _rail_broken(close, start, start_price, slope, high, atr)
         lines.append({
             "kind": kind,
             "start_index": start,
