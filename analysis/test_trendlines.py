@@ -15,6 +15,7 @@ from analysis.trendlines import (
     _atr,
     _evaluate,
     _pivots,
+    _rail_broken,
     _select_line,
     detect_trendlines,
 )
@@ -31,6 +32,18 @@ def _uptrend_frame(periods: int = 60) -> pd.DataFrame:
         "close": close,
         "volume": 1_000_000,
     }, index=idx)
+
+
+@pytest.mark.parametrize("high", [False, True])
+@pytest.mark.parametrize("breaches,expected", [([], False), ([8], False), ([8, 10], False), ([8, 9], True), ([19], True)])
+def test_confirmed_close_break_survives_recovery(high, breaches, expected):
+    projected = 100. + np.arange(20) * .5
+    close = projected + (-1. if high else 1.)
+    close[breaches] = projected[breaches] + (1. if high else -1.)
+    assert _rail_broken(close, 3, projected[3], .5, high, atr=2.) is expected
+    # Old price action before this independently fitted rail cannot break it.
+    close[:2] = projected[:2] + (10. if high else -10.)
+    assert _rail_broken(close, 3, projected[3], .5, high, atr=2.) is expected
 
 
 def test_detect_trendlines_returns_blue_support_and_resistance() -> None:
