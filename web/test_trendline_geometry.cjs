@@ -112,7 +112,13 @@ function createChart(el, options) {
       },
       applyOptions(next) { model.$h(next); },
       priceScale: () => ({applyOptions(next) { model.Dt().$h(next); }}),
-      createPriceLine() {}, setMarkers() {},
+      createPriceLine() {},
+      setMarkers(markers) {
+        this.markers = markers;
+        model.na(markers.map(marker => ({
+          ...marker, time: behavior.convertHorzItemToInternal(marker.time), originalTime: marker.time,
+        })));
+      },
       primitives: [],
       attachPrimitive(primitive) { this.primitives.push(primitive); primitive.attached({requestUpdate() {}}); },
       detachPrimitive(primitive) { this.primitives = this.primitives.filter(item => item !== primitive); primitive.detached(); },
@@ -177,13 +183,13 @@ const candles = Array.from({length: 100}, (_, index) => ({
   open: 30, high: 31, low: 29, close: 30,
 }));
 const rail = {data: [{time: candles[10].time, value: 10}, {time: candles[90].time, value: 20}],
-  color: '#42a5f5', style: '-', width: 2};
-const resistance = {...rail, style: ':', data: [
+  color: '#42a5f5', style: '-', width: 2, kind: 'support', label: 'Support'};
+const resistance = {...rail, style: ':', kind: 'resistance', label: 'Resistance', data: [
   {time: candles[5].time, value: 50}, {time: candles[95].time, value: 40},
 ]};
 const payload = {
   candles, rsi14: [{time: candles[99].time, value: 50}],
-  segments: [{...rail, color: '#ffeb3b'}], trendlines: [rail, resistance],
+  segments: [{...rail, color: '#ffeb3b', label: 'Pattern'}], trendlines: [rail, resistance],
   manual_corrections: [{id: 'vertical', kind: 'vert', time: candles[50].time}],
   // A line-only forecast also needs whitespace padding in the RSI pane.
   forecast: [{time: '2024-04-10', value: 32}],
@@ -204,6 +210,20 @@ const sameCandlePixels = (a, b, rows) => {
 const rendered = price.allSeries.find(series => series.options.color === '#42a5f5');
 const descending = price.allSeries.find(series => series.options.color === '#42a5f5' && series.options.lineStyle === library.LineStyle.Dotted);
 const pattern = price.allSeries.find(series => series.options.color === '#ffeb3b');
+const blueRails = price.allSeries.filter(series => series.options.color === '#42a5f5');
+assert.equal(blueRails.length, 2);
+assert.deepEqual(blueRails.map(series => series.markers[0].text), ['Support', 'Resistance']);
+for (const [series, source, position] of [
+  [rendered, rail, 'belowBar'], [descending, resistance, 'aboveBar'],
+]) {
+  assert.equal(series.data.length, 2);
+  assert.equal(series.markers.length, 1);
+  assert.equal(series.markers[0].time, source.data[0].time);
+  assert.equal(series.markers[0].position, position);
+  assert.equal(series.markers[0].color, '#42a5f5');
+  assert.equal(series.model.sa()[0].text, source.label);
+  assert.equal(series.model.sa()[0].position, position);
+}
 assert.equal(pattern.options.autoscaleInfoProvider, undefined);
 assert.equal(rendered.data.length, 2); // no extension or intermediate point mutation
 assert.equal(JSON.stringify(payload), originalPayload);
@@ -351,7 +371,7 @@ const nvdaCandles = nvda.bars.map(row => ({
   open: row.o, high: row.h, low: row.l, close: row.c,
 })).filter(row => row.time >= '2026-04-23' && row.time <= '2026-06-29');
 const nvdaRail = {data: [{time: '2026-04-23', value: 197.2206}, {time: '2026-06-29', value: 189.8}],
-  color: '#42a5f5', style: '-', width: 2};
+  color: '#42a5f5', style: '-', width: 2, kind: 'support', label: 'Support'};
 const nvdaValueAt = index => 197.2206 + (189.8 - 197.2206) * index / (nvdaCandles.length - 1);
 const innerNvdaRail = {...nvdaRail, color: '#4fc3f7', data: [
   {time: nvdaCandles[5].time, value: nvdaValueAt(5)},
@@ -371,6 +391,9 @@ flushLayouts();
 const [nvdaPrice, nvdaRsi] = charts.slice(beforeNvda);
 assert.deepEqual(nvdaPrice.times(), nvdaRsi.times());
 const nvdaLine = nvdaPrice.allSeries.find(series => series.options.color === '#42a5f5');
+assert.equal(nvdaLine.markers[0].text, 'Support');
+assert.equal(nvdaLine.markers[0].position, 'belowBar');
+assert.equal(nvdaLine.markers[0].time, nvdaRail.data[0].time);
 assert.equal(nvdaLine.data.length, nvdaCandles.length);
 assert.equal(nvdaLine.data[0], nvdaRail.data[0]);
 assert.equal(nvdaLine.data.at(-1), nvdaRail.data.at(-1));

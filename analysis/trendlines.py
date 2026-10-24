@@ -456,17 +456,15 @@ def detect_trendlines(
         start = max(support["start_index"], resistance["start_index"])
         end = min(support["end_index"], resistance["end_index"])
         overlap = end - start + 1
-        if overlap <= 0:
-            # The two rails describe different regimes; keep the current one.
-            lines = [max(lines, key=lambda line: line["end_index"])]
-        elif overlap < MIN_CHANNEL_OVERLAP:
-            # Both rails are current enough to keep, but they barely overlap;
-            # they are independent lines, not a channel shape.
+        if overlap < MIN_CHANNEL_OVERLAP:
+            # Each rail already passed its own recency and penetration checks.
+            # Keep both even when their anchored spans do not overlap; only
+            # overlapping boundaries can describe a channel together.
             for line in lines:
-                line["channel"] = "short overlap"
+                line["channel"] = "no overlap" if overlap <= 0 else "short overlap"
                 line["close_pair"] = False
                 line["crosses"] = False
-                line["overlap_bars"] = overlap
+                line["overlap_bars"] = max(0, overlap)
         else:
             gaps = [
                 _line_at(resistance, i) - _line_at(support, i)

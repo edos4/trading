@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
 from pathlib import Path
+from math import sin
 
 import pandas as pd
 import pytest
@@ -139,6 +140,36 @@ def _interactive_chart():
         setattr(chart, method, Mock())
     chart._redraw()
     return chart, rail
+
+
+def test_desktop_names_both_fitted_rails_on_their_own_side():
+    from analysis.chart_renderer import build_trade_viewer_payload
+
+    close = [100. + i * .25 + sin(i / 2) * 3 for i in range(100)]
+    df = pd.DataFrame({
+        "open": [price - .4 for price in close],
+        "high": [price + .6 for price in close],
+        "low": [price - .6 for price in close],
+        "close": close, "volume": 1000.,
+    }, index=pd.bdate_range("2024-01-02", periods=len(close)))
+    payload = build_trade_viewer_payload(df, symbol="TEST", trendlines=True)
+    assert {rail["kind"] for rail in payload["trendlines"]} == {"support", "resistance"}
+    chart, _ = _interactive_chart()
+    chart._payload, chart._candles = payload, payload["candles"]
+    chart._start, chart._visible = 0, len(chart._candles)
+    chart._pattern_label = Mock()
+
+    chart._redraw()
+
+    calls = {call.args[2]: call for call in chart._pattern_label.call_args_list}
+    assert set(calls) == {"Support", "Resistance"}
+    for rail, points in chart._visible_pattern_segments(chart._candles):
+        assert rail["label"] == rail["kind"].title()
+        a, b = points[0], points[-1]
+        expected_x = chart._x_for((a[0] + b[0]) / 2)
+        expected_y = chart._y_price((a[1] + b[1]) / 2)
+        expected_y += 16 if rail["kind"] == "support" else -16
+        assert calls[rail["label"]].args[:2] == pytest.approx((expected_x, expected_y))
 
 
 @pytest.mark.parametrize("fraction,factor", [(.25, .5), (.5, .5), (.75, .5), (.5, 1.25)])
