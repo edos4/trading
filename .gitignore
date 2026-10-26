@@ -15,8 +15,13 @@ logs/update-db.lock
 logs/paper_signals_*.jsonl
 logs/stocks_history_updated.txt
 logs/stocks_history_updated.txt.tmp
+logs/hourly-bars.lock
+logs/hourly_bars_updated.txt
+logs/hourly_bars_updated.txt.tmp
 .env
 patterns_detected.md
+docs/hourly_bars_progress.md
+data/trading_bot.db
 # offline research bar-cache snapshots (rebuild with scripts/build_barcache.py)
 data/barcache/
 data/barcache_flag/
