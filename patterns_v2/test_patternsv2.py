@@ -54,6 +54,7 @@ def test_adapts_breakout_into_trade_signal():
     assert len(hits) == 1
     sig = hits[0]
     assert sig.pattern == "double_bottom"
+    assert sig.signal_bar_idx == 50
     assert sig.action == "BUY"
     assert sig.price == float(df["close"].iloc[50])
     assert sig.stop_loss == 120.0

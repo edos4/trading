@@ -158,6 +158,14 @@ class ExplorerService:
                 )
             cheap: list[TradeSignal] = []
             for sig in raw:
+                if not indicators_only:
+                    from analysis.pattern_dii import describe_pattern_dii_rejection
+
+                    # Explorer includes recent historical detections: use that bar's prefix.
+                    end = sig.signal_bar_idx
+                    prefix = df if end is None else df.iloc[:end + 1]
+                    if describe_pattern_dii_rejection(prefix) is not None:
+                        continue
                 if not passes_min_confidence(sig):
                     continue
                 if not passes_regime_filter(sig, self._store):

@@ -128,6 +128,29 @@ Follow-up verification: `indicators/test_indicators.py` plus
 discovery, BUY/SELL transitions, no repeat entries, protective trailing bands,
 balanced/invalid/short history, and existing indicator scan regressions.
 
+**Mandatory pattern scan gate — follow-up requirement**
+
+Patterns and Patternsv2 entry candidates now require **45 <= bulls <= 55**
+(inclusive), with the same default DII calculation (10, 70) and the candidate's
+timeframe. Missing history (fewer than 80 candles), invalid dependent windows,
+and zero-total percentages fail closed. The specified numeric interval is
+applied directly; it is not replaced with an alternative trend threshold.
+
+`analysis/pattern_dii.py` shares the gate between `MarketScanner` and Explorer.
+The scanner applies it before other entry checks and collect-first ranking,
+including detections returned by spawn workers; rejections carry the DII reason
+in the signal log and increment `dii_rejected`. Pattern-only and saved shadow
+filters do not disable this mandatory gate. Explorer records each detection's
+bar index and evaluates only its candle prefix, so later chart candles cannot
+change that historical eligibility. Standalone indicators and saved-rule
+strategies are excluded; position management and exits retain their own rules.
+This requirement supersedes the earlier optional-only pattern-filter scope.
+
+Verification: **76 passed** across the new numerical gate, scanner and Explorer
+tests plus existing scanner startup/filter, Patternsv2 and indicator regressions.
+Boundary checks include 45 and 55 (accepted), just outside either boundary,
+missing history, invalid values, zero events, and causal Explorer evaluation.
+
 **How to use it**
 
 Start with a daily, long-side context rule such as `bulls > bears` (equivalently `bulls > 50` when the total is positive). An optional stronger candidate is `bulls >= 60`. These are evaluation examples, not thresholds supplied by BigBeluga or established profitable settings. A balanced flat series produces 50/50 because ties count, so strict dominance excludes that case. Strong relative dominance can still arise from very few events; it is not independently a measure of trend strength or liquidity.
@@ -336,7 +359,7 @@ Paper open/closed rows and Replay open/closed rows are all required. Paper signa
 
 Display three areas: the existing price/volume chart with DII upper/lower overlays, the existing RSI pane when present, and the new DII count pane. Retain readable heights, with scrolling or a larger modal if needed on smaller screens. With insufficient history for a full 80-candle calculation window, keep the chart open and show an explicit warmup/unavailable state in the DII area. Other chart content remains usable; individual unavailable readings create gaps. The follow-up visual update adds orange/blue gradient fill between the count lines, latest-bar percentage labels, and `+1` price labels over the displayed trailing calculation period. DII grid lines and dotted last-price guides are hidden, and the count pane is taller. The count pane, percentages, and price overlays remain required.
 
-The initial implementation requires no new dependency, `.env` setting, Pine interpreter, remote-study request, database migration, or broker integration. The follow-up standalone detector uses existing `BaseIndicator` discovery. It adds no global regime gate, optimization framework, smoothing, or volume weighting. The standalone policy uses `lower`/`upper` as protective trailing bands. Other extensions would change the product beyond the calculation and explicitly documented standalone policy.
+The initial implementation requires no new dependency, `.env` setting, Pine interpreter, remote-study request, database migration, or broker integration. The follow-up standalone detector uses existing `BaseIndicator` discovery. The later mandatory pattern-scan DII gate is described above. No optimization framework, smoothing, or volume weighting is added. The standalone policy uses `lower`/`upper` as protective trailing bands. Other extensions would change the product beyond the calculation and explicitly documented standalone policy.
 
 **Attribution and permitted use**
 

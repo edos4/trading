@@ -258,6 +258,7 @@ def _to_signal(df: pd.DataFrame, raw: dict, *, symbol: str, timeframe: str, late
         notes=notes,
         chart_annotations=_annotations(df, raw, idx, entry, stop, target),
         provenance="patternsv2",
+        signal_bar_idx=idx,
     )
 
 
