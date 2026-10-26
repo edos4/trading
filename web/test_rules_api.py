@@ -143,6 +143,44 @@ class WebRulesApiTests(unittest.TestCase):
         self.assertIn("own filter", response.text)
         start.assert_not_called()
 
+    def test_dii_catalog_and_validation_without_storage(self):
+        response = self.client.get("/api/rules/catalog")
+        self.assertEqual(response.status_code, 200)
+        entries = [item for item in response.json()["indicators"] if item["id"] == "directional_imbalance_index"]
+        self.assertEqual(len(entries), 1)
+        entry = entries[0]
+        self.assertEqual(entry["outputs"], ["bulls", "bears", "up", "down", "upper", "lower"])
+        self.assertEqual([(p["name"], p["default"], p["min"], p["max"]) for p in entry["params"]],
+                         [("length", 10, 1, 250), ("period", 70, 1, 250)])
+        body = payload("DII bullish context")
+        left = body["root"]["children"][0]["left"]
+        left.update(id="directional_imbalance_index", params={"length": 10, "period": 70}, field="bulls")
+        body["root"]["children"][0]["right"]["value"] = 50
+        self.assertEqual(self.client.post("/api/rules/validate", json=body).status_code, 200)
+        left["field"] = "bad"
+        self.assertEqual(self.client.post("/api/rules/validate", json=body).status_code, 400)
+        left["field"] = "bulls"
+        left["params"]["period"] = 251
+        self.assertEqual(self.client.post("/api/rules/validate", json=body).status_code, 400)
+
+    @needs_db
+    def test_dii_save_load_preview(self):
+        body = payload("DII context")
+        body["root"]["children"][0]["left"].update(id="directional_imbalance_index", field="bulls")
+        body["root"]["children"][0]["right"]["value"] = 50
+        saved = self.client.post("/api/rules", json={"name": body["name"], "payload": body})
+        self.assertEqual(saved.status_code, 201, saved.text)
+        rule_id = saved.json()["id"]
+        loaded = self.client.get(f"/api/rules/{rule_id}")
+        self.assertEqual(loaded.status_code, 200, loaded.text)
+        with patch("core.rule_backtest.load_candles", return_value=candles()):
+            preview = self.client.post("/api/rules/preview", json={"rule_id": rule_id, "symbol": "TEST", "bars": 5})
+        self.assertEqual(preview.status_code, 200, preview.text)
+        from analysis.rule_catalog import compute
+        import pandas as pd
+        expected = compute("directional_imbalance_index", pd.DataFrame([dict(open=c.open, high=c.high, low=c.low, close=c.close, volume=c.volume) for c in candles()]), {})["bulls"].iloc[-1]
+        self.assertEqual(preview.json()["bars"][-1]["conditions"][0]["left"], expected)
+
     # ── storage-backed ─────────────────────────────────────────────────────
     @needs_db
     def test_catalog_and_crud(self) -> None:

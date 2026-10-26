@@ -344,3 +344,41 @@ def test_desktop_pattern_segment_interpolates_when_panned():
     chart._draw_pattern_segments(chart._candles[3:7])
     args = chart._canvas.create_line.call_args.args
     assert args == (50, 70, 350, 40)
+
+
+@pytest.mark.parametrize('timeframe,freq', [('1d', 'B'), ('1W', 'W-FRI')])
+def test_dii_precrop_alignment_and_future_causality(timeframe, freq):
+    from analysis.indicator_engine import IndicatorEngine
+    idx = pd.date_range('2018-01-01', periods=400, freq=freq)
+    values = np.arange(400.) + 100
+    df = pd.DataFrame(dict(open=values, high=values+1, low=values-1, close=values, volume=100), index=idx)
+    df.loc[idx[250], 'high'] = np.inf
+    original = df.copy()
+    payload = build_trade_viewer_payload(df, symbol='TEST', timeframe=timeframe)
+    direct = IndicatorEngine(df).directional_imbalance_index()
+    assert payload['dii']['length'] == 10 and payload['dii']['period'] == 70
+    for field, series in direct.items():
+        points = payload['dii'][field]
+        assert [row['time'] for row in points] == [row['time'] for row in payload['candles']]
+        for point in points:
+            expected = series.iloc[idx.get_loc(pd.Timestamp(point['time']))]
+            if np.isfinite(expected): assert point['value'] == expected
+            else: assert 'value' not in point
+    assert 'value' in payload['dii']['bulls'][0]  # warmup precedes visible crop
+    prefix = build_trade_viewer_payload(df.iloc[:350], symbol='TEST', timeframe=timeframe)
+    for field in direct:
+        full = {row['time']: row for row in payload['dii'][field]}
+        assert all(row == full[row['time']] for row in prefix['dii'][field] if row['time'] in full)
+    import json
+    json.dumps(payload, allow_nan=False)
+    pd.testing.assert_frame_equal(df, original)
+
+
+def test_dii_session_dedup_prefers_valid_reprint():
+    idx = pd.bdate_range('2024-01-01', periods=120)
+    df = pd.DataFrame(dict(open=10., high=11., low=9., close=10., volume=100), index=idx)
+    bad = df.iloc[[50]].copy()
+    bad.index += pd.Timedelta(hours=4)
+    bad['high'] = np.nan
+    actual = build_trade_viewer_payload(pd.concat([df, bad]), symbol='TEST')
+    assert actual['dii'] == build_trade_viewer_payload(df, symbol='TEST')['dii']

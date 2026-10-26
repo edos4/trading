@@ -279,6 +279,29 @@ class WebPaperApiTests(unittest.TestCase):
             self.assertEqual(r.status_code, 200)
             self.assertEqual(chart.call_args.kwargs["log_time"], "2024-01-02T00:00:00+00:00")
 
+    def test_pattern_open_and_closed_chart_routes_carry_dii(self):
+        self._login()
+        import pandas as pd
+        from core.paper_books import PaperBook
+        from core.test_paper_books import _open_trade
+        history = pd.DataFrame(dict(open=100., high=101., low=99., close=100., volume=1000),
+                               index=pd.bdate_range("2025-01-01", periods=300))
+        with patch("core.paper_books.PaperAccount.save"), \
+             patch("data.history.owns_local_stocks_history", return_value=False), \
+             patch("data.history.load_daily_ohlcv_df", return_value=history):
+            book = PaperBook("us")
+            trade = _open_trade("TEST", 100.)
+            book.account.positions["TEST"] = [trade]
+            book.account.closed = [trade]
+            def chart(market, **kwargs):
+                return book.render_trade_chart(**kwargs)
+            with patch("web.app.paper_books.chart", side_effect=chart):
+                for side in ("open", "closed"):
+                    response = self.client.get("/api/paper/chart", params={
+                        "market": "us", "side": side, "symbol": "TEST", "index": 0})
+                    self.assertEqual(response.status_code, 200, response.text)
+                    self.assertEqual(response.json()["dii"]["bulls"][-1]["value"], 50)
+
     def test_replay_chart_bad_market(self) -> None:
         self._login()
         r = self.client.post(

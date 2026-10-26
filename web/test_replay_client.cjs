@@ -24,8 +24,8 @@ const corrections = [{id:'drawn',kind:'pattern',label:'correct trough',points:[
   {time:'2024-01-02',value:10,pane:'price'}, {time:'2024-01-08',value:9.5,pane:'price'}]}];
 const drawMounts = [];
 const requests = [], lines = [];
-const series = () => ({setData(data){this.data=data;}, applyOptions(){}, priceScale(){return {applyOptions(){}};}, createPriceLine(){}, setMarkers(markers){this.markers=markers;}});
-const chart = {addCandlestickSeries:series, addHistogramSeries:series, addLineSeries(options){const s=series();s.options=options;lines.push(s);return s;}, subscribeCrosshairMove(){},
+const series = () => ({attachPrimitive(){}, detachPrimitive(){}, setData(data){this.data=data;}, applyOptions(){}, priceScale(){return {applyOptions(){}};}, createPriceLine(){}, setMarkers(markers){this.markers=markers;}});
+const chart = {addCandlestickSeries:series, addHistogramSeries:series, addLineSeries(options){const s=series();s.options=options;lines.push(s);return s;}, subscribeCrosshairMove(){}, unsubscribeCrosshairMove(){},
   priceScale(){return {width:()=>40,options:()=>({minimumWidth:40})};},
   paneSize(){return {width:800,height:460};},
   timeScale(){return {fitContent(){}, subscribeVisibleLogicalRangeChange(){}, unsubscribeVisibleLogicalRangeChange(){}, setVisibleLogicalRange(){}, getVisibleLogicalRange:()=>null, subscribeSizeChange(){}, unsubscribeSizeChange(){}};}, remove(){}};
@@ -165,6 +165,18 @@ vm.runInContext(fs.readFileSync('web/static/app.js','utf8'),context);
   assert.equal(drawMounts.at(-1).readOnly,true);
   assert.deepEqual(Array.from(drawMounts.at(-1).times),data.candles.map(row=>row.time));
   assert.deepEqual(JSON.parse(JSON.stringify(drawMounts.at(-1).shapes)),[]);
+  window.TVChart.unmount();
+  const dii = {length:10, period:70};
+  for (const field of ['up','down','bulls','bears','upper','lower']) {
+    dii[field] = data.candles.map((bar, index) => index === 0 ? {time:bar.time} :
+      {time:bar.time, value:{up:21,down:14,bulls:60,bears:40,upper:12,lower:8}[field]});
+  }
+  window.TVChart.mount(get('replay-chart-host'), {...data, dii}, {readOnly:true});
+  assert.equal(get('replay-chart-host').children.length, 3);
+  assert.match(get('replay-chart-host').children[2].children[0].textContent, /DII \(10, 70\).*last displayed bar.*Bulls 60.0%.*Bears 40.0%/);
+  context.diiReadout = {dii};
+  assert.match(vm.runInContext('fmtRsi(diiReadout, "2024-01-02")', context), /Up — Down — Bulls — Bears —/);
+  assert.match(vm.runInContext('fmtRsi(diiReadout, "2024-01-04")', context), /Up 21 Down 14 Bulls 60.0% Bears 40.0%/);
   window.TVChart.unmount();
   console.log('Replay upload, reload, open/closed double-click, and pattern line rendering passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});

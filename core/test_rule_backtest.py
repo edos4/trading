@@ -82,3 +82,23 @@ def test_bad_rule_requires_history(wired, monkeypatch) -> None:
     })
     with pytest.raises(ValueError):
         wired.preview_rule(slow, "TEST", bars=10)
+
+
+def test_dii_daily_transition_fills_next_open():
+    import pandas as pd
+    from analysis.rule_engine import evaluate_series
+    from analysis.rule_catalog import compute
+    raw = payload().model_dump(mode='json')
+    raw['root']['children'][0]['left'] = {'source': 'indicator', 'id': 'directional_imbalance_index', 'field': 'bulls'}
+    raw['root']['children'][0]['right'] = {'source': 'value', 'value': 50}
+    rule = RulePayload.model_validate(raw)
+    close = np.concatenate([np.full(100, 100.), np.arange(101., 131.)])
+    df = pd.DataFrame(dict(open=close-.2, high=close+1, low=close-1, close=close, volume=1e6))
+    dates = pd.bdate_range('2024-01-01', periods=len(df)).strftime('%Y-%m-%d').tolist()
+    state = evaluate_series(rule, df)
+    signal = state[state & ~state.shift(1, fill_value=False)].index[0]
+    trades = rule_backtest._replay('TEST', df, dates, rule, notional=1000, txn_cost=0, slippage=0, start_date=None, end_date=None)
+    assert trades[0]['entry_date'] == dates[signal+1]
+    assert trades[0]['entry'] == df.open.iloc[signal+1]
+    assert trades[0]['entry_date'] != dates[signal]
+    assert compute('directional_imbalance_index', df.iloc[:signal+1], {})['bulls'].iloc[-1] > 50

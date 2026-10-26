@@ -260,7 +260,7 @@ class ChartRenderer:
             "bars": bars,
         }
 
-    def _prepare_df(self, df: pd.DataFrame, timeframe: str = "1d") -> pd.DataFrame:
+    def _prepare_df(self, df: pd.DataFrame, timeframe: str = "1d", *, preserve_invalid: bool = False) -> pd.DataFrame:
         """
         mplfinance expects Title-case columns and a DatetimeIndex.
         Synthesizes business-day dates when the store has no timestamps.
@@ -296,7 +296,12 @@ class ChartRenderer:
         prices = ["Open", "High", "Low", "Close"]
         out[prices] = out[prices].apply(pd.to_numeric, errors="coerce")
         valid = np.isfinite(out[prices].to_numpy(dtype=float, na_value=np.nan)).all(axis=1)
-        out = out.loc[valid].copy()
+        if preserve_invalid:
+            # Prefer a valid reprint; retain an invalid row only for sessions with no valid candle.
+            valid_dates = out.index[valid]
+            out = out.loc[valid | ~out.index.isin(valid_dates)].copy()
+        else:
+            out = out.loc[valid].copy()
         # An incomplete later reprint must not erase a valid session candle.
         out = out.loc[~out.index.duplicated(keep="last")].copy()
         out["Volume"] = pd.to_numeric(out["Volume"], errors="coerce").replace(
@@ -890,6 +895,12 @@ def build_trade_viewer_payload(
 ) -> dict:
     """OHLCV + levels for an interactive TradingView-style viewer (no PNG)."""
     renderer = ChartRenderer(save_to_disk=False, session_tz=session_tz)
+    from analysis.indicator_engine import IndicatorEngine
+
+    calculation_frame = renderer._prepare_df(ohlcv_df, timeframe, preserve_invalid=True)
+    dii_values = IndicatorEngine(calculation_frame.rename(columns=str.lower)).directional_imbalance_index()
+    dii_values = {key: pd.Series(value.to_numpy(), index=calculation_frame.index)
+                  for key, value in dii_values.items()}
     df = renderer._prepare_df(ohlcv_df, timeframe)
     annotations = _align_weekly_annotations(annotations or [], df.index, timeframe, session_tz)
     # Recover old ledger geometry only at the entry event, never from a newer setup.
@@ -914,6 +925,7 @@ def build_trade_viewer_payload(
     candles = []
     volume = []
     rsi14 = []
+    dii = {"length": 10, "period": 70, **{key: [] for key in dii_values}}
     valid_positions: list[int] = []
     rsi = _rsi_sma(df["Close"], RSI_PERIOD)
     for position, (idx, row) in enumerate(df.iterrows()):
@@ -927,6 +939,9 @@ def build_trade_viewer_payload(
             continue
         valid_positions.append(position)
         candles.append({"time": t, "open": o, "high": h, "low": low, "close": c})
+        for key, values in dii_values.items():
+            value = _viewer_finite(values.get(idx))
+            dii[key].append({"time": t, **({"value": value} if value is not None else {})})
         up = c >= o
         volume.append({
             "time": t,
@@ -1124,6 +1139,7 @@ def build_trade_viewer_payload(
         "candles": candles,
         "volume": volume,
         "rsi14": rsi14,
+        "dii": dii,
         "levels": levels,
         "markers": markers,
         "segments": segments,

@@ -480,10 +480,12 @@ def test_paper_weekly_chart_aggregates_only_daily_history_fallback() -> None:
 
     # A scanner frame already has the requested frequency and its saved anchor
     # dates. It must pass through without reaggregation or relabeling.
-    scanner.ohlcv_frame.return_value = weekly
+    warm_weekly = pd.DataFrame({col: weekly[col].iloc[-1] for col in weekly},
+                               index=pd.date_range("2023-01-06", periods=80, freq="W-FRI"))
+    scanner.ohlcv_frame.return_value = warm_weekly
     with patch("data.history.owns_local_stocks_history", return_value=True), \
          patch("data.history.load_daily_ohlcv_df") as load:
-        assert _chart_history_frame(scanner, "TEST", "1W", market="us") is weekly
+        assert _chart_history_frame(scanner, "TEST", "1W", market="us") is scanner.ohlcv_frame.return_value
     load.assert_not_called()
 
 
@@ -710,3 +712,35 @@ def test_same_day_start_does_not_rewind() -> None:
     acct._sim_now = datetime(2026, 10, 7, 13, 30, tzinfo=timezone.utc)
     start, rewind = resolve_stream_start(acct, "2026-10-07", "us")
     assert (start, rewind) == ("2026-10-07", False)
+
+
+
+def test_short_scanner_chart_uses_history_for_dii_and_falls_back():
+    from core.paper_books import _chart_history_frame
+    history = pd.DataFrame(dict(open=100., high=101., low=99., close=100., volume=1000),
+                           index=pd.bdate_range("2024-01-01", periods=120))
+    scanner = Mock()
+    scanner.ohlcv_frame.return_value = history.iloc[-20:]
+    with patch("data.history.owns_local_stocks_history", return_value=True), \
+         patch("data.history.load_daily_ohlcv_df", return_value=history):
+        assert len(_chart_history_frame(scanner, "TEST", "1d", market="us")) == 120
+    with patch("data.history.owns_local_stocks_history", return_value=True), \
+         patch("data.history.load_daily_ohlcv_df", side_effect=ConnectionError):
+        assert len(_chart_history_frame(scanner, "TEST", "1d", market="us")) == 20
+
+
+def test_pattern_paper_open_and_closed_charts_include_dii():
+    history = pd.DataFrame(dict(open=100., high=101., low=99., close=100., volume=1000),
+                           index=pd.bdate_range("2025-01-01", periods=300))
+    with patch("core.paper_books.PaperAccount.save"), \
+         patch("data.history.owns_local_stocks_history", return_value=False), \
+         patch("data.history.load_daily_ohlcv_df", return_value=history):
+        book = PaperBook("us")
+        trade = _open_trade("TEST", 100.)
+        book.account.positions["TEST"] = [trade]
+        book.account.closed = [trade]
+        for side in ("open", "closed"):
+            result = book.render_trade_chart(side=side, symbol="TEST", index=0)
+            assert "error" not in result
+            assert result["dii"]["bulls"][-1]["value"] == 50
+            assert result["dii"]["up"][-1]["value"] == 70

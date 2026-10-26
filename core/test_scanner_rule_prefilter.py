@@ -113,3 +113,34 @@ def test_pattern_target_filter() -> None:
     assert scanner._rule_filter_matches_pattern("flag") is False
     scanner._rule_filter_pattern = "all"
     assert scanner._rule_filter_matches_pattern("flag") is True
+
+
+@pytest.mark.parametrize('mode,n', [('shadow', 120), ('filter', 120), ('filter', 30)])
+def test_dii_real_after_signal_gate(monkeypatch, mode, n):
+    import asyncio
+    from unittest.mock import Mock
+    from patterns.base_pattern import TradeSignal
+    scanner = _scanner(patterns_v2=True)
+    raw = _rule().model_dump(mode='json')
+    raw['root']['children'][0]['left'] = {'source': 'indicator', 'id': 'directional_imbalance_index', 'field': 'bulls'}
+    raw['root']['children'][0]['right']['value'] = 50
+    scanner._rule_filter = RulePayload.model_validate(raw)
+    scanner._rule_filter_mode = mode
+    scanner._rule_filter_position = 'after'
+    scanner._store.replace_all('TEST', '1d', _candles(100., n))
+    scanner._paper = None
+    scanner._append_signal_log = Mock()
+    monkeypatch.setattr('core.scanner.settings.vision_confirmation_enabled', False)
+    signal = TradeSignal(symbol='TEST', action='BUY', pattern='double_bottom', timeframe='1d', confidence=1, price=100, qty=1, stop_loss=95, take_profit=110)
+    asyncio.run(scanner._finish_signal(signal))
+    status = scanner._append_signal_log.call_args.kwargs['status']
+    if mode == 'shadow':
+        assert status == 'accepted'
+        assert signal.rule_evidence['matched'] is False
+        assert signal.rule_evidence['conditions'][0]['left'] == 50
+        assert scanner.stats['rule_filter_shadow'] == 1
+    else:
+        assert status == 'rejected'
+        assert scanner.stats['rule_filter_rejected'] == 1
+        assert scanner._rule_filter_evidence('TEST', '1d')['matched'] is False
+        if n < 80: assert not scanner._rule_filter_evidence('TEST', '1d')['warm']

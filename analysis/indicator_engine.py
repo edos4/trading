@@ -50,6 +50,28 @@ class IndicatorEngine:
         _ENGINE_CACHE[key] = eng
         return eng
 
+    def directional_imbalance_index(self, length: int = 10, period: int = 70) -> dict[str, pd.Series]:
+        """Python translation of Directional Imbalance Index, © BigBeluga.
+
+        Original: https://www.tradingview.com/script/WSvRZ0j0-Directional-Imbalance-Index-BigBeluga/
+        CC BY-NC-SA 4.0: https://creativecommons.org/licenses/by-nc-sa/4.0/
+        Uses stricter full-window startup and paired missing-data invalidation.
+        Bulls/bears are percentages, up/down event counts, upper/lower prices.
+        """
+        for name, value in (("length", length), ("period", period)):
+            if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)) or value < 1:
+                raise ValueError(f"{name} must be a positive integer")
+        high = pd.to_numeric(self.high, errors="coerce").astype(float).replace([np.inf, -np.inf], np.nan)
+        low = pd.to_numeric(self.low, errors="coerce").astype(float).replace([np.inf, -np.inf], np.nan)
+        upper = high.rolling(length + 1, min_periods=length + 1).max()
+        lower = low.rolling(length + 1, min_periods=length + 1).min()
+        valid = high.notna() & low.notna() & upper.notna() & lower.notna()
+        up = high.eq(upper).astype(float).where(valid).rolling(period, min_periods=period).sum()
+        down = low.eq(lower).astype(float).where(valid).rolling(period, min_periods=period).sum()
+        total = (up + down).replace(0, np.nan)
+        return {"bulls": 100 * up / total, "bears": 100 * down / total,
+                "up": up, "down": down, "upper": upper, "lower": lower}
+
     # ── Moving averages ────────────────────────────────────────────────────────
     def sma(self, period: int) -> pd.Series:
         return self.close.rolling(window=period).mean()

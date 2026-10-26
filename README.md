@@ -422,6 +422,33 @@ uses them two ways:
    "context before the pattern" layer — e.g. require `ADX(14) >= 20` so
    sideways breakouts are rejected.
 
+**Directional Imbalance Index [BigBeluga]** is available under Trend with
+`length=10`, `period=70`. Outputs are `bulls`/`bears` (0–100%), `up`/`down`
+(event counts, 0–period), and `upper`/`lower` (prices). The extrema include the
+current bar and the preceding `length` bars; equal extrema count again.
+Calculation needs 80 candles at defaults; an unshifted Builder rule requests
+82 under the existing history policy. Missing inputs and zero-total percentages
+remain unavailable and cannot pass percentage comparisons. Large parameters or
+offsets can exceed available history; windows are never shortened.
+
+For daily context, try `bulls > bears` or `bulls > 50`, first as an **After /
+Shadow** filter scoped to the intended pattern. These are evaluation examples,
+not established profitable thresholds. Saving a rule does not activate it.
+Paper and Replay trade-row charts always show the default DII count pane,
+orange/blue dominance shading, end-of-line percentages, `+1` extreme-event
+labels and price bands, including ordinary pattern trades. The displayed
+settings are independent of saved rule settings; hover reports the cursor bar,
+and the resting readout is the last displayed bar. Short history shows warmup /
+unavailable. Weekly charts work; weekly rule preview/backtest still loads daily
+history and must not be interpreted as weekly evaluation. Other replay execution
+limitations and the complete example payload are in
+[the implementation notes](docs/indicators/directional_imbalance_index.md).
+
+Python translation of [**© BigBeluga’s original indicator**](https://www.tradingview.com/script/WSvRZ0j0-Directional-Imbalance-Index-BigBeluga/), licensed
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/), with stricter
+full-window startup and missing-data handling. Commercial permission has not
+been established. No TradingView export was supplied for external parity checks.
+
 **How the editor works.** A rule is a tree of groups ("blocks"). Each block has
 one connector (`AND` / `OR`) and holds conditions; `+ Group` nests another level
 (up to four). A condition compares an indicator output to a number or another
