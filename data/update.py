@@ -146,6 +146,9 @@ def run_update(
     try:
         db.ensure_schema(conn)
         symbols = db.all_symbols(conn)
+        # Release the read transaction before the network pass: an open SELECT
+        # holds ACCESS SHARE on symbols and blocks schema changes in other runs.
+        conn.commit()
         if not symbols:
             log.error("update | database is empty — no symbols in stocks_history")
             return
