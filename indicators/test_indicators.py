@@ -58,6 +58,7 @@ def test_discover_lists_the_ported_indicators():
         "indicator_supertrend_ai",
         "indicator_dema_supertrend",
         "indicator_pivot_points",
+        "indicator_directional_imbalance_index",
     }
 
 
@@ -368,3 +369,50 @@ def test_explorer_template_has_indicators_only_checkbox():
     assert "Indicators only" in html
     assert "indicators_only" in script
     assert 'text="Indicators only"' in desktop
+
+
+@pytest.mark.parametrize("direction", [1, -1])
+def test_dii_dominance_transition_and_trailing(direction):
+    from indicators.directional_imbalance_index import DirectionalImbalanceIndexIndicator
+    detector = DirectionalImbalanceIndexIndicator()
+    close = np.concatenate([np.full(100, 100.), 100 + direction * np.arange(1., 31.)])
+    high, low = close + 1, close - 1
+    signals = []
+    for end in range(detector.MIN_BARS, len(close)+1):
+        store, snap = _store(close[:end], high[:end], low[:end], close[:end])
+        signal = detector.analyze(snap, store)
+        if signal is not None:
+            signals.append((end, signal))
+    assert len(signals) == 1
+    end, signal = signals[0]
+    assert end == 101
+    assert signal.action == ("BUY" if direction > 0 else "SELL")
+    assert signal.pattern == detector.name
+    assert signal.take_profit is None and signal.stop_loss_on_close
+    store, _ = _store(close[:end], high[:end], low[:end], close[:end])
+    df = store.get_df("TEST", "1d", min_bars=2)
+    action, stop = detector.trail(df)
+    assert action == signal.action and stop == signal.stop_loss
+    assert stop < signal.price if direction > 0 else stop > signal.price
+    assert "bulls" in signal.notes and "bears" in signal.notes
+    assert detector.trail(df.iloc[:100]) is None  # balanced
+    assert detector.trail(df.iloc[:40]) is None
+    invalid = df.copy()
+    invalid.loc[invalid.index[-1], "high"] = np.nan
+    assert detector.trail(invalid) is None
+    class Store:
+        def get_df(self, *args, **kwargs): return invalid
+    assert detector.analyze(snap, Store()) is None
+
+
+def test_dii_unavailable_and_first_warm_reading_never_emit():
+    from indicators.directional_imbalance_index import DirectionalImbalanceIndexIndicator
+    detector = DirectionalImbalanceIndexIndicator()
+    for n in (0, 40, 80, 82):
+        close = np.arange(n, dtype=float) + 100
+        class Store:
+            def get_df(self, *args, **kwargs):
+                return pd.DataFrame(dict(open=close, high=close+1, low=close-1, close=close, volume=1000))
+        from types import SimpleNamespace
+        assert detector.analyze(SimpleNamespace(symbol="TEST", timeframe="1d"), Store()) is None
+    assert detector.timeframes == ["1d", "1W"]

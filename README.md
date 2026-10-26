@@ -431,6 +431,17 @@ Calculation needs 80 candles at defaults; an unshifted Builder rule requests
 remain unavailable and cannot pass percentage comparisons. Large parameters or
 offsets can exceed available history; windows are never shortened.
 
+DII is also a standalone, automatically discovered indicator named
+`indicator_directional_imbalance_index` in **Indicators-only** scans, on daily
+and weekly bars. Its local trading policy enters BUY when bulls cross above
+50%, or SELL when bears cross above 50%, using defaults (10, 70) and at least
+82 candles. It trails the lower band for BUY or upper band for SELL, with no
+fixed target, and exits when dominance is lost, balanced, or unavailable.
+These trading decisions are bot additions, not rules from BigBeluga's Pine
+script. Existing market restrictions and entry/risk checks still apply.
+Adding it to discovery means Indicators-only scans can now emit DII signals;
+no saved Builder rule is required.
+
 For daily context, try `bulls > bears` or `bulls > 50`, first as an **After /
 Shadow** filter scoped to the intended pattern. These are evaluation examples,
 not established profitable thresholds. Saving a rule does not activate it.
