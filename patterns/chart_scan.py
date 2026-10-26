@@ -86,6 +86,8 @@ def latest_signals_over_lookback(
                 continue
             if sig is None:
                 continue
+            sig.signal_bar_idx = i
+            sig.signal_bar_timestamp = candle.timestamp
             found = sig
             age = n - 1 - i
 

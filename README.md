@@ -422,6 +422,16 @@ uses them two ways:
    "context before the pattern" layer — e.g. require `ADX(14) >= 20` so
    sideways breakouts are rejected.
 
+**Mandatory DII gate for Patterns and Patternsv2.** Detected pattern entries
+must satisfy **45% <= bullish percentage <= 55%**, inclusive, using DII defaults
+(10, 70) on the scanned timeframe. Outside-range or unavailable readings
+(including fewer than 80 candles) skip the entry. Paper scanner rejections are
+recorded with the DII reason and `dii_rejected` count, before other entry checks
+and collect-first ranking. Pattern-only mode and optional shadow rules do not
+bypass this gate. Explorer applies it to the detected bar's historical prefix.
+Indicators-only scans, including standalone DII and saved-rule strategies,
+keep their own entry policy. Existing position exits are unchanged.
+
 **Directional Imbalance Index [BigBeluga]** is available under Trend with
 `length=10`, `period=70`. Outputs are `bulls`/`bears` (0–100%), `up`/`down`
 (event counts, 0–period), and `upper`/`lower` (prices). The extrema include the

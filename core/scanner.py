@@ -295,6 +295,7 @@ class MarketScanner:
             "patterns_found": 0,
             "signals_rejected": 0,
             "volume_gate_rejected": 0,
+            "dii_rejected": 0,
             "collect_first_ranked": 0,
             "collect_first_selected": 0,
             "rule_filter_shadow": 0,
@@ -1282,6 +1283,18 @@ class MarketScanner:
                 if self._paper is not None else None
             )
             signal.signal_bar_timestamp = candle.timestamp
+
+        # Mandatory for both pattern scanners, including worker-produced detections.
+        if not self._indicators_only and signal.action in ("BUY", "SELL"):
+            from analysis.pattern_dii import describe_pattern_dii_rejection
+
+            df = self._store.get_df(signal.symbol, signal.timeframe, min_bars=80)
+            dii_reason = describe_pattern_dii_rejection(df)
+            if dii_reason is not None:
+                self.stats["signals_rejected"] += 1
+                self.stats["dii_rejected"] = self.stats.get("dii_rejected", 0) + 1
+                self._append_signal_log(signal, status="rejected", reason=dii_reason)
+                return
 
         reason = signal.blocked_reason or signal.filtered_reason
         if reason:
