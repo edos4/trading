@@ -694,6 +694,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "(by recency). Default: all stale symbols (no cap).",
     )
     parser.add_argument(
+        "--update-hourly",
+        action="store_true",
+        help="Fetch hourly OHLCV bars via Alpaca for all stale US symbols. "
+        "Free Basic plan: 200 req/min, batched and paginated. Unbounded.",
+    )
+    parser.add_argument(
+        "--update-hourly-limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="With --update-hourly, cap the fetch to the top N stale symbols",
+    )
+    parser.add_argument(
         "--ingest-pse",
         action="store_true",
         help="Create local stocks_history if needed and load PSE Edge daily "
@@ -757,6 +770,12 @@ async def main(args: argparse.Namespace | None = None) -> None:
             fetch=not args.update_db_no_fetch,
             fetch_limit=args.update_db_fetch_limit,
         )
+        return
+
+    if args.update_hourly:
+        from data.update_hourly import run_update as run_hourly
+
+        run_hourly(fetch_limit=args.update_hourly_limit)
         return
 
     if args.ingest_pse:

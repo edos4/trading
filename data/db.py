@@ -2,6 +2,7 @@
 data/db.py — PostgreSQL access for the stock-history database.
 
 `--check-db` and `--update-db` keep daily_bars current from Yahoo/PSE.
+`--update-hourly` keeps hourly_bars current from Alpaca.
 The scanner and UIs read via the history facade (API or this Postgres).
 CSV files are not a history source.
 
@@ -12,8 +13,10 @@ empty the discrete `db_*` fields are assembled into one.
 Schema:
   daily_bars(symbol, ts, bar_date, open, high, low, close, volume)
       PK (symbol, ts); bar_date derived from ts in America/New_York.
+  hourly_bars(symbol, ts, bar_date, open, high, low, close, volume)
+      PK (symbol, ts); bar_date derived from ts in America/New_York.
   symbols(symbol, letter, market, source_path, last_bar_ts, row_count,
-      file_mtime, file_size, updated_at)
+      file_mtime, file_size, updated_at, last_hourly_bar_ts)
 
 `ts` (Unix seconds) is the bar identity; `bar_date` is reporting-only.
 source_path / file_mtime / file_size are leftover columns (unused).
@@ -49,16 +52,31 @@ CREATE TABLE IF NOT EXISTS daily_bars (
 
 CREATE INDEX IF NOT EXISTS daily_bars_bar_date_idx ON daily_bars (bar_date);
 
+CREATE TABLE IF NOT EXISTS hourly_bars (
+    symbol   TEXT NOT NULL,
+    ts       BIGINT NOT NULL,
+    bar_date DATE NOT NULL,
+    open     DOUBLE PRECISION NOT NULL,
+    high     DOUBLE PRECISION NOT NULL,
+    low      DOUBLE PRECISION NOT NULL,
+    close    DOUBLE PRECISION NOT NULL,
+    volume   BIGINT NOT NULL,
+    PRIMARY KEY (symbol, ts)
+);
+
+CREATE INDEX IF NOT EXISTS hourly_bars_bar_date_idx ON hourly_bars (bar_date);
+
 CREATE TABLE IF NOT EXISTS symbols (
-    symbol      TEXT PRIMARY KEY,
-    letter      TEXT NOT NULL,
-    market      TEXT NOT NULL DEFAULT 'us',
-    source_path TEXT,
-    last_bar_ts BIGINT,
-    row_count   BIGINT,
-    file_mtime  BIGINT,
-    file_size   BIGINT,
-    updated_at  TIMESTAMPTZ
+    symbol           TEXT PRIMARY KEY,
+    letter           TEXT NOT NULL,
+    market           TEXT NOT NULL DEFAULT 'us',
+    source_path      TEXT,
+    last_bar_ts      BIGINT,
+    row_count        BIGINT,
+    file_mtime       BIGINT,
+    file_size        BIGINT,
+    updated_at       TIMESTAMPTZ,
+    last_hourly_bar_ts BIGINT
 );
 """
 
@@ -109,17 +127,41 @@ ON CONFLICT (symbol, ts) DO UPDATE SET
 
 _SYMBOL_UPSERT_SQL = """
 INSERT INTO symbols (symbol, letter, market, source_path, last_bar_ts,
-                     row_count, file_mtime, file_size, updated_at)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now())
+                     row_count, file_mtime, file_size, updated_at, last_hourly_bar_ts)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now(), %s)
 ON CONFLICT (symbol) DO UPDATE SET
-    letter      = EXCLUDED.letter,
-    market      = EXCLUDED.market,
-    source_path = EXCLUDED.source_path,
-    last_bar_ts = EXCLUDED.last_bar_ts,
-    row_count   = EXCLUDED.row_count,
-    file_mtime  = EXCLUDED.file_mtime,
-    file_size   = EXCLUDED.file_size,
-    updated_at  = now()
+    letter           = EXCLUDED.letter,
+    market           = EXCLUDED.market,
+    source_path      = EXCLUDED.source_path,
+    last_bar_ts      = EXCLUDED.last_bar_ts,
+    row_count        = EXCLUDED.row_count,
+    file_mtime       = EXCLUDED.file_mtime,
+    file_size        = EXCLUDED.file_size,
+    updated_at       = now(),
+    last_hourly_bar_ts = COALESCE(EXCLUDED.last_hourly_bar_ts, symbols.last_hourly_bar_ts)
+"""
+
+# Hourly bars: separate staging to avoid mixing with daily bars.
+_HOURLY_STAGE_SQL = """
+CREATE TEMP TABLE IF NOT EXISTS _stage_hourly (
+    symbol TEXT,
+    ts     BIGINT,
+    open   DOUBLE PRECISION,
+    high   DOUBLE PRECISION,
+    low    DOUBLE PRECISION,
+    close  DOUBLE PRECISION,
+    volume BIGINT
+)
+"""
+
+_HOURLY_STAGE_COPY_SQL = "COPY _stage_hourly (symbol, ts, open, high, low, close, volume) FROM STDIN"
+
+_HOURLY_STAGE_FLUSH_SQL = """
+INSERT INTO hourly_bars (symbol, ts, bar_date, open, high, low, close, volume)
+SELECT symbol, ts, (to_timestamp(ts) AT TIME ZONE %s)::date,
+       open, high, low, close, volume
+FROM _stage_hourly
+ON CONFLICT (symbol, ts) DO NOTHING
 """
 
 
@@ -152,6 +194,19 @@ def ensure_schema(conn=None) -> None:
     try:
         with conn.cursor() as cur:
             cur.execute(_SCHEMA_SQL)
+            # Only ALTER when the column is missing: an unconditional ALTER
+            # takes ACCESS EXCLUSIVE on symbols and queues behind any open
+            # reader (e.g. the daily updater's symbol list), stalling both runs.
+            cur.execute(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_schema = current_schema() "
+                "AND table_name = 'symbols' "
+                "AND column_name = 'last_hourly_bar_ts'"
+            )
+            if cur.fetchone() is None:
+                cur.execute(
+                    "ALTER TABLE symbols ADD COLUMN last_hourly_bar_ts BIGINT"
+                )
         conn.commit()
     finally:
         if own:
@@ -191,14 +246,70 @@ def flush_stage(conn, *, market: str = "us") -> None:
         cur.execute("TRUNCATE _stage")
 
 
+# --- Hourly bar staging (separate from daily) ---
+
+def create_hourly_staging(conn) -> None:
+    with conn.cursor() as cur:
+        cur.execute(_HOURLY_STAGE_SQL)
+
+
+def copy_hourly_bars(conn, symbol: str, rows: Iterable[tuple]) -> None:
+    """Bulk-load hourly bars into _stage_hourly temp table."""
+    with conn.cursor() as cur:
+        with cur.copy(_HOURLY_STAGE_COPY_SQL) as copy:
+            for ts, o, h, l, c, v in rows:
+                copy.write_row((symbol, ts, o, h, l, c, v))
+
+
+def flush_hourly_stage(conn, *, market: str = "us") -> int:
+    """Merge staged hourly bars, keeping rows that already exist.
+
+    Returns the number of newly inserted bars; conflicts are skipped so a
+    provider switch (Polygon → Alpaca) never rewrites existing history.
+    """
+    with conn.cursor() as cur:
+        cur.execute(_HOURLY_STAGE_FLUSH_SQL, (bar_date_tz(market),))
+        inserted = cur.rowcount
+        cur.execute("TRUNCATE _stage_hourly")
+    return inserted
+
+
+def hourly_coverage(conn) -> dict[str, tuple[int, int]]:
+    """symbol -> (first_ts, last_ts) for hourly bars already in the database."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT symbol, min(ts), max(ts) FROM hourly_bars GROUP BY symbol"
+        )
+        return {
+            symbol: (int(first_ts), int(last_ts))
+            for symbol, first_ts, last_ts in cur.fetchall()
+            if first_ts is not None
+        }
+
+
+_LAST_HOURLY_TS_SQL = """
+UPDATE symbols
+SET last_hourly_bar_ts = GREATEST(COALESCE(last_hourly_bar_ts, 0), %s),
+    updated_at = now()
+WHERE symbol = %s
+"""
+
+
+def set_last_hourly_bar_ts(conn, symbol: str, ts: int) -> None:
+    """Advance the hourly resume point without touching daily-bar meta."""
+    with conn.cursor() as cur:
+        cur.execute(_LAST_HOURLY_TS_SQL, (ts, symbol))
+
+
 def upsert_symbol(conn, symbol: str, letter: str, market: str, source_path: str,
                   last_bar_ts: int | None, row_count: int,
-                  file_mtime: int | None, file_size: int | None) -> None:
+                  file_mtime: int | None, file_size: int | None,
+                  last_hourly_bar_ts: int | None = None) -> None:
     with conn.cursor() as cur:
         cur.execute(
             _SYMBOL_UPSERT_SQL,
             (symbol, letter, market, source_path, last_bar_ts, row_count,
-             file_mtime, file_size),
+             file_mtime, file_size, last_hourly_bar_ts),
         )
 
 
@@ -224,7 +335,7 @@ def refresh_symbol_meta(conn, symbol: str) -> None:
 def all_symbols(conn, market: str | None = None) -> list[dict[str, Any]]:
     sql = (
         "SELECT symbol, letter, market, source_path, last_bar_ts, row_count, "
-        "file_mtime, file_size, updated_at FROM symbols"
+        "file_mtime, file_size, updated_at, last_hourly_bar_ts FROM symbols"
     )
     params: list[Any] = []
     if market:
@@ -372,6 +483,59 @@ def load_daily_ohlcv_rows(
         conn.close()
 
 
+def load_hourly_ohlcv_rows(
+    symbol: str,
+    after_ts: int | None = None,
+    limit: int | None = None,
+    *,
+    market: str | None = None,
+) -> list[dict[str, Any]]:
+    """Raw hourly bars for the history API. Empty list if DB/symbol missing."""
+    symbol = _history_symbol(symbol, market)
+    if not symbol:
+        return []
+    try:
+        conn = get_conn()
+    except Exception:
+        return []
+    try:
+        sql = (
+            "SELECT ts, bar_date, open, high, low, close, volume "
+            "FROM hourly_bars WHERE symbol = %s"
+        )
+        params: list[Any] = [symbol]
+        if after_ts is not None:
+            sql += " AND ts > %s"
+            params.append(int(after_ts))
+        if limit is not None:
+            lim = max(1, int(limit))
+            sql += " ORDER BY ts DESC LIMIT %s"
+            params.append(lim)
+            sql = f"SELECT * FROM ({sql}) AS recent ORDER BY ts"
+        else:
+            sql += " ORDER BY ts"
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+        out: list[dict[str, Any]] = []
+        for ts, bar_date, o, h, l, c, v in rows:
+            out.append({
+                "ts": int(ts),
+                "date": bar_date.isoformat() if hasattr(bar_date, "isoformat") else str(bar_date),
+                "open": float(o),
+                "high": float(h),
+                "low": float(l),
+                "close": float(c),
+                "volume": int(v) if v is not None else 0,
+            })
+        return out
+    except Exception:
+        log.exception(f"DB | load_hourly_ohlcv_rows failed for {symbol}")
+        return []
+    finally:
+        conn.close()
+
+
 def load_symbol_meta(symbol: str, *, market: str | None = None) -> dict[str, Any] | None:
     symbol = _history_symbol(symbol, market)
     if not symbol:
@@ -383,7 +547,8 @@ def load_symbol_meta(symbol: str, *, market: str | None = None) -> dict[str, Any
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT symbol, market, last_bar_ts, row_count FROM symbols "
+                "SELECT symbol, market, last_bar_ts, row_count, last_hourly_bar_ts "
+                "FROM symbols "
                 "WHERE symbol = %s",
                 (symbol,),
             )
@@ -395,6 +560,7 @@ def load_symbol_meta(symbol: str, *, market: str | None = None) -> dict[str, Any
             "market": row[1] or "us",
             "last_bar_ts": row[2],
             "row_count": int(row[3] or 0),
+            "last_hourly_bar_ts": row[4],
         }
     except Exception:
         log.exception(f"DB | load_symbol_meta failed for {symbol}")
