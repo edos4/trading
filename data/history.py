@@ -259,6 +259,39 @@ def load_daily_candles(
     return candles or None
 
 
+def load_hourly_bars(
+    symbol: str,
+    *,
+    after_ts: int | None = None,
+    limit: int | None = None,
+    market: str | None = None,
+) -> list[dict[str, Any]] | None:
+    """Hourly bars from Postgres (local_history_backfill_enabled only).
+
+    None on hard failure; [] if empty.
+    """
+    symbol = (symbol or "").upper().strip()
+    if not symbol:
+        return None
+    if not local_history_backfill_enabled():
+        return None
+    from data.db import load_hourly_ohlcv_rows
+
+    return load_hourly_ohlcv_rows(
+        symbol, after_ts=after_ts, limit=limit, market=market,
+    )
+
+
+def load_hourly_candles(
+    symbol: str, *, limit: int | None = None, market: str | None = None,
+) -> list[OHLCVCandle] | None:
+    bars = load_hourly_bars(symbol, limit=limit, market=market)
+    if bars is None:
+        return None
+    candles = bars_to_candles(bars)
+    return candles or None
+
+
 def load_daily_ohlcv_df(
     symbol: str,
     *,

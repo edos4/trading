@@ -181,6 +181,24 @@ class Settings(BaseSettings):
     db_user: str = "r00t"
     db_password: str = ""
 
+    # ── Alpaca (hourly OHLCV bulk fetch) ────────────────────────────────────
+    # Keys from https://app.alpaca.markets/portal/api-keys. The free Basic plan
+    # allows 200 requests/min, SIP history since 2016, and data up to 15 minutes
+    # old. Extended-hours bars are included, matching the rows already loaded.
+    alpaca_api_key: str = ""
+    alpaca_secret_key: str = ""
+    # Paper keys need the paper trading host for the asset list; bar data is
+    # served from the same data host either way.
+    alpaca_paper: bool = True
+    # sip = consolidated tape; iex = that exchange only (thinner volume).
+    alpaca_data_feed: str = "sip"
+    # Requests/min across every worker. Kept under the 200 plan limit as margin.
+    alpaca_requests_per_min: int = 170
+    # Symbols per bars request. A page holds at most 10 000 data points, so
+    # larger batches only change how many pages a batch needs.
+    hourly_fetch_batch_size: int = 25
+    # Concurrent batch workers, each with its own connection + temp staging table.
+    hourly_fetch_workers: int = 8
     # ── Remote stocks_history API (local --ui / --web) ──────────────────────
     # Local --ui/--web auto-use https://33ai.rootlabs.dev when this is empty (charts
     # included; no Yahoo). All OHLCV reads use this API, never local Postgres.
@@ -361,6 +379,21 @@ class Settings(BaseSettings):
     @classmethod
     def _clamp_analyze_workers(cls, value: int) -> int:
         return max(0, min(int(value), 32))
+
+    @field_validator("hourly_fetch_workers")
+    @classmethod
+    def _clamp_hourly_workers(cls, value: int) -> int:
+        return max(1, min(int(value), 32))
+
+    @field_validator("hourly_fetch_batch_size")
+    @classmethod
+    def _clamp_hourly_batch_size(cls, value: int) -> int:
+        return max(1, min(int(value), 200))
+
+    @field_validator("alpaca_requests_per_min")
+    @classmethod
+    def _clamp_alpaca_rpm(cls, value: int) -> int:
+        return max(1, min(int(value), 200))
 
     @field_validator("tv_screener_min_interval_seconds")
     @classmethod
