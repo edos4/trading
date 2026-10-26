@@ -53,7 +53,7 @@ def test_export_replay_roundtrip_and_chart(monkeypatch, tmp_path):
                 })
                 assert response.status_code == 200, response.text
                 payload = response.json()
-                assert payload['dii']['length'] == 10
+                assert payload['dii']['length'] == 20
                 assert [p['time'] for p in payload['dii']['up']] == [p['time'] for p in payload['candles']]
                 assert all('value' not in p for p in payload['dii']['bulls'])
                 assert len(payload['candles']) > 2

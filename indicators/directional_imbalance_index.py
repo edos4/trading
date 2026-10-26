@@ -14,8 +14,8 @@ from indicators._signal import BaseIndicator, emit
 
 
 class DirectionalImbalanceIndexIndicator(BaseIndicator):
-    LENGTH = 10
-    PERIOD = 70
+    LENGTH = 20
+    PERIOD = 40
     MIN_BARS = LENGTH + PERIOD + 2
     trails = True
 

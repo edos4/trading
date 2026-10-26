@@ -151,7 +151,7 @@ class WebRulesApiTests(unittest.TestCase):
         entry = entries[0]
         self.assertEqual(entry["outputs"], ["bulls", "bears", "up", "down", "upper", "lower"])
         self.assertEqual([(p["name"], p["default"], p["min"], p["max"]) for p in entry["params"]],
-                         [("length", 10, 1, 250), ("period", 70, 1, 250)])
+                         [("length", 20, 1, 250), ("period", 40, 1, 250)])
         body = payload("DII bullish context")
         left = body["root"]["children"][0]["left"]
         left.update(id="directional_imbalance_index", params={"length": 10, "period": 70}, field="bulls")
