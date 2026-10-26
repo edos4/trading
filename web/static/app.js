@@ -32,7 +32,13 @@ async function api(url, opts = {}) {
  * the same readout the desktop viewer shows. */
 function fmtRsi(data, time) {
   const row = (data.rsi14 || []).find((r) => r.time === time);
-  return row == null ? "" : `    RSI ${Number(row.value).toFixed(1)}`;
+  const rsi = row == null ? "" : `    RSI ${Number(row.value).toFixed(1)}`;
+  if (!data.dii) return rsi;
+  const value = (field, percent = false) => {
+    const number = (data.dii[field] || []).find(point => point.time === time)?.value;
+    return Number.isFinite(number) ? number.toFixed(percent ? 1 : 0) + (percent ? "%" : "") : "—";
+  };
+  return rsi + `    DII (${data.dii.length}, ${data.dii.period}) Up ${value("up")} Down ${value("down")} Bulls ${value("bulls", true)} Bears ${value("bears", true)}`;
 }
 
 function downloadText(filename, text, mime) {
@@ -1004,7 +1010,8 @@ function initPaper() {
     return (
       `O ${Number(o.open).toFixed(2)}  H ${Number(o.high).toFixed(2)}  ` +
       `L ${Number(o.low).toFixed(2)}  C ${Number(o.close).toFixed(2)}  ` +
-      `${sign}${Number(o.change).toFixed(2)} (${sign}${Number(o.change_pct).toFixed(2)}%)`
+      `${sign}${Number(o.change).toFixed(2)} (${sign}${Number(o.change_pct).toFixed(2)}%)` +
+      (data.dii ? `    Last displayed bar${fmtRsi(data, data.candles?.at(-1)?.time)}` : "")
     );
   }
 
@@ -1625,7 +1632,8 @@ function initReplay() {
     return (
       `O ${Number(o.open).toFixed(2)}  H ${Number(o.high).toFixed(2)}  ` +
       `L ${Number(o.low).toFixed(2)}  C ${Number(o.close).toFixed(2)}  ` +
-      `${sign}${Number(o.change).toFixed(2)} (${sign}${Number(o.change_pct).toFixed(2)}%)`
+      `${sign}${Number(o.change).toFixed(2)} (${sign}${Number(o.change_pct).toFixed(2)}%)` +
+      (data.dii ? `    Last displayed bar${fmtRsi(data, data.candles?.at(-1)?.time)}` : "")
     );
   }
   function closeTradeChart() {

@@ -62,12 +62,20 @@ def _chart_history_frame(scanner, symbol: str, timeframe: str, *, market: str):
     """
     from data.history import load_daily_ohlcv_df, owns_local_stocks_history, resample_chart_frame
 
+    tape = None
     if owns_local_stocks_history() and scanner is not None:
         df = scanner.ohlcv_frame(symbol, timeframe, min_bars=2)
-        if df is not None and len(df) >= 2:
+        if df is not None and len(df) >= 80:
             return df
-    df = load_daily_ohlcv_df(symbol, tv_fallback=False, market=market)
-    return resample_chart_frame(df, timeframe, session_tz=get_market(market).session_tz)
+        tape = df
+    try:
+        df = load_daily_ohlcv_df(symbol, tv_fallback=False, market=market)
+        history = resample_chart_frame(df, timeframe, session_tz=get_market(market).session_tz)
+    except Exception:
+        if tape is None or len(tape) < 2:
+            raise
+        return tape
+    return history if tape is None or (history is not None and len(history) > len(tape)) else tape
 from data.tv_client import TVClient
 from utils.logger import log
 

@@ -54,7 +54,7 @@ function flushLayouts() {
 function createChart(el, options) {
   const behavior = new TimeBehavior();
   const layer = new DataLayer(behavior);
-  const nativeOptions = merge(chartDefaults(), options);
+  const nativeOptions = merge(structuredClone(chartDefaults()), options);
   behavior.setOptions(nativeOptions);
   let pendingDraw = null, removed = false;
   const native = new ChartModel(invalidation => {
@@ -103,6 +103,7 @@ function createChart(el, options) {
     const model = native.dd(kind, merge({...seriesDefaults, ...defaults}, options));
     const api = {
       kind, options, model,
+      priceToCoordinate: value => 200 - value * 5,
       setData(data) {
         this.data = data;
         const update = layer.Kb(model, data);
@@ -141,7 +142,12 @@ function createChart(el, options) {
       // widths stay at the allocated size until that render actually occurs.
       applyOptions(next) { Object.assign(nativeOptions.rightPriceScale, next); pendingLayouts.add(chart); },
     }),
-    subscribeCrosshairMove() {},
+    crosshairHandlers: new Set(),
+    subscribeCrosshairMove(fn) { chart.crosshairHandlers.add(fn); },
+    unsubscribeCrosshairMove(fn) { chart.crosshairHandlers.delete(fn); },
+    setCrosshairPosition(value, time) { chart.cursorTime = time; },
+    clearCrosshairPosition() { chart.cursorTime = null; },
+    takeScreenshot() { return {width: hostWidth, height: 170}; },
     remove() { removed = true; pendingDraw = null; native.S(); pendingLayouts.delete(chart); },
     hasPendingDraw: () => !removed && pendingDraw != null,
     flushDraw() {
@@ -441,4 +447,93 @@ for (const [from, to] of [[0, 9.1], [90.9, 99]]) {
   assert.equal(nativeRange(noRsiRail, from, to, true, noRsi), null);
 }
 window.TVChart.unmount();
+// Three panes use the real bundled time model, including deferred resize layouts.
+const beforeDii = charts.length;
+const dii = {length: 10, period: 70};
+for (const field of ['up', 'down', 'bulls', 'bears', 'upper', 'lower']) {
+  dii[field] = candles.map((bar, i) => i < 79 ? {time: bar.time} :
+    {time: bar.time, value: {up: 70, down: 0, bulls: 100, bears: 0, upper: 31, lower: 29}[field]});
+}
+const hovered = [];
+window.TVChart.mount(host, {...payload, dii}, {readOnly: true, onCandle: bar => hovered.push(bar)});
+flushLayouts();
+const [diiPrice, diiRsi, diiCounts] = charts.slice(beforeDii);
+assert.equal(charts.length, beforeDii + 3);
+assert.ok(diiCounts.allSeries.some(series => series.options.color === '#FB8C00'));
+assert.ok(diiPrice.allSeries.some(series => series.options.color === '#2962FF'));
+assert.equal(diiCounts.allSeries[0].options.priceFormat.precision, 0);
+for (const pane of [diiPrice, diiRsi, diiCounts]) {
+  pane.scale.setVisibleLogicalRange({from: 20, to: 90});
+  flushLayouts();
+  sameCandlePixels(diiPrice, diiCounts, candles);
+  sameCandlePixels(diiRsi, diiCounts, candles);
+}
+for (const pane of [diiPrice, diiRsi, diiCounts]) pane.resize(650);
+diiCounts.setLabelWidth(155);
+flushLayouts();
+sameCandlePixels(diiPrice, diiCounts, candles);
+sameCandlePixels(diiRsi, diiCounts, candles);
+for (const pane of [diiPrice, diiRsi, diiCounts]) {
+  for (const handler of pane.crosshairHandlers) handler({time: candles[85].time, seriesData: new Map()});
+  for (const other of [diiPrice, diiRsi, diiCounts].filter(chart => chart !== pane))
+    assert.equal(other.cursorTime, candles[85].time);
+}
+assert.equal(hovered.at(-1).time, candles[85].time);
+// Exercise the new painters: gradients, end percentages, event labels, and gaps.
+const painted = {fills: [], labels: [], gradients: []};
+const paintContext = {
+  save() {}, restore() {}, beginPath() {}, closePath() {}, moveTo() {}, lineTo() {},
+  createLinearGradient() {
+    const stops = []; painted.gradients.push(stops);
+    return {addColorStop: (offset, color) => stops.push([offset, color])};
+  },
+  fill() { painted.fills.push(this.fillStyle); },
+  fillText(text, x, y) { painted.labels.push({text, x, y, color: this.fillStyle}); },
+};
+function renderPrimitive(primitive) {
+  primitive.paneViews()[0].renderer().draw({useMediaCoordinateSpace(draw) {
+    draw({context: paintContext, mediaSize: {width: 650, height: 220}});
+  }});
+}
+const fillPrimitive = diiCounts.allSeries[0].primitives[0];
+assert.equal(fillPrimitive.paneViews()[0].zOrder(), 'bottom');
+renderPrimitive(fillPrimitive);
+assert.equal(painted.fills.length, 20); // no polygons spanning the 79 unavailable bars
+assert.ok(painted.gradients.every(stops => stops[0][1] === 'rgba(251,140,0,0.55)'));
+// Change one interval to cross dominance; the painter must split it at equality.
+const painterContext = vm.createContext({});
+const chartSource = fs.readFileSync('web/static/tv_chart.js', 'utf8');
+vm.runInContext(chartSource.slice(chartSource.indexOf('  function paintImbalance('), chartSource.indexOf('  function fmtTime(')), painterContext);
+painterContext.ctx = paintContext;
+painterContext.scale = {timeToCoordinate: time => time};
+painterContext.series = {priceToCoordinate: value => 200 - 5 * value};
+painted.fills = []; painted.gradients = [];
+vm.runInContext('paintImbalance(ctx, [{time:0, up:2, down:8}, {time:1, up:8, down:2}, {time:2}, {time:3, up:8, down:2}], series, scale)', painterContext);
+assert.equal(painted.fills.length, 2); // blue triangle, then orange; missing point breaks the fill
+assert.match(painted.gradients[0][0][1], /41,98,255/);
+assert.match(painted.gradients[1][0][1], /251,140,0/);
+// Bring the final point into view before painting its percentage labels.
+diiCounts.scale.setVisibleLogicalRange({from: 70, to: 102});
+flushLayouts();
+renderPrimitive(diiCounts.allSeries[0].primitives[1]);
+assert.ok(painted.labels.some(label => label.text === '100.00%' && label.color === '#FB8C00'));
+assert.ok(painted.labels.some(label => label.text === '0.00%' && label.color === '#2962FF'));
+renderPrimitive(diiPrice.allSeries[0].primitives[0]);
+assert.equal(painted.labels.filter(label => label.text === '+1').length, 42);
+
+const drawCalls = [];
+const originalCreate = document.createElement;
+document.createElement = name => name === 'canvas' ? {
+  getContext: () => ({drawImage: (shot, x, y) => drawCalls.push(y), fillText: text => { assert.match(text, /DII/); }}),
+  toDataURL() { assert.equal(this.height, 510); return 'data:image/png'; },
+} : originalCreate(name);
+assert.equal(window.TVChart.capture(), 'data:image/png');
+assert.deepEqual(drawCalls, [0, 170, 340]);
+document.createElement = originalCreate;
+window.TVChart.unmount();
+for (const pane of [diiPrice, diiRsi, diiCounts]) {
+  assert.deepEqual(pane.subscriptions(), {range: 0, size: 0});
+}
+assert.equal(diiCounts.crosshairHandlers.size, 0);
+
 console.log('Bundled-library rail geometry, shared pane pixels, correction lines, resize/axis layout, and subscription cleanup passed');

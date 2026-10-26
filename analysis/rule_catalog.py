@@ -61,6 +61,10 @@ def _wma(df, p):
     return {"value": _engine(df).wma(int(p["period"]))}
 
 
+def _directional_imbalance_index(df, p):
+    return _engine(df).directional_imbalance_index(int(p["length"]), int(p["period"]))
+
+
 def _rsi(df, p):
     return {"value": _engine(df).rsi_wilder(int(p["period"]))}
 
@@ -154,6 +158,11 @@ def _dist_sma_atr(df, p):
 PERIOD = (Param("period", "Period"),)
 
 INDICATORS: tuple[Indicator, ...] = (
+    Indicator("directional_imbalance_index", "Directional Imbalance Index [BigBeluga]", "Trend",
+              (Param("length", "Length", default=10, maximum=250),
+               Param("period", "Period", default=70, maximum=250)),
+              ("bulls", "bears", "up", "down", "upper", "lower"), _directional_imbalance_index,
+              lambda p: int(p["length"]) + int(p["period"])),
     Indicator("open", "Open", "Price", (), ("value",), _price("open"), lambda p: 1),
     Indicator("high", "High", "Price", (), ("value",), _price("high"), lambda p: 1),
     Indicator("low", "Low", "Price", (), ("value",), _price("low"), lambda p: 1),

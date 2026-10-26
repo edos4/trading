@@ -173,3 +173,48 @@ def test_empty_group_rejected() -> None:
             "name": "bad",
             "root": {"kind": "group", "op": "AND", "children": []},
         })
+
+
+DII = 'directional_imbalance_index'
+
+
+def test_dii_catalog_and_outputs():
+    from analysis.rule_catalog import catalog_payload, compute, resolve_params, warmup, validate_rule
+    entries = [item for item in catalog_payload() if item['id'] == DII]
+    assert len(entries) == 1
+    assert entries[0]['outputs'] == ['bulls', 'bears', 'up', 'down', 'upper', 'lower']
+    assert resolve_params(DII, None) == {'length': 10, 'period': 70}
+    assert warmup(DII, None) == 80
+    df = frame(range(100, 260))
+    for params in ({}, {'length': 3, 'period': 7}):
+        outputs = compute(DII, df, params)
+        for field, values in outputs.items():
+            tree = rule([condition(DII, 'eq', float(values.iloc[-1]), params=params, field=field)])
+            validate_rule(tree)
+            assert evaluate_bar(tree, df)['matched']
+    implicit = rule([condition(DII, 'gt', 50)])
+    assert required_bars(implicit) == 82
+    assert evaluate_series(implicit, df).equals(evaluate_series(rule([condition(DII, 'gt', 50, field='bulls')]), df))
+    assert required_bars(rule([condition(DII, 'gt', 50, offset=4)])) == 86
+    assert required_bars(rule([condition(DII, 'gt', 50, params={'length': 30, 'period': 40})])) == 72
+    for params in ({'nope': 1}, {'length': 0}, {'period': 251}):
+        with pytest.raises(ValueError): validate_rule(rule([condition(DII, 'gt', 50, params=params)]))
+    with pytest.raises(ValueError): validate_rule(rule([condition(DII, 'gt', 50, field='nope')]))
+
+
+def test_dii_dominance_crossing_offsets_and_unavailable():
+    df = frame([200.] * 100 + list(np.arange(201., 301.)))
+    bullish = rule([condition(DII, 'gt', 50, field='bulls')])
+    relative = rule([condition(DII, 'gt', {'source': 'indicator', 'id': DII, 'field': 'bears'}, field='bulls')])
+    state = evaluate_series(bullish, df)
+    assert state.equals(evaluate_series(relative, df))
+    cross = evaluate_series(rule([condition(DII, 'crosses_above', 50, field='bulls')]), df)
+    assert required_bars(rule([condition(DII, 'crosses_above', 50, field='bulls')])) == 82
+    assert cross.sum() == 1
+    assert cross[cross].index[0] == state[state].index[0]
+    shifted = evaluate_series(rule([condition(DII, 'gt', 50, field='bulls', offset=2)]), df)
+    assert shifted.equals(state.shift(2, fill_value=False))
+    contracting = frame(range(100))
+    contracting['high'], contracting['low'] = 500-np.arange(100.), np.arange(100.)
+    for operator in ('gt', 'ne', 'eq'):
+        assert not evaluate_series(rule([condition(DII, operator, 50, field='bulls')]), contracting).any()

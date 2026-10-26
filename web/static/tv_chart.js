@@ -24,6 +24,8 @@ window.TVChart = (function () {
 
   let chart = null;
   let rsiChart = null;
+  let diiChart = null;
+  let diiLegend = null;
   let cleanup = [];
   let tools = null;
   let currentDraftKey = null;
@@ -33,11 +35,13 @@ window.TVChart = (function () {
   function unmount() {
     cleanup.forEach(fn => fn()); cleanup = [];
     tools = null;
+    diiLegend = null;
     preview = false;
     if (rsiChart) {
       rsiChart.remove();
       rsiChart = null;
     }
+    if (diiChart) { diiChart.remove(); diiChart = null; }
     if (chart) {
       chart.remove();
       chart = null;
@@ -47,9 +51,9 @@ window.TVChart = (function () {
   /* Matching logical ranges also need matching plot widths: each chart sizes
    * its price axis from its own labels, otherwise the same bar has a different
    * pixel x in each pane. Recheck after labels or the host size change. */
-  function linkTimeScales(from, to) {
+  function linkTimeScales(...charts) {
     let syncing = false, aligning = false;
-    const charts = [from, to], scales = charts.map(chart => chart.timeScale());
+    const scales = charts.map(chart => chart.timeScale());
     const widths = charts.map(chart => chart.paneSize().width);
     const pending = new Map();
     const sameRange = (a, b) => a && b &&
@@ -68,7 +72,7 @@ window.TVChart = (function () {
       if (aligning) return;
       aligning = true;
       try {
-        const axes = [from.priceScale("right"), to.priceScale("right")];
+        const axes = charts.map(chart => chart.priceScale("right"));
         const width = Math.max(...axes.map(axis => axis.width()));
         if (width > 0) for (const axis of axes) {
           if (axis.options().minimumWidth < width) axis.applyOptions({minimumWidth: width});
@@ -99,6 +103,51 @@ window.TVChart = (function () {
     return () => {
       scales.forEach((scale, index) => scale.unsubscribeVisibleLogicalRangeChange(handlers[index]));
     };
+  }
+
+  // Canvas primitives share the chart's coordinates, resize and screenshot lifecycle.
+  function attachPainter(series, paint, zOrder = "normal") {
+    const primitive = {
+      attached() {}, detached() {}, updateAllViews() {},
+      paneViews: () => [{ zOrder: () => zOrder, renderer: () => ({
+        draw: target => target.useMediaCoordinateSpace(scope => {
+          scope.context.save();
+          try { paint(scope); } finally { scope.context.restore(); }
+        }),
+      }) }],
+    };
+    series.attachPrimitive(primitive);
+    cleanup.push(() => series.detachPrimitive(primitive));
+  }
+
+  function paintImbalance(context, points, upSeries, timeScale) {
+    const polygon = (a, b) => {
+      const orange = a.up + b.up > a.down + b.down;
+      const y = [a.up, b.up, b.down, a.down].map(value => upSeries.priceToCoordinate(value));
+      if (y.some(value => value == null) || Math.max(...y) === Math.min(...y)) return;
+      const gradient = context.createLinearGradient(0, Math.min(...y), 0, Math.max(...y));
+      gradient.addColorStop(0, orange ? "rgba(251,140,0,0.55)" : "rgba(41,98,255,0.55)");
+      gradient.addColorStop(1, orange ? "rgba(251,140,0,0.02)" : "rgba(41,98,255,0.02)");
+      context.fillStyle = gradient;
+      context.beginPath(); context.moveTo(a.x, y[0]); context.lineTo(b.x, y[1]);
+      context.lineTo(b.x, y[2]); context.lineTo(a.x, y[3]); context.closePath(); context.fill();
+    };
+    let previous = null;
+    for (const row of points) {
+      const x = timeScale.timeToCoordinate(row.time);
+      if (x == null || !Number.isFinite(row.up) || !Number.isFinite(row.down)) { previous = null; continue; }
+      const point = {x, up: row.up, down: row.down};
+      if (previous) {
+        const a = previous.up - previous.down, b = point.up - point.down;
+        if (a * b < 0) {
+          const fraction = a / (a - b);
+          const value = previous.up + fraction * (point.up - previous.up);
+          const cross = {x: previous.x + fraction * (point.x - previous.x), up: value, down: value};
+          polygon(previous, cross); polygon(cross, point);
+        } else polygon(previous, point);
+      }
+      previous = point;
+    }
   }
 
   function fmtTime(time) {
@@ -226,7 +275,8 @@ window.TVChart = (function () {
      * chart under the price chart. Only split the host when there is RSI data. */
     let priceEl = el;
     let rsiEl = null;
-    if (rsi.length) {
+    let diiEl = null;
+    if (rsi.length || data.dii) {
       el.innerHTML = "";
       el.style.display = "flex";
       el.style.flexDirection = "column";
@@ -235,7 +285,15 @@ window.TVChart = (function () {
       rsiEl = el.ownerDocument.createElement("div");
       rsiEl.style.cssText = `height:${RSI_PANE_HEIGHT}px;flex:none`;
       el.appendChild(priceEl);
-      el.appendChild(rsiEl);
+      if (rsi.length) el.appendChild(rsiEl);
+      else rsiEl = null;
+      if (data.dii) {
+        diiEl = el.ownerDocument.createElement("div");
+        diiEl.style.cssText = "height:220px;flex:none;position:relative";
+        el.appendChild(diiEl);
+      }
+      priceEl.style.minHeight = "240px";
+      el.style.overflowY = "auto";
     }
     chart = LightweightCharts.createChart(priceEl, {
       autoSize: true,
@@ -264,7 +322,7 @@ window.TVChart = (function () {
         barSpacing: 8,
         minBarSpacing: 0.5,
         // The RSI pane below owns the date axis when it is present.
-        visible: !rsiEl,
+        visible: !rsiEl && !diiEl,
       },
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true },
       handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
@@ -440,6 +498,7 @@ window.TVChart = (function () {
           scaleMargins: { top: 0, bottom: 0 },
         },
         timeScale: {
+          visible: !diiEl,
           borderColor: GRID,
           rightOffset: 4,
           barSpacing: 8,
@@ -473,7 +532,7 @@ window.TVChart = (function () {
       }
       rsiSeries.setData(rsiData);
       rsiChart.timeScale().fitContent();
-      cleanup.push(linkTimeScales(chart, rsiChart));
+      if (!data.dii) cleanup.push(linkTimeScales(chart, rsiChart));
       // Hovering the oscillator still reports the candle under the cursor.
       rsiChart.subscribeCrosshairMove((param) => {
         if (!hooks || typeof hooks.onCandle !== "function") return;
@@ -481,6 +540,108 @@ window.TVChart = (function () {
         const bar = time == null ? null : candles.find((c) => c.time === time);
         hooks.onCandle(bar ? { ...bar } : null);
       });
+    }
+
+    if (diiEl) {
+      const dii = data.dii;
+      const colors = { up: "#FB8C00", down: "#2962FF" };
+      diiChart = LightweightCharts.createChart(diiEl, {
+        autoSize: true,
+        layout: { background: { color: BG }, textColor: TEXT, fontSize: 11 },
+        grid: { vertLines: { visible: false }, horzLines: { visible: false } },
+        rightPriceScale: { borderColor: GRID, scaleMargins: { top: 0.18, bottom: 0.12 } },
+        timeScale: { borderColor: GRID, rightOffset: 4, barSpacing: 8, minBarSpacing: 0.5 },
+        crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      });
+      const countSeries = {};
+      for (const [field, color] of Object.entries(colors)) {
+        const series = diiChart.addLineSeries({ color, lineWidth: 1, title: field, priceLineVisible: false,
+          priceFormat: { type: "price", precision: 0, minMove: 1 }, lastValueVisible: false });
+        series.setData(dii[field] || []);
+        countSeries[field] = series;
+        const band = chart.addLineSeries({ color, lineWidth: 1, priceLineVisible: false,
+          lastValueVisible: false, crosshairMarkerVisible: false });
+        band.setData(dii[field === "up" ? "upper" : "lower"] || []);
+      }
+      const downValues = new Map((dii.down || []).map(row => [row.time, row.value]));
+      const countPoints = (dii.up || []).map(row => ({time: row.time, up: row.value, down: downValues.get(row.time)}));
+      attachPainter(countSeries.up, ({context}) => {
+        paintImbalance(context, countPoints, countSeries.up, diiChart.timeScale());
+      }, "bottom");
+      const lastTime = candles[candles.length - 1]?.time;
+      const latest = field => (dii[field] || []).find(row => row.time === lastTime)?.value;
+      attachPainter(countSeries.up, ({context, mediaSize}) => {
+        const x = diiChart.timeScale().timeToCoordinate(lastTime);
+        if (x == null || x < 0 || x > mediaSize.width) return;
+        context.font = "11px sans-serif";
+        for (const [field, percent] of [["up", "bulls"], ["down", "bears"]]) {
+          const value = latest(field), share = latest(percent);
+          if (!Number.isFinite(value)) continue;
+          const y = countSeries[field].priceToCoordinate(value);
+          if (y == null) continue;
+          context.fillStyle = colors[field];
+          context.fillText(Number.isFinite(share) ? `${share.toFixed(2)}%` : "—", Math.min(x + 8, mediaSize.width - 55),
+            y + (latest("up") === latest("down") ? (field === "up" ? -7 : 13) : (value > latest(field === "up" ? "down" : "up") ? -7 : 13)));
+        }
+      });
+      const extrema = Object.fromEntries(["upper", "lower"].map(field =>
+        [field, new Map((dii[field] || []).map(row => [row.time, row.value]))]));
+      attachPainter(candleSeries, ({context}) => {
+        context.font = "10px sans-serif";
+        context.textAlign = "center";
+        // Like Pine's last-bar labels, mark only events in the displayed calculation period.
+        for (const bar of candles.slice(-dii.period)) {
+          const x = chart.timeScale().timeToCoordinate(bar.time);
+          if (x == null) continue;
+          for (const [field, price, extreme, offset] of [
+            ["up", bar.high, extrema.upper.get(bar.time), -8],
+            ["down", bar.low, extrema.lower.get(bar.time), 14],
+          ]) {
+            if (!Number.isFinite(extreme) || price !== extreme) continue;
+            const y = candleSeries.priceToCoordinate(price);
+            if (y == null) continue;
+            context.fillStyle = colors[field]; context.fillText("+1", x, y + offset);
+          }
+        }
+        context.textAlign = "start";
+      });
+      const legend = el.ownerDocument.createElement("div");
+      legend.style.cssText = "position:absolute;left:8px;top:4px;z-index:2;color:#d1d4dc;pointer-events:none;font-size:11px";
+      diiEl.appendChild(legend);
+      diiLegend = legend;
+      const readout = time => {
+        const value = field => (dii[field] || []).find(row => row.time === time)?.value;
+        const fmt = (field, percent = false) => Number.isFinite(value(field))
+          ? value(field).toFixed(percent ? 1 : 0) + (percent ? "%" : "") : "—";
+        const ready = Number.isFinite(value("up")) && Number.isFinite(value("down"));
+        legend.textContent = `DII (${dii.length}, ${dii.period}) · ${time} · ${time === candles[candles.length - 1]?.time ? "last displayed bar · " : ""}Up ${fmt("up")} · Down ${fmt("down")} · Bulls ${fmt("bulls", true)} · Bears ${fmt("bears", true)}${ready ? "" : " · warmup / unavailable"}`;
+      };
+      readout(candles[candles.length - 1]?.time);
+      diiChart.timeScale().fitContent();
+      cleanup.push(linkTimeScales(...[chart, rsiChart, diiChart].filter(Boolean)));
+      const paneCharts = [chart, rsiChart, diiChart].filter(Boolean);
+      let syncingCrosshair = false;
+      for (const source of paneCharts) {
+        const handler = param => {
+          if (syncingCrosshair) return;
+          syncingCrosshair = true;
+          try {
+            const time = param?.time == null ? null : fmtTime(param.time);
+            const bar = candles.find(row => row.time === time);
+            readout(time || candles[candles.length - 1]?.time);
+            if (source === diiChart && typeof hooks?.onCandle === "function") hooks.onCandle(bar || null);
+            for (const target of paneCharts) {
+              if (target === source) continue;
+              if (!bar) target.clearCrosshairPosition();
+              else if (target === chart) target.setCrosshairPosition(bar.close, time, candleSeries);
+              else if (target === rsiChart) target.setCrosshairPosition(rsiValues.get(time) ?? 50, time, rsiSeries);
+              else target.setCrosshairPosition((dii.up || []).find(row => row.time === time)?.value ?? 0, time, countSeries.up);
+            }
+          } finally { syncingCrosshair = false; }
+        };
+        source.subscribeCrosshairMove(handler);
+        cleanup.push(() => source.unsubscribeCrosshairMove(handler));
+      }
     }
 
     if (window.ChartDraw) {
@@ -520,15 +681,18 @@ window.TVChart = (function () {
 
   /* Both panes stacked, so a capture still shows the whole chart. */
   function capture() {
-    const top = chart.takeScreenshot();
-    if (!rsiChart) return top.toDataURL("image/png");
-    const bottom = rsiChart.takeScreenshot();
+    const shots = [chart, rsiChart, diiChart].filter(Boolean).map(pane => pane.takeScreenshot());
     const out = document.createElement("canvas");
-    out.width = Math.max(top.width, bottom.width);
-    out.height = top.height + bottom.height;
+    out.width = Math.max(...shots.map(shot => shot.width));
+    out.height = shots.reduce((height, shot) => height + shot.height, 0);
     const ctx = out.getContext("2d");
-    ctx.drawImage(top, 0, 0);
-    ctx.drawImage(bottom, 0, top.height);
+    let y = 0;
+    for (const shot of shots) { ctx.drawImage(shot, 0, y); y += shot.height; }
+    if (diiLegend) {
+      const top = shots.slice(0, -1).reduce((height, shot) => height + shot.height, 0);
+      ctx.fillStyle = TEXT; ctx.font = "11px sans-serif";
+      ctx.fillText(diiLegend.textContent, 8, top + 14);
+    }
     return out.toDataURL("image/png");
   }
 

@@ -95,3 +95,28 @@ def test_trail_returns_none_when_rule_stops_matching() -> None:
     quiet["high"] = 101.0
     quiet["low"] = 99.0
     assert indicator.trail(quiet) is None
+
+
+def test_dii_transition_evidence_and_trail():
+    raw = payload()
+    raw['root']['children'][0]['left'] = {'source': 'indicator', 'id': 'directional_imbalance_index', 'field': 'bulls'}
+    raw['root']['children'][0]['right']['value'] = 50
+    close = np.concatenate([np.full(100, 100.), np.arange(101., 201.)])
+    df = pd.DataFrame(dict(open=close, high=close+1, low=close-1, close=close, volume=1e6))
+    indicator = VisualRuleIndicator({'id': 'dii', 'payload': raw})
+    signals = []
+    for n in range(indicator.MIN_BARS, len(df)+1):
+        snapshot = Snapshot()
+        snapshot.candle = Candle(pd.Timestamp('2025-01-01') + pd.Timedelta(days=n-1))
+        signal = indicator.analyze(snapshot, Store(df.iloc[:n]))
+        if signal is not None: signals.append(signal)
+    assert len(signals) == 1
+    signal = signals[0]
+    assert signal.action == 'BUY' and signal.provenance == 'visual_rule'
+    assert np.isfinite(signal.stop_loss) and np.isfinite(signal.take_profit)
+    assert signal.rule_evidence['conditions'][0]['left'] > 50
+    assert indicator.trail(df)[0] == 'BUY'
+    assert indicator.trail(df.iloc[:100]) is None
+    raw['exit']['on_false'] = False
+    disabled = VisualRuleIndicator({'id': 'off', 'payload': raw})
+    assert disabled.trails is False and disabled.trail(df) is None
