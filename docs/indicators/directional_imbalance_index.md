@@ -3,13 +3,13 @@
 Status: local implementation completed on 2026-10-26; automated verification passes.
 Calculation, Builder catalog, rule consumers, and default Paper/Replay chart display
 are implemented. Manual browser checks, database-backed save/load/preview, and
-external TradingView parity remain unverified. No rule or book was activated.
+external TradingView parity remain unverified. No saved rule or book was activated. A subsequent user-requested standalone integration adds DII to automatic Indicators-only discovery.
 
 Integrate BigBeluga's Directional Imbalance Index as a locally computed, multi-output entry in the existing visual rule catalog. Use it first as an optional context filter through the Builder's existing shadow/filter controls. A saved Builder rule can also trade it independently once its entry and exit policy has been evaluated.
 
 The initial release must also show DII when a user double-clicks an open or closed trade row on the **Paper** or **Replay** page. Chart visibility is required even when the trade came from another pattern and no DII rule or filter is enabled.
 
-The supplied Pine script defines an oscillator and chart decorations. It supplies no trading strategy, protective stop, target, or alert condition. Adding it directly to automatic detector discovery would require inventing those decisions and would change every local Indicators-only scan. The catalog gives users explicit control with substantially less integration work.
+The supplied Pine script defines an oscillator and chart decorations. It supplies no trading strategy, protective stop, target, or alert condition. The initial integration used the catalog for explicit control. A subsequent user request makes DII a standalone discovered indicator as well: `indicators/directional_imbalance_index.py` adds the local entry/exit policy described below, so Indicators-only scans now include it.
 
 **Where it fits today**
 
@@ -25,7 +25,7 @@ The supplied Pine script defines an oscillator and chart decorations. It supplie
 | `analysis/chart_renderer.py:build_trade_viewer_payload()` | Shared interactive payload builder for Paper and Replay row charts. Compute and attach DII series here. |
 | `core/paper_books.py`, `web/app.py` | Paper trade chart history and `/api/paper/chart`; Replay history and `/api/replay/chart`. Both feed the shared payload builder. |
 | `web/static/tv_chart.js`, `web/static/app.js` | Shared renderer and row double-click/modal handlers. Add the DII pane, price overlays, and hover readout to both pages. |
-| `indicators/__init__.py`, `indicators/_signal.py` | Discover trade-emitting `BaseIndicator` subclasses. No new subclass is needed for the initial integration. |
+| `indicators/__init__.py`, `indicators/_signal.py` | Discover trade-emitting `BaseIndicator` subclasses. Automatically discovers `DirectionalImbalanceIndexIndicator` for standalone Indicators-only scans. |
 | `data/tv_studies.py`, `data/tv_stacks.py` | Existing authenticated remote-study path. DII can compute entirely from local high/low history, so it needs no TradingView session or stack. |
 
 The initial data path is:
@@ -102,6 +102,31 @@ Register:
 All outputs use the catalog's float-series contract. Counts remain numerically integral. Document percentage fields as 0–100, count fields as 0–`period`, and extrema as prices. Put `bulls` first so the Builder's existing implicit first-output behavior resolves to a useful percentage, and use explicit fields in saved examples.
 
 The proposed parameter ceilings are local UI limits, not a reproduction of Pine's input limits. Their maximum combined warmup plus the engine's two-bar allowance is 502, within the default 512-candle store. Actual fetched history may be shorter: `settings.tv_history_days` defaults to 450. Nonzero operand offsets add more history requirements. Preserve the existing insufficient-history result and document it; do not silently shorten windows or raise global history settings for this indicator.
+
+**Standalone indicator — follow-up implementation**
+
+`DirectionalImbalanceIndexIndicator` is automatically discovered as
+`indicator_directional_imbalance_index` for `1d` and `1W`. It uses the same
+engine calculation, defaults (10, 70), and 82-candle history requirement.
+A BUY occurs when a finite previous bulls reading is <=50 and the current
+reading is >50; a SELL occurs on the symmetric move below 50. No signal is
+emitted merely because history first becomes available, during persistent
+dominance, at balance, or from unavailable readings.
+
+The local trading policy trails the lower band for BUY and upper band for SELL,
+without a fixed target. The existing scanner ratchets protective stops and exits
+on lost dominance, balanced/unavailable context, or an invalid protective band.
+The standard emitter rejects invalid or excessively distant initial stops;
+market restrictions (including PH long-only), completed-bar checks, position
+limits, and next-open paper execution remain in their shared paths. This policy
+is an explicit bot addition: the Pine source defines no entry or exit strategy.
+It is now part of all Indicators-only discovery; pattern scans and saved Builder
+rules retain their existing selection paths.
+
+Follow-up verification: `indicators/test_indicators.py` plus
+`analysis/test_directional_imbalance_index.py`: **59 passed**. Coverage includes
+discovery, BUY/SELL transitions, no repeat entries, protective trailing bands,
+balanced/invalid/short history, and existing indicator scan regressions.
 
 **How to use it**
 
@@ -311,7 +336,7 @@ Paper open/closed rows and Replay open/closed rows are all required. Paper signa
 
 Display three areas: the existing price/volume chart with DII upper/lower overlays, the existing RSI pane when present, and the new DII count pane. Retain readable heights, with scrolling or a larger modal if needed on smaller screens. With insufficient history for a full 80-candle calculation window, keep the chart open and show an explicit warmup/unavailable state in the DII area. Other chart content remains usable; individual unavailable readings create gaps. The follow-up visual update adds orange/blue gradient fill between the count lines, latest-bar percentage labels, and `+1` price labels over the displayed trailing calculation period. DII grid lines and dotted last-price guides are hidden, and the count pane is taller. The count pane, percentages, and price overlays remain required.
 
-The initial implementation requires no new dependency, `.env` setting, Pine interpreter, remote-study request, database migration, broker integration, or automatic `BaseIndicator` registration. It also adds no global regime gate, optimization framework, smoothing, volume weighting, or inferred stop based on `upper`/`lower`. Those would change the product or the trading policy beyond translating this indicator.
+The initial implementation requires no new dependency, `.env` setting, Pine interpreter, remote-study request, database migration, or broker integration. The follow-up standalone detector uses existing `BaseIndicator` discovery. It adds no global regime gate, optimization framework, smoothing, or volume weighting. The standalone policy uses `lower`/`upper` as protective trailing bands. Other extensions would change the product beyond the calculation and explicitly documented standalone policy.
 
 **Attribution and permitted use**
 
