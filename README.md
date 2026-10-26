@@ -465,6 +465,15 @@ history and must not be interpreted as weekly evaluation. Other replay execution
 limitations and the complete example payload are in
 [the implementation notes](docs/indicators/directional_imbalance_index.md).
 
+Every trade-row chart also has **Patterns / RSI / DII** toggles at the start of
+its drawing toolbar (top-left). **Patterns** hides the detected-pattern overlays
+(rails, labels, markers and the correction drawing layer) without discarding
+them; **RSI** hides the Wilder RSI(14) pane; **DII** hides the Directional
+Imbalance Index pane. A toggle is only offered when the payload carries that
+overlay, the choice is remembered in `localStorage` under `chart-view` and
+applies to every chart, and hiding a pane re-mounts the chart in place so the
+current zoom and any saved corrections survive.
+
 Python translation of [**© BigBeluga’s original indicator**](https://www.tradingview.com/script/WSvRZ0j0-Directional-Imbalance-Index-BigBeluga/), licensed
 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/), with stricter
 full-window startup and missing-data handling. Commercial permission has not

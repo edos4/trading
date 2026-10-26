@@ -31,9 +31,22 @@ window.TVChart = (function () {
   let currentDraftKey = null;
   let preview = false;
   const drafts = new Map();
+  /* Overlays the reader can hide. The state lives here rather than in the
+   * panes, so hiding a pane and re-mounting the chart are the same operation
+   * and the choice sticks for every chart opened afterwards, including after a
+   * reload or a jump to another tab. */
+  const view = { patterns: true, rsi: true, dii: true };
+  try {
+    const saved = JSON.parse(localStorage.getItem("chart-view") || "null");
+    for (const key of Object.keys(view)) {
+      if (typeof saved?.[key] === "boolean") view[key] = saved[key];
+    }
+  } catch (_) { /* storage unavailable: start with every overlay shown */ }
+  let lastMount = null;
 
   function unmount() {
     cleanup.forEach(fn => fn()); cleanup = [];
+    lastMount = null;
     tools = null;
     diiLegend = null;
     preview = false;
@@ -216,7 +229,45 @@ window.TVChart = (function () {
     return sampled;
   }
 
-  function mount(el, data, hooks) {
+  /* Hiding an overlay keeps its data: re-mount the same payload with the
+   * toggled flag, preserving the visible bar range so the view does not jump. */
+  function toggleView(key) {
+    const target = lastMount;
+    if (!target) return;
+    const range = chart ? chart.timeScale().getVisibleLogicalRange() : null;
+    view[key] = !view[key];
+    try { localStorage.setItem("chart-view", JSON.stringify(view)); }
+    catch (_) { /* storage unavailable: the choice lasts for this page */ }
+    mount(target.el, target.data, target.hooks, range);
+  }
+
+  function viewToggles(host, available) {
+    const items = [
+      ["patterns", "Patterns", "Show or hide pattern overlays and corrections", available.patterns],
+      ["rsi", "RSI", "Show or hide the RSI(14) pane", available.rsi],
+      ["dii", "DII", "Show or hide the Directional Imbalance Index pane", available.dii],
+    ].filter(item => item[3]);
+    if (!items.length) return null;
+    const bar = host.ownerDocument.createElement("div");
+    bar.className = "chart-view-toggles";
+    bar.style.cssText = "display:flex;gap:4px";
+    for (const [key, label, hint] of items) {
+      const button = host.ownerDocument.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.title = hint;
+      button.className = "btn";
+      button.style.cssText = "font:11px sans-serif;padding:2px 6px";
+      const on = view[key];
+      button.setAttribute("aria-pressed", String(on));
+      if (on) { button.style.backgroundColor = "#42a5f5"; button.style.color = "#131722"; }
+      button.addEventListener("click", () => toggleView(key));
+      bar.appendChild(button);
+    }
+    return bar;
+  }
+
+  function mount(el, data, hooks, restoreRange) {
     unmount();
     if (!el || typeof LightweightCharts === "undefined") {
       throw new Error("TradingView chart library is not loaded");
@@ -225,9 +276,11 @@ window.TVChart = (function () {
     if (candles.length < 2) {
       throw new Error("not enough bars to chart");
     }
+    lastMount = {el, data, hooks};
     el.innerHTML = "";
     el.style.display = "";
     el.style.flexDirection = "";
+    el.style.position = "relative";
     const rsi = data.rsi14 || [];
     const identity = data.trade_id || data.entry_time;
     const draftKey = identity ? 'pattern-draft-' + JSON.stringify([
@@ -245,7 +298,7 @@ window.TVChart = (function () {
         window.location.href = '/patterns?chart=' + encodeURIComponent(key);
       } catch (err) { window.alert('Could not open pattern editor: ' + err.message); }
     }
-    if (!hooks?.readOnly) {
+    if (!hooks?.readOnly && view.patterns) {
       const menu = document.createElement("button");
       menu.type = "button";
       menu.textContent = "Correct pattern…";
@@ -272,22 +325,25 @@ window.TVChart = (function () {
       });
     }
     /* Lightweight Charts v4 has no sub-panes, so an RSI series needs its own
-     * chart under the price chart. Only split the host when there is RSI data. */
+     * chart under the price chart. Only split the host when a pane is shown. */
+    const showRsi = view.rsi && rsi.length > 0;
+    const showDii = view.dii && !!data.dii;
     let priceEl = el;
     let rsiEl = null;
     let diiEl = null;
-    if (rsi.length || data.dii) {
+    if (showRsi || showDii) {
       el.innerHTML = "";
       el.style.display = "flex";
       el.style.flexDirection = "column";
       priceEl = el.ownerDocument.createElement("div");
       priceEl.style.cssText = "flex:1;min-height:0";
-      rsiEl = el.ownerDocument.createElement("div");
-      rsiEl.style.cssText = `height:${RSI_PANE_HEIGHT}px;flex:none`;
       el.appendChild(priceEl);
-      if (rsi.length) el.appendChild(rsiEl);
-      else rsiEl = null;
-      if (data.dii) {
+      if (showRsi) {
+        rsiEl = el.ownerDocument.createElement("div");
+        rsiEl.style.cssText = `height:${RSI_PANE_HEIGHT}px;flex:none`;
+        el.appendChild(rsiEl);
+      }
+      if (showDii) {
         diiEl = el.ownerDocument.createElement("div");
         diiEl.style.cssText = "height:220px;flex:none;position:relative";
         el.appendChild(diiEl);
@@ -295,6 +351,12 @@ window.TVChart = (function () {
       priceEl.style.minHeight = "240px";
       el.style.overflowY = "auto";
     }
+    const toggles = viewToggles(el, {
+      patterns: !!((data.segments || []).length || (data.trendlines || []).length
+        || (data.markers || []).length || (data.manual_corrections || []).length || data.pattern),
+      rsi: rsi.length > 0,
+      dii: !!data.dii,
+    });
     chart = LightweightCharts.createChart(priceEl, {
       autoSize: true,
       layout: {
@@ -356,7 +418,7 @@ window.TVChart = (function () {
         title: level.title,
       });
     }
-    if ((data.markers || []).length) {
+    if (view.patterns && (data.markers || []).length) {
       candleSeries.setMarkers(data.markers.filter(marker => marker.price == null));
       for (const marker of data.markers.filter(marker => marker.price != null)) {
         const pivot = chart.addLineSeries({
@@ -370,17 +432,17 @@ window.TVChart = (function () {
       }
     }
 
-    if (window.PatternNotes) {
+    if (view.patterns && window.PatternNotes) {
       const notes = window.PatternNotes.collect(data);
       if (notes.length) candleSeries.attachPrimitive(window.PatternNotes.create(notes, PRICE_BAND));
     }
 
-    const automaticRails = new Set(data.trendlines || []);
-    const overlays = [...(data.segments || []), ...automaticRails];
+    const automaticRails = new Set(view.patterns ? data.trendlines || [] : []);
+    const overlays = view.patterns ? [...(data.segments || []), ...automaticRails] : [];
     const candleIndices = new Map(candles.map((row, index) => [row.time, index]));
     const priceTimes = [...new Set(candles.concat(
       data.volume || [], data.pred_candles || [], data.forecast || [],
-      (data.markers || []).filter(marker => marker.price != null),
+      view.patterns ? (data.markers || []).filter(marker => marker.price != null) : [],
       overlays.flatMap(segment => segment.data || []),
     ).map(row => row.time))].sort();
     const extraTimes = priceTimes.filter(time => !candleIndices.has(time));
@@ -532,7 +594,7 @@ window.TVChart = (function () {
       }
       rsiSeries.setData(rsiData);
       rsiChart.timeScale().fitContent();
-      if (!data.dii) cleanup.push(linkTimeScales(chart, rsiChart));
+      if (!diiEl) cleanup.push(linkTimeScales(chart, rsiChart));
       // Hovering the oscillator still reports the candle under the cursor.
       rsiChart.subscribeCrosshairMove((param) => {
         if (!hooks || typeof hooks.onCandle !== "function") return;
@@ -644,7 +706,7 @@ window.TVChart = (function () {
       }
     }
 
-    if (window.ChartDraw) {
+    if (window.ChartDraw && view.patterns) {
       const panes = [{ el: priceEl, chart, series: candleSeries, pane: "price" }];
       if (rsiSeries) panes.push({ el: rsiEl, chart: rsiChart, series: rsiSeries, pane: "rsi" });
       let saved = data.manual_corrections || [];
@@ -654,6 +716,7 @@ window.TVChart = (function () {
       }
       tools = window.ChartDraw.attach({
         host: el,
+        leading: toggles,
         panes,
         times: candles.map((row) => row.time),
         shapes: saved, readOnly: !!hooks?.readOnly, onCorrect: correct,
@@ -677,6 +740,14 @@ window.TVChart = (function () {
         cleanup.push(() => window.removeEventListener('beforeunload', warn));
       }
     }
+
+    if (toggles && !tools) {
+      toggles.style.cssText += ";position:absolute;top:4px;left:6px;z-index:6;"
+        + "background:#131722;padding:2px;border:1px solid " + GRID + ";border-radius:4px";
+      el.appendChild(toggles);
+    }
+
+    if (restoreRange) chart.timeScale().setVisibleLogicalRange(restoreRange);
   }
 
   /* Both panes stacked, so a capture still shows the whole chart. */

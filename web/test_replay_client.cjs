@@ -6,6 +6,7 @@ class Element {
   constructor() { this.events = {}; this.children = []; this.style = {}; this.value = ''; this.hidden = true; this.dataset = {}; this.classList = {add(){}, toggle(){}, remove(){}}; this.ownerDocument = null; }
   addEventListener(name, fn) { this.events[name] = fn; }
   removeEventListener(name) { delete this.events[name]; }
+  setAttribute(key, value) { this[key] = value; }
   remove() { this.removed = true; }
   focus() {}
   appendChild(child) { this.children.push(child); }
@@ -30,7 +31,7 @@ const chart = {addCandlestickSeries:series, addHistogramSeries:series, addLineSe
   paneSize(){return {width:800,height:460};},
   timeScale(){return {fitContent(){}, subscribeVisibleLogicalRangeChange(){}, unsubscribeVisibleLogicalRangeChange(){}, setVisibleLogicalRange(){}, getVisibleLogicalRange:()=>null, subscribeSizeChange(){}, unsubscribeSizeChange(){}};}, remove(){}};
 const window = {TB_PAGE:'replay', location:{}, innerWidth:1200, innerHeight:800,
-  ChartDraw:{attach(options){drawMounts.push(options);return {snapshot:()=>corrections,pending:()=>false,destroy(){}}}}};
+  ChartDraw:{attach(options){drawMounts.push(options);if(options.leading)options.host.appendChild(options.leading);return {snapshot:()=>corrections,pending:()=>false,destroy(){}}}}};
 const stored = new Map();
 const sessionStorage = {getItem:key=>stored.get(key),setItem:(key, value)=>stored.set(key,value)};
 const context = vm.createContext({window, document, sessionStorage, console, FormData, LightweightCharts:{createChart:()=>chart,CrosshairMode:{Normal:0},LineStyle:{Dashed:2,Dotted:1,Solid:0}}, fetch: async (url, opts) => {
@@ -166,17 +167,34 @@ vm.runInContext(fs.readFileSync('web/static/app.js','utf8'),context);
   assert.deepEqual(Array.from(drawMounts.at(-1).times),data.candles.map(row=>row.time));
   assert.deepEqual(JSON.parse(JSON.stringify(drawMounts.at(-1).shapes)),[]);
   window.TVChart.unmount();
-  const dii = {length:10, period:70};
+  const dii = {length:20, period:40};
   for (const field of ['up','down','bulls','bears','upper','lower']) {
     dii[field] = data.candles.map((bar, index) => index === 0 ? {time:bar.time} :
       {time:bar.time, value:{up:21,down:14,bulls:60,bears:40,upper:12,lower:8}[field]});
   }
   window.TVChart.mount(get('replay-chart-host'), {...data, dii}, {readOnly:true});
-  assert.equal(get('replay-chart-host').children.length, 3);
-  assert.match(get('replay-chart-host').children[2].children[0].textContent, /DII \(10, 70\).*last displayed bar.*Bulls 60.0%.*Bears 40.0%/);
+  assert.equal(get('replay-chart-host').children.length, 4); // price, RSI, DII, view toggles
+  assert.match(get('replay-chart-host').children[2].children[0].textContent, /DII \(20, 40\).*last displayed bar.*Bulls 60.0%.*Bears 40.0%/);
   context.diiReadout = {dii};
   assert.match(vm.runInContext('fmtRsi(diiReadout, "2024-01-02")', context), /Up — Down — Bulls — Bears —/);
   assert.match(vm.runInContext('fmtRsi(diiReadout, "2024-01-04")', context), /Up 21 Down 14 Bulls 60.0% Bears 40.0%/);
+  // View toggles: each click re-mounts the same payload without that overlay.
+  const toggles = get('replay-chart-host').children.at(-1);
+  assert.deepEqual(toggles.children.map(button => button.textContent), ['Patterns', 'RSI', 'DII']);
+  assert.deepEqual(toggles.children.map(button => button['aria-pressed']), ['true', 'true', 'true']);
+  let added = lines.length;
+  toggles.children[2].events.click();  // DII off
+  assert.equal(get('replay-chart-host').children.length, 3); // price, RSI, toggles
+  assert.equal(lines.length - added, 5); // pattern segment, three rails, RSI
+  added = lines.length;
+  get('replay-chart-host').children.at(-1).children[1].events.click();  // RSI off
+  assert.equal(get('replay-chart-host').children.length, 1); // price only, plus toggles
+  assert.equal(lines.length - added, 4); // pattern segment and three rails
+  added = lines.length;
+  const draws = drawMounts.length;
+  get('replay-chart-host').children.at(-1).children[0].events.click();  // patterns off
+  assert.equal(lines.length, added); // no overlay series, no correction layer
+  assert.equal(drawMounts.length, draws);
   window.TVChart.unmount();
   console.log('Replay upload, reload, open/closed double-click, and pattern line rendering passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});

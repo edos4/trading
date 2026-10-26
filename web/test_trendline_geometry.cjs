@@ -28,6 +28,7 @@ nativeChart.S();
 
 class Element {
   constructor(document) { this.ownerDocument = document; this.style = {}; this.children = []; this.clientHeight = 460; }
+  addEventListener() {}
   appendChild(child) { this.children.push(child); child.parentElement = this; }
   get offsetTop() {
     return this.parentElement?.children.slice(0, this.parentElement.children.indexOf(this))
