@@ -159,8 +159,8 @@ PERIOD = (Param("period", "Period"),)
 
 INDICATORS: tuple[Indicator, ...] = (
     Indicator("directional_imbalance_index", "Directional Imbalance Index [BigBeluga]", "Trend",
-              (Param("length", "Length", default=10, maximum=250),
-               Param("period", "Period", default=70, maximum=250)),
+              (Param("length", "Length", default=20, maximum=250),
+               Param("period", "Period", default=40, maximum=250)),
               ("bulls", "bears", "up", "down", "upper", "lower"), _directional_imbalance_index,
               lambda p: int(p["length"]) + int(p["period"])),
     Indicator("open", "Open", "Price", (), ("value",), _price("open"), lambda p: 1),

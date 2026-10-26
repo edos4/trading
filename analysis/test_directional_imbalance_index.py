@@ -30,7 +30,7 @@ def oracle(df, length, period):
     return out
 
 
-@pytest.mark.parametrize('length,period', [(10,70), (1,1), (3,7)])
+@pytest.mark.parametrize('length,period', [(20,40), (1,1), (3,7)])
 @pytest.mark.parametrize('kind', ['rising', 'falling', 'flat', 'contracting', 'ties', 'invalid', 'empty', 'short'])
 def test_loop_oracle_and_causality(length, period, kind):
     rng = np.random.default_rng(44)
@@ -62,9 +62,9 @@ def test_loop_oracle_and_causality(length, period, kind):
 
 def test_default_startup_and_zero_total():
     rising = IndicatorEngine(frame(np.arange(100.)+10, np.arange(100.))).directional_imbalance_index()
-    assert rising['bulls'].first_valid_index() == 79
-    assert rising['up'].iloc[79] == 70
-    assert rising['bulls'].iloc[79] == 100
+    assert rising['bulls'].first_valid_index() == 59
+    assert rising['up'].iloc[59] == 40
+    assert rising['bulls'].iloc[59] == 100
     contracting = IndicatorEngine(frame(500-np.arange(100.), np.arange(100.))).directional_imbalance_index()
     assert contracting['up'].iloc[-1] == contracting['down'].iloc[-1] == 0
     assert np.isnan(contracting['bulls'].iloc[-1])

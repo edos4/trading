@@ -50,7 +50,7 @@ class IndicatorEngine:
         _ENGINE_CACHE[key] = eng
         return eng
 
-    def directional_imbalance_index(self, length: int = 10, period: int = 70) -> dict[str, pd.Series]:
+    def directional_imbalance_index(self, length: int = 20, period: int = 40) -> dict[str, pd.Series]:
         """Python translation of Directional Imbalance Index, © BigBeluga.
 
         Original: https://www.tradingview.com/script/WSvRZ0j0-Directional-Imbalance-Index-BigBeluga/

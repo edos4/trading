@@ -925,7 +925,7 @@ def build_trade_viewer_payload(
     candles = []
     volume = []
     rsi14 = []
-    dii = {"length": 10, "period": 70, **{key: [] for key in dii_values}}
+    dii = {"length": 20, "period": 40, **{key: [] for key in dii_values}}
     valid_positions: list[int] = []
     rsi = _rsi_sma(df["Close"], RSI_PERIOD)
     for position, (idx, row) in enumerate(df.iterrows()):

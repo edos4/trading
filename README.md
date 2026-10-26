@@ -424,8 +424,8 @@ uses them two ways:
 
 **Mandatory DII gate for Patterns and Patternsv2.** Detected pattern entries
 must satisfy **45% <= bullish percentage <= 55%**, inclusive, using DII defaults
-(10, 70) on the scanned timeframe. Outside-range or unavailable readings
-(including fewer than 80 candles) skip the entry. Paper scanner rejections are
+(20, 40) on the scanned timeframe. Outside-range or unavailable readings
+(including fewer than 60 candles) skip the entry. Paper scanner rejections are
 recorded with the DII reason and `dii_rejected` count, before other entry checks
 and collect-first ranking. Pattern-only mode and optional shadow rules do not
 bypass this gate. Explorer applies it to the detected bar's historical prefix.
@@ -433,19 +433,19 @@ Indicators-only scans, including standalone DII and saved-rule strategies,
 keep their own entry policy. Existing position exits are unchanged.
 
 **Directional Imbalance Index [BigBeluga]** is available under Trend with
-`length=10`, `period=70`. Outputs are `bulls`/`bears` (0–100%), `up`/`down`
+`length=20`, `period=40`. Outputs are `bulls`/`bears` (0–100%), `up`/`down`
 (event counts, 0–period), and `upper`/`lower` (prices). The extrema include the
 current bar and the preceding `length` bars; equal extrema count again.
-Calculation needs 80 candles at defaults; an unshifted Builder rule requests
-82 under the existing history policy. Missing inputs and zero-total percentages
+Calculation needs 60 candles at defaults; an unshifted Builder rule requests
+62 under the existing history policy. Missing inputs and zero-total percentages
 remain unavailable and cannot pass percentage comparisons. Large parameters or
 offsets can exceed available history; windows are never shortened.
 
 DII is also a standalone, automatically discovered indicator named
 `indicator_directional_imbalance_index` in **Indicators-only** scans, on daily
 and weekly bars. Its local trading policy enters BUY when bulls cross above
-50%, or SELL when bears cross above 50%, using defaults (10, 70) and at least
-82 candles. It trails the lower band for BUY or upper band for SELL, with no
+50%, or SELL when bears cross above 50%, using defaults (20, 40) and at least
+62 candles. It trails the lower band for BUY or upper band for SELL, with no
 fixed target, and exits when dominance is lost, balanced, or unavailable.
 These trading decisions are bot additions, not rules from BigBeluga's Pine
 script. Existing market restrictions and entry/risk checks still apply.

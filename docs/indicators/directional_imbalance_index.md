@@ -41,7 +41,7 @@ closed OHLCV history
 
 **Calculation contract**
 
-Keep the source's defaults: `length=10`, `period=70`. For chronological bar `t`:
+Use the configured defaults: `length=20`, `period=40`. For chronological bar `t`:
 
 ```text
 upper[t] = max(high[t-length], ..., high[t])
@@ -59,8 +59,8 @@ bears[t] = 100 * down[t] / total[t]
 
 Implementation details that affect parity:
 
-- The extrema window is **`length + 1`**, including the current bar. A 10-bar rolling maximum would be an off-by-one error.
-- Every event compares a bar with that bar's own trailing extrema. Do not compare all 70 historical highs with today's `upper`.
+- The extrema window is **`length + 1`**, including the current bar. A 20-bar rolling maximum would be an off-by-one error.
+- Every event compares a bar with that bar's own trailing extrema. Do not compare all `period` historical highs with today's `upper`.
 - Equality counts. A repeated high or low can contribute again; this is not a strict breakout test. Compare the original numeric series without tick rounding or approximate equality.
 - Both events can occur on one bar. `up + down` can exceed `period`; each individual count remains between zero and `period`.
 - The arrays seeded with zero are recreated each bar because they are not declared `var`. Their sums are rolling event counts, not lifetime cumulative counts, and the zero seed adds nothing.
@@ -75,7 +75,7 @@ Use pandas rolling maxima/minima, boolean event series, and rolling sums. This a
 
 Adopt a deliberately conservative trading contract: full finite high/low windows are required. Use `min_periods=length+1` for extrema and `min_periods=period` for event sums. Preserve invalid events as `NaN`; converting comparisons against unavailable extrema directly into zero would incorrectly make the count window appear ready.
 
-For zero-based rows, extrema first become valid at row `length`; counts first become valid at row `length + period - 1`. Therefore catalog warmup is **`length + period` candles**, or **80** at defaults. `required_bars()` currently adds two bars and applies a 60-bar floor, so an unshifted default DII rule requests **82** candles. Reuse that policy rather than adding a second warmup mechanism.
+For zero-based rows, extrema first become valid at row `length`; counts first become valid at row `length + period - 1`. Therefore catalog warmup is **`length + period` candles**, or **60** at defaults. `required_bars()` currently adds two bars and applies a 60-bar floor, so an unshifted default DII rule requests **62** candles. Reuse that policy rather than adding a second warmup mechanism.
 
 Return extrema once their own window is valid, but mask both counts and percentages until the full event window is valid. A nonfinite high or low invalidates the paired event for that bar and any dependent count window. Do not drop candle rows, interpolate, or count missing values as failed events. Preserve output length and chronological alignment. Holidays absent from the candle series do not create extra bars; these are candle counts, not calendar-day windows.
 
@@ -85,7 +85,7 @@ The calculation is causal: appending future candles must never change prior outp
 
 **Public interface and catalog entry**
 
-Add `IndicatorEngine.directional_imbalance_index(length=10, period=70) -> dict[str, pd.Series]`, following the engine's existing RangeIndex convention. Its calculation depends only on high and low. Validate positive integer arguments at this callable boundary; the catalog separately resolves and validates API inputs using its existing convention.
+Add `IndicatorEngine.directional_imbalance_index(length=20, period=40) -> dict[str, pd.Series]`, following the engine's existing RangeIndex convention. Its calculation depends only on high and low. Validate positive integer arguments at this callable boundary; the catalog separately resolves and validates API inputs using its existing convention.
 
 Register:
 
@@ -94,8 +94,8 @@ Register:
 | ID | `directional_imbalance_index` |
 | Label | `Directional Imbalance Index [BigBeluga]` |
 | Group | `Trend` |
-| `length` | Integer; default 10; initial catalog range 1–250 |
-| `period` | Integer; default 70; initial catalog range 1–250 |
+| `length` | Integer; default 20; initial catalog range 1–250 |
+| `period` | Integer; default 40; initial catalog range 1–250 |
 | Ordered outputs | `bulls`, `bears`, `up`, `down`, `upper`, `lower` |
 | Warmup | `int(p["length"]) + int(p["period"])` |
 
@@ -107,7 +107,7 @@ The proposed parameter ceilings are local UI limits, not a reproduction of Pine'
 
 `DirectionalImbalanceIndexIndicator` is automatically discovered as
 `indicator_directional_imbalance_index` for `1d` and `1W`. It uses the same
-engine calculation, defaults (10, 70), and 82-candle history requirement.
+engine calculation, defaults (20, 40), and 62-candle history requirement.
 A BUY occurs when a finite previous bulls reading is <=50 and the current
 reading is >50; a SELL occurs on the symmetric move below 50. No signal is
 emitted merely because history first becomes available, during persistent
@@ -131,8 +131,8 @@ balanced/invalid/short history, and existing indicator scan regressions.
 **Mandatory pattern scan gate — follow-up requirement**
 
 Patterns and Patternsv2 entry candidates now require **45 <= bulls <= 55**
-(inclusive), with the same default DII calculation (10, 70) and the candidate's
-timeframe. Missing history (fewer than 80 candles), invalid dependent windows,
+(inclusive), with the same default DII calculation (20, 40) and the candidate's
+timeframe. Missing history (fewer than 60 candles), invalid dependent windows,
 and zero-total percentages fail closed. The specified numeric interval is
 applied directly; it is not replaced with an alternative trend threshold.
 
@@ -181,7 +181,7 @@ This is a complete example payload for validating, saving, and previewing a dail
       "left": {
         "source": "indicator",
         "id": "directional_imbalance_index",
-        "params": {"length": 10, "period": 70},
+        "params": {"length": 20, "period": 40},
         "field": "bulls",
         "offset": 0
       },
@@ -241,7 +241,7 @@ Acceptance: the method matches the loop oracle on fully warmed finite windows; a
 - [x] Add one `Indicator` entry to `INDICATORS` using the proposed ID, label, `Trend` group, parameter ranges, output order, and `length + period` warmup. Existing `_BY_ID` and `catalog_payload()` construction should pick it up automatically.
 - [x] Extend rule-engine tests for omitted parameters, both explicit parameters, all six explicit output fields, implicit first-output selection, and rejection of unknown parameters/fields or values outside catalog bounds.
 - [x] Verify a `bulls > bears` comparison and a `bulls > 50` condition agree when the denominator is positive. Verify missing percentages never pass a percentage comparison, including `ne`.
-- [x] Assert catalog warmup is 80 and `required_bars()` is 82 at defaults. Cover a nondefault window, an operand offset, and one crossing condition to catch alignment mistakes.
+- [x] Assert catalog warmup is 60 and `required_bars()` is 62 at defaults. Cover a nondefault window, an operand offset, and one crossing condition to catch alignment mistakes.
 
 Acceptance: `catalog_payload()` contains exactly one DII entry, existing indicators retain their metadata and behavior, and generic rule evaluation consumes the returned series. No rule schema, saved-rule migration, or frontend-specific DII branch is needed.
 
@@ -259,7 +259,7 @@ The chart work below is required in this phase:
 - [x] Extend `build_trade_viewer_payload()` with a `dii` object containing `length`, `period`, and time-aligned `up`, `down`, `bulls`, `bears`, `upper`, and `lower` series. Use the same engine method as the rule catalog. Emit finite values or chart whitespace points; never serialize `NaN`/infinity as JSON numbers.
 - [x] Calculate on available normalized, deduplicated history **before** visible-range/trade-window cropping, then slice outputs to emitted candle timestamps. Preserve missing high/low values during calculation so the indicator's invalid-window policy still applies. `_prepare_df()` currently removes invalid price rows: account for that ordering when preparing the computation frame, rather than silently compressing its history. Preserve existing candle validation and deduplication behavior.
 - [x] Trace both callers: Paper's `PaperBook.render_trade_chart()` and Replay's `api_replay_chart()` must supply preceding history when available. Preserve timeframe resampling and market timezone. Do not restart the oscillator at entry or compute only on visible candles. A short scanner tape may need the existing history source for warmup; do not add remote-study computation.
-- [x] Render a DII count pane in `web/static/tv_chart.js`, alongside the existing price/volume and RSI panes. Plot `up` in orange `#FB8C00` and `down` in blue `#2962FF`, with count units and a legend titled `DII (10, 70)` for the initial default display. Put `upper` and `lower` on the price chart in their corresponding colors. Do not put counts or percentages on the price scale or apply RSI's fixed 0–100 scale to counts.
+- [x] Render a DII count pane in `web/static/tv_chart.js`, alongside the existing price/volume and RSI panes. Plot `up` in orange `#FB8C00` and `down` in blue `#2962FF`, with count units and a legend titled `DII (20, 40)` for the initial default display. Put `upper` and `lower` on the price chart in their corresponding colors. Do not put counts or percentages on the price scale or apply RSI's fixed 0–100 scale to counts.
 - [x] Extend Paper and Replay hover/readout paths in `web/static/app.js` to show counts and bull/bear percentages for the cursor's bar. Hovering any pane must refer to the same candle. Undefined percentages show an unavailable value, not 0% or the last valid reading. Without hover, label any summary as the last displayed bar's value.
 - [x] Extend lifecycle handling for the additional pane: synchronized pan/zoom and crosshair time, aligned plot widths, resizing, cleanup on close/remount, and `capture()` including all visible panes. Preserve entry/exit markers, pattern/trend lines, correction tools, and saved drawing identities. DII is read-only and needs no new drawing-tool mode.
 - [x] Extend `analysis/test_chart_viewer_payload.py` for DII values, pre-crop warmup, invalid-input alignment, session deduplication, and weekly timestamps. Assert future candles cannot change an earlier bar's DII. Extend `web/test_replay_flow.py` and applicable chart tests in `web/test_paper_api.py`/`core/test_paper_books.py` to prove both chart routes carry DII for ordinary pattern trades.
@@ -269,7 +269,7 @@ Acceptance: focused tests pass without a TradingView connection. Double-clicking
 
 **Phase 4 — document and check the initial release**
 
-- [x] Update the README's Builder documentation with the DII name, defaults, fields/units, 80-candle calculation warmup, 82-candle default rule requirement, daily usage example, and license attribution.
+- [x] Update the README's Builder documentation with the DII name, defaults, fields/units, 60-candle calculation warmup, 62-candle default rule requirement, daily usage example, and license attribution.
 - [x] Run the focused command below. Record pass/fail/skip counts and any unavailable external checks in this document; do not describe planned checks as completed.
 - [ ] In an existing local Builder session, select DII, edit both parameters, switch output fields, and compare preview evidence with the engine's values. Save/reload the example rule if rules storage is configured. If the UI needs a fix, keep it generic to catalog-driven indicators.
 - [ ] Browser-check Paper and Replay separately: double-click open and closed rows, confirm DII counts and price bands, hover all panes, pan/zoom, resize, capture, close, and open a different row. Include ordinary pattern trades, short history, and a weekly chart. Confirm RSI, annotations, and corrections still work.
@@ -353,11 +353,11 @@ node web/test_chart_draw.cjs
 
 **Required chart presentation and scope**
 
-Double-clicking Paper or Replay rows must use the existing chart modal and show DII by default, including trades produced by unrelated patterns. The initial display uses fixed defaults `length=10`, `period=70`, independently of saved rule parameters. Label those settings clearly so a differently configured trading rule is not mistaken for the displayed indicator. A chart parameter editor and historical rule-parameter snapshots are outside this initial display change.
+Double-clicking Paper or Replay rows must use the existing chart modal and show DII by default, including trades produced by unrelated patterns. The initial display uses fixed defaults `length=20`, `period=40`, independently of saved rule parameters. Label those settings clearly so a differently configured trading rule is not mistaken for the displayed indicator. A chart parameter editor and historical rule-parameter snapshots are outside this initial display change.
 
 Paper open/closed rows and Replay open/closed rows are all required. Paper signal-log charts using the same builder should also receive the display. Use each chart's actual timeframe, session timezone, and supplied history; weekly chart display is supported independently of the weekly rule-replay limitation above. Per-bar DII values use only that bar and its history. Preserve replay cutoff metadata and the distinction between inspection of later bars and evidence available at entry; do not present the final chart value as the entry-time signal.
 
-Display three areas: the existing price/volume chart with DII upper/lower overlays, the existing RSI pane when present, and the new DII count pane. Retain readable heights, with scrolling or a larger modal if needed on smaller screens. With insufficient history for a full 80-candle calculation window, keep the chart open and show an explicit warmup/unavailable state in the DII area. Other chart content remains usable; individual unavailable readings create gaps. The follow-up visual update adds orange/blue gradient fill between the count lines, latest-bar percentage labels, and `+1` price labels over the displayed trailing calculation period. DII grid lines and dotted last-price guides are hidden, and the count pane is taller. The count pane, percentages, and price overlays remain required.
+Display three areas: the existing price/volume chart with DII upper/lower overlays, the existing RSI pane when present, and the new DII count pane. Retain readable heights, with scrolling or a larger modal if needed on smaller screens. With insufficient history for a full 60-candle calculation window, keep the chart open and show an explicit warmup/unavailable state in the DII area. Other chart content remains usable; individual unavailable readings create gaps. The follow-up visual update adds orange/blue gradient fill between the count lines, latest-bar percentage labels, and `+1` price labels over the displayed trailing calculation period. DII grid lines and dotted last-price guides are hidden, and the count pane is taller. The count pane, percentages, and price overlays remain required.
 
 The initial implementation requires no new dependency, `.env` setting, Pine interpreter, remote-study request, database migration, or broker integration. The follow-up standalone detector uses existing `BaseIndicator` discovery. The later mandatory pattern-scan DII gate is described above. No optimization framework, smoothing, or volume weighting is added. The standalone policy uses `lower`/`upper` as protective trailing bands. Other extensions would change the product beyond the calculation and explicitly documented standalone policy.
 

@@ -743,4 +743,4 @@ def test_pattern_paper_open_and_closed_charts_include_dii():
             result = book.render_trade_chart(side=side, symbol="TEST", index=0)
             assert "error" not in result
             assert result["dii"]["bulls"][-1]["value"] == 50
-            assert result["dii"]["up"][-1]["value"] == 70
+            assert result["dii"]["up"][-1]["value"] == 40

@@ -356,7 +356,7 @@ def test_dii_precrop_alignment_and_future_causality(timeframe, freq):
     original = df.copy()
     payload = build_trade_viewer_payload(df, symbol='TEST', timeframe=timeframe)
     direct = IndicatorEngine(df).directional_imbalance_index()
-    assert payload['dii']['length'] == 10 and payload['dii']['period'] == 70
+    assert payload['dii']['length'] == 20 and payload['dii']['period'] == 40
     for field, series in direct.items():
         points = payload['dii'][field]
         assert [row['time'] for row in points] == [row['time'] for row in payload['candles']]
