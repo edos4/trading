@@ -35,6 +35,7 @@ from web.auth import (
     require_login,
     require_password_configured,
     set_session_cookie,
+    username_from_basic_auth,
     verify_credentials,
 )
 from web.jobs import (
@@ -246,9 +247,14 @@ def create_app() -> FastAPI:
     app.mount("/static", StaticFiles(directory=str(ROOT / "static")), name="static")
 
     def ctx(request: Request, **extra: Any) -> dict[str, Any]:
+        # The header is rendered only when `user` is truthy, so it must follow
+        # every way require_login can authenticate. A browser that cached the
+        # Basic credentials from the 401 challenge sends them on every request;
+        # reading the session alone left those pages with no navbar at all.
+        user = current_username(request) or username_from_basic_auth(request)
         return {
             "request": request,
-            "user": current_username(request),
+            "user": user,
             "hermes_enabled": bool((settings.hermes_dashboard_url or "").strip()),
             "tasks_enabled": bool(getattr(settings, "tasks_enabled", True)),
             **extra,
