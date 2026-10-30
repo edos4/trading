@@ -116,6 +116,20 @@ def _closed_row(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+SIGNAL_LOG_FIELDS = (
+    "market", "ts", "sim_bar", "sim_bar_idx", "symbol", "timeframe", "action",
+    "pattern", "confidence", "price", "status", "reason",
+)
+
+
+def _signal_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Log-tab signal: the decision fields plus provenance, no chart geometry."""
+    out = {key: _round(row.get(key)) for key in SIGNAL_LOG_FIELDS}
+    out.update(
+        __import__("core.pattern_provenance", fromlist=["row_payload"]).row_payload(row))
+    return out
+
+
 def _scan_stats(raw: Any) -> Optional[dict[str, Any]]:
     if not isinstance(raw, dict) or not raw:
         return None
@@ -154,6 +168,7 @@ def _book_export(snap: dict[str, Any]) -> dict[str, Any]:
         "pending_entries": snap.get("pending_entries", []),
         "order_events": snap.get("order_events", []),
         "scan_stats": _scan_stats(snap.get("scan_stats")),
+        "signal_logs": [_signal_row(s) for s in (snap.get("signal_logs") or [])],
         "open_positions": [_open_row(p) for p in (snap.get("positions") or [])],
         "closed_trades": [_closed_row(t) for t in (snap.get("closed") or [])],
     }
@@ -174,6 +189,7 @@ def snapshot_from_paper_account(
         sim_days_held,
         unrealized_pct,
     )
+    from core.signal_log_store import load_signal_log
 
     profile = get_market(account.market)
     clock = clock_payload(profile.id)
@@ -273,6 +289,10 @@ def snapshot_from_paper_account(
         "closed_count": len(snap["closed"]),
         "exposure": snap["exposure"],
         "scan_stats": scan_stats,
+        "signal_logs": [
+            {**row, "market": row.get("market") or profile.id}
+            for row in reversed(load_signal_log(profile.id))
+        ],
         "positions": positions,
         "closed": closed,
         "summary": result.summary() if result.trades else "No closed trades yet.",
@@ -331,6 +351,8 @@ def build_paper_trade_export(
         "review_prompt": REVIEW_PROMPT.strip(),
         "notes": [
             "Open and closed paper trades from the operator desk.",
+            "signal_logs holds every detected signal with its accept/fill/reject"
+            " outcome and reason, newest first, as shown in the Paper Logs tab.",
             "Each book is a separate ledger. Do not mix $ and ₱.",
             "Identity is (market, symbol), not ticker alone.",
         ],

@@ -172,6 +172,59 @@ def test_export_includes_both_books_and_review_prompt():
     assert "noise" not in us["scan_stats"]
 
 
+def test_export_includes_log_tab_signals():
+    envelope = _envelope()
+    envelope["books"]["us"]["signal_logs"] = [{
+        "market": "us",
+        "ts": "2026-01-02T00:00:00+00:00",
+        "sim_bar": "2026-01-01T00:00:00+00:00",
+        "sim_bar_idx": 4,
+        "symbol": "TSLA",
+        "timeframe": "1d",
+        "action": "BUY",
+        "pattern": "double_bottom",
+        "confidence": 0.34567,
+        "price": 19.66666,
+        "status": "rejected",
+        "reason": "DII bullish percentage 0.00% outside required 40%–60% (60, 40).",
+        "provenance": "patternsv2",
+        "pattern_version_id": None,
+        "chart_annotations": [{"type": "segment", "start_price": 1}],
+    }]
+    payload = build_paper_trade_export(envelope, market="us")
+    us = payload["books"][0]
+    assert us["signal_logs"] == [{
+        "market": "us",
+        "ts": "2026-01-02T00:00:00+00:00",
+        "sim_bar": "2026-01-01T00:00:00+00:00",
+        "sim_bar_idx": 4,
+        "symbol": "TSLA",
+        "timeframe": "1d",
+        "action": "BUY",
+        "pattern": "double_bottom",
+        "confidence": 0.3457,
+        "price": 19.6667,
+        "status": "rejected",
+        "reason": "DII bullish percentage 0.00% outside required 40%–60% (60, 40).",
+        "trade_id": None,
+        "signal_id": None,
+        "pattern_version_id": None,
+        "provenance": "patternsv2",
+        "requested_rules": None,
+        "resolved_rules": None,
+        "execution_model": None,
+        "decision_date": None,
+        "entry_fee_paid": None,
+        "rule_evidence": None,
+    }]
+    assert payload["books"][0]["signal_logs"][0]["reason"].startswith("DII bullish")
+
+
+def test_export_without_signal_log_keeps_an_empty_list():
+    payload = build_paper_trade_export(_envelope(), market="ph")
+    assert payload["books"][0]["signal_logs"] == []
+
+
 def test_export_filter_ph_excludes_us():
     payload = build_paper_trade_export(_envelope(), market="ph")
     assert payload["filter"] == "ph"
@@ -191,6 +244,7 @@ def test_export_rejects_bad_market():
 def test_export_from_paper_account():
     import json
     from datetime import datetime, timezone
+    from unittest.mock import patch
 
     from core.backtester import BacktestTrade
     from core.paper_trader import PaperAccount
@@ -235,9 +289,11 @@ def test_export_from_paper_account():
     acct.positions["MSFT"] = [open_t]
     acct._last_price["MSFT"] = 55.0
 
-    payload = build_paper_account_export(
-        acct, scan_stats={"trades_opened": 2, "rejection_by_gate": {}},
-    )
+    with patch("core.signal_log_store.load_signal_log",
+               return_value=[{"symbol": "MSFT", "status": "accepted", "market": "us"}]):
+        payload = build_paper_account_export(
+            acct, scan_stats={"trades_opened": 2, "rejection_by_gate": {}},
+        )
     assert payload["purpose"] == "paper_trade_evaluation"
     assert payload["filter"] == "us"
     assert len(payload["books"]) == 1
@@ -252,6 +308,7 @@ def test_export_from_paper_account():
         "mode": "filter", "outcome": "allow"}
     assert book["closed_trades"][0]["laya_assessment"] is None
     assert book["scan_stats"]["trades_opened"] == 2
+    assert book["signal_logs"][0]["symbol"] == "MSFT"
     assert book["metrics"]["profit_factor"] is None
     json.dumps(payload, allow_nan=False)
 

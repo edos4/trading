@@ -248,6 +248,7 @@ class WebPaperApiTests(unittest.TestCase):
         for book in data["books"]:
             self.assertIn("open_positions", book)
             self.assertIn("closed_trades", book)
+            self.assertIn("signal_logs", book)
             self.assertNotIn("equity_png_b64", book)
 
     def test_export_market_filter(self) -> None:
