@@ -59,6 +59,7 @@ def test_discover_lists_the_ported_indicators():
         "indicator_dema_supertrend",
         "indicator_pivot_points",
         "indicator_directional_imbalance_index",
+        "indicator_support_resistance",
     }
 
 
@@ -375,7 +376,7 @@ def test_explorer_template_has_indicators_only_checkbox():
 def test_dii_dominance_transition_and_trailing(direction):
     from indicators.directional_imbalance_index import DirectionalImbalanceIndexIndicator
     detector = DirectionalImbalanceIndexIndicator()
-    close = np.concatenate([np.full(100, 100.), 100 + direction * np.arange(1., 31.)])
+    close = np.concatenate([np.full(130, 100.), 100 + direction * np.arange(1., 31.)])
     high, low = close + 1, close - 1
     signals = []
     for end in range(detector.MIN_BARS, len(close)+1):
@@ -385,7 +386,7 @@ def test_dii_dominance_transition_and_trailing(direction):
             signals.append((end, signal))
     assert len(signals) == 1
     end, signal = signals[0]
-    assert end == 101
+    assert end == 131
     assert signal.action == ("BUY" if direction > 0 else "SELL")
     assert signal.pattern == detector.name
     assert signal.take_profit is None and signal.stop_loss_on_close
@@ -395,7 +396,7 @@ def test_dii_dominance_transition_and_trailing(direction):
     assert action == signal.action and stop == signal.stop_loss
     assert stop < signal.price if direction > 0 else stop > signal.price
     assert "bulls" in signal.notes and "bears" in signal.notes
-    assert detector.trail(df.iloc[:100]) is None  # balanced
+    assert detector.trail(df.iloc[:130]) is None  # balanced
     assert detector.trail(df.iloc[:40]) is None
     invalid = df.copy()
     invalid.loc[invalid.index[-1], "high"] = np.nan
@@ -405,10 +406,65 @@ def test_dii_dominance_transition_and_trailing(direction):
     assert detector.analyze(snap, Store()) is None
 
 
+def _rail(kind, level, start_index=0, confirmed=True, broken=False):
+    return {"kind": kind, "start_index": start_index, "start_price": level,
+            "slope": 0.0, "confirmed": confirmed, "broken": broken}
+
+
+@pytest.mark.parametrize("action,kind", [("BUY", "support"), ("SELL", "resistance")])
+def test_support_resistance_bounce_inside_dii_band(monkeypatch, action, kind):
+    from indicators import support_resistance as sr
+
+    detector = sr.SupportResistanceIndicator()
+    close = np.full(120, 100.0)
+    open_ = close - 0.1 if action == "BUY" else close + 0.1
+    store, snap = _store(open_, close + 1, close - 1, close)
+    level = 99.5 if action == "BUY" else 100.5
+    monkeypatch.setattr(sr, "detect_trendlines", lambda df: [_rail(kind, level)])
+
+    signal = detector.analyze(snap, store)
+    assert signal is not None
+    assert signal.action == action
+    assert signal.pattern == "indicator_support_resistance"
+    if action == "BUY":
+        assert signal.stop_loss < signal.price < signal.take_profit
+    else:
+        assert signal.take_profit < signal.price < signal.stop_loss
+    assert signal.setup_key == (0, 0 if action == "BUY" else 1)
+    assert "DII bulls 50.00%" in signal.notes
+
+
+@pytest.mark.parametrize("rising", [True, False])
+def test_support_resistance_rejects_dii_outside_the_band(monkeypatch, rising):
+    from indicators import support_resistance as sr
+
+    base = np.arange(120, dtype=float)
+    close = 100.0 + base if rising else 500.0 - base
+    open_ = close - 0.1 if rising else close + 0.1
+    store, snap = _store(open_, close + 1, close - 1, close)
+    level = float(close[-1]) - 0.5 if rising else float(close[-1]) + 0.5
+    monkeypatch.setattr(
+        sr, "detect_trendlines", lambda df: [_rail("support" if rising else "resistance", level)])
+    assert sr.SupportResistanceIndicator().analyze(snap, store) is None
+
+
+def test_support_resistance_needs_confirmed_unbroken_rail(monkeypatch):
+    from indicators import support_resistance as sr
+
+    close = np.full(120, 100.0)
+    store, snap = _store(close - 0.1, close + 1, close - 1, close)
+    for broken, confirmed in ((True, True), (False, False)):
+        monkeypatch.setattr(
+            sr, "detect_trendlines",
+            lambda df, b=broken, c=confirmed: [_rail("support", 99.5, broken=b, confirmed=c)],
+        )
+        assert sr.SupportResistanceIndicator().analyze(snap, store) is None
+
+
 def test_dii_unavailable_and_first_warm_reading_never_emit():
     from indicators.directional_imbalance_index import DirectionalImbalanceIndexIndicator
     detector = DirectionalImbalanceIndexIndicator()
-    for n in (0, 40, 80, 82):
+    for n in (0, 60, 100, 102):
         close = np.arange(n, dtype=float) + 100
         class Store:
             def get_df(self, *args, **kwargs):

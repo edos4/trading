@@ -92,7 +92,7 @@ def test_dii_daily_transition_fills_next_open():
     raw['root']['children'][0]['left'] = {'source': 'indicator', 'id': 'directional_imbalance_index', 'field': 'bulls'}
     raw['root']['children'][0]['right'] = {'source': 'value', 'value': 50}
     rule = RulePayload.model_validate(raw)
-    close = np.concatenate([np.full(100, 100.), np.arange(101., 131.)])
+    close = np.concatenate([np.full(102, 100.), np.arange(101., 131.)])
     df = pd.DataFrame(dict(open=close-.2, high=close+1, low=close-1, close=close, volume=1e6))
     dates = pd.bdate_range('2024-01-01', periods=len(df)).strftime('%Y-%m-%d').tolist()
     state = evaluate_series(rule, df)

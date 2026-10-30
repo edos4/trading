@@ -450,7 +450,7 @@ for (const [from, to] of [[0, 9.1], [90.9, 99]]) {
 window.TVChart.unmount();
 // Three panes use the real bundled time model, including deferred resize layouts.
 const beforeDii = charts.length;
-const dii = {length: 20, period: 40};
+const dii = {length: 60, period: 40};
 for (const field of ['up', 'down', 'bulls', 'bears', 'upper', 'lower']) {
   dii[field] = candles.map((bar, i) => i < 79 ? {time: bar.time} :
     {time: bar.time, value: {up: 70, down: 0, bulls: 100, bears: 0, upper: 31, lower: 29}[field]});

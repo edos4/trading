@@ -1286,9 +1286,9 @@ class MarketScanner:
 
         # Mandatory for both pattern scanners, including worker-produced detections.
         if not self._indicators_only and signal.action in ("BUY", "SELL"):
-            from analysis.pattern_dii import describe_pattern_dii_rejection
+            from analysis.pattern_dii import MIN_BARS, describe_pattern_dii_rejection
 
-            df = self._store.get_df(signal.symbol, signal.timeframe, min_bars=80)
+            df = self._store.get_df(signal.symbol, signal.timeframe, min_bars=MIN_BARS)
             dii_reason = describe_pattern_dii_rejection(df)
             if dii_reason is not None:
                 self.stats["signals_rejected"] += 1
