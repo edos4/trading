@@ -217,7 +217,12 @@ class KronosExperimentStore:
         return {"rows": out, "total": int(total), "limit": limit}
 
     def summary(self) -> dict:
-        """Aggregate Experiment 2 accuracy for the section header."""
+        """Aggregate Experiment 2 accuracy for the section header.
+
+        Averages are kept per horizon: +1D and +5D misses are on different
+        scales (a five-day close is far less predictable), so blending them
+        into one number hides which horizon a model actually got right.
+        """
         with self.connect() as con:
             row = con.execute(
                 "SELECT COUNT(*) AS total, "
@@ -228,18 +233,37 @@ class KronosExperimentStore:
                 "       MAX(anchor_date) FILTER (WHERE actual_close IS NOT NULL) "
                 "           AS last_graded_anchor, "
                 "       MAX(graded_at) AS last_graded_at, "
-                "       MAX(saved_at) AS last_saved_at, "
+                "       MAX(saved_at) AS last_saved_at "
+                "FROM kronos_experiment2"
+            ).fetchone()
+            by_horizon = con.execute(
+                "SELECT day_ahead, "
                 "       AVG(base_accuracy_pct) AS base_avg, "
                 "       COUNT(base_accuracy_pct) AS base_n, "
                 "       AVG(finetuned_accuracy_pct) AS fine_avg, "
                 "       COUNT(finetuned_accuracy_pct) AS fine_n "
-                "FROM kronos_experiment2"
-            ).fetchone()
+                "FROM kronos_experiment2 GROUP BY day_ahead ORDER BY day_ahead"
+            ).fetchall()
         total = int(row["total"] or 0)
         graded = int(row["graded"] or 0)
 
         def rate(value):
             return round(float(value), 2) if value is not None else None
+
+        def model(n, avg):
+            return {"graded": int(n or 0), "avg_accuracy_pct": rate(avg)}
+
+        # Every configured horizon is present even with no graded rows, so the
+        # panel always shows both +1D and +5D instead of vanishing.
+        horizons = {
+            str(day_ahead): {"base": model(0, None), "finetuned": model(0, None)}
+            for day_ahead in HORIZONS
+        }
+        for horizon in by_horizon:
+            horizons[str(int(horizon["day_ahead"]))] = {
+                "base": model(horizon["base_n"], horizon["base_avg"]),
+                "finetuned": model(horizon["fine_n"], horizon["fine_avg"]),
+            }
 
         last_saved = row["last_saved_at"]
         last_graded = row["last_graded_at"]
@@ -258,12 +282,7 @@ class KronosExperimentStore:
             },
             "graded": graded,
             "pending": total - graded,
-            "models": {
-                "base": {"graded": int(row["base_n"] or 0),
-                         "avg_accuracy_pct": rate(row["base_avg"])},
-                "finetuned": {"graded": int(row["fine_n"] or 0),
-                              "avg_accuracy_pct": rate(row["fine_avg"])},
-            },
+            "horizons": horizons,
         }
 
     def _history_bars(self, symbol: str, since: date) -> list[tuple[date, float]]:

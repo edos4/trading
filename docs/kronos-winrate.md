@@ -234,8 +234,10 @@ each once the actual close settles.
 - Horizons are fixed to **D1 and D5** even though the underlying forecast runs
   five trading days.
 - Accuracy is `100 × (1 − |predicted − actual| / actual)`. It is stored per
-  model at grading time; the section header shows the mean of each model's
-  graded rows and the raw table shows every value used.
+  model at grading time. The panel shows the averages **split by horizon**
+  (a `+1D` row and a `+5D` row, each with the base and fine-tuned mean and its
+  graded count) because a five-day miss and a one-day miss are not comparable;
+  the raw table below shows every value used.
 - Symbols are the same tracked list used by **Save today's forecasts**
   (`KRONOS_TRACKED_SYMBOLS`, falling back to the first 100 `WATCHLIST` names).
 

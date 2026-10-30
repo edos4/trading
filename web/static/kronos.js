@@ -30,7 +30,7 @@
   const exp2RefreshEl = document.getElementById("kronos-exp2-refresh");
   const exp2StatusEl = document.getElementById("kronos-exp2-status");
   const exp2SummaryEl = document.getElementById("kronos-exp2-summary");
-  const exp2AvgEl = document.getElementById("kronos-exp2-avg");
+  const exp2AvgBodyEl = document.querySelector("#kronos-exp2-avg tbody");
   const exp2BodyEl = document.querySelector("#kronos-exp2 tbody");
   const exp2GradedOnlyEl = document.getElementById("kronos-exp2-graded-only");
 
@@ -506,9 +506,6 @@
     experimentData = data || null;
     const summary = (data && data.summary) || {};
     const saved = summary.saved || {};
-    const models = summary.models || {};
-    const base = models.base || {};
-    const fine = models.finetuned || {};
     if (exp2SummaryEl) {
       exp2SummaryEl.textContent = [
         `${saved.predictions || 0} row(s) across ${saved.symbols || 0} symbol(s)`,
@@ -523,12 +520,45 @@
           : "",
       ].filter(Boolean).join(" • ");
     }
-    if (exp2AvgEl) {
-      exp2AvgEl.textContent =
-        `Avg Base Accuracy: ${fmtAccuracy(base.avg_accuracy_pct)} • ` +
-        `Avg Finetuned Accuracy: ${fmtAccuracy(fine.avg_accuracy_pct)}`;
-    }
+    renderExperimentAverages(summary.horizons || {});
     renderExperimentRows();
+  }
+
+  // One row per horizon: a +5D miss and a +1D miss are not comparable, so the
+  // blended average hid which horizon each model actually got right.
+  function renderExperimentAverages(horizons) {
+    if (!exp2AvgBodyEl) return;
+    const keys = Object.keys(horizons).sort((a, b) => Number(a) - Number(b));
+    exp2AvgBodyEl.innerHTML = "";
+    if (!keys.length) {
+      // Also covers a server still on the pre-per-horizon summary shape, which
+      // would otherwise leave the table blank during a rolling restart.
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 4;
+      td.className = "muted";
+      td.textContent = "No per-horizon averages yet.";
+      tr.appendChild(td);
+      exp2AvgBodyEl.appendChild(tr);
+      return;
+    }
+    keys.forEach((key) => {
+      const entry = horizons[key] || {};
+      const base = entry.base || {};
+      const fine = entry.finetuned || {};
+      const tr = document.createElement("tr");
+      [
+        `+${key}D`,
+        fmtAccuracy(base.avg_accuracy_pct),
+        fmtAccuracy(fine.avg_accuracy_pct),
+        `${base.graded || 0} / ${fine.graded || 0}`,
+      ].forEach((cell) => {
+        const td = document.createElement("td");
+        td.textContent = cell;
+        tr.appendChild(td);
+      });
+      exp2AvgBodyEl.appendChild(tr);
+    });
   }
 
   function renderExperimentRows() {
