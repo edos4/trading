@@ -10,6 +10,14 @@ data points per page), then written with COPY + one upsert transaction.
 Free Basic plan: 200 requests/min, SIP history since 2016, latest 15 minutes
 restricted. Extended-hours bars are included, matching the rows already loaded.
 
+Runs intraday and after the close (see the `stocks_history-hourly-bars` cron):
+the target session is "today" once its first bar is readable, otherwise the last
+closed session. The request window always stops at the newest bar that has both
+*closed* and cleared the 15-minute SIP delay, so a forming candle is never
+stored. Patterns read completed 1h bars, and ON CONFLICT DO NOTHING could not
+correct a partial row afterwards — hence no DO UPDATE path and a newest bar that
+trails wall-clock by at most the current hour.
+
 Idempotent and non-destructive: existing hourly_bars rows are authoritative.
 Each run reads per-symbol coverage straight from the table, fetches only the
 missing tail, and inserts with ON CONFLICT DO NOTHING — so history populated
@@ -43,12 +51,41 @@ _HOURLY_STAMP_NAME = "hourly_bars_updated.txt"
 _FETCH_WORKERS = max(1, settings.hourly_fetch_workers)
 _BATCH_SIZE = max(1, settings.hourly_fetch_batch_size)
 _NY_TZ = ZoneInfo("America/New_York")
+# Free-plan SIP delay: newer bars are rejected with HTTP 403 rather than delayed.
+_DATA_DELAY = timedelta(minutes=15)
+# Extended hours open at 04:00 ET and run to 20:00, so the session's first
+# complete bar opens at 04:00 and its last at 19:00.
+_FIRST_BAR_HOUR = 4
+_FINAL_BAR_HOUR = 19
 
 
 def _last_trading_date(now: datetime | None = None) -> date:
     """Most recent closed US cash session."""
     from core.market import last_closed_session_date
     return last_closed_session_date("us", now)
+
+
+def _complete_end(now: datetime) -> datetime:
+    """Newest instant whose bars are both finished and past the SIP delay.
+
+    A bar opening at HH:00 is complete at HH+1:00 and only becomes readable
+    after `_DATA_DELAY`. Stopping one second before that boundary means the
+    forming bar is never requested, so `ON CONFLICT DO NOTHING` can never
+    freeze a half-built row.
+    """
+    cutoff = now.astimezone(timezone.utc) - _DATA_DELAY
+    return cutoff.replace(minute=0, second=0, microsecond=0) - timedelta(seconds=1)
+
+
+def _target_session(now: datetime) -> date:
+    """Session being collected: today once its first bar is readable."""
+    local = now.astimezone(_NY_TZ)
+    first_readable = local.replace(
+        hour=_FIRST_BAR_HOUR, minute=0, second=0, microsecond=0
+    )
+    if local.weekday() < 5 and _complete_end(now).astimezone(_NY_TZ) >= first_readable:
+        return local.date()
+    return _last_trading_date(now)
 
 
 def _read_stamp() -> date | None:
@@ -78,14 +115,33 @@ def _default_start_date() -> str:
     return (stamp - timedelta(days=365 * 4)).isoformat() if stamp else "2022-01-01"
 
 
-def _session_end_iso(day: date) -> str:
-    """End of `day` on the New York clock, as UTC RFC-3339.
+def _session_end(day: date, now: datetime | None = None) -> datetime:
+    """Latest instant Alpaca may serve for `day`, as UTC.
 
     Alpaca's date-only `end` is UTC midnight, which cuts off the final
     extended-hours bar once EST is in effect (19:00 ET = 00:00Z next day).
+
+    The free plan also refuses SIP data younger than 15 minutes (HTTP 403
+    "subscription does not permit querying recent SIP data"), and the forming
+    bar must not be stored at all. Both are handled by `_complete_end`, so a
+    run during the session stops at the last finished hour.
     """
     end = datetime(day.year, day.month, day.day, 23, 59, 59, tzinfo=_NY_TZ)
-    return end.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cutoff = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    return min(end, _complete_end(cutoff))
+
+
+def _expected_last_open(day: date, end: datetime) -> int:
+    """Newest bar-open a pass through `end` can be expected to have stored.
+
+    A completed session ends with the 19:00 ET extended-hours bar; mid-session
+    the newest possible bar is the hour boundary of the clamped end.
+    """
+    final = datetime(day.year, day.month, day.day, _FINAL_BAR_HOUR, tzinfo=_NY_TZ)
+    hour_end = end.replace(minute=0, second=0, microsecond=0)
+    if hour_end == end:
+        hour_end -= timedelta(hours=1)
+    return int(min(final, hour_end).timestamp())
 
 
 def _symbol_start(sym: dict, default_start: str) -> str:
@@ -272,14 +328,23 @@ def run_update(*, fetch_limit: int | None = None) -> None:
             log.error("update_hourly | could not load the Alpaca asset list — aborting")
             return
 
-        last_session = _last_trading_date()
+        now_utc = datetime.now(timezone.utc)
+        target_session = _target_session(now_utc)
+        end_dt = _session_end(target_session, now_utc)
+        expected_open = _expected_last_open(target_session, end_dt)
+        # While New York is still on the session's own date, a symbol that
+        # stopped printing early may only be missing the newest bars. Re-check
+        # it until local midnight so an intraday run cannot leave the day
+        # permanently partial.
+        tail_window = now_utc.astimezone(_NY_TZ).date() == target_session
         default_start = _default_start_date()
 
-        # Stale = no hourly bars yet, or the newest stored bar is before the
-        # last closed session. Sorted oldest first so the worst gaps go first.
+        # Stale = no hourly bars yet, the newest stored bar is before the
+        # target session, or that session is still short of the bars now
+        # readable. Sorted oldest first so the worst gaps go first.
         pending: list[tuple[str, str, str]] = []
         stale_count = skipped_otc = skipped_unsupported = 0
-        gap_fill = 0
+        gap_fill = tail_fill = 0
         for sym in symbols:
             if (sym.get("market") or "us").lower() != "us":
                 continue  # Alpaca does not cover Philippine stocks
@@ -291,10 +356,15 @@ def run_update(*, fetch_limit: int | None = None) -> None:
                 start = default_start
             else:
                 last_bar_date = db.bar_date_from_ts(last_ts, market="us")
-                if last_bar_date >= last_session:
+                if last_bar_date > target_session:
                     continue
+                if last_bar_date == target_session:
+                    if not (tail_window and last_ts < expected_open):
+                        continue
+                    tail_fill += 1
+                else:
+                    gap_fill += 1
                 start = (last_bar_date - timedelta(days=1)).isoformat()
-                gap_fill += 1
 
             stale_count += 1
             alpaca = _alpaca_symbol(symbol, assets)
@@ -315,12 +385,13 @@ def run_update(*, fetch_limit: int | None = None) -> None:
             f"{skipped_unsupported} not in Alpaca"
         )
         log.info(
-            f"update_hourly | {gap_fill} symbol(s) have existing bars "
-            f"(fill gaps only), {stale_count - gap_fill} start empty"
+            f"update_hourly | {gap_fill} symbol(s) behind an earlier session, "
+            f"{tail_fill} catching up {target_session}, "
+            f"{stale_count - gap_fill - tail_fill} start empty"
         )
         if not pending:
             log.info("update_hourly | nothing Alpaca can serve is stale")
-            _write_stamp(last_session)
+            _write_stamp(target_session)
             return
 
         if fetch_limit:
@@ -330,11 +401,11 @@ def run_update(*, fetch_limit: int | None = None) -> None:
         batches = [
             pending[i:i + _BATCH_SIZE] for i in range(0, len(pending), _BATCH_SIZE)
         ]
-        end = _session_end_iso(last_session)
+        end = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
         total = len(pending)
         log.info(
             f"update_hourly | fetch: {total} symbol(s) in {len(batches)} batch(es), "
-            f"through {last_session}, workers={_FETCH_WORKERS}, "
+            f"through {target_session} (end {end}), workers={_FETCH_WORKERS}, "
             f"feed={settings.alpaca_data_feed}"
         )
 
@@ -396,7 +467,7 @@ def run_update(*, fetch_limit: int | None = None) -> None:
                         error_count=error_count,
                         elapsed=elapsed,
                         eta_hours=eta_hours,
-                        to_date=last_session.isoformat(),
+                        to_date=target_session.isoformat(),
                     )
                     log.info(
                         f"Progress: {completed}/{total} "
@@ -417,7 +488,7 @@ def run_update(*, fetch_limit: int | None = None) -> None:
             error_count=error_count,
             elapsed=time.monotonic() - start_time,
             eta_hours=0.0,
-            to_date=last_session.isoformat(),
+            to_date=target_session.isoformat(),
         )
 
         log.info(
@@ -429,8 +500,8 @@ def run_update(*, fetch_limit: int | None = None) -> None:
         # Only a full, error-free pass may advance the stamp: it anchors the
         # 4-year backfill window for symbols that have no hourly bars yet.
         if fetch_limit is None and error_count == 0:
-            _write_stamp(last_session)
-            log.info(f"update_hourly | wrote stamp {last_session}")
+            _write_stamp(target_session)
+            log.info(f"update_hourly | wrote stamp {target_session}")
         else:
             log.info("update_hourly | stamp not advanced (partial or failed run)")
 
