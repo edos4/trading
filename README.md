@@ -123,6 +123,12 @@ stream server on its own with `python main.py --papertrade-stream` and point
 the UI at it; the combined `--paper --stream=...` form is for unattended CLI
 replays.
 
+Both the CLI dump and the web **Export Trades** button include the book's
+`signal_logs`: every signal shown in the Paper → Logs tab (accepted, filled or
+rejected, with the rejection reason), newest first, next to `open_positions` and
+`closed_trades`. Chart geometry is not repeated per signal; the trade rows keep
+theirs.
+
 `--collect-first --collect-first-top-n 4` still works; `--collect-first=4` is
 the short form.
 
@@ -422,15 +428,20 @@ uses them two ways:
    "context before the pattern" layer — e.g. require `ADX(14) >= 20` so
    sideways breakouts are rejected.
 
-**Mandatory DII gate for Patterns and Patternsv2.** Detected pattern entries
-must satisfy **45% <= bullish percentage <= 55%**, inclusive, using DII defaults
-(20, 40) on the scanned timeframe. Outside-range or unavailable readings
-(including fewer than 60 candles) skip the entry. Paper scanner rejections are
-recorded with the DII reason and `dii_rejected` count, before other entry checks
-and collect-first ranking. Pattern-only mode and optional shadow rules do not
-bypass this gate. Explorer applies it to the detected bar's historical prefix.
-Indicators-only scans, including standalone DII and saved-rule strategies,
-keep their own entry policy. Existing position exits are unchanged.
+**Mandatory DII gate for Patterns and Patternsv2.** Every detected pattern entry
+must show a bullish percentage between **40% and 60%**, inclusive, using DII
+defaults (20, 40) on the scanned timeframe. The band applies to BUY and SELL
+alike and covers the support/resistance-based pattern entries, so a level is
+only traded while the DII is in that balanced band. Outside-band or invalid
+readings skip the entry. Short history (fewer than 60 candles, e.g. while bulk
+history preloads at process start) does not reject — the gate engages once
+enough candles are stored — and a zero-event window (no new `length`-bar high or
+low in the last `period` bars) counts as balanced 50/50, not unavailable. Paper scanner
+rejections are recorded with the DII reason and `dii_rejected` count, before
+other entry checks and collect-first ranking. Pattern-only mode and optional
+shadow rules do not bypass this gate. Explorer applies it to the detected bar's
+historical prefix. Indicators-only scans, including standalone DII and saved-rule
+strategies, keep their own entry policy. Existing position exits are unchanged.
 
 **Directional Imbalance Index [BigBeluga]** is available under Trend with
 `length=20`, `period=40`. Outputs are `bulls`/`bears` (0–100%), `up`/`down`
@@ -438,8 +449,9 @@ keep their own entry policy. Existing position exits are unchanged.
 current bar and the preceding `length` bars; equal extrema count again.
 Calculation needs 60 candles at defaults; an unshifted Builder rule requests
 62 under the existing history policy. Missing inputs and zero-total percentages
-remain unavailable and cannot pass percentage comparisons. Large parameters or
-offsets can exceed available history; windows are never shortened.
+remain unavailable as raw outputs; the pattern gate reads a zero-total window as
+balanced. Large parameters or offsets can exceed available history; windows are
+never shortened.
 
 DII is also a standalone, automatically discovered indicator named
 `indicator_directional_imbalance_index` in **Indicators-only** scans, on daily
@@ -451,6 +463,15 @@ These trading decisions are bot additions, not rules from BigBeluga's Pine
 script. Existing market restrictions and entry/risk checks still apply.
 Adding it to discovery means Indicators-only scans can now emit DII signals;
 no saved Builder rule is required.
+
+**Support/resistance bounce trading** is another automatically discovered
+indicators-only strategy, `indicator_support_resistance`, on daily and weekly
+bars. It trades the same pivot-anchored support/resistance rails drawn on trade
+charts, only while the DII is inside the same 40%–60% consideration band. A BUY
+needs a touch/hold of a confirmed, unbroken support rail; a SELL needs a
+rejection at a confirmed, unbroken resistance rail. The stop sits half an ATR
+beyond the rail and the target is the opposite rail when it is at least one R
+away, otherwise 2R.
 
 For daily context, try `bulls > bears` or `bulls > 50`, first as an **After /
 Shadow** filter scoped to the intended pattern. These are evaluation examples,

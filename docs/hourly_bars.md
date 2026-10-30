@@ -226,6 +226,47 @@ All core files have been implemented and verified:
 # ALPACA_DATA_FEED=sip
 ```
 
+### Schedule
+
+A weekday crontab block (`stocks_history-hourly-bars`) runs the updater hourly
+at **:20 past the hour, 05:20–21:20 ET** — through pre-market (from 04:00),
+the regular session, extended hours (to 20:00) and a 21:20 safety tick:
+
+```cron
+# --- stocks_history-hourly-bars BEGIN ---
+TZ=America/New_York
+20 5-21 * * 1-5 flock -n -E 0 .../logs/hourly-bars.lock sh -c '... python main.py --update-hourly >> .../logs/hourly_bars_alpaca.log 2>&1'
+# --- stocks_history-hourly-bars END ---
+```
+
+The updater targets the **current session** once its first bar is readable
+(≥ 05:15 ET) and the last closed session otherwise, so intraday ticks write
+today's bars and the 21:20 tick completes the day. `flock` keeps a slow pass
+from overlapping the next tick, and because each pass re-reads per-symbol
+coverage from `hourly_bars`, a missed tick is simply caught up by the next one.
+
+### Request window (free-plan limits)
+
+- The request `end` is the closed session's end, clamped to the last **finished
+  and readable** hour: `truncate(now − 15 min) − 1 s`. Alpaca rejects SIP data
+  younger than 15 minutes with `403 subscription does not permit querying
+  recent SIP data`, and a forming bar fetched mid-hour would be stored partial
+  and then frozen by `ON CONFLICT DO NOTHING`. Stopping at the boundary keeps
+  only complete bars in the table (newest bar lags by at most ~1 h 15 m).
+- A 403 is a plan-scope rejection, not a credential failure: the client skips
+  that batch and keeps going. Only HTTP 401 aborts (the key pair is bad).
+- While New York is still on the session's own date, symbols whose newest bar
+  is short of the last readable bar are re-checked, so an intraday run cannot
+  leave the day permanently partial.
+
+**No `DO UPDATE` on purpose.** Patterns read completed 1h bars, so a forming
+candle is a wrong input rather than a fresher one — and since only closed bars
+are ever fetched, `ON CONFLICT DO NOTHING` can never freeze a partial row. That
+also keeps every pre-existing (Polygon-era) row authoritative. A missed tick
+self-heals: missing bars are simply absent from the table, so the next pass
+inserts them, and the intraday target is re-derived from the clock each run.
+
+
 ### What to expect
 
 - **Existing rows are preserved.** Coverage comes from `hourly_bars`, only the
