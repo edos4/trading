@@ -101,7 +101,7 @@ def test_dii_transition_evidence_and_trail():
     raw = payload()
     raw['root']['children'][0]['left'] = {'source': 'indicator', 'id': 'directional_imbalance_index', 'field': 'bulls'}
     raw['root']['children'][0]['right']['value'] = 50
-    close = np.concatenate([np.full(100, 100.), np.arange(101., 201.)])
+    close = np.concatenate([np.full(101, 100.), np.arange(101., 201.)])
     df = pd.DataFrame(dict(open=close, high=close+1, low=close-1, close=close, volume=1e6))
     indicator = VisualRuleIndicator({'id': 'dii', 'payload': raw})
     signals = []

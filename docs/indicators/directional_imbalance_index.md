@@ -75,11 +75,13 @@ Use pandas rolling maxima/minima, boolean event series, and rolling sums. This a
 
 Adopt a deliberately conservative trading contract: full finite high/low windows are required. Use `min_periods=length+1` for extrema and `min_periods=period` for event sums. Preserve invalid events as `NaN`; converting comparisons against unavailable extrema directly into zero would incorrectly make the count window appear ready.
 
-For zero-based rows, extrema first become valid at row `length`; counts first become valid at row `length + period - 1`. Therefore catalog warmup is **`length + period` candles**, or **60** at defaults. `required_bars()` currently adds two bars and applies a 60-bar floor, so an unshifted default DII rule requests **62** candles. Reuse that policy rather than adding a second warmup mechanism.
+For zero-based rows, extrema first become valid at row `length`; counts first become valid at row `length + period - 1`. Therefore catalog warmup is **`length + period` candles**, or **60** at defaults. `required_bars()` currently adds two bars, so an unshifted default DII rule requests **62** candles. Reuse that policy rather than adding a second warmup mechanism.
 
 Return extrema once their own window is valid, but mask both counts and percentages until the full event window is valid. A nonfinite high or low invalidates the paired event for that bar and any dependent count window. Do not drop candle rows, interpolate, or count missing values as failed events. Preserve output length and chronological alignment. Holidays absent from the candle series do not create extra bars; these are candle counts, not calendar-day windows.
 
 Full-window startup and fail-closed handling of corrupt candles are explicit bot policies. Do not claim parity with TradingView's early dataset bars or its treatment of missing inputs. Numerical parity is required on finite, fully warmed windows. An empty or short frame returns aligned empty/`NaN` outputs without emitting a trade.
+
+**Source parity — verified.** The published script (v1.0, 2025-11-21, Pine `//@version=6`) computes `upper = ta.highest(high, length + 1)`, `lower = ta.lowest(low, length + 1)`, the same `for i = 0 to period-1` loop testing `h == upper[i]` / `l == lower[i]`, and `bulls = Up / total * 100` with `total = Up + Dn`. A literal port of that loop reproduces `IndicatorEngine.directional_imbalance_index` on every row from `length + period - 1` onward for random, trending and flat series across `(60,40)`, `(20,40)`, `(10,70)` and `(3,7)`. The only differences are the two policies above — warmup `NaN`s instead of partial windows, and invalid candles invalidating dependent windows — plus the configured defaults (20/40 here versus the source's 10/70).
 
 The calculation is causal: appending future candles must never change prior outputs. The original script can update on a forming candle, and `barstate.islast` does not mean closed. For trading, use the scanner's existing completed-session-bar checks; compare TradingView values on confirmed bars. See [TradingView's bar-state documentation](https://www.tradingview.com/pine-script-docs/concepts/bar-states/).
 
@@ -130,30 +132,38 @@ balanced/invalid/short history, and existing indicator scan regressions.
 
 **Mandatory pattern scan gate — follow-up requirement**
 
-Patterns and Patternsv2 entry candidates now require **45 <= bulls <= 55**
+Patterns and Patternsv2 entry candidates now require **40 <= bulls <= 60**
 (inclusive), with the same default DII calculation (20, 40) and the candidate's
-timeframe. Missing history (fewer than 60 candles), invalid dependent windows,
-and zero-total percentages fail closed. The specified numeric interval is
-applied directly; it is not replaced with an alternative trend threshold.
+timeframe. The band is directional-neutral and applies to BUY and SELL alike;
+it covers every support/resistance-based pattern entry, so a level is only
+traded while the DII sits in that balanced band. Missing history (fewer than 60
+candles, e.g. the short window held while bulk history is still preloading at
+process startup) is skipped without rejection; invalid dependent windows fail
+closed. A zero-total window (no new `length`-bar high or low in the last
+`period` bars) carries no directional imbalance, so the gate treats it as
+balanced 50/50 instead of unavailable. The specified numeric bounds are applied
+directly; they are not replaced with an alternative trend threshold.
 
 `analysis/pattern_dii.py` shares the gate between `MarketScanner` and Explorer.
-The scanner applies it before other entry checks and collect-first ranking,
-including detections returned by spawn workers; rejections carry the DII reason
-in the signal log and increment `dii_rejected`. Pattern-only and saved shadow
-filters do not disable this mandatory gate. Explorer records each detection's
-bar index and evaluates only its candle prefix, so later chart candles cannot
-change that historical eligibility. Standalone indicators and saved-rule
-strategies are excluded; position management and exits retain their own rules.
-This requirement supersedes the earlier optional-only pattern-filter scope.
+The scanner applies it before other entry
+checks and collect-first ranking, including detections returned by spawn
+workers; rejections carry the DII reason in the signal log and increment
+`dii_rejected`. Pattern-only and saved shadow filters do not disable this
+mandatory gate. Explorer records each detection's bar index and evaluates only
+its candle prefix, so later chart candles cannot change that historical
+eligibility. Standalone indicators and saved-rule strategies are excluded;
+position management and exits retain their own rules. This requirement
+supersedes the earlier optional-only pattern-filter scope.
 
-Verification: **76 passed** across the new numerical gate, scanner and Explorer
-tests plus existing scanner startup/filter, Patternsv2 and indicator regressions.
-Boundary checks include 45 and 55 (accepted), just outside either boundary,
-missing history, invalid values, zero events, and causal Explorer evaluation.
+Verification: **57 passed** across the band gate, both pattern scanners, the
+Explorer prefix/action cases, and the support/resistance strategy tests.
+Boundary checks include 40 and 60 (accepted), just outside either boundary, both
+actions, short warmup, invalid values, zero-event balance, and causal Explorer
+evaluation.
 
 **How to use it**
 
-Start with a daily, long-side context rule such as `bulls > bears` (equivalently `bulls > 50` when the total is positive). An optional stronger candidate is `bulls >= 60`. These are evaluation examples, not thresholds supplied by BigBeluga or established profitable settings. A balanced flat series produces 50/50 because ties count, so strict dominance excludes that case. Strong relative dominance can still arise from very few events; it is not independently a measure of trend strength or liquidity.
+Start with a daily context rule such as `bulls > bears` (equivalently `bulls > 50` when the total is positive). The mandatory pattern gate instead only considers readings between 40% and 60%, inclusive. These are evaluation examples, not thresholds supplied by BigBeluga or established profitable settings. A balanced flat series produces 50/50 because ties count, so strict dominance excludes that case. Strong relative dominance can still arise from very few events; it is not independently a measure of trend strength or liquidity.
 
 For a pattern filter, evaluate the persistent state with `gt`/`gte`, not a one-bar crossing. Existing scanner integration provides:
 

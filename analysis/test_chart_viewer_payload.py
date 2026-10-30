@@ -352,7 +352,7 @@ def test_dii_precrop_alignment_and_future_causality(timeframe, freq):
     idx = pd.date_range('2018-01-01', periods=400, freq=freq)
     values = np.arange(400.) + 100
     df = pd.DataFrame(dict(open=values, high=values+1, low=values-1, close=values, volume=100), index=idx)
-    df.loc[idx[250], 'high'] = np.inf
+    df.loc[idx[200], 'high'] = np.inf
     original = df.copy()
     payload = build_trade_viewer_payload(df, symbol='TEST', timeframe=timeframe)
     direct = IndicatorEngine(df).directional_imbalance_index()

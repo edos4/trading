@@ -30,7 +30,7 @@ def oracle(df, length, period):
     return out
 
 
-@pytest.mark.parametrize('length,period', [(20,40), (1,1), (3,7)])
+@pytest.mark.parametrize('length,period', [(60,40), (1,1), (3,7)])
 @pytest.mark.parametrize('kind', ['rising', 'falling', 'flat', 'contracting', 'ties', 'invalid', 'empty', 'short'])
 def test_loop_oracle_and_causality(length, period, kind):
     rng = np.random.default_rng(44)

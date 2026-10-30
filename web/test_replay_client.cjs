@@ -167,14 +167,14 @@ vm.runInContext(fs.readFileSync('web/static/app.js','utf8'),context);
   assert.deepEqual(Array.from(drawMounts.at(-1).times),data.candles.map(row=>row.time));
   assert.deepEqual(JSON.parse(JSON.stringify(drawMounts.at(-1).shapes)),[]);
   window.TVChart.unmount();
-  const dii = {length:20, period:40};
+  const dii = {length:60, period:40};
   for (const field of ['up','down','bulls','bears','upper','lower']) {
     dii[field] = data.candles.map((bar, index) => index === 0 ? {time:bar.time} :
       {time:bar.time, value:{up:21,down:14,bulls:60,bears:40,upper:12,lower:8}[field]});
   }
   window.TVChart.mount(get('replay-chart-host'), {...data, dii}, {readOnly:true});
   assert.equal(get('replay-chart-host').children.length, 4); // price, RSI, DII, view toggles
-  assert.match(get('replay-chart-host').children[2].children[0].textContent, /DII \(20, 40\).*last displayed bar.*Bulls 60.0%.*Bears 40.0%/);
+  assert.match(get('replay-chart-host').children[2].children[0].textContent, /DII \(60, 40\).*last displayed bar.*Bulls 60.0%.*Bears 40.0%/);
   context.diiReadout = {dii};
   assert.match(vm.runInContext('fmtRsi(diiReadout, "2024-01-02")', context), /Up — Down — Bulls — Bears —/);
   assert.match(vm.runInContext('fmtRsi(diiReadout, "2024-01-04")', context), /Up 21 Down 14 Bulls 60.0% Bears 40.0%/);

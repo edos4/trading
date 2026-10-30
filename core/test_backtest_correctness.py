@@ -117,12 +117,12 @@ def test_multisymbol_scanner_and_replay_match_top_four_gates_and_equity(monkeypa
     from core.backtester import _make_snapshot
     from data.tv_client import OHLCVCandle
     import analysis.price_volume
-    from config import PATTERN_SCAN_HISTORY_BARS
     symbols = ['AAA','BBB','CCC','DDD','EEE','FFF']
+    # Flat bars keep the DII inside its 40–60% band for BUY, with 100+ candles.
     bars = [OHLCVCandle(open=100, high=101, low=99, close=100, volume=1000,
                        timestamp=datetime(2024,1,1,21,tzinfo=timezone.utc)+timedelta(days=i))
-            for i in range(PATTERN_SCAN_HISTORY_BARS+2)]
-    fire = PATTERN_SCAN_HISTORY_BARS
+            for i in range(130)]
+    fire = 120
 
     class Pattern:
         name = 'double_bottom'

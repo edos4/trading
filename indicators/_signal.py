@@ -89,6 +89,7 @@ def emit(
     target: float | None = None,
     notes: str,
     line=None,
+    setup_key=None,
 ) -> TradeSignal | None:
     price = float(df["close"].iloc[-1])
     if action not in ("BUY", "SELL") or not np.isfinite(price) or price <= 0:
@@ -143,6 +144,7 @@ def emit(
         stop_loss_on_close=trailing,
         take_profit=None if trailing else round(float(target), 4),
         notes=notes,
+        setup_key=setup_key,
         chart_annotations=annotations,
     )
 
