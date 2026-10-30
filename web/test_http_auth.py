@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import signal
 import unittest
 from unittest.mock import patch
@@ -92,6 +93,30 @@ class WebHttpAuthTests(unittest.TestCase):
         r = self.client.get("/api/backtest/status")
         self.assertEqual(r.status_code, 200)
         self.assertIn("busy", r.json())
+
+    def test_basic_auth_page_keeps_the_navbar(self) -> None:
+        """Pages served to a Basic-authenticated client must keep the header.
+
+        `_unauthorized()` sends a ``WWW-Authenticate: Basic`` challenge, so a
+        browser can end up caching those credentials and sending them on every
+        request. require_login accepts them, but base.html renders <nav> only
+        when ``user`` is truthy — reading the session alone left those pages
+        with no navbar at all while the content still rendered.
+        """
+        token = base64.b64encode(b"admin:correct-horse").decode()
+        r = self.client.get(
+            "/kronos",
+            headers={"Authorization": f"Basic {token}", "Accept": "text/html"},
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('<header class="topbar">', r.text)
+        self.assertIn("Explorer", r.text)
+
+        # The same page without credentials still bounces to the login form,
+        # which is deliberately header-free.
+        anon = self.client.get(
+            "/kronos", headers={"Accept": "text/html"}, follow_redirects=False)
+        self.assertIn(anon.status_code, (303, 307, 401))
 
 
 if __name__ == "__main__":
