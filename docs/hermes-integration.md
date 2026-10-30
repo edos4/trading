@@ -1,14 +1,16 @@
-# Running the trading bot under Hermes Agent (local Qwen3.6-35B via FreeToken)
+# Running the trading bot under Hermes Agent (local Qwen3.8-27B via llama.cpp)
 
 How [Nous Research Hermes Agent](https://hermes-agent.nousresearch.com/) manages this
 repo, driven by the model served locally by
-[FreeToken](https://github.com/FlashML-org/FreeToken) (`Qwen/Qwen3.6-35B-A3B-FP8`).
+[llama.cpp](https://github.com/ggml-org/llama.cpp) (`Qwen3.8-27B`, Q4_K_M GGUF).
 
 Two distinct things have to line up, and it is easy to conflate them:
 
-1. **Hermes as a model client** — Hermes needs an LLM. That LLM is FreeToken's local
-   endpoint (`http://127.0.0.1:1919/v1`), which serves both the OpenAI and Anthropic
-   APIs. FreeToken also ships `ft launch hermes`, which writes Hermes's provider config.
+1. **Hermes as a model client** — Hermes needs an LLM. That LLM is `llama-server`'s
+   local endpoint (`http://127.0.0.1:1919/v1`), which is OpenAI-compatible
+   (`/v1/chat/completions`, `/v1/models`). It does **not** serve the Anthropic API, so
+   Hermes must run in `chat_completions` mode. There is no auto-wiring CLI: the provider
+   block is written by hand (Step 2).
 2. **Hermes as an operator of the bot** — Hermes drives the bot through the MCP server
    this repo already ships (`mcp_server/`, stdio), plus its own shell/file tools.
 
@@ -24,7 +26,7 @@ machine's own config, not here.
 | Piece | What it gives us |
 |---|---|
 | **Hermes Agent** | Self-hosted CLI/desktop agent (MIT). Persistent memory, auto-skills, scheduling, subagents, terminal + file tools, MCP **client** (stdio + HTTP), messaging gateway. |
-| **FreeToken** | Edge MoE serving engine. Serves the OpenAI API (`/v1/chat/completions`, `/v1/responses`, `/v1/models`) **and** the Anthropic API (`/v1/messages`). |
+| **llama.cpp (`llama-server`)** | Plain C++ GGUF runtime. Splits the model across GPU and CPU, serves the OpenAI API, and parses tool calls through the model's own Jinja chat template. No Python, no venv, no kernel-cache wheels — one binary plus its CUDA libs. |
 | **This repo** | Already speaks MCP. `mcp_server/` is a stdio `FastMCP` server (~52 tools) that proxies to the running web UI, with destructive ops default-deny. |
 
 The repo's README already documents wiring an MCP client to `run_mcp.sh`
@@ -37,8 +39,8 @@ model-provider step.
 
 ```
                    ┌──────────────────────────┐
-   Qwen3.6-35B-A3B │  FreeToken `ft serve`    │  OpenAI + Anthropic compatible
-   (FP8, local GPU) │  127.0.0.1:1919          │  /v1/chat/completions, /v1/models
+   Qwen3.8-27B     │  llama-server            │  OpenAI compatible
+   (Q4_K_M, 17.4GB)│  127.0.0.1:1919          │  /v1/chat/completions, /v1/models
                    └────────────┬─────────────┘
                                 │  model.base_url (OpenAI wire)
                    ┌────────────▼─────────────┐
@@ -56,7 +58,8 @@ model-provider step.
 
 Two hard prerequisites:
 
-- **FreeToken must be serving the model** — `/v1/models` reachable at `127.0.0.1:1919`.
+- **llama-server must be serving the model** — `/v1/models` reachable at
+  `127.0.0.1:1919`.
 - **The web UI must be running** (`python main.py --web` / `./run_web.sh --no-tunnel`) —
   the MCP tools proxy to its `/api/*`; it is the sole owner of paper books and backtest
   jobs. `server_health` / `curl 127.0.0.1:8080/health` verifies it.
@@ -68,8 +71,8 @@ Two hard prerequisites:
 | Need | Check |
 |---|---|
 | Hermes installed | `hermes doctor`; install: `curl -fsSL https://hermes-agent.nousresearch.com/install.sh \| bash` |
-| FreeToken installed | `ft --version` |
-| A GPU that can hold the model | `nvidia-smi -L` |
+| llama.cpp binaries + a GGUF | `llama-server --version`; a prebuilt CUDA archive unpacked under `~/.local/opt/llama.cpp` with its bundled `cudart-*` dir is enough (no CUDA toolkit needed) |
+| A GPU that can hold most of the model | `nvidia-smi -L` — a 16 GB card keeps ~50 of this model's 65 layers on the GPU |
 | Repo venv + deps | `<repo>/.venv/bin/python -c "import mcp_server"` |
 | Filled `.env` with `WEB_UI_PASSWORD` | `python main.py --web` starts cleanly |
 | Web UI up | `curl -fsS http://127.0.0.1:8080/health` → `{"ok":true}` |
@@ -79,78 +82,193 @@ Two hard prerequisites:
 ## Step 1 — Serve the model, then point Hermes at it
 
 ```bash
-# 1. Start the engine (dtype/parsers/backends resolve from the checkpoint + GPU)
-ft serve --model Qwen/Qwen3.6-35B-A3B-FP8
-#    → wait for: "API server is ready to serve on 127.0.0.1:1919"
+# 1. Prebuilt CUDA build: its own libs must be on the loader path.
+. ~/.local/opt/llama.cpp/env.sh
 
-# 2. Grab the exact served model id (defaults to the checkpoint basename)
-curl -s http://127.0.0.1:1919/v1/models
+# 2. Start the server (see the context/VRAM section below before changing -c)
+llama-server -m ~/models/qwen3.8-27b/Qwen3.8-27B-Q4_K_M.gguf \
+  -c 262144 -fa on -ctk q4_0 -ctv q4_0 -t 20 -b 2048 -ub 512 --parallel 1 \
+  --jinja -a qwen3.8 --host 127.0.0.1 --port 1919
+#    → wait for: "main: model loaded" / "srv  llama_server: listening on http://127.0.0.1:1919"
 
-# 3. Configure + launch Hermes against it
-ft launch hermes            # add --dry-run to preview, -y to auto-approve
+# 3. Grab the exact served model id (`-a`) and what the build reports
+curl -s http://127.0.0.1:1919/v1/models          # → ids: ["qwen3.8"]
+curl -s http://127.0.0.1:1919/props | jq '{model_alias, model_path, total_slots, n_ctx: .default_generation_settings.n_ctx, modalities, tools: .chat_template_caps.supports_tools}'
 ```
 
-`ft launch` discovers the model via `/v1/models`, writes Hermes's provider config,
-installs the Hermes CLI if missing, and clears cloud keys from the child env so Hermes
-cannot silently fall back to a paid endpoint.
+### ⚠ Context vs. VRAM (read this)
 
-### ⚠ The KV-cache gotcha (read this)
+This model is **dense 27B** (17.4 GB at Q4_K_M) on a 16.3 GB card, and it is **hybrid**:
+only 16 of its 65 layers are full attention (the rest are SSM/gated-delta-net). So the KV
+cache is the context lever, and it is not cheap:
 
-On a 16 GB card the engine's **auto** sizing favors a large MoE expert cache and hands the
-KV pool only ~8,000 tokens — far below Hermes's **64K agent minimum**. Hermes will happily
-start (it reads the model's advertised 256K window) and then fail at runtime once context
-grows past the real KV pool.
+| context | q8_0 KV | q4_0 KV | note |
+|---|---|---|---|
+| 64K | 2.1 GiB | 1.1 GiB | fastest turns; `-ngl 50` measured 9.8 tok/s |
+| 128K | 4.2 GiB | 2.2 GiB | measured 7.8 tok/s (auto split) |
+| **256K** | 8.5 GiB | 4.5 GiB | **native max** (`n_ctx_train` 262144); measured 7.5 tok/s — what the unit uses |
+| 1M | 34 GiB | 18 GiB | **not reachable**: KV alone exceeds the card, before weights |
 
-Fix it explicitly. Force a split that fits the card's cache budget (~7.8 GiB here):
-
-```bash
-ft serve --model Qwen/Qwen3.6-35B-A3B-FP8 \
-  --num-tokens 131072 \
-  --moe-cache-size 1200
-```
-
-- `--num-tokens N` pins the KV pool. The model supports 256K, but KV is ~20 KB/token and
-  the GPU also holds weights + MoE cache + Mamba state.
-- **Setting `--num-tokens` alone OOMs**: it pins KV *without* shrinking the expert cache.
-  Always pair it with a smaller `--moe-cache-size`.
-- KV is cheap relative to experts, so trading expert slots for context is worthwhile
-  (e.g. 128K KV + 1200 slots ≈ 7.4 GiB vs auto's 8K KV + 2607 slots ≈ 7.8 GiB).
-- You can also resize a *running* server budget-aware without a restart:
-  `ft ctl cache --kv 131072 --moe 1200` (returns HTTP 503 and keeps the old cache if it
-  does not fit). Use this to find a working split, then bake it into the startup flags.
-- Set Hermes's `model.context_length` to the same number so it compresses history before
-  the server's real limit:
+- **1M context is a hardware limit, not a flag.** It would also need YaRN
+  (`--rope-scaling yarn --yarn-orig-ctx 262144`), on top of 18 GiB of q4_0 KV. Putting KV
+  in host RAM (`--no-kv-offload`) makes it *possible* on paper and unusable in practice.
+- **Leave `-ngl` unset at 128K+** so `common_fit_params` sizes the GPU/CPU split to free
+  memory; pinning `-ngl 50` at 256K OOMs. Pinning only wins at 64K (~2 tok/s over auto).
+- Quant alternates sit next to the model (Q5_K_M 19.5 GB, Q8_0 29.0 GB). They buy fidelity
+  and lose layers to the CPU: `~/.local/opt/llama.cpp/run-qwen3.8-27b.sh` documents the
+  measured per-quant numbers (Q4_K_M is the fastest at 16 tok/s with an 8K context).
+- `--jinja` is **mandatory** for tool calling: it makes the server render the model's
+  Qwen chat template and parse `tool_calls` out of the output.
+- Set Hermes's `model.context_length` to the same `-c` you serve:
 
 ```yaml
 # ~/.hermes/config.yaml
 model:
-  provider: custom
-  default: Qwen3.6-35B-A3B-FP8
+  provider: custom:llama
+  default: Qwen3.8-27B-Q4_K_M
   base_url: http://127.0.0.1:1919/v1
-  context_length: 131072
-  supports_vision: true        # see "Vision" below
+  api_mode: chat_completions
+  context_length: 262144
+  supports_vision: false       # text-only GGUF, see "Vision" below
 ```
+
+### Context compaction needs a budget — not a cooldown
+
+On this window Hermes compacts at **85% (222,822 tokens at 256K) no matter what
+`compression.threshold` says**: the small-context floor binds, and the trigger is capped at
+85% of the usable window. Everything else follows from that number.
+
+- Compaction is itself an LLM call over the transcript, so it costs a full long-context
+  pass: prefill at ~800 tok/s plus ~4.5 tok/s decode at depth.
+- **The summary request carries no output reservation.** Hermes reports
+  `aux_output_reservation: null` and the server sees `max_tokens: -1`, so Qwen keeps
+  generating (thinking included) until the ceiling. Measured on the failing attempt:
+  a 6.8K-token prompt streamed for **1,201s** and was cut off uncommitted — 6.8K tokens of
+  *input*, because Hermes bounds what it summarises. Worse, with `--parallel 1` that
+  abandoned stream kept the **only slot** busy, which is why "the model may stop
+  responding".
+- The summary budget scales with the window: `min(ctx × 0.05, 10_000)`, so **10,000
+  tokens at 256K**. A cap below that produces
+  *"summary was truncated (finish_reason=length)"* and the attempt is discarded — the cap
+  must therefore sit at or above the budget, not below it.
+- Two separate ceilings apply, and both default too low: the host compaction ceiling
+  (600s) and the auxiliary stream ceiling, which is `max(600, 4 × auxiliary.compression.timeout)`
+  — the stock 300s timeout therefore yields **1200s** and reports
+  *"Auxiliary streamed call timed out after 1200s total ceiling (stream still open but
+  over budget)"*.
+- The visible warning — *"Context is over the compression threshold … but compression is
+  currently blocked (cooldown:300)"* — is a **downstream effect** of those timeouts, not
+  the cause.
+- The failure cooldown is persisted on the session row
+  (`sessions.compression_failure_cooldown_until`), so restarting the service does not
+  clear it; it expires on its own.
+
+Size both budgets to the model, and bound the summary:
+
+```yaml
+# ~/.hermes/config.yaml
+compression:
+  context_timeout_seconds: 1500         # idle window, long enough for a 10K-token summary
+  context_total_ceiling_seconds: 2400   # host backstop above it
+  proactive_prune_tokens: 30000         # deterministic prune before the LLM is needed
+  proactive_prune_min_result_chars: 8000
+auxiliary:
+  compression:
+    timeout: 1500                       # -> aux stream ceiling becomes 6000s
+    extra_body:
+      max_tokens: 10000                 # == Hermes' summary budget at 256K
+      chat_template_kwargs:
+        enable_thinking: false          # Qwen thinking otherwise eats the whole budget
+```
+
+Verified: the server logs the summary request with the configured cap (previously `-1`),
+`enable_thinking: false` yields zero reasoning tokens, and a summary that fits the cap
+commits with `method: llm_summary`.
+
+`proactive_prune_tokens` is the cheap lever: it drops/summarises old tool results with **no
+model call**, and that is what actually keeps sessions away from the trigger (this repo's
+MCP tools return large JSON). With it enabled, LLM compaction only fires in very long
+sessions.
+
+A healthy compaction writes one `[CONTEXT COMPACTION — REFERENCE ONLY]` message and marks
+the prior turns `compacted=1` in `~/.hermes/state.db` (`messages`). A
+"deterministic fallback summary" warning instead means the summary route still stalled —
+raise the ceiling again or start a fresh session.
 
 ### Vision
 
-`GET /v1/stats` reports `model.input_modalities` (`["text","image"]` when a vision encoder
-is registered). Hermes does not know this model from models.dev, so set
-`model.supports_vision: true` — otherwise Hermes pre-describes images instead of sending
-them natively, and the chart PNGs (`analyze_symbol(save_chart=true)`,
-`paper_trade_chart`, `get_pattern_run_chart`) go unread. Verify with a base64 image in an
-OpenAI `image_url` block.
+`GET /props` reports `modalities` (`{"vision": true}` only when an `mmproj` encoder was
+loaded with `--mmproj`). This GGUF is **text-only**, so `model.supports_vision` must be
+`false`: if it is set to `true`, Hermes sends images natively, llama-server rejects them,
+and the chart PNGs this repo renders (`analyze_symbol(save_chart=true)`,
+`paper_trade_chart`, `get_pattern_run_chart`) cannot be read by the agent at all.
 
-### Reasoning output
+Chart review therefore needs either a multimodal GGUF (plus its `mmproj`) or an auxiliary
+vision model routed through `auxiliary.*`, not this endpoint.
 
-FreeToken serves Qwen with a reasoning parser (`/v1/stats` → `reasoning.gears`). Thinking
-lands in `reasoning_content`, separate from `content`. With a tiny `max_tokens` the whole
-budget can be consumed by reasoning and `content` comes back empty — a budget artifact,
-not a failure. FreeToken's default output budget (32,768) is ample, and Hermes does not cap
-output for custom endpoints.
+### Tool calling and reasoning output
+
+Verify tools before trusting a multi-step loop:
+
+```bash
+curl -s http://127.0.0.1:1919/v1/chat/completions -H 'Content-Type: application/json' -d '{
+  "model": "qwen3.8",
+  "messages": [{"role":"user","content":"Weather in Tokyo? Use the tool."}],
+  "tools": [{"type":"function","function":{"name":"get_weather",
+             "parameters":{"type":"object","properties":{"city":{"type":"string"}}}}}]
+}'
+# → choices[0].finish_reason == "tool_calls", choices[0].message.tool_calls populated.
+```
+
+Raw JSON printed as `content` instead means `--jinja` is missing (or a custom
+`--chat-template` broke it). `/props` → `chat_template_caps.supports_tools` should be
+`true`.
+
+Qwen's thinking lands in `reasoning_content`, separate from the visible `content`. With a
+tiny `max_tokens` the whole budget can be spent on reasoning and `content` comes back
+empty — a budget artifact, not a failure. llama-server applies no output cap of its own,
+and Hermes does not cap output for custom endpoints.
 
 ---
 
-## Step 2 — Give Hermes the trading MCP server
+## Step 2 — Point Hermes at the model
+
+There is no `ft launch hermes` equivalent here: write the provider block yourself. The
+local endpoint needs no API key, so no credential entry is involved.
+
+```yaml
+# ~/.hermes/config.yaml
+model:
+  provider: custom:llama
+  default: Qwen3.8-27B-Q4_K_M
+  base_url: http://127.0.0.1:1919/v1
+  api_mode: chat_completions
+  supports_vision: false
+  context_length: 262144
+custom_providers:
+  - name: llama
+    base_url: http://127.0.0.1:1919/v1
+    model: Qwen3.8-27B-Q4_K_M
+    api_mode: chat_completions
+    models:
+      Qwen3.8-27B-Q4_K_M:
+        context_length: 262144
+```
+
+Confirm with `hermes status`: it prints the model and provider it resolved
+(`Provider: custom:llama`).
+
+> **Model name is a label, not a selector.** llama-server serves whatever GGUF it was
+> started with; `-a` only sets the advertised id. Keep `model.default` aligned with the
+> alias (or with `/v1/models`) so the two agree, but nothing is loaded on request.
+>
+> **Context length is a contract, not a wish.** Set `model.context_length` to the `-c` you
+> actually serve. Hermes compresses history before that limit; if it is set higher than
+> the server holds, long turns fail at runtime.
+
+---
+
+## Step 3 — Give Hermes the trading MCP server
 
 `mcp_server/` is **stdio**, so Hermes spawns it as a child process — nothing to firewall,
 secrets stay in `.env`. Add to `~/.hermes/config.yaml`:
@@ -199,7 +317,7 @@ To shrink the surface further, add a `tools.include` allowlist under
 
 ---
 
-## Step 3 (optional) — Let Hermes also work the *code*
+## Step 4 (optional) — Let Hermes also work the *code*
 
 The MCP server manages the *running bot*. To let Hermes manage the *repository* — read/edit
 code, run tests — use its built-in terminal and file tools, and/or add scoped MCP servers:
@@ -222,29 +340,35 @@ multiple focused commits.
 
 ---
 
-## Step 4 — Make it survive reboots
+## Step 5 — Make it survive reboots
 
 Everything the agent needs should come back on its own after a restart. This host already
 runs the bot's web UI as a **systemd user service** with `Restart=always`, and user-systemd
-**linger** is enabled (`loginctl show-user $ME | grep Linger` → `yes`), so user services
+**linger** is enabled (`loginctl show-user $USER | grep Linger` → `yes`), so user services
 start at boot without an interactive login.
 
 Add a unit for the model server, modelled on the repo's web unit:
 
 ```ini
-# ~/.config/systemd/user/freetoken.service
+# ~/.config/systemd/user/llama-server.service
 [Unit]
-Description=FreeToken model server (Qwen3.6-35B-A3B-FP8)
+Description=llama.cpp server (Qwen3.8-27B Q4_K_M, OpenAI-compatible)
 After=network-online.target
 StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 WorkingDirectory=%h
-# --num-tokens + --moe-cache-size pin a KV pool big enough for the agent (see Step 1).
-ExecStart=%h/.freetoken/venv/bin/ft serve --model %h/.freetoken/models/Qwen3.6-35B-A3B-FP8 \
-  --host 127.0.0.1 --port 1919 --moe-backend auto --max-running-requests 4 \
-  --memory-ratio 0.85 --num-tokens 131072 --moe-cache-size 1200
+# Prebuilt CUDA binaries + their bundled cudart (no CUDA toolkit on this host).
+Environment=LD_LIBRARY_PATH=%h/.local/opt/llama.cpp/cudart-llama-b11514-bin-ubuntu-cuda-13.4-x64:%h/.local/opt/llama.cpp/llama-b11514
+# -ngl is left unset so the build auto-fits the GPU/CPU split; 256K is the model's native
+# max with q4_0 KV (4.5 GiB). Pinning -ngl at this context OOMs.
+# --parallel 1 is load-bearing: the default 4 slots share ONE KV cache, so concurrent
+# sessions starve each other ("failed to find free space in the KV cache").
+ExecStart=%h/.local/opt/llama.cpp/llama-b11514/llama-server \
+  -m %h/models/qwen3.8-27b/Qwen3.8-27B-Q4_K_M.gguf \
+  -c 262144 -fa on -ctk q4_0 -ctv q4_0 -t 20 -b 2048 -ub 512 --parallel 1 \
+  --jinja -a qwen3.8 --host 127.0.0.1 --port 1919
 Restart=always
 RestartSec=10
 KillMode=control-group
@@ -266,39 +390,37 @@ model server and web UI are up:
 ```ini
 # ~/.config/systemd/user/hermes-gateway.service.d/after-stack.conf
 [Unit]
-After=freetoken.service trading-web.service
-Wants=freetoken.service trading-web.service
+After=llama-server.service trading-web.service
+Wants=llama-server.service trading-web.service
 ```
 
 Then:
 
 ```bash
 systemctl --user daemon-reload
-systemctl --user enable --now freetoken.service
+systemctl --user enable --now llama-server.service
 systemctl --user list-dependencies default.target   # confirm all units are pulled in
-systemctl --user is-enabled freetoken hermes-gateway trading-web
+systemctl --user is-enabled llama-server hermes-gateway trading-web
 ```
 
-> **Desktop-app conflict.** FreeToken Desktop launches its own `ft serve` on port 1919. If
-> the systemd unit owns the port, do not start the model from the Desktop app at the same
-> time. Killing the desktop app alone is not enough — its worker children reparent to
-> `systemd --user` and keep port **1920** (the torch rendezvous store) and the GPU, causing
-> an `EADDRINUSE` crash loop. Reap them (`kill` the leftover `ft serve` / `spawn_main`
-> pids) before starting the service.
+> **Port 1919 is exclusive.** Anything else started by hand (a shell-run `llama-server`,
+> an old engine) makes the unit crash-loop on `EADDRINUSE`. Find the holder with
+> `ss -tlnp | grep 1919`, stop it, and let systemd take the port.
 
 ---
 
 ## Operations
 
 ```bash
-systemctl --user status  freetoken hermes-gateway trading-web   # states
-systemctl --user restart freetoken.service                      # after changing flags
-journalctl --user -u freetoken -f                               # model-server log
-journalctl --user -u hermes-gateway -f                          # gateway log
-curl -s http://127.0.0.1:1919/v1/cache/status                   # KV/expert geometry
-curl -s http://127.0.0.1:1919/v1/stats                          # throughput, modalities
-hermes status                                                   # model, gateway, jobs
-hermes -z "<prompt>"                                            # one-shot, headless
+systemctl --user status  llama-server hermes-gateway trading-web   # states
+systemctl --user restart llama-server.service                      # after changing flags
+journalctl --user -u llama-server -f                               # model-server log
+journalctl --user -u hermes-gateway -f                              # gateway log
+curl -s http://127.0.0.1:1919/health                                # {"status":"ok"}
+curl -s http://127.0.0.1:1919/props | jq '{model_alias, modalities, n_ctx: .default_generation_settings.n_ctx}'
+nvidia-smi --query-gpu=memory.used --format=csv,noheader            # VRAM headroom
+hermes status                                                       # model, gateway, jobs
+hermes -z "<prompt>"                                                # one-shot, headless
 ```
 
 A typical verification prompt: *"Use the trading-bot MCP tools: call `server_health`, then
@@ -316,7 +438,7 @@ Hermes's model and the app's internal AI are **separate**:
 
 | Caller | Model | Configured in |
 |---|---|---|
-| Hermes (the agent) | Qwen3.6-35B-A3B-FP8 via FreeToken | `~/.hermes/config.yaml` |
+| Hermes (the agent) | Qwen3.8-27B (Q4_K_M) via llama.cpp | `~/.hermes/config.yaml` |
 | Chart vision confirmation | Anthropic Claude | repo `.env` (`VISION_CONFIRMATION_ENABLED`, `ANTHROPIC_*`) |
 | AI pattern editing | DeepSeek | repo `.env` (`DEEPSEEK_*`) |
 
@@ -334,13 +456,15 @@ provider is a single adapter in `ai/providers/deepseek.py`; vision is
 
 | Key | Meaning |
 |---|---|
-| `model.provider: custom` | Self-hosted OpenAI-compatible endpoint |
-| `model.base_url` | `http://127.0.0.1:1919/v1` (FreeToken) |
-| `model.default` | served model id from `/v1/models` |
-| `model.context_length` | pin to the KV pool you allocated (e.g. 131072; ≥ 65536) |
-| `model.supports_vision` | `true` — FreeToken serves image input |
+| `model.provider: custom:llama` | Name of the self-hosted OpenAI-compatible provider below |
+| `model.base_url` | `http://127.0.0.1:1919/v1` (llama-server) |
+| `model.api_mode` | `chat_completions` — llama-server has no `/v1/messages` |
+| `model.default` | the served alias (`-a`) from `/v1/models` |
+| `model.context_length` | same value as `-c` (here `262144`) |
+| `model.supports_vision` | `false` for a text-only GGUF; `true` only with `--mmproj` |
+| `custom_providers[]` | `name: llama` + `models:` map carrying the context length |
 | `mcp_servers.trading-bot.*` | stdio MCP server (`run_mcp.sh`) |
-| `auxiliary.*` | route compression/vision elsewhere if the local 35B is weak there |
+| `auxiliary.*` | route compression/vision elsewhere; the local 27B cannot see images |
 
 **Repo side** (`.env`, unchanged — the MCP server already reads it):
 
@@ -376,17 +500,20 @@ provider is a single adapter in `ai/providers/deepseek.py`; vision is
 
 | Symptom | Cause / fix |
 |---|---|
-| `EADDRINUSE` on port **1920**, service crash-loops | Orphaned FreeToken children (from a killed Desktop app) hold the torch rendezvous port/GPU. Reap the leftover `ft serve` / `spawn_main` pids, then restart. |
-| CUDA OOM on startup after adding `--num-tokens` | KV pinned without shrinking the expert cache. Add `--moe-cache-size` (see Step 1). |
-| `HTTP 503` from `ft ctl cache` | Requested cache exceeds the budget; lower `--kv`/`--moe`. The old cache is kept. |
-| Hermes context-limit refusal at startup | Local window < 64K — allocate ≥ 64K KV and pin `model.context_length` ≥ 65536. |
-| Model prints tool calls as text | Tool-call parser off — FreeToken auto-infers it (`qwen3_coder` here); set `--tool-call-parser` explicitly and restart. |
+| `CUDA error: out of memory` at startup | `-ngl` too high for free VRAM. Lower it by 2 and restart; check `nvidia-smi` for what else holds the card. |
+| `failed to find free space in the KV cache`, requests failing at ~38K | Default slot count too high. Serve with `--parallel 1`: 4 slots share one unified 65536-token cache, so long sessions evict each other. |
+| Compaction stalls / "blocked (cooldown:300)" | Ceilings and the summary cap were sized for a smaller window. See [Context compaction needs a budget](#context-compaction-needs-a-budget--not-a-cooldown). |
+| "summary was truncated (finish_reason=length)" | `auxiliary.compression.extra_body.max_tokens` is below Hermes' budget of `min(ctx × 0.05, 10000)`; raise it to that. |
+| Generation crawls at ~4 tok/s | Most layers are on the CPU. Raise `-ngl` until just under the OOM point (see Step 1's table). |
+| Model prints tool calls as text / "no tool support" | `--jinja` missing (or a custom `--chat-template` broke parsing). Confirm `/props` → `chat_template_caps.supports_tools`. |
+| Hermes context-limit refusal at startup | Served window < 64K — raise `-c` and pin `model.context_length` to match. |
+| `EADDRINUSE` on 1919, service crash-loops | Another `llama-server` (started by hand) owns the port: `ss -tlnp \| grep 1919`, stop it, restart the unit. |
+| Empty assistant `content` | Tiny `max_tokens` consumed by reasoning; the answer is in `reasoning_content`. Give it output budget. |
+| Hermes won't see chart images | Expected — this is a text-only GGUF. Keep `model.supports_vision: false` and use an auxiliary vision model. |
 | `mcp_trading-bot_*` tools missing | `hermes mcp test trading-bot`; confirm `run_mcp.sh` is executable and absolute; check no `tools.include` filtered them; `/reload-mcp`. |
 | "web service unreachable" | `python main.py --web` isn't running, or `MCP_API_URL` is wrong — check `/health`. |
 | HTTP 401 from a tool | Bad `MCP_*` / `WEB_UI_*` credentials. |
 | `No module named mcp_server` | Launch via `run_mcp.sh` (it `cd`s to the repo root). |
-| Empty assistant `content` | Tiny `max_tokens` consumed by reasoning; the answer is in `reasoning_content`. Give output budget (FreeToken default 32K). |
-| Hermes won't see chart images | Set `model.supports_vision: true`. |
 | Destructive/Maintenance/Deploy tool "disabled" | Set the matching `MCP_ALLOW_*` in `.env` and restart the Hermes session. |
 
 ---
@@ -397,4 +524,4 @@ provider is a single adapter in `ai/providers/deepseek.py`; vision is
 - [Hermes Agent — LLM and model providers](https://hermes-agent.nousresearch.com/docs/integrations/providers)
 - [Hermes Agent — MCP](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp)
 - [Hermes Agent — Use MCP with Hermes](https://hermes-agent.nousresearch.com/docs/guides/use-mcp-with-hermes/)
-- [FreeToken — README](https://github.com/FlashML-org/FreeToken) and [CLI reference](https://github.com/FlashML-org/FreeToken/blob/main/docs/cli.md)
+- [llama.cpp — server docs](https://github.com/ggml-org/llama.cpp/tree/master/tools/server) and [releases](https://github.com/ggml-org/llama.cpp/releases)
