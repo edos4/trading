@@ -31,9 +31,11 @@ SUMMARY = {
               "last_saved_at": "2026-10-14T21:00:00"},
     "graded": 2,
     "pending": 0,
-    "models": {
-        "base": {"graded": 2, "avg_accuracy_pct": 95.35},
-        "finetuned": {"graded": 2, "avg_accuracy_pct": 99.6},
+    "horizons": {
+        "1": {"base": {"graded": 1, "avg_accuracy_pct": 97.37},
+              "finetuned": {"graded": 1, "avg_accuracy_pct": 99.47}},
+        "5": {"base": {"graded": 1, "avg_accuracy_pct": 93.33},
+              "finetuned": {"graded": 1, "avg_accuracy_pct": 99.73}},
     },
 }
 
@@ -130,8 +132,11 @@ class WebKronosExperimentApiTests(unittest.TestCase):
         self.assertEqual(r.json()["days"], 5)
         self.assertEqual(r.json()["saved"]["predictions"], 2)
         self.assertEqual(r.json()["graded_now"], 2)
-        self.assertEqual(r.json()["summary"]["models"]["base"]["avg_accuracy_pct"],
-                         95.35)
+        self.assertEqual(
+            r.json()["summary"]["horizons"]["1"]["base"]["avg_accuracy_pct"], 97.37)
+        self.assertEqual(
+            r.json()["summary"]["horizons"]["5"]["finetuned"]["avg_accuracy_pct"],
+            99.73)
 
     def test_run_requires_tracked_symbols(self) -> None:
         self._login()

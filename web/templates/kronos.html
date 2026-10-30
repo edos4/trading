@@ -91,6 +91,17 @@
   <p id="kronos-exp2-status" class="status"></p>
   <p id="kronos-exp2-summary" class="muted small"></p>
   <div class="table-wrap">
+    <table id="kronos-exp2-avg">
+      <thead>
+        <tr>
+          <th>Horizon</th><th>Avg Base Accuracy</th>
+          <th>Avg Finetuned Accuracy</th><th>Graded (base / finetuned)</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <div class="table-wrap">
     <table id="kronos-exp2">
       <thead>
         <tr>
@@ -102,10 +113,9 @@
       <tbody></tbody>
     </table>
   </div>
-  <p id="kronos-exp2-avg" class="muted small"></p>
 </section>
 {% endblock %}
 {% block scripts %}
 <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
-<script src="/static/kronos.js?v=11"></script>
+<script src="/static/kronos.js?v=12"></script>
 {% endblock %}

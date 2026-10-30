@@ -89,8 +89,19 @@ def test_grade_scores_both_models(kronos_store_factory) -> None:
     assert summary["pending"] == 0
     assert summary["saved"]["last_graded_anchor"] == "2026-10-14"
     assert summary["saved"]["last_graded_at"] is not None
-    assert round(summary["models"]["base"]["avg_accuracy_pct"], 2) == 95.35
-    assert round(summary["models"]["finetuned"]["avg_accuracy_pct"], 2) == 99.6
+    # Averages stay split per horizon: D1 forecasts 390/382 against a 380
+    # settle, D5 forecasts 400/376 against a 375 settle. Blending them into a
+    # single 95.35 / 99.60 line is exactly what hid that split.
+    horizons = summary["horizons"]
+    assert sorted(horizons) == ["1", "5"]
+    assert horizons["1"]["base"]["graded"] == 1
+    assert round(horizons["1"]["base"]["avg_accuracy_pct"], 2) == 97.37
+    assert horizons["1"]["finetuned"]["graded"] == 1
+    assert round(horizons["1"]["finetuned"]["avg_accuracy_pct"], 2) == 99.47
+    assert horizons["5"]["base"]["graded"] == 1
+    assert round(horizons["5"]["base"]["avg_accuracy_pct"], 2) == 93.33
+    assert horizons["5"]["finetuned"]["graded"] == 1
+    assert round(horizons["5"]["finetuned"]["avg_accuracy_pct"], 2) == 99.73
 
     rows = store.recent(limit=10)["rows"]
     assert rows[0]["actual_close"] == 380.0
@@ -138,3 +149,8 @@ def test_resaving_clears_grading(kronos_store_factory) -> None:
     summary = store.summary()
     assert summary["graded"] == 0
     assert summary["pending"] == 2
+    # Both horizons stay present so the panel never hides +1D or +5D.
+    assert sorted(summary["horizons"]) == ["1", "5"]
+    for entry in summary["horizons"].values():
+        assert entry["base"] == {"graded": 0, "avg_accuracy_pct": None}
+        assert entry["finetuned"] == {"graded": 0, "avg_accuracy_pct": None}
