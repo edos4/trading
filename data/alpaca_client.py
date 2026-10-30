@@ -109,10 +109,19 @@ class AlpacaClient:
                 with urllib.request.urlopen(req, timeout=self._timeout) as resp:
                     return json.loads(resp.read().decode("utf-8"))
             except urllib.error.HTTPError as exc:
-                if exc.code in (401, 403):
+                if exc.code == 401:
                     raise AlpacaAuthError(
                         f"Alpaca rejected the API key pair (HTTP {exc.code})"
                     ) from exc
+                if exc.code == 403:
+                    # Plan scope, not credentials — e.g. "subscription does not
+                    # permit querying recent SIP data" or OTC content. Skip the
+                    # batch instead of aborting every other worker's work.
+                    body = exc.read().decode("utf-8", "replace").strip()
+                    log.warning(
+                        f"Alpaca | HTTP 403: {body or exc.reason} — batch skipped"
+                    )
+                    return None
                 if exc.code == 400:
                     body = exc.read().decode("utf-8", "replace").strip()
                     raise AlpacaBadRequest(body or "HTTP 400") from exc
