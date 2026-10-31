@@ -24,6 +24,22 @@ from . import (
 from ._triangle_base import detect as detect_triangles
 from .common import DISABLED, MIRROR, PATTERN_NAMES, atr, first_break, sig, tradable, zigzag
 
+try:
+    from loguru import logger as _log
+except ImportError:  # standalone checkout without the bot's logging stack
+    import logging
+
+    _log = logging.getLogger(__name__)
+
+
+def _safe(fn, *args):
+    """One detector's numerical failure must not erase the symbol's other shapes."""
+    try:
+        return fn(*args)
+    except Exception:
+        _log.exception("Patternsv2 detector %s failed", getattr(fn, "__module__", fn))
+        return []
+
 
 _SWAP = {"low": "high", "high": "low", "bottom": "top", "top": "bottom"}
 _SWAP_RE = re.compile(r"\b(low|high|bottom|top)\b")
@@ -64,17 +80,19 @@ def detect(h, l, c, zz_mult=2.0):
             bullish_pivots = P
         found = []
         for fn in _BULLISH_DETECTORS:
-            found.extend(fn(hh, ll, cc, a, P))
+            found.extend(_safe(fn, hh, ll, cc, a, P))
         # Bearish head-and-shoulders confirms on the joining neckline. The
         # up-sloping inverse keeps the horizontal at the right armpit.
         shoulder_name = "inv_head_shoulders" if d == 1 else "head_shoulders"
         if shoulder_name not in DISABLED:
-            found.extend(inv_head_shoulders.detect(hh, ll, cc, a, P, join_neck=(d == -1)))
+            found.extend(_safe(
+                inv_head_shoulders.detect, hh, ll, cc, a, P, join_neck=(d == -1),
+            ))
         for s in found:
             if d == -1:
                 _mirror_signal(s)
             sigs.append(s)
-    sigs += detect_triangles(h, l, c, a, bullish_pivots)
+    sigs += _safe(detect_triangles, h, l, c, a, bullish_pivots)
     sigs = [s for s in sigs if s["pattern"] not in DISABLED and tradable(h, l, c, s["start"], s["signal"])]
     seen, uniq = set(), []
     for s in sorted(sigs, key=lambda s: (s["signal"], -s["score"])):
