@@ -1291,6 +1291,10 @@ class MarketScanner:
             df = self._store.get_df(signal.symbol, signal.timeframe, min_bars=MIN_BARS)
             dii_reason = describe_pattern_dii_rejection(df)
             if dii_reason is not None:
+                log.info(
+                    f"Signal REJECTED by DII gate — {signal.symbol} "
+                    f"{signal.pattern} | {dii_reason}"
+                )
                 self.stats["signals_rejected"] += 1
                 self.stats["dii_rejected"] = self.stats.get("dii_rejected", 0) + 1
                 self._append_signal_log(signal, status="rejected", reason=dii_reason)
