@@ -269,6 +269,46 @@ def test_detector_reuses_pivots_and_skips_disabled_patterns(monkeypatch):
     assert len(calls) == 2
 
 
+def test_degenerate_side_fit_returns_none_instead_of_raising():
+    """Two pivots walked back onto one bar leave no x-span for the regression."""
+    from patterns_v2.patterns._triangle_base import _fit_side
+
+    assert _fit_side([235.0, 235.0], [15.66, 15.66], 0.25, 0.60, True) is None
+    assert _fit_side([10.0], [15.0], 0.25, 0.60, False) is None
+    assert _fit_side([10.0, 12.0], [np.nan, 15.0], 0.25, 0.60, True) is None
+    assert _fit_side([10.0, 12.0], [15.0, 15.4], 0.25, 0.60, True) is not None
+
+
+def test_one_failing_detector_keeps_the_symbols_other_patterns(monkeypatch):
+    """A numerical failure in one family must not erase the rest of the scan."""
+    import sys
+
+    from patterns_v2.loader import detect_fn
+
+    detect = detect_fn()
+    detectors = sys.modules[detect.__module__]
+
+    def broken(*_args, **_kwargs):
+        raise np.linalg.LinAlgError("SVD did not converge in Linear Least Squares")
+
+    def double_bottom_stub(*_args, **_kwargs):
+        return [{
+            "pattern": "double_bottom", "direction": 1, "start": 10, "end": 40,
+            "signal": 50, "level": 150.0, "score": 5.0,
+            "lines": [(10, 120.0, 40, 140.0)],
+            "points": [(10, 120.0, "low 1"), (25, 140.0, "neck"), (40, 122.0, "low 2")],
+        }]
+
+    monkeypatch.setattr(detectors, "_BULLISH_DETECTORS", (broken, double_bottom_stub))
+    frame = _frame()
+    found = detect(
+        frame["high"].to_numpy(float),
+        frame["low"].to_numpy(float),
+        frame["close"].to_numpy(float),
+    )
+    assert "double_bottom" in {signal["pattern"] for signal in found}
+
+
 def test_checkboxes_exist_on_web_and_desktop():
     root = Path(__file__).resolve().parents[1]
     explorer = (root / "web/templates/explorer.html").read_text()

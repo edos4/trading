@@ -56,14 +56,30 @@ def _touch_x(idxs, prices, series):
 def _fit_side(x, y, ai, touch_atr, upper):
     x = np.asarray(x, float)
     y = np.asarray(y, float)
-    s, b = np.polyfit(x - x[0], y, 1)
-    fitted = s * (x - x[0]) + b
+    # _touch_x can walk two pivots back onto the same bar, leaving one distinct
+    # x for the whole side. np.polyfit then divides by a zero scale and LAPACK
+    # raises "SVD did not converge", which used to abort detection for the
+    # entire symbol (AAL, every scan). A side with no span has no line.
+    if x.size < 2 or y.size != x.size:
+        return None
+    if not (np.isfinite(x).all() and np.isfinite(y).all()):
+        return None
+    span = x - x[0]
+    if not np.any(span):
+        return None
+    try:
+        s, b = np.polyfit(span, y, 1)
+    except np.linalg.LinAlgError:
+        return None
+    if not (np.isfinite(s) and np.isfinite(b)):
+        return None
+    fitted = s * span + b
     if upper:
         b += (y - fitted).max()
-        gap = (s * (x - x[0]) + b) - y
+        gap = (s * span + b) - y
     else:
         b -= (fitted - y).max()
-        gap = y - (s * (x - x[0]) + b)
+        gap = y - (s * span + b)
     if gap.max() > touch_atr * ai:
         return None
     return float(s), float(b), float(x[0])
