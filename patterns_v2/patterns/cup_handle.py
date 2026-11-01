@@ -33,17 +33,21 @@ def detect(
 ):
     I, Pr, H, C = P
     out = []
-    for k in range(3, len(I)):
-        # left rim, cup low, right rim, handle low
-        if list(H[k - 3 : k + 1]) != [True, False, True, False]:
+    n = len(c)
+    for k in range(2, len(I)):
+        # Left rim, cup low, right rim. The handle is taken from raw bars below:
+        # requiring it to be a ZigZag pivot demands a 2xATR swing against a pause
+        # capped at max_retr of the cup depth, which cannot both hold on real
+        # charts and made this detector unreachable.
+        if list(H[k - 2 : k + 1]) != [True, False, True]:
             continue
         ai = a[C[k]]
         if not np.isfinite(ai) or ai <= 0:
             continue
-        left, cup_low, right, handle = (Pr[k - 3], Pr[k - 2], Pr[k - 1], Pr[k])
-        x0, x_cup, x1, x_h = (int(I[k - 3]), int(I[k - 2]), int(I[k - 1]), int(I[k]))
-        cup_w, handle_w = x1 - x0, x_h - x1
-        if not (min_w <= cup_w <= max_w) or not (min_handle <= handle_w <= max_handle) or handle_w >= cup_w:
+        left, cup_low, right = Pr[k - 2], Pr[k - 1], Pr[k]
+        x0, x_cup, x1 = int(I[k - 2]), int(I[k - 1]), int(I[k])
+        cup_w = x1 - x0
+        if not (min_w <= cup_w <= max_w):
             continue
         # The bowl's low sits in the middle, not glued to either rim.
         rim_sep = max(8, int(0.20 * cup_w))
@@ -57,6 +61,18 @@ def detect(
             continue
         if not (min_depth <= depth / abs(top) <= max_depth):
             continue
+        # Handle: the lowest low in the few weeks after the right rim.
+        last = min(n - 1, x1 + max_handle)
+        if last - x1 < min_handle:
+            continue
+        x_h = x1 + 1 + int(np.argmin(l[x1 + 1 : last + 1]))
+        handle = float(l[x_h])
+        handle_w = x_h - x1
+        if not (min_handle <= handle_w <= max_handle) or handle_w >= cup_w:
+            continue
+        # The pause must stay under the rim; a close through it is the breakout.
+        if c[x1 + 1 : x_h + 1].size and float(np.max(c[x1 + 1 : x_h + 1])) > top:
+            continue
         if (right - handle) <= 0 or not (min_retr <= (right - handle) / depth <= max_retr):
             continue
         lo_i = max(0, x0 - lookback)
@@ -69,7 +85,8 @@ def detect(
             continue
         if not _u_shape(l, x0, x1, cup_low, depth):
             continue
-        j = first_break(c, C[k], C[k] + wait, lambda _j, y=top: y, floor=handle, h=h, l=l)
+        j = first_break(c, max(C[k], x_h + 1), max(C[k], x_h + 1) + wait,
+                        lambda _j, y=top: y, floor=handle, h=h, l=l)
         if j is None:
             continue
         lines = [
