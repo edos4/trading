@@ -31,6 +31,7 @@ from copy import deepcopy
 from collections import deque
 from contextlib import asynccontextmanager, AsyncExitStack
 from datetime import datetime, timezone
+from typing import Any
 from zoneinfo import ZoneInfo
 from pathlib import Path
 
@@ -316,11 +317,22 @@ class MarketScanner:
         # Collect-first: chart-pattern signals gathered during a scan, ranked
         # after the scan completes, then only the top-N finished.
         self._collect_pool: list[tuple[TradeSignal, BasePattern | None, object]] = []
+        # Monotonic start of the scan currently in flight (live clock).
+        self._scan_started_monotonic: float | None = None
         # Scan-cycle health counters — surfaced by the paper trading UI/CLI
         # so a stalled or misbehaving scan is visible without reading logs.
         self.stats: dict = {
             "last_scan_at": None,
             "scan_duration_s": 0.0,
+            # Scan clock — the paper tab renders these live: when the scan in
+            # flight started, when it finished, and the run's total scan time.
+            "scan_started_at": None,
+            "scan_finished_at": None,
+            "scan_in_progress": False,
+            "scan_total_s": 0.0,
+            "scans_completed": 0,
+            "run_started_at": None,
+            "run_finished_at": None,
             "patterns_found": 0,
             "signals_rejected": 0,
             "volume_gate_rejected": 0,
@@ -630,6 +642,50 @@ class MarketScanner:
             f"Scan | skip interval sleep — {elapsed:.1f}s >= {self._scan_interval}s"
         )
 
+    def scan_timing(self) -> dict[str, Any]:
+        """Live scan clock: elapsed of the scan in flight, plus run totals.
+
+        The paper tab polls this every couple of seconds and ticks the numbers
+        locally, so a 30-second scan is visible while it runs instead of only
+        showing up as a finished figure.
+        """
+        now = time.monotonic()
+        started = getattr(self, "_scan_started_monotonic", None)
+        in_progress = bool(self.stats.get("scan_in_progress"))
+        scans = int(self.stats.get("scans_completed") or 0)
+        total = round(float(self.stats.get("scan_total_s") or 0.0), 2)
+        run_started_at = self.stats.get("run_started_at")
+        run_finished_at = self.stats.get("run_finished_at")
+        run_elapsed = None
+        if run_started_at:
+            try:
+                start_dt = datetime.fromisoformat(str(run_started_at))
+                end_dt = (
+                    datetime.fromisoformat(str(run_finished_at))
+                    if run_finished_at else datetime.now(timezone.utc)
+                )
+                run_elapsed = round((end_dt - start_dt).total_seconds(), 1)
+            except ValueError:
+                run_elapsed = None
+        return {
+            "run_started_at": run_started_at,
+            "run_finished_at": run_finished_at,
+            "run_elapsed_s": run_elapsed,
+            "scan_started_at": self.stats.get("scan_started_at"),
+            "scan_finished_at": self.stats.get("scan_finished_at"),
+            "scan_in_progress": in_progress,
+            "scan_elapsed_s": (
+                round(now - started, 1)
+                if in_progress and started is not None else None
+            ),
+            "last_scan_duration_s": round(
+                float(self.stats.get("scan_duration_s") or 0.0), 2
+            ),
+            "scan_total_s": total,
+            "scans_completed": scans,
+            "avg_scan_s": round(total / scans, 2) if scans else None,
+        }
+
     def _reference_symbol(self) -> str | None:
         if not self._symbols:
             return None
@@ -738,6 +794,8 @@ class MarketScanner:
 
     async def run(self) -> None:
         await self._start_when_ready()
+        self.stats["run_started_at"] = datetime.now(timezone.utc).isoformat()
+        self.stats["run_finished_at"] = None
         n_workers = self._feed_worker_count()
         try:
             while self._running:
@@ -769,6 +827,8 @@ class MarketScanner:
                         self._scan_interval if self._scan_interval > 0 else 1.0
                     )
         finally:
+            self.stats["run_finished_at"] = datetime.now(timezone.utc).isoformat()
+            self.stats["scan_in_progress"] = False
             self.stop()
 
     @asynccontextmanager
@@ -794,6 +854,10 @@ class MarketScanner:
         uses its own MCP session so there is no contention on the stdio pipe.
         """
         scan_start = time.monotonic()
+        self._scan_started_monotonic = scan_start
+        self.stats["scan_started_at"] = datetime.now(timezone.utc).isoformat()
+        self.stats["scan_finished_at"] = None
+        self.stats["scan_in_progress"] = True
         self._collect_pool = []
         self.stats["patterns_found"] = 0
         self.stats["signals_rejected"] = 0
@@ -998,9 +1062,16 @@ class MarketScanner:
                 f"Scan | replay date skew detected: "
                 f"daily dates={sorted(self._scan_daily_dates)}"
             )
+        duration = round(time.monotonic() - scan_start, 2)
         self.stats["last_scan_at"] = datetime.now(timezone.utc).isoformat()
-        self.stats["scan_duration_s"] = round(time.monotonic() - scan_start, 2)
-        log.info("Scan complete")
+        self.stats["scan_duration_s"] = duration
+        self.stats["scan_finished_at"] = self.stats["last_scan_at"]
+        self.stats["scan_in_progress"] = False
+        self.stats["scans_completed"] = int(self.stats.get("scans_completed") or 0) + 1
+        self.stats["scan_total_s"] = round(
+            float(self.stats.get("scan_total_s") or 0.0) + duration, 2
+        )
+        log.info(f"Scan complete in {duration:.1f}s")
 
     def _apply_bar(self, symbol: str, timeframe: str, snapshot) -> tuple[bool, MarketSnapshot | None]:
         """Ledger + bar identity on the scan loop. Snapshot if patterns should run."""

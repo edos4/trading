@@ -658,6 +658,39 @@ function initPaper() {
     }
   }
 
+  const scanTiming = {};
+
+  function fmtDur(seconds) {
+    const s = Number(seconds);
+    if (!Number.isFinite(s) || s < 0) return "—";
+    if (s < 60) return `${s.toFixed(1)}s`;
+    const total = Math.round(s);
+    const m = Math.floor(total / 60);
+    if (m < 60) return `${m}m ${String(total % 60).padStart(2, "0")}s`;
+    const h = Math.floor(m / 60);
+    return `${h}h ${String(m % 60).padStart(2, "0")}m`;
+  }
+
+  function scanClockText(id) {
+    const t = scanTiming[id];
+    if (!t || !t.run_started_at) return "";
+    if (t.scan_in_progress) {
+      const scanStartMs = Date.parse(t.scan_started_at || "");
+      const live = Number.isFinite(scanStartMs)
+        ? Math.max(0, (Date.now() - scanStartMs) / 1000)
+        : Number(t.scan_elapsed_s || 0);
+      return `Scanning… ${fmtDur(live)}`;
+    }
+    const scans = Number(t.scans_completed || 0);
+    if (scans) return `Scan ${scans} took ${fmtDur(t.last_scan_duration_s)}`;
+    return "";
+  }
+
+  function renderScanClock(id) {
+    const el = document.getElementById(`${id}-scan-clock`);
+    if (el) el.textContent = scanClockText(id);
+  }
+
   function renderCard(id, snap) {
     const card = document.querySelector(`.book-card[data-book="${id}"]`);
     const startBtn = document.querySelector(`.book-start[data-book="${id}"]`);
@@ -701,8 +734,7 @@ function initPaper() {
           .join(", ") || "none";
         scanEl.textContent =
           `Last scan: ${last}   Patterns found: ${st.patterns_found}   ` +
-          `Trades opened: ${st.trades_opened}   Rejected: ${st.signals_rejected}   ` +
-          `Scan time: ${(st.scan_duration_s || 0).toFixed(1)}s` +
+          `Trades opened: ${st.trades_opened}   Rejected: ${st.signals_rejected}` +
           (snap.use_stream || snap.duration_days
             ? `   Sim days: ${st.sim_days}${snap.duration_days ? `/${snap.duration_days}` : ""}`
             : "") +
@@ -712,6 +744,8 @@ function initPaper() {
           `   Reject gates: ${rejectGates}`;
       }
     }
+    scanTiming[id] = snap.scan_timing || null;
+    renderScanClock(id);
     if (statusEl) statusEl.textContent = snap.error || snap.status || "";
     if (startBtn) startBtn.disabled = !!snap.running;
     if (stopBtn) stopBtn.disabled = !snap.running;
@@ -978,6 +1012,10 @@ function initPaper() {
   }
 
   let pollTimer = null;
+
+  // Tick the scan clocks locally between polls so a 30-second scan counts up
+  // live instead of jumping once per poll.
+  setInterval(() => BOOKS.forEach((id) => renderScanClock(id)), 1000);
 
   async function refresh() {
     const s = await api("/api/paper/status");

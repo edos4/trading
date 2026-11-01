@@ -1,6 +1,7 @@
 """A failed feed request must not lose a replay session or orphan workers."""
 
 import asyncio
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -49,6 +50,77 @@ def test_incomplete_scan_retries_date_before_advance_and_duration_stop(monkeypat
     assert feed.advances == 1
     assert scanner.stats["scan_complete"] is True
     assert scanner._stop_if_duration_reached() is True
+
+
+def test_scan_cycle_stamps_the_scan_clock(monkeypatch):
+    """A finished cycle must leave a start/finish stamp and a running total."""
+
+    class Feed:
+        snapshot_batch_size = 10
+
+        async def fetch_snapshots(self, symbols, timeframe, **kwargs):
+            return {symbol: None for symbol in symbols}
+
+        async def advance_replay(self, session):
+            return True, False
+
+    scanner = _scanner(Feed(), monkeypatch, symbols=("AAA",))
+    monkeypatch.setattr(scanner, "_apply_bar", lambda symbol, *_: (False, None))
+    scanner._running = True
+    assert scanner.scan_timing()["scans_completed"] == 0
+
+    asyncio.run(scanner._scan_all(feed_sessions=[object()]))
+    timing = scanner.scan_timing()
+    assert timing["scans_completed"] == 1
+    assert timing["scan_in_progress"] is False
+    assert timing["scan_elapsed_s"] is None
+    assert timing["scan_total_s"] == pytest.approx(timing["last_scan_duration_s"])
+    assert (
+        datetime.fromisoformat(timing["scan_finished_at"])
+        >= datetime.fromisoformat(timing["scan_started_at"])
+    )
+
+    asyncio.run(scanner._scan_all(feed_sessions=[object()]))
+    timing = scanner.scan_timing()
+    assert timing["scans_completed"] == 2
+    assert timing["avg_scan_s"] == pytest.approx(scanner.stats["scan_total_s"] / 2)
+
+
+def test_run_stamps_the_run_clock(monkeypatch):
+    """The paper tab's run clock must start when the loop starts and freeze."""
+    from contextlib import asynccontextmanager
+
+    scanner = MarketScanner.__new__(MarketScanner)
+    scanner.stats = {}
+    scanner._running = True
+    scanner._scan_interval = 0
+    scanner._duration_days = None
+    scanner._sim_days = 0
+    scanner._symbols = []
+    scanner._tv = SimpleNamespace()
+    scanner._paper = None
+
+    async def noop(*args, **kwargs):
+        return None
+
+    async def one_cycle(*args, **kwargs):
+        scanner._running = False
+
+    @asynccontextmanager
+    async def sessions(n):
+        yield []
+
+    monkeypatch.setattr(scanner, "_start_when_ready", noop)
+    monkeypatch.setattr(scanner, "_preload_feed", noop)
+    monkeypatch.setattr(scanner, "_scan_all", one_cycle)
+    monkeypatch.setattr(scanner, "_open_feed_sessions", sessions)
+    monkeypatch.setattr(scanner, "stop", lambda: None)
+
+    asyncio.run(scanner.run())
+    assert scanner.stats["run_started_at"]
+    assert scanner.stats["run_finished_at"]
+    assert scanner.stats["run_finished_at"] >= scanner.stats["run_started_at"]
+    assert scanner.scan_timing()["run_elapsed_s"] >= 0
 
 
 def test_transport_failure_finishes_other_workers_before_reconnecting(monkeypatch):
