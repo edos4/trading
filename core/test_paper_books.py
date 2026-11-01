@@ -793,3 +793,17 @@ def test_run_settings_indicators_only_wins_over_pattern_flags():
     assert cfg["collect_first_top_n"] == 6
     assert cfg["stream_start"] is None
     assert cfg["duration_days"] == 12
+
+
+def test_snapshot_reports_the_persisted_scan_clock_without_a_scanner():
+    """A stopped/restarted desk still shows the book's total scan time."""
+    with patch("core.paper_books.PaperAccount.save"):
+        mgr = PaperBookManager()
+        book = mgr.books["us"]
+        book.account.record_scan(7.5)
+        book.account.record_scan(2.5)
+        assert book.scanner is None
+        timing = mgr.snapshot("us")["scan_timing"]
+        assert timing["scan_total_s"] == 10.0
+        assert timing["scans_completed"] == 2
+        assert timing["avg_scan_s"] == 5.0

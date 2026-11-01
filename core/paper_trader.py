@@ -18,6 +18,7 @@ import threading
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from config import settings
@@ -303,6 +304,13 @@ class PaperAccount:
         self.equity_curve: list[tuple[str, float]] = []
         self._last_price: dict[str, float] = {}
         self._tick = 0
+        # Cumulative scan clock: every completed scan adds its duration here so
+        # the desk can show the book's total scanning time (across start/stop
+        # runs), not just the last cycle. Reset only with the account.
+        self._scan_total_s = 0.0
+        self._scan_count = 0
+        self._last_scan_s = 0.0
+        self._last_scan_at: str | None = None
         # Per-symbol count of *actual new bars* seen (as opposed to
         # scan cycles) — scan_interval_seconds is typically much shorter
         # than a daily pattern's bar (e.g. hourly scans of a daily
@@ -443,6 +451,28 @@ class PaperAccount:
             self._daily_key = ""
             self._daily_pnl = 0.0
             self._tick = 0
+
+    def record_scan(self, seconds: float) -> None:
+        """Add one completed scan to the book's cumulative scan clock."""
+        elapsed = max(0.0, float(seconds))
+        with self._lock:
+            self._scan_total_s = round(self._scan_total_s + elapsed, 3)
+            self._scan_count = int(self._scan_count) + 1
+            self._last_scan_s = round(elapsed, 2)
+            self._last_scan_at = datetime.now(timezone.utc).isoformat()
+
+    def scan_clock(self) -> dict[str, Any]:
+        """Cumulative scan time/count for this book, persisted across runs."""
+        with self._lock:
+            total = round(float(self._scan_total_s), 2)
+            count = int(self._scan_count)
+            return {
+                "scan_total_s": total,
+                "scans_completed": count,
+                "avg_scan_s": round(total / count, 2) if count else None,
+                "last_scan_duration_s": round(float(self._last_scan_s), 2),
+                "last_scan_at": self._last_scan_at,
+            }
 
     def sim_now(self, timeframe: str | None = None) -> datetime | None:
         with self._lock:
@@ -1093,6 +1123,10 @@ class PaperAccount:
                 "slippage_pct": self.slippage_pct,
                 "max_daily_loss": self.max_daily_loss,
                 "tick": self._tick,
+                "scan_total_s": self._scan_total_s,
+                "scan_count": self._scan_count,
+                "last_scan_s": self._last_scan_s,
+                "last_scan_at": self._last_scan_at,
                 "bar_count": dict(self._bar_count),
                 "sim_now_by_timeframe": {
                     tf: ts.isoformat() for tf, ts in self._sim_now_by_timeframe.items()
@@ -1160,6 +1194,10 @@ class PaperAccount:
             raise ValueError(f"Paper account cash must be finite: {p}")
         acct.max_daily_loss = data.get("max_daily_loss", acct.max_daily_loss)
         acct._tick = data.get("tick", 0)
+        acct._scan_total_s = float(data.get("scan_total_s") or 0.0)
+        acct._scan_count = int(data.get("scan_count") or 0)
+        acct._last_scan_s = float(data.get("last_scan_s") or 0.0)
+        acct._last_scan_at = data.get("last_scan_at") or None
         raw_bar_count = data.get("bar_count", {}) or {}
         # Migrate pre-timeframe accounts whose counters were keyed only by
         # symbol. Those counters represented the daily paper clock.

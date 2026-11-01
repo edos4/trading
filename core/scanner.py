@@ -643,17 +643,33 @@ class MarketScanner:
         )
 
     def scan_timing(self) -> dict[str, Any]:
-        """Live scan clock: elapsed of the scan in flight, plus run totals.
+        """Live scan clock: the scan in flight, plus the book's total time.
 
-        The paper tab polls this every couple of seconds and ticks the numbers
-        locally, so a 30-second scan is visible while it runs instead of only
-        showing up as a finished figure.
+        Cumulative time/count are read from the paper account so the desk shows
+        the entire book's scanning time (across start/stop runs), not just the
+        last cycle. The paper tab polls this every couple of seconds and ticks
+        the in-flight scan locally, so a 30-second scan is visible while it
+        runs instead of only showing up as a finished figure.
         """
         now = time.monotonic()
         started = getattr(self, "_scan_started_monotonic", None)
         in_progress = bool(self.stats.get("scan_in_progress"))
-        scans = int(self.stats.get("scans_completed") or 0)
-        total = round(float(self.stats.get("scan_total_s") or 0.0), 2)
+        paper = getattr(self, "_paper", None)
+        if paper is not None:
+            clock = paper.scan_clock()
+        else:
+            # Bare scanners (CLI/tests) have no book to accumulate into.
+            scans = int(self.stats.get("scans_completed") or 0)
+            total = round(float(self.stats.get("scan_total_s") or 0.0), 2)
+            clock = {
+                "scan_total_s": total,
+                "scans_completed": scans,
+                "avg_scan_s": round(total / scans, 2) if scans else None,
+                "last_scan_duration_s": round(
+                    float(self.stats.get("scan_duration_s") or 0.0), 2
+                ),
+                "last_scan_at": self.stats.get("last_scan_at"),
+            }
         run_started_at = self.stats.get("run_started_at")
         run_finished_at = self.stats.get("run_finished_at")
         run_elapsed = None
@@ -668,6 +684,7 @@ class MarketScanner:
             except ValueError:
                 run_elapsed = None
         return {
+            **clock,
             "run_started_at": run_started_at,
             "run_finished_at": run_finished_at,
             "run_elapsed_s": run_elapsed,
@@ -678,12 +695,6 @@ class MarketScanner:
                 round(now - started, 1)
                 if in_progress and started is not None else None
             ),
-            "last_scan_duration_s": round(
-                float(self.stats.get("scan_duration_s") or 0.0), 2
-            ),
-            "scan_total_s": total,
-            "scans_completed": scans,
-            "avg_scan_s": round(total / scans, 2) if scans else None,
         }
 
     def _reference_symbol(self) -> str | None:
@@ -1071,6 +1082,8 @@ class MarketScanner:
         self.stats["scan_total_s"] = round(
             float(self.stats.get("scan_total_s") or 0.0) + duration, 2
         )
+        if self._paper is not None:
+            self._paper.record_scan(duration)
         log.info(f"Scan complete in {duration:.1f}s")
 
     def _apply_bar(self, symbol: str, timeframe: str, snapshot) -> tuple[bool, MarketSnapshot | None]:

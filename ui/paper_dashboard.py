@@ -263,10 +263,7 @@ class MarketBookFrame(ttk.LabelFrame):
                 f"Scan: {float(stats.get('scan_duration_s') or 0):.1f}s"
             )
         timing = snap.get("scan_timing") or {}
-        if timing.get("run_started_at"):
-            self.scan_clock_var.set(self._scan_clock_text(timing))
-        else:
-            self.scan_clock_var.set("")
+        self.scan_clock_var.set(self._scan_clock_text(timing))
         self.status_var.set(snap.get("error") or snap.get("status") or "")
         running = bool(snap.get("running"))
         self.start_btn.config(state=tk.DISABLED if running else tk.NORMAL)
@@ -291,18 +288,26 @@ class MarketBookFrame(ttk.LabelFrame):
         return f"{minutes // 60}h {minutes % 60:02d}m"
 
     def _scan_clock_text(self, timing: dict) -> str:
-        """Just the scan in flight (or the last one): how long it takes."""
-        if timing.get("scan_in_progress"):
-            return (
-                f"Scanning… {self._fmt_duration(timing.get('scan_elapsed_s'))}"
-            )
+        """Total time this book has spent scanning, across all its runs."""
         scans = int(timing.get("scans_completed") or 0)
-        if scans:
+        total = float(timing.get("scan_total_s") or 0.0)
+        if not scans and not total and not timing.get("scan_in_progress"):
+            return ""
+        if timing.get("scan_in_progress"):
+            elapsed = float(timing.get("scan_elapsed_s") or 0.0)
             return (
-                f"Scan {scans} took "
-                f"{self._fmt_duration(timing.get('last_scan_duration_s'))}"
+                f"Scanning… {self._fmt_duration(elapsed)}   "
+                f"Total scan time: {self._fmt_duration(total + elapsed)}   "
+                f"{scans + 1} scans"
             )
-        return ""
+        avg = (
+            f"   avg {self._fmt_duration(timing.get('avg_scan_s'))}"
+            if timing.get("avg_scan_s") is not None else ""
+        )
+        return (
+            f"Total scan time: {self._fmt_duration(total)}   "
+            f"{scans} scans{avg}"
+        )
 
 
 class PaperDashboard:

@@ -141,13 +141,11 @@ def _scan_stats(raw: Any) -> Optional[dict[str, Any]]:
         "scan_duration_s",
         "sim_days",
         "rejection_by_gate",
-        # Scan clock: when the scan in flight started/finished and the run's
-        # cumulative scanning time (the CLI path has no live scanner object).
+        # Per-run scan state. Cumulative time/count live in scan_timing, which
+        # is persisted on the account and covers every run of the book.
         "scan_started_at",
         "scan_finished_at",
         "scan_in_progress",
-        "scan_total_s",
-        "scans_completed",
         "run_started_at",
         "run_finished_at",
     )
@@ -316,6 +314,8 @@ def snapshot_from_paper_account(
         "closed_count": len(snap["closed"]),
         "exposure": snap["exposure"],
         "scan_stats": scan_stats,
+        # Cumulative across every run of this book (persisted on the account).
+        "scan_timing": account.scan_clock(),
         "signal_logs": [
             {**row, "market": row.get("market") or profile.id}
             for row in reversed(load_signal_log(profile.id))

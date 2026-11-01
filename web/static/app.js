@@ -673,17 +673,26 @@ function initPaper() {
 
   function scanClockText(id) {
     const t = scanTiming[id];
-    if (!t || !t.run_started_at) return "";
-    if (t.scan_in_progress) {
-      const scanStartMs = Date.parse(t.scan_started_at || "");
-      const live = Number.isFinite(scanStartMs)
-        ? Math.max(0, (Date.now() - scanStartMs) / 1000)
-        : Number(t.scan_elapsed_s || 0);
-      return `Scanning… ${fmtDur(live)}`;
-    }
+    if (!t) return "";
     const scans = Number(t.scans_completed || 0);
-    if (scans) return `Scan ${scans} took ${fmtDur(t.last_scan_duration_s)}`;
-    return "";
+    const total = Number(t.scan_total_s || 0);
+    if (!scans && !total && !t.scan_in_progress) return "";
+    // The account persists this clock, so it covers every scan of the book
+    // (all Start/Stop runs), not just the last cycle.
+    if (t.scan_in_progress) {
+      let live = Number(t.scan_elapsed_s || 0);
+      const scanStartMs = Date.parse(t.scan_started_at || "");
+      if (Number.isFinite(scanStartMs)) {
+        live = Math.max(0, (Date.now() - scanStartMs) / 1000);
+      }
+      return (
+        `Scanning… ${fmtDur(live)}   ` +
+        `Total scan time: ${fmtDur(total + live)}   ` +
+        `${scans + 1} scans`
+      );
+    }
+    const avg = t.avg_scan_s != null ? `   avg ${fmtDur(t.avg_scan_s)}` : "";
+    return `Total scan time: ${fmtDur(total)}   ${scans} scans${avg}`;
   }
 
   function renderScanClock(id) {

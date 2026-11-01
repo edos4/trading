@@ -295,3 +295,19 @@ def test_position_marks_record_exit_fill_not_bar_close():
     assert t.position_marks[-1]["unrl_pct"] == pytest.approx(t.pnl_pct)
     assert t.position_marks[-1]["mtm"] == pytest.approx(t.pnl_usd)
 
+
+
+def test_scan_clock_accumulates_and_persists(tmp_path):
+    """Total scan time/count must survive a restart, not reset per run."""
+    acct = PaperAccount(market="us")
+    acct.record_scan(7.5)
+    acct.record_scan(2.5)
+    clock = acct.scan_clock()
+    assert clock["scan_total_s"] == 10.0
+    assert clock["scans_completed"] == 2
+    assert clock["avg_scan_s"] == 5.0
+    assert clock["last_scan_duration_s"] == 2.5
+
+    path = tmp_path / "paper_us.json"
+    acct.save(path)
+    assert PaperAccount.load(path, market="us").scan_clock() == clock

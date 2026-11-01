@@ -321,6 +321,8 @@ def test_export_from_paper_account():
     )
     acct.positions["MSFT"] = [open_t]
     acct._last_price["MSFT"] = 55.0
+    acct.record_scan(7.5)
+    acct.record_scan(2.5)
 
     with patch("core.signal_log_store.load_signal_log",
                return_value=[{"symbol": "MSFT", "status": "accepted", "market": "us"}]):
@@ -350,6 +352,10 @@ def test_export_from_paper_account():
     assert book["settings"]["n_symbols"] == 2000
     assert book["use_stream"] is True
     assert book["laya"] == {"mode": "off", "policy_id": ""}
+    # The exported clock is the book's total, persisted on the account.
+    assert book["scan_timing"]["scan_total_s"] == 10.0
+    assert book["scan_timing"]["scans_completed"] == 2
+    assert book["scan_timing"]["avg_scan_s"] == 5.0
     json.dumps(payload, allow_nan=False)
 
 
