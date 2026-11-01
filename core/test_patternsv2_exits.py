@@ -104,12 +104,22 @@ def test_new_signals_protect_profit_after_activation_without_same_bar_lookahead(
     }
     s = _to_signal(df, raw, symbol='TEST', timeframe='1d', latest=0)
     s.qty = 100
+    # This test pins the exit *mechanism* (arm on activation, no same-bar
+    # lookahead, trail never loosens). patternsv2 now derives the cap and trail
+    # from ATR14, and a one-row frame has no ATR, so pin the ladder explicitly
+    # here rather than letting the pattern's volatility defaults move the
+    # fixture's geometry.
+    s.stop_loss_pct_cap = 0.03
+    s.trailing_stop_pct = 0.025
+    s.trailing_activation_pct = 0.05
     account = PaperAccount(market='us', slippage_pct=0, txn_cost_pct=.001)
     account.assume_session_open = True
     ok, message = account.open_position(s, candle(100, 100, 100, 100), OHLCVStore())
     assert ok, message
     # Today's wide range cannot execute the stop established by today's close.
-    activation = candle(100, 104, 94, 95, 1) if short else candle(100, 106, 96, 106, 1)
+    # The low/high stay inside the 3% hard stop (97 / 103) so it cannot pre-empt
+    # the trailing stop this bar's close arms.
+    activation = candle(100, 102, 94, 95, 1) if short else candle(100, 106, 97.5, 106, 1)
     assert account.on_bar('TEST', activation, '1d') == []
     p = account.positions['TEST'][0]
     p = _trade_from_dict(_trade_to_dict(p))

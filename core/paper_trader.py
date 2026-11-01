@@ -25,6 +25,7 @@ from core.backtester import (
     BacktestResult,
     BacktestTrade,
     _apply_notional_sizing,
+    _apply_risk_sizing,
     _check_exit,
     _close_trade,
     _open_trade,
@@ -735,13 +736,26 @@ class PaperAccount:
                 )
 
         signal.price = candle.close * (1 + self.slippage_pct if signal.action == "BUY" else 1 - self.slippage_pct)
-        _apply_notional_sizing(
-            signal, ENGINE.position_notional,
-            fractional=is_fractional_qty(signal.pattern),
-        )
+        if ENGINE.risk_pct > 0:
+            _apply_risk_sizing(
+                signal, self.equity() * ENGINE.risk_pct,
+                cap=signal.stop_loss_pct_cap,
+                fractional=is_fractional_qty(signal.pattern),
+            )
+        else:
+            _apply_notional_sizing(
+                signal, ENGINE.position_notional,
+                fractional=is_fractional_qty(signal.pattern),
+            )
         if signal.qty <= 0 or (
             signal.qty < 1 and not is_fractional_qty(signal.pattern)
         ):
+            if ENGINE.risk_pct > 0:
+                return False, (
+                    f"Risk sizing: {ENGINE.risk_pct:.2%} of "
+                    f"{format_money(self.equity(), self.market)} buys < 1 share of "
+                    f"{signal.symbol} at {format_money(candle.close, self.market)}."
+                )
             return False, (
                 f"Sizing: ${ENGINE.position_notional:,.0f} buys < 1 share of "
                 f"{signal.symbol} at {format_money(candle.close, self.market)}."

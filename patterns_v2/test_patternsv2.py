@@ -60,9 +60,10 @@ def test_adapts_breakout_into_trade_signal():
     assert sig.stop_loss == 120.0
     assert sig.take_profit == 180.0
     assert sig.provenance == "patternsv2"
-    assert sig.stop_loss_pct_cap == 0.05
-    assert sig.trailing_stop_pct == 0.025
-    assert sig.trailing_activation_pct == 0.05
+    assert isinstance(sig.stop_loss_pct_cap, float)
+    assert sig.stop_loss_pct_cap >= 0.03
+    assert sig.trailing_stop_pct == pytest.approx(1.5 * sig.stop_loss_pct_cap)
+    assert sig.trailing_activation_pct == pytest.approx(sig.stop_loss_pct_cap)
     assert sig.trailing_stop_mode == "highest_close"
     assert sig.trailing_ref_after_check
     assert any(a.get("pattern_version_id") == "patternsv2" for a in sig.chart_annotations)
