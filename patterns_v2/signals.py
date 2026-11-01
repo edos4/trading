@@ -7,9 +7,14 @@ unbroken rail on the breakout bar for flags, pennants, triangles, wedges,
 channels, and rectangles. Target uses the full measured move (pole, bowl, or
 pattern width) from the fill. Keep those structural levels even when the
 breakout close makes the measured reward smaller than the full-depth risk.
-Execution also caps the initial stop distance at 5% and trails prior closes
-by 2.5% after a 5% favorable close, so activation does not give back the
-entire initial gain. Structural levels remain available for charting.
+Execution stops are volatility-scaled rather than flat: the initial stop is
+``clamp(1.5 * ATR14, 3%, 8%)`` from the fill, and the trailing stop sits 1.5R
+behind the best close after the trade is +1R, so the give-back is a fixed
+fraction of the risk taken instead of a fixed fraction of price. A flat 3% cap
+was inside half an average daily range for most of the US universe (median
+0.52x ATR14 over 2025-11..2026-10): 11 of 13 closed paper trades stopped out at
+exactly -3.0% while 85% of them later showed >= 2R of favourable excursion.
+Structural levels remain available for charting.
 """
 
 from __future__ import annotations
@@ -33,6 +38,49 @@ from patterns_v2.loader import detect_fn
 
 # detect() returns nothing on a shorter series.
 MIN_BARS = 60
+
+# ── Volatility-scaled risk geometry ─────────────────────────────────────────
+# The initial stop is `clamp(STOP_ATR_MULT * ATR14, FLOOR, CEIL)` from the
+# signal price; the trailing stop is `TRAIL_GIVEBACK_R * stop_pct` behind the
+# best close (mode=highest/lowest_close), armed once the trade is
+# `TRAIL_ARM_R * stop_pct` in favour. Expressing the trail as a multiple of the
+# stop keeps the give-back in R constant when the stop distance changes, which
+# the old 2.5%-price/5%-activation pair did not (it gave back a fixed 0.83R).
+STOP_ATR_MULT = 1.5
+STOP_PCT_FLOOR = 0.03
+STOP_PCT_CEIL = 0.08
+STOP_ATR_PERIOD = 14
+TRAIL_GIVEBACK_R = 1.5
+TRAIL_ARM_R = 1.0
+
+
+def stop_pct_for(df: pd.DataFrame, idx: int, price: float) -> float:
+    """Initial stop distance as a fraction of ``price``, from ATR14 at ``idx``.
+
+    Only bars at or before ``idx`` are used, so the value is causal. A short or
+    degenerate series falls back to the floor rather than widening the stop
+    blind.
+    """
+    if df is None or price <= 0 or idx < 1:
+        return STOP_PCT_FLOOR
+    lo = max(0, idx - STOP_ATR_PERIOD)
+    window = df.iloc[lo : idx + 1]
+    high = window["high"].to_numpy(dtype=float)
+    low = window["low"].to_numpy(dtype=float)
+    close = window["close"].to_numpy(dtype=float)
+    if len(close) < 2:
+        return STOP_PCT_FLOOR
+    prev_close = close[:-1]
+    tr = [
+        max(h - l, abs(h - pc), abs(l - pc))
+        for h, l, pc in zip(high[1:], low[1:], prev_close)
+    ]
+    tr = [v for v in tr if math.isfinite(v) and v > 0]
+    if not tr:
+        return STOP_PCT_FLOOR
+    atr = sum(tr) / len(tr)
+    return min(max(STOP_ATR_MULT * atr / price, STOP_PCT_FLOOR), STOP_PCT_CEIL)
+
 
 # Placeholder so a Patternsv2 paper scan still walks daily bars.
 class Patternsv2Scan:
@@ -239,6 +287,7 @@ def _to_signal(df: pd.DataFrame, raw: dict, *, symbol: str, timeframe: str, late
     notes = f"Patternsv2 {name} score={score:.2f}"
     if age > 0:
         notes = f"{notes} | chart-scan: triggered {age} bar(s) ago"
+    stop_pct = stop_pct_for(df, idx, entry)
     return TradeSignal(
         symbol=symbol,
         action="BUY" if direction > 0 else "SELL",
@@ -249,10 +298,10 @@ def _to_signal(df: pd.DataFrame, raw: dict, *, symbol: str, timeframe: str, late
         qty=0.0,
         stop_loss=None if stop is None else round(stop, 4),
         take_profit=None if target is None else round(target, 4),
-        stop_loss_pct_cap=0.05,
-        trailing_stop_pct=0.025,
+        stop_loss_pct_cap=round(stop_pct, 5),
+        trailing_stop_pct=round(TRAIL_GIVEBACK_R * stop_pct, 5),
         trailing_stop_mode="highest_close" if direction > 0 else "lowest_close",
-        trailing_activation_pct=0.05,
+        trailing_activation_pct=round(TRAIL_ARM_R * stop_pct, 5),
         trailing_ref_after_check=True,
         setup_key=(int(raw.get("start") or 0), int(raw.get("end") or 0), idx),
         notes=notes,

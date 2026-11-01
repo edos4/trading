@@ -13,6 +13,7 @@ backtester and PaperAccount to stay byte-identical.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 
 
@@ -22,6 +23,13 @@ class EngineConfig:
 
     # Flat notional per trade — no risk sizing, no compounding.
     position_notional: float = 10_000.0
+    # 0.0 keeps the flat-notional path above (`.cjs` parity). Set to a fraction
+    # of equity — 0.005 = 0.5% — to size each trade so the distance to the
+    # effective initial stop equals that fraction of equity. Needed once stops
+    # are volatility-scaled: with a flat notional, dollar risk varies with the
+    # stop distance, so a 3% stop on a 10%-ATR name risks three times what an
+    # 8% stop on a quiet name does.
+    risk_pct: float = 0.0
     # Round-trip cost per leg. 0.0 = the documented `.cjs` headline numbers
     # (which carry no cost line). `--txn-cost 0.001` matches the `.cjs`
     # "cost optional" mode; PH overlays its own via MarketProfile.
@@ -40,7 +48,11 @@ class EngineConfig:
     )
 
 
-ENGINE = EngineConfig()
+ENGINE = EngineConfig(
+    # Per-process override so a paper run can size by risk without editing the
+    # frozen settings or the systemd unit: TRADING_RISK_PCT=0.005 => 0.5%.
+    risk_pct=float(os.environ.get("TRADING_RISK_PCT", "0") or 0),
+)
 
 
 def is_fractional_qty(pattern: str) -> bool:

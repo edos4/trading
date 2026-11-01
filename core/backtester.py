@@ -806,6 +806,38 @@ def _check_exit_legacy(
 
 
 # ── Sizing ──────────────────────────────────────────────────────────────────
+def _apply_risk_sizing(
+    signal: TradeSignal,
+    risk_dollars: float,
+    *,
+    cap: float | None = None,
+    fractional: bool = False,
+) -> None:
+    """Size so the distance to the effective initial stop equals ``risk_dollars``.
+
+    Mirrors ``_effective_stop`` (backtester): the stop that actually governs the
+    trade is the nearer of the structural stop and the ``cap`` percentage, and
+    both scale with price, so the fraction computed here survives the rebase to
+    the fill price in ``_open_trade``.
+    """
+    px = signal.price
+    if (px is None or not math.isfinite(px) or px <= 0
+            or not math.isfinite(risk_dollars) or risk_dollars <= 0):
+        signal.qty = 0.0
+        return
+    dist = None
+    if signal.stop_loss is not None and math.isfinite(signal.stop_loss):
+        dist = abs(px - signal.stop_loss)
+    if cap is not None and math.isfinite(cap) and cap > 0:
+        cap_dist = px * cap
+        dist = cap_dist if dist is None else min(dist, cap_dist)
+    if dist is None or not math.isfinite(dist) or dist <= 0:
+        signal.qty = 0.0
+        return
+    qty = risk_dollars / dist
+    signal.qty = qty if fractional else float(int(qty))
+
+
 def _apply_notional_sizing(
     signal: TradeSignal,
     notional: float = 10_000.0,
