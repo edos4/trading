@@ -411,8 +411,11 @@ def _rail(kind, level, start_index=0, confirmed=True, broken=False):
             "slope": 0.0, "confirmed": confirmed, "broken": broken}
 
 
-@pytest.mark.parametrize("action,kind", [("BUY", "support"), ("SELL", "resistance")])
-def test_support_resistance_bounce_inside_dii_band(monkeypatch, action, kind):
+@pytest.mark.parametrize("action,kind,bulls", [
+    ("BUY", "support", 30.0),        # inside the BUY band (16–40)
+    ("SELL", "resistance", 50.0),    # inside the SELL band (40–60)
+])
+def test_support_resistance_bounce_inside_dii_band(monkeypatch, action, kind, bulls):
     from indicators import support_resistance as sr
 
     detector = sr.SupportResistanceIndicator()
@@ -421,6 +424,9 @@ def test_support_resistance_bounce_inside_dii_band(monkeypatch, action, kind):
     store, snap = _store(open_, close + 1, close - 1, close)
     level = 99.5 if action == "BUY" else 100.5
     monkeypatch.setattr(sr, "detect_trendlines", lambda df: [_rail(kind, level)])
+    # The bands are per side now, so a flat frame (50%) only satisfies SELL.
+    # Control the reading and let the real band constants do the gating.
+    monkeypatch.setattr(sr, "dii_consideration", lambda _state: (bulls, 100.0 - bulls))
 
     signal = detector.analyze(snap, store)
     assert signal is not None
@@ -431,7 +437,7 @@ def test_support_resistance_bounce_inside_dii_band(monkeypatch, action, kind):
     else:
         assert signal.take_profit < signal.price < signal.stop_loss
     assert signal.setup_key == (0, 0 if action == "BUY" else 1)
-    assert "DII bulls 50.00%" in signal.notes
+    assert f"DII bulls {bulls:.2f}%" in signal.notes
 
 
 @pytest.mark.parametrize("rising", [True, False])

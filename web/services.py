@@ -164,7 +164,7 @@ class ExplorerService:
                     # Explorer includes recent historical detections: use that bar's prefix.
                     end = sig.signal_bar_idx
                     prefix = df if end is None else df.iloc[:end + 1]
-                    if describe_pattern_dii_rejection(prefix) is not None:
+                    if describe_pattern_dii_rejection(prefix, action=sig.action) is not None:
                         continue
                 if not passes_min_confidence(sig):
                     continue

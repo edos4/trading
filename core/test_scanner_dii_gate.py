@@ -1,11 +1,39 @@
 import asyncio
 from unittest.mock import AsyncMock, Mock
 
+import numpy as np
+import pandas as pd
 import pytest
 
-from analysis.test_pattern_dii import frame
 from core.scanner import MarketScanner
 from patterns.base_pattern import TradeSignal
+
+
+def _frame_at(bulls: float, n: int = 100) -> pd.DataFrame:
+    """A flat frame whose trailing 40 bars produce the intended bulls
+    percentage at the last bar. The engine's rolling-window counts are
+    position-sensitive (tied highs/lows saturate for the flat prefix
+    bars), so the helper places unique low-nudges at evenly spread
+    positions in the trailing 40 bars. Each nudge is a unique sub-bar
+    drop (0.001 * (j+1)) so its low is a strict window minimum, while
+    the flat baseline highs stay above every nudged high so up moves
+    still count as window maxima. With evenly spread nudges the engine
+    counts each nudge as exactly one down event, giving bulls ≈ 50
+    - 2.5 * n_down for n_down >= 2 (the first two nudges interfere with
+    the rolling-minimum warmup). n_down = 0 gives 50.0.
+    Callers needing n_down < 2 for a target below 50 should pass a
+    target of at least 50 (the engine's minimum granularity for this
+    frame shape is 2.5 steps)."""
+    n_down = int(round((100 - bulls) / 2.5))
+    close = pd.Series(np.full(n, 100.0))
+    start = n - 40
+    if n_down > 0:
+        for j in range(n_down):
+            i = start + (j * 40 // n_down)
+            close.iloc[i] = 100.0 - (0.001 * (j + 1))
+    high = (close + 1.0).copy()
+    low = (close - 1.0).copy()
+    return pd.DataFrame(dict(open=close.values, high=high.values, low=low.values, close=close.values, volume=1000))
 
 
 @pytest.mark.parametrize('patterns_v2', [False, True])
@@ -21,8 +49,16 @@ from patterns.base_pattern import TradeSignal
 def test_both_pattern_scanners_gate_before_other_entry_checks(
         monkeypatch, patterns_v2, direction, short, action, accepted):
     scanner = MarketScanner(symbols=['TEST'], market='us', patterns_v2=patterns_v2, volume_gate=False)
-    scanner._store.get_df = Mock(return_value=frame(
-        30 if short else 100, rising=direction == 'up', falling=direction == 'down'))
+    if direction == 'flat':
+        if action == 'BUY':
+            # 40% sits in the BUY band (16–40).
+            frame = _frame_at(40.0, n=120)
+        else:
+            # 60% sits in the SELL band (40–60).
+            frame = _frame_at(60.0, n=120)
+    else:
+        frame = _frame_at(0.0, n=120)
+    scanner._store.get_df = Mock(return_value=frame)
     scanner._append_signal_log = Mock()
     scanner._finish_signal = AsyncMock()
     scanner._min_share_price = 0
