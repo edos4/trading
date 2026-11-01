@@ -687,6 +687,6 @@ async def run_stream_server(
 ) -> None:
     from data.history import enable_ui_web_history
 
-    # Child process of --web/--ui: inject https://33ai.rootlabs.dev when URL is empty.
+    # Child process of --web: inject https://33ai.rootlabs.dev when URL is empty.
     enable_ui_web_history()
     await StreamServer(start_date=start_date, market=market).run()

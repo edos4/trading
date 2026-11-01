@@ -256,7 +256,7 @@ otherwise drop those fields from `BacktestTrade`). Check `core/paper_books.py` /
 - **`main.py`** — `run_backtest` / `run_paper` / `run_scanner` / `_parse_args`: drop
   `--collect-first*`; add `--barcache DIR`, `--universe NAME`, `--txn-cost FLOAT`. Delete the
   `volume_gate_compare` A/B block (`main.py:467–528`).
-- **`ui/backtest_dialog.py PARAMS`** (:44) + **`web/jobs.py`** — remove every risk/gate/overlay
+- **`web/jobs.py`** — remove every risk/gate/overlay
   row; keep `market`, `n_symbols`/`universe`, `extra_symbols`, `pattern_filter`, `max_workers`;
   add `barcache_dir`, `txn_cost_pct`. `web/jobs.py` iterates `PARAMS` generically — drop the
   hardcoded `"hard_stop_percentage"` at `web/jobs.py:96`.
@@ -283,7 +283,7 @@ otherwise drop those fields from `BacktestTrade`). Check `core/paper_books.py` /
    `barcache_dir`.
 6. Pattern touch-ups one at a time — each followed by its single-pattern backtest over
    `data/barcache` and a diff vs the `.cjs` number.
-8. Callers: `main.py`, `ui/backtest_dialog.py`, `web/jobs.py`.
+8. Callers: `main.py`, `web/jobs.py`.
 9. Tests: delete / rewrite / add.
 10. Verification pass.
 11. *(optional)* `patterns/012_ascending_channel_long.py` from `backtest_channel_long_v1.cjs`.
@@ -375,7 +375,7 @@ Branch `refactor/cjs-backtest-methodology`.
   is `analyze() → _apply_notional_sizing → paper.open_position`.
 - `main.py` — `run_backtest` rewritten (`--barcache` / `--universe` / `--txn-cost`; per-
   pattern universe default); legacy A/B path removed.
-- `ui/backtest_dialog.py`, `web/jobs.py`, `web/app.py` — slim PARAMS, universe-driven,
+- `web/jobs.py`, `web/app.py` — slim PARAMS, universe-driven,
   volume A/B retired.
 - Patterns: 002/003/006/007 → Wilder RSI; 004/005 `protective_exit_on_close` **bug fixed**;
   006 → C21 reclaim + C22/C23 filters + C24 dual stop + offline earnings cache; 008 → RS

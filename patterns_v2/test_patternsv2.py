@@ -310,19 +310,15 @@ def test_one_failing_detector_keeps_the_symbols_other_patterns(monkeypatch):
     assert "double_bottom" in {signal["pattern"] for signal in found}
 
 
-def test_checkboxes_exist_on_web_and_desktop():
+def test_checkboxes_exist_on_web():
     root = Path(__file__).resolve().parents[1]
     explorer = (root / "web/templates/explorer.html").read_text()
     paper = (root / "web/templates/paper.html").read_text()
     script = (root / "web/static/app.js").read_text()
-    desktop = (root / "ui/app.py").read_text()
-    desk_paper = (root / "ui/paper_dashboard.py").read_text()
     assert 'id="patterns-v2"' in explorer
     assert "Patternsv2" in explorer
     assert 'id="{{ book.id }}-patterns-v2"' in paper
     assert "patterns_v2" in script
-    assert 'text="Patternsv2"' in desktop
-    assert 'text="Patternsv2"' in desk_paper
 
 
 def test_scanner_patterns_v2_uses_detector(monkeypatch):

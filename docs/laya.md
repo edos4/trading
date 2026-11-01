@@ -124,7 +124,7 @@ The plan follows the current working tree, including uncommitted Indicators work
 
 Two constraints are easy to miss: `BacktestService.validate_settings` currently rejects collect-first, and a selectable sizing value in a request does not mean `StreamReplay` supports it. Initial Laya experiments must use supported historical-stream settings; do not promise paper/backtest parity for unsupported combinations.
 
-This is a web-tab project. The Tkinter `ui/` app and `frontend/` assets are not the implementation target unless separately requested.
+This is a web-tab project. The Tkinter `ui/` app was removed and `frontend/` assets are not the implementation target unless separately requested.
 
 ## 4. Trading use cases, ordered by value and feasibility
 

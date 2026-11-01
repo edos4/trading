@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pandas as pd
 import numpy as np
@@ -330,22 +333,6 @@ def test_legacy_trade_without_anchors_does_not_redetect():
     assert payload['segments'] == []
 
 
-def test_desktop_pattern_segment_interpolates_when_panned():
-    from ui.tv_chart import TradingViewChart
-    from unittest.mock import Mock
-    chart = object.__new__(TradingViewChart)
-    chart._canvas = Mock()
-    chart._candles = [{"time": str(i)} for i in range(10)]
-    chart._payload = {"segments": [{"data": [{"time": "0", "value": 10}, {"time": "9", "value": 19}], "color": "#ff9800"}]}
-    chart._start = 3
-    chart._visible = 4
-    chart._plot = (0, 0, 400, 100)
-    chart._price_lo, chart._price_hi = 10, 20
-    chart._draw_pattern_segments(chart._candles[3:7])
-    args = chart._canvas.create_line.call_args.args
-    assert args == (50, 70, 350, 40)
-
-
 @pytest.mark.parametrize('timeframe,freq', [('1d', 'B'), ('1W', 'W-FRI')])
 def test_dii_precrop_alignment_and_future_causality(timeframe, freq):
     from analysis.indicator_engine import IndicatorEngine
@@ -382,3 +369,76 @@ def test_dii_session_dedup_prefers_valid_reprint():
     bad['high'] = np.nan
     actual = build_trade_viewer_payload(pd.concat([df, bad]), symbol='TEST')
     assert actual['dii'] == build_trade_viewer_payload(df, symbol='TEST')['dii']
+
+
+def test_detection_chart_enables_rails_using_only_the_detection_tape():
+    from core.pattern_editor_api import PatternEditor
+    from data.barcache import load
+
+    # Real frozen tapes carry exchange-open UTC timestamps, spanning daylight
+    # saving time. Their rendered market dates must match the saved detection.
+    tape = load("us", "CDNS", root=Path(__file__).parents[1] / "tests/fixtures/barcache")
+    rows = [[c.timestamp.isoformat(), c.open, c.high, c.low, c.close, c.volume]
+            for c in tape[:120]]
+    event = {"status": "detected", "symbol": "CDNS", "pattern": "test_pattern",
+             "pattern_version_id": "test-version", "session": rows[99][0],
+             "action": "BUY", "entry": rows[99][4]}
+    settings = SimpleNamespace(market="us", timeframe="1d")
+    inputs = SimpleNamespace(request=SimpleNamespace(preset=SimpleNamespace(settings=settings)),
+                             dataset="frozen-tape")
+    editor = object.__new__(PatternEditor)
+    editor.backtests = Mock()
+    editor.backtests.result.return_value = {"signals": {"events": [event]}, "inputs": inputs}
+    editor.backtests._read_json.return_value = {"CDNS": rows}
+
+    payload = editor.run_chart("test-run", 0)
+
+    assert payload["candles"][0]["time"] == "2025-06-20"
+    assert payload["candles"][-1]["time"] == "2025-11-10"
+    assert len(payload["candles"]) == 100
+    assert any(m["time"] == "2025-11-10" and m["text"] == "BUY" for m in payload["markers"])
+    assert payload["trendlines"]
+    assert all(point["time"] <= "2025-11-10"
+               for rail in payload["trendlines"] for point in rail["data"])
+
+
+def test_weekly_anchor_mapping_preserves_labels_and_rejects_ambiguous_or_missing_week():
+    from analysis.chart_renderer import _weekly_chart_time
+
+    # Providers can label an existing weekly candle Monday or Friday. Match
+    # its week without moving the candle or selecting a neighboring week.
+    monday = pd.DatetimeIndex(["2024-01-01", "2024-01-08", "2024-01-15"])
+    original = monday.copy()
+    assert _weekly_chart_time(monday, "2024-01-11", "America/New_York") == "2024-01-08"
+    assert monday.equals(original)
+    assert _weekly_chart_time(monday, "2023-12-28", "America/New_York") is None
+    ambiguous = pd.DatetimeIndex(["2024-01-08", "2024-01-12"])
+    assert _weekly_chart_time(ambiguous, "2024-01-11", "America/New_York") is None
+    assert _weekly_chart_time(ambiguous, "2024-01-08", "America/New_York") == "2024-01-08"
+
+
+def test_legacy_weekly_rounding_marker_is_aligned_before_geometry_recovery():
+    from analysis.chart_renderer import build_trade_viewer_payload
+
+    idx = pd.date_range("2021-01-01", periods=160, freq="W-FRI")
+    close = [80. + (i - 70) ** 2 * .01 for i in range(160)]
+    df = pd.DataFrame({
+        "open": [c - .2 for c in close], "high": [c + 1 for c in close],
+        "low": [c - 1 for c in close], "close": close, "volume": 1000,
+    }, index=idx)
+    marker = {"type": "marker", "date": (idx[70] - pd.Timedelta(days=1)).date().isoformat(),
+              "price": close[70], "label": "bottom"}
+    original = dict(marker)
+
+    weekly = build_trade_viewer_payload(df, symbol="TEST", timeframe="1W",
+                                        pattern="pattern_004_rounding_bottom", annotations=[marker])
+
+    curve = next(s for s in weekly["segments"] if s["label"] == "Rounding bottom fit")
+    assert [point["time"] for point in curve["data"]] == [d.date().isoformat() for d in idx[10:131]]
+    assert [point["value"] for point in curve["data"]] == pytest.approx(close[10:131])
+    assert marker == original
+    # Same-week aggregation is exclusive to weekly charts. Missing daily
+    # pivots retain the existing strict rule rather than snapping to Friday.
+    daily = build_trade_viewer_payload(df, symbol="TEST", timeframe="1d",
+                                       pattern="pattern_004_rounding_bottom", annotations=[marker])
+    assert daily["segments"] == [] and daily["markers"] == []

@@ -50,7 +50,7 @@ volume confirm, optional vision) before placing any order.
 ```
 
 patterns — they do **not** generate entries on their own. Both run in CLI
-scan/paper/backtest and in the `--ui` explorer, Backtest dialog, and Paper
+scan/paper/backtest and in the web explorer, Backtest dialog, and Paper
 Trading dashboard.
 
 ## Setup
@@ -249,9 +249,6 @@ records the metrics).
 | `python main.py` (live/paper scan) | `VOLUME_GATE_ENABLED` in `.env`, or `--volume-gate` for this run |
 | `python main.py --paper` | same |
 | `python main.py --backtest` | same; add `--volume-gate-compare` for A/B |
-| `python main.py --ui` → symbol explorer | toolbar checkbox **Volume gate** |
-| `python main.py --ui` → **Backtest** | form checkbox **Volume gate (RVOL+OBV)** + **Compare A/B (Volume)** |
-| `python main.py --ui` → **Paper Trading** | per-book **Volume gate** (rejection count in that book’s scan stats) |
 
 UI checkboxes default to the `.env` value but can override for that session.
 Startup logs print `Volume gate: ON/OFF`. Rejects log as
@@ -279,16 +276,6 @@ Enable in `.env` only if expectancy / PF improve **and** trade count does not
 collapse. A run that goes to zero trades is not an edge — it is sample death.
 
 ## Symbol Explorer UI
-
-### Desktop (tkinter)
-
-```bash
-python main.py --ui
-```
-
-Local desktop app on Windows/macOS/Linux. No browser required.
-
-### Web (VPS)
 
 Authenticated browser UI with the same Explorer / Backtest / Paper surfaces (plus
 Patterns, Indicators, Laya, Kronos, Documentation, and a Trello-style **Tasks**
@@ -668,7 +655,7 @@ journalctl --user -u trading-web.service -f
 
 **One history database (VPS).** Contabo runs Postgres `stocks_history` and
 serves `GET /api/history/symbols`, `GET /api/history/{symbol}`, and
-`GET /api/history/{symbol}/meta`. Local `--ui` / `--web` **always** read
+`GET /api/history/{symbol}/meta`. Local `--web` **always** reads
 backtest prefetch) from `https://33ai.rootlabs.dev` — `STOCKS_HISTORY_URL` is
 applied automatically if empty. They do **not** use Yahoo/TV for history, and do **not** need
 `DATABASE_URL`. History API Basic auth is
@@ -678,7 +665,7 @@ dashboard password. On the VPS set `STOCKS_HISTORY_OWNER=true` and leave
 `--update-db` and **serves** `GET /api/history`. All OHLCV **reads**
 (default `https://33ai.rootlabs.dev`), never local Postgres or CSV.
 
-What both UIs support:
+What the web UI supports:
 
 - Explore top TradingView screener symbols and filter the list by ticker.
 - Click a symbol to fetch daily or weekly OHLCV history and render a
@@ -689,14 +676,10 @@ What both UIs support:
   (first bottom, neckline, second bottom, entry, channel rails, …) prints the
   conditions that part satisfied directly under its label — thresholds are read
   from the detector itself, so the note always matches the live rules.
-- **Volume gate** checkbox (toolbar): when checked, detections must also
-  clear the RVOL+OBV confirm gate (see [Volume Confirm Gate](#volume-confirm-gate)).
-  plus **Compare A/B (Volume)**) runs `Backtester` with the same engine as
-  `python main.py --backtest`.
 - **Paper Trading**: dual-book desk (US + PH) that runs two `MarketScanner`
   threads, each with its own `PaperAccount` (`core/paper_books.py`). Ledgers
   stay separate (`$` vs `₱`). CLI `python main.py --paper --market us|ph`
-  is still one market; dual is `--ui` / `--web` only.
+  is still one market; dual is `--web` only.
 - Download the selected symbol's OHLCV data as CSV / save chart PNG.
 
 and volume-gate code as the scanner. Backtest / Paper Trading are not toy
@@ -1395,10 +1378,6 @@ trading_bot_v2/
 │   ├── paper_books.py                   # Dual-market paper manager (US thread + PH thread)
 │   ├── backtester.py                    # Historical walk-forward backtest engine
 │   ├── test_volume_gate.py              # Unit tests for analysis.price_volume
-│
-├── ui/
-│   ├── app.py                           # Native tkinter symbol explorer (--ui)
-│   └── paper_dashboard.py               # Dual-book Paper desk (US + PH cards)
 │
 ├── web/
 │   ├── app.py                           # Authenticated FastAPI web UI (--web)

@@ -1,7 +1,7 @@
 # AI pattern edits (P08)
 
 P08 adds the direct DeepSeek adapter and the durable edit coordinator. It does not
-add user-facing screens; the web Patterns tab (P09) and desktop dialog (P10) consume
+add user-facing screens; the web Patterns tab (P09) consumes
 this service. Generated code still executes only through the existing isolation
 boundary.
 
@@ -100,7 +100,7 @@ adapter never silently substitutes one because the returned model is recorded.
   live smoke use a sandbox double, and the blocked/failed paths are asserted
   separately. Production `PATTERN_EDIT_*` sandbox prerequisites are unchanged
   from P02/P04.
-- User-facing editing UI is P09 (web) and P10 (desktop); integration/release
+- User-facing editing UI is P09 (web); integration/release
   rehearsal is P11.
 
 Resume at the [implementation tracker](pattern-editor-implementation-plan.md) and

@@ -1,4 +1,4 @@
-"""Shared business logic for the web UI (mirrors tk ui/app.py flows)."""
+"""Shared business logic for the web UI (explorer data/pattern/chart helpers)."""
 
 from __future__ import annotations
 

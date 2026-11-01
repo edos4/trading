@@ -60,7 +60,7 @@ def is_fractional_qty(pattern: str) -> bool:
 
 
 # ── Back-compat shims ────────────────────────────────────────────────────────
-# The Explorer UI (ui/app.py, web/services.py) annotates a chart-scan with
+# The web services (web/services.py) annotate a chart-scan with
 # "would this signal pass the gates". There are no gates anymore, so these
 # always pass. Kept as no-ops so those modules import without a rewrite.
 def passes_min_confidence(*_a, **_k) -> bool:

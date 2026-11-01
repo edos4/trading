@@ -1,9 +1,9 @@
-# Pattern Editor screens (P09 web, P10 desktop)
+# Pattern Editor screens (web)
 
 The Patterns screens are thin renderers over one shared, UI-independent facade,
-`core/pattern_editor_api.py` (`PatternEditor`). Web and desktop submit the same
-durable requests and read the same PostgreSQL job/version/run records; neither
-frontend resolves patterns, validates presets, or decides eligibility itself.
+`core/pattern_editor_api.py` (`PatternEditor`). The web frontend submits durable
+requests and reads the same PostgreSQL job/version/run records; it does not
+resolve patterns, validate presets, or decide eligibility itself.
 
 ## Shared facade
 
@@ -15,12 +15,12 @@ frontend resolves patterns, validates presets, or decides eligibility itself.
   `preset_id` or settings that validate and are persisted; contradictory values
   raise. An automatic edit requires a historical-stream preset.
 - Execution runs on a background thread owned by the facade. The durable job row
-  is the authority, so a page reload or a reopened dialog reconnects by id; the
+  is the authority, so a page reload reconnects by id; the
   thread is only a fast path.
 - `run_payload` is now the single implementation used by both `/api/backtest`
   and the Patterns tab.
 
-## Web tab (P09)
+## Web tab
 
 - `web/templates/patterns.html` + `web/static/patterns.js`; a **Patterns** link
 - Authenticated endpoints in `web/app.py`:
@@ -58,20 +58,6 @@ frontend resolves patterns, validates presets, or decides eligibility itself.
   replacement chosen in the same transaction. Archived versions cannot be
   selected for new runs or reused as defaults.
 
-## Desktop dialog (P10)
-
-- `ui/patterns_dialog.py` is opened by the **Patterns** toolbar button beside
-  `edit_request_from_values` builder, so both frontends enforce identical rules.
-- It shows the same history/badges, source/documentation/diff, saved-preset
-  selector with the replay settings, the same provider/provider-balance line,
-  live progress, diagnostics and a candidate-vs-base comparison, plus the same
-  four lifecycle actions.
-- Every service call runs on a background thread; results are delivered through a
-  `queue.Queue` drained on the Tk thread. Worker threads never touch Tk directly.
-- Closing the window only stops that window's polling — it never marks a durable
-  job cancelled or completed. The last job id is remembered by the app, so
-  reopening the dialog reconnects to the same durable job.
-
 ## Evidence
 
 - Web tests: `core/test_patterns_web.py` (auth, navigation, catalog/versions/
@@ -79,14 +65,8 @@ frontend resolves patterns, validates presets, or decides eligibility itself.
   reload reconnect, failed validation, block+retry without a model call,
   backtest-only retry, cancellation, expired lease, default/archive with
   replacement and conflict, malformed requests, database unavailable).
-- Desktop tests: `core/test_patterns_desktop.py` (one request builder for both
-  frontends, offscreen submit→results, closing during a job keeps the durable
-  state, reopen reconnects, PostgreSQL error surfacing, stale-generation conflict
-  when another frontend changes the default).
 - Smokes: [P09 smoke](verification/pattern-editor-p09-smoke.txt) (real
-  `main.py --web`) and [P10 smoke](verification/pattern-editor-p10-smoke.txt)
-  (real `main.py --ui` toolbar → dialog → submit → blocked → reopen reconnect).
-  See the tracker for the recorded gate commands.
+  `main.py --web`). See the tracker for the recorded gate commands.
 
 ## Not performed / gates
 
@@ -103,9 +83,9 @@ backtest start/end dates. Leave Symbols blank to scan the universe plus the
 chart symbol (PH uses symbols from PH history); enter symbols to limit the scan.
 
 After generation, inspect the new version and its detections. Select a detection
-(double-click on desktop) to open that version's chart. **Backtest again** uses
+to open that version's chart. **Backtest again** uses
 the current dates and symbols without another AI call. **Save / use version**
 makes it the default; **Reject / archive** keeps it out of future selection.
 Switching versions restores the latest completed run and clears unrelated charts.
-Desktop installations with `PATTERN_API_URL` use the same remote editor endpoints
+Installations with `PATTERN_API_URL` use the same remote editor endpoints
 as the web page.

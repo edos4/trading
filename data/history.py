@@ -42,7 +42,7 @@ def owns_local_stocks_history() -> bool:
 
 
 def enable_ui_web_history() -> None:
-    """--ui / --web / paper stream: facade history, no Yahoo. Laptops hit 33ai.rootlabs.dev."""
+    """--web / paper stream: facade history, no Yahoo. Laptops hit 33ai.rootlabs.dev."""
     global _ui_web_mode
     _ui_web_mode = True
     _apply_local_remote_history_url()
@@ -70,15 +70,15 @@ def _apply_local_remote_history_url() -> None:
 
     current = (settings.stocks_history_url or "").strip()
     if current:
-        log.info(f"History | --ui/--web using {current.rstrip('/')}")
+        log.info(f"History | --web using {current.rstrip('/')}")
         return
     if owns_local_stocks_history():
-        log.info("History | --ui/--web on history owner — local Postgres")
+        log.info("History | --web on history owner — local Postgres")
         return
     settings.stocks_history_url = DEFAULT_STOCKS_HISTORY_URL
     _applied_remote_url = True
     log.info(
-        "History | local --ui/--web OHLCV (including charts) from "
+        "History | local --web OHLCV (including charts) from "
         f"{DEFAULT_STOCKS_HISTORY_URL}"
     )
 
@@ -351,7 +351,7 @@ def fetch_ohlcv_candles(
 ) -> list[OHLCVCandle]:
     """Daily (or weekly resampled from daily) from GET /api/history, then optional TV.
 
-    --ui/--web never fall back to Yahoo/TV: charts and OHLCV come from
+    --web never falls back to Yahoo/TV: charts and OHLCV come from
     33ai.rootlabs.dev.
     """
     daily = load_daily_candles(symbol, market=market)

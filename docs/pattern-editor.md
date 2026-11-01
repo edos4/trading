@@ -11,7 +11,7 @@ Status: proposed. This document plans the implementation; it does not change run
 - `core/pattern_versions.py` snapshots file-backed baselines and dependencies. Its activation recovery writes source mirrors into `patterns/`; database authority requires replacing that behavior.
 - `core/pattern_loader.py` supports explicit versions, but discovers available patterns by enumerating Python files and falls back to file imports. This does not yet satisfy database-backed discovery/loading.
 - `core/pattern_edit_validation.py`, `core/pattern_edit_worker.py`, and `core/pattern_edit_evaluator.py` provide candidate validation and isolated execution. The evaluator currently evaluates signals; it is not a complete portfolio backtest.
-- `core/backtester.py` is an offline daily-bar backtester. `web/jobs.py` and `ui/backtest_dialog.py` expose cache-based settings, without a historical stream mode. Web form definitions currently depend on the desktop dialog module.
+- `core/backtester.py` is an offline daily-bar backtester. `web/jobs.py` exposes cache-based settings, without a historical stream mode.
 - `data/stream_client.py`, `data/stream_server.py`, `core/scanner.py`, and `core/paper_trader.py` contain the historical replay and paper execution pieces to reuse.
 - `tests/test_backtest_paper_parity.py` checks selected fill scenarios; it does not establish full stream/scanner parity or absence of future-data exposure.
 
@@ -92,7 +92,7 @@ Changing the default affects new runs. Existing backtests and paper sessions ret
 
 ## Shared backtest service and historical replay
 
-Create a UI-independent backtest request/schema and runner service, for example `core/backtest_service.py`. Web, desktop, and automatic editor jobs use this same contract. Retain offline mode for existing workflows and add an explicitly labeled **Historical stream** mode.
+Create a UI-independent backtest request/schema and runner service, for example `core/backtest_service.py`. Web and automatic editor jobs use this same contract. Retain offline mode for existing workflows and add an explicitly labeled **Historical stream** mode.
 
 The stream request includes market, symbols/universe, timeframe, start date, end date or session count, warmup, initial capital, sizing, transaction costs, slippage, enabled gates, pattern-only mode, exact version IDs, and end-of-run handling. Validate mutually exclusive or unsupported options rather than ignoring them. Start with supported daily replay; expose other timeframes only when implemented.
 
@@ -105,9 +105,9 @@ Execution requirements:
 - Freeze input history for the candidate/base comparison. Save data references and hashes, resolved symbols, engine identity, and every effective setting so reruns can be reproduced or declared incompatible.
 - Default stream end behavior follows paper trading: retain open positions and report realized and unrealized results. Offer an explicit force-close option and label resulting exits. Keep offline end-of-data behavior visible when comparing modes.
 - Support cancellation, durable status, progress, errors, and resource cleanup. A restart must mark interrupted runs clearly; retry creates a traceable attempt. Resume is optional and must not be claimed without persisted replay/account state.
-- Run independent jobs without sharing a single global result slot. Both frontends query the same run/status/result service; desktop uses background execution and main-thread widget updates.
+- Run independent jobs without sharing a single global result slot. The web frontend queries the same run/status/result service.
 
-Audit `main.py` launch paths so both frontends initialize the required history providers. The standalone CLI currently rejects `--stream` without `--paper`; changing that CLI behavior is optional unless the shared service is exposed through `--backtest --stream` in this release. Frontend stream support is mandatory regardless.
+Audit `main.py` launch paths so the web frontend initializes the required history providers. The standalone CLI currently rejects `--stream` without `--paper`; changing that CLI behavior is optional unless the shared service is exposed through `--backtest --stream` in this release.
 
 ## AI editing and validation
 
@@ -133,16 +133,16 @@ Proposed service/API operations:
 - Set a default with the expected pattern generation.
 - Archive a version, optionally replacing the default atomically.
 
-Add a web `/patterns` route, template, and client script, using existing authentication and mutation protections. Extend the web backtest form with mode, replay settings, and version selection. Build a desktop Patterns dialog and extend `ui/backtest_dialog.py` with the same fields and validation. Move shared form/schema definitions out of the desktop module so headless web startup does not depend on Tkinter UI code.
+Add a web `/patterns` route, template, and client script, using existing authentication and mutation protections. Extend the web backtest form with mode, replay settings, and version selection.
 
 ## Implementation order
 
 1. **PostgreSQL storage and exact bootstrap:** replace the legacy store, add schema migrations and database blobs, freeze/import all file patterns, verify bytes and behavior, and document backup/rollback. Publish database-authoritative discovery only after baseline parity passes.
 2. **Version service:** explicit version loading, default/archive operations, run pinning, worker propagation, and removal of source-mirror activation dependencies.
-3. **Stream backtests:** shared request/runner, isolated replay/account state, durable jobs, cancellation, and deterministic parity tests. Wire both existing backtest frontends before adding AI automation.
+3. **Stream backtests:** shared request/runner, isolated replay/account state, durable jobs, cancellation, and deterministic parity tests. Wire the web backtest frontend before adding AI automation.
 4. **AI coordinator:** verified provider/model configuration, structured generation, immutable version creation, validation, and automatic candidate/base backtests.
 5. **Patterns screens:** navigation, instruction textbox and Submit, history/diffs, progress/results, default selection, and deletion.
-6. **Integration and rollout:** migrate a copy of existing data, compare baseline behavior, exercise both launch modes, document configuration and recovery, then cut over database loading.
+6. **Integration and rollout:** migrate a copy of existing data, compare baseline behavior, exercise the web launch mode, document configuration and recovery, then cut over database loading.
 
 ## Acceptance and verification
 
@@ -152,13 +152,13 @@ Add a web `/patterns` route, template, and client script, using existing authent
 - A second migration run creates no duplicates. Missing/corrupt blobs, runtime incompatibility, and unresolved source conflicts produce actionable errors without silently substituting code.
 - Multiple versions coexist; exactly one usable default exists per enabled pattern. Concurrent default changes and version creation are safe. Deletion preserves historical results and obeys replacement rules.
 - A default change during a running job does not change that job's version set, including spawned workers.
-- From both `main.py --web` and `main.py --ui`, a user can run and cancel a historical stream backtest with a selected version and inspect persistent results.
+- From `main.py --web`, a user can run and cancel a historical stream backtest with a selected version and inspect persistent results.
 - Pinned fixtures produce matching signal times, entries, exits, quantities, costs, and P&L through paper replay and the new stream backtest under identical settings. Test pending entries, deduplication, missing bars, warmup, gates, and end-of-run positions.
 - A future-bar mutation cannot affect earlier signals/fills. Two simultaneous replay jobs cannot alter each other's clock, account, dedup state, or the active paper session.
 - Submit with a mocked provider creates exactly one immutable version and automatically validates/backtests it. Invalid code, malformed responses, timeouts, cancellation, missing data, and unavailable sandbox/model produce visible and recoverable outcomes.
 - An unsuccessful candidate never changes the default. Repeating only a failed backtest does not regenerate code.
-- Complete browser and desktop smoke checks for navigation, submission, progress, results, default selection, deletion, and restart recovery. Run the existing pattern-loader/version/validation and backtest-paper parity suites plus targeted new integration tests.
+- Complete browser smoke checks for navigation, submission, progress, results, default selection, deletion, and restart recovery. Run the existing pattern-loader/version/validation and backtest-paper parity suites plus targeted new integration tests.
 
 ## Confirmed scope and remaining configuration
 
-The user confirmed both frontends, saved backtest presets, DeepSeek as the direct provider, PostgreSQL-only storage, and accurate initial seeding from the file patterns. The exact initial symbols, dates, market, and costs will be selected when saving the first preset; these do not block implementation planning. The model ID has been verified against official documentation as described above.
+The user confirmed the web frontend, saved backtest presets, DeepSeek as the direct provider, PostgreSQL-only storage, and accurate initial seeding from the file patterns. The exact initial symbols, dates, market, and costs will be selected when saving the first preset; these do not block implementation planning. The model ID has been verified against official documentation as described above.
