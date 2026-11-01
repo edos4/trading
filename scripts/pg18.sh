@@ -32,17 +32,27 @@ EOF
     "$PGBIN/pg_ctl" -D "$PGROOT/data" -l "$PGROOT/server.log" -w start
     "$PGBIN/createdb" -h "$PGROOT/socket" -p "$PORT" -U r00t stocks_history
     ;;
-  start)
-    "$PGBIN/pg_ctl" -D "$PGROOT/data" -l "$PGROOT/server.log" -w start
-    ;;
-  stop)
-    "$PGBIN/pg_ctl" -D "$PGROOT/data" -m fast -w stop
-    ;;
-  restart)
-    "$PGBIN/pg_ctl" -D "$PGROOT/data" -l "$PGROOT/server.log" -m fast -w restart
-    ;;
-  status)
-    "$PGBIN/pg_ctl" -D "$PGROOT/data" status
+  start|stop|restart|status)
+    # systemd owns the running server once trading-pg18.service is installed
+    # (enabled at boot with the rest of the user units). Driving pg_ctl directly
+    # behind systemd's back leaves the unit state stale, so delegate when the
+    # unit exists and keep pg_ctl only as the fallback for bare hosts.
+    if systemctl --user list-unit-files trading-pg18.service >/dev/null 2>&1 \
+        && systemctl --user cat trading-pg18.service >/dev/null 2>&1; then
+      case "$1" in
+        start) systemctl --user start trading-pg18.service && systemctl --user is-active trading-pg18.service ;;
+        stop) systemctl --user stop trading-pg18.service && echo "stopped (trading-pg18.service)" ;;
+        restart) systemctl --user restart trading-pg18.service && systemctl --user is-active trading-pg18.service ;;
+        status) systemctl --user status trading-pg18.service --no-pager | head -12 ;;
+      esac
+      exit 0
+    fi
+    case "$1" in
+      start) "$PGBIN/pg_ctl" -D "$PGROOT/data" -l "$PGROOT/server.log" -w start ;;
+      stop) "$PGBIN/pg_ctl" -D "$PGROOT/data" -m fast -w stop ;;
+      restart) "$PGBIN/pg_ctl" -D "$PGROOT/data" -l "$PGROOT/server.log" -m fast -w restart ;;
+      status) "$PGBIN/pg_ctl" -D "$PGROOT/data" status ;;
+    esac
     ;;
   psql)
     "$PGBIN/psql" -h "$PGROOT/socket" -p "$PORT" -U r00t -d stocks_history

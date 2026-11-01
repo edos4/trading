@@ -120,6 +120,19 @@ scripts/pg18.sh init      # first time only: initdb + create the stocks_history 
 scripts/pg18.sh start     # start (idempotent); also: stop | restart | status | psql
 ```
 
+The running server is owned by the `trading-pg18.service` user unit, which is
+enabled at boot (the `trading-web.service` drop-in `Wants=` it). With that unit
+installed, `scripts/pg18.sh` delegates start/stop/restart/status to systemd
+instead of driving `pg_ctl`, so the two never disagree about the server state:
+
+```bash
+systemctl --user status trading-pg18   # same view as scripts/pg18.sh status
+journalctl --user -u trading-pg18 -f   # logs (pg_ctl's server.log is idle here)
+```
+
+On a host without the unit, `scripts/pg18.sh` falls back to `pg_ctl` and logs to
+`$HOME/.local/share/trading-pg18/server.log` as before.
+
 It listens on `127.0.0.1:5433` with a private Unix socket under
 `$HOME/.local/share/trading-pg18/socket`. Point the app at it in `.env`:
 
