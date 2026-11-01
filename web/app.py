@@ -57,6 +57,12 @@ ROOT = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(ROOT / "templates"))
 
 
+class KronosPredictRequest(BaseModel):
+    symbol: str
+    days: int = Field(5, ge=1, le=120)
+    market: Optional[Literal["us", "ph"]] = None
+
+
 class HistoryBulkRequest(BaseModel):
     symbols: list[str] = Field(default_factory=list, max_length=500)
     after_ts: Optional[int] = None
@@ -424,6 +430,49 @@ def create_app() -> FastAPI:
                           getattr(settings, "kronos_symbols", None) or []),
                       kronos_save_days=int(
                           getattr(settings, "kronos_save_days", 5)))
+
+    @app.post("/api/kronos/predict")
+    async def api_kronos_predict(request: Request, _user: str = Depends(require_login)):
+        # Legacy single-symbol endpoint: the web Kronos tab's "Predict" button
+        # and the MCP kronos_predict tool still call this path. It runs the
+        # same base + fine-tuned forecast as /api/kronos/forecast (isolated
+        # .venv-kronos subprocess), then summarizes the first symbol into a
+        # compact per-symbol dict.
+        from web import kronos as kronos_module
+        try:
+            body = KronosPredictRequest.model_validate(await _json_body(request))
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        try:
+            payload = await asyncio.to_thread(
+                kronos_module.forecast, [body.symbol], body.days,
+            )
+        except Exception:
+            log.exception("Web | Kronos predict failed")
+            return JSONResponse({"detail": "Kronos prediction failed."}, status_code=500)
+        rows = payload.get("results") or []
+        if not rows:
+            return JSONResponse({"detail": "No Kronos forecast results."}, status_code=500)
+        row = rows[0]
+        base = row.get("base") or {}
+        finetuned = row.get("finetuned") or {}
+        last_close = row.get("last_close") or 0.0
+        pred_close = finetuned.get("pred_close", base.get("pred_close", 0.0))
+        return {
+            "symbol": row.get("symbol"),
+            "days": row.get("days", body.days),
+            "market": row.get("market") or body.market or "us",
+            "base": base,
+            "finetuned": finetuned,
+            "pred": {
+                "days": body.days,
+                "last_close": last_close,
+                "pred_close": pred_close,
+                "pred_return_pct": (
+                    (pred_close / last_close - 1.0) * 100.0 if last_close else 0.0
+                ),
+            },
+        }
 
     @app.post("/api/kronos/forecast")
     async def api_kronos_forecast(request: Request, _user: str = Depends(require_login)):
