@@ -8,12 +8,20 @@ channels, and rectangles. Target uses the full measured move (pole, bowl, or
 pattern width) from the fill. Keep those structural levels even when the
 breakout close makes the measured reward smaller than the full-depth risk.
 Execution stops are volatility-scaled rather than flat: the initial stop is
-``clamp(1.5 * ATR14, 3%, 8%)`` from the fill, and the trailing stop sits 1.5R
-behind the best close after the trade is +1R, so the give-back is a fixed
+``clamp(1.5 * ATR14, 3%, 8%)`` from the fill, and the trailing stop sits 2R
+behind the best close once the trade is +2R, so the give-back is a fixed
 fraction of the risk taken instead of a fixed fraction of price. A flat 3% cap
 was inside half an average daily range for most of the US universe (median
 0.52x ATR14 over 2025-11..2026-10): 11 of 13 closed paper trades stopped out at
 exactly -3.0% while 85% of them later showed >= 2R of favourable excursion.
+
+The 2R/2R pair is measured, not stylistic. Swept over 1,696 US names and 225
+patternsv2 signals (2022-01..2026-10, flat $10k, the real causal-v1 exit
+engine): the previous 1R arm / 1.5R give-back returned PF 0.89 and -$10.4k,
+tightening the give-back to 1.0R or 0.75R was worse (-$25.7k / -$26.7k), while
+2R/2R returned PF 1.15 with the win rate unchanged (32.4% vs 32.0%) and only 12
+trailing exits in 185 trades. A trail closer than 2R cuts target-bound trades
+inside one bar's noise. Treat it as a disaster brake, not an exit strategy.
 Structural levels remain available for charting.
 """
 
@@ -46,12 +54,15 @@ MIN_BARS = 60
 # `TRAIL_ARM_R * stop_pct` in favour. Expressing the trail as a multiple of the
 # stop keeps the give-back in R constant when the stop distance changes, which
 # the old 2.5%-price/5%-activation pair did not (it gave back a fixed 0.83R).
+# Arm 2R / give back 2R leaves the trail at breakeven for an armed trade and as
+# a disaster brake only; 1R/1.5R put its floor at -0.5R and cut winners early
+# (see the module docstring for the measured sweep).
 STOP_ATR_MULT = 1.5
 STOP_PCT_FLOOR = 0.03
 STOP_PCT_CEIL = 0.08
 STOP_ATR_PERIOD = 14
-TRAIL_GIVEBACK_R = 1.5
-TRAIL_ARM_R = 1.0
+TRAIL_GIVEBACK_R = 2.0
+TRAIL_ARM_R = 2.0
 
 
 def stop_pct_for(df: pd.DataFrame, idx: int, price: float) -> float:
