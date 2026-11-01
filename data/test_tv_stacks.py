@@ -102,6 +102,10 @@ def test_fake_series_buys_then_trails_out(monkeypatch):
     account = PaperAccount(market="us")
     account.assume_session_open = True
     account.indicators_only = True
+    # `exit_indicator`'s close-fill branch is the legacy-model path: a causal-v1
+    # position queues the exit for the next open and returns None (see its
+    # docstring). This test is about the close-fill, so pin the model it wants.
+    account.execution_model = "legacy"
     opened, reason = account.open_position(signal, _snapshot(second, 100).candle, None)
     assert opened, reason
     position = account.positions["AAPL"][0]
