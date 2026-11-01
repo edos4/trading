@@ -11,7 +11,7 @@ import pytest
 
 from data.tv_client import MarketSnapshot, OHLCVCandle
 from patterns.base_pattern import TradeSignal
-from patterns_v2.signals import MIN_BARS, detect_trade_signals
+from patterns_v2.signals import MIN_BARS, TRAIL_ARM_R, TRAIL_GIVEBACK_R, detect_trade_signals
 
 
 def _frame(n: int = 80) -> pd.DataFrame:
@@ -62,8 +62,8 @@ def test_adapts_breakout_into_trade_signal():
     assert sig.provenance == "patternsv2"
     assert isinstance(sig.stop_loss_pct_cap, float)
     assert sig.stop_loss_pct_cap >= 0.03
-    assert sig.trailing_stop_pct == pytest.approx(1.5 * sig.stop_loss_pct_cap)
-    assert sig.trailing_activation_pct == pytest.approx(sig.stop_loss_pct_cap)
+    assert sig.trailing_stop_pct == pytest.approx(TRAIL_GIVEBACK_R * sig.stop_loss_pct_cap)
+    assert sig.trailing_activation_pct == pytest.approx(TRAIL_ARM_R * sig.stop_loss_pct_cap)
     assert sig.trailing_stop_mode == "highest_close"
     assert sig.trailing_ref_after_check
     assert any(a.get("pattern_version_id") == "patternsv2" for a in sig.chart_annotations)
