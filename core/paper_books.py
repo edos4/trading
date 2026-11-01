@@ -112,6 +112,104 @@ def stream_server_reusable(
     return asof >= requested
 
 
+def paper_run_settings(
+    *,
+    market: str,
+    n_symbols: int,
+    use_stream: bool,
+    interval_seconds: int,
+    stream_start: Optional[str] = None,
+    volume_gate: bool = False,
+    pattern_only: bool = False,
+    indicators_only: bool = False,
+    patterns_v2: bool = False,
+    collect_first: bool = False,
+    collect_first_top_n: int = 4,
+    tv_stack_name: str = "",
+    rule_name: str = "",
+    rule_filter_id: str = "",
+    rule_filter_mode: str = "off",
+    rule_filter_position: str = "after",
+    laya_mode: str = "off",
+    laya_policy_id: str = "",
+    duration_days: int | None = None,
+) -> dict[str, Any]:
+    """The filters one paper run was started with, as exportable JSON.
+
+    Single source of truth for both the desk header (`paper_run_status`) and
+    the trades export, so an exported book can be read back without guessing
+    which gates were on.
+    """
+    profile = get_market(market)
+    pace = (
+        "scan-paced replay"
+        if use_stream and int(interval_seconds) <= 0
+        else f"scanning every {int(interval_seconds)}s"
+    )
+    return {
+        "market": profile.id,
+        "label": profile.label,
+        "n_symbols": int(n_symbols),
+        "use_stream": bool(use_stream),
+        "pace": pace,
+        "scan_interval_seconds": int(interval_seconds or 0),
+        "stream_start": stream_start if use_stream else None,
+        "volume_gate": bool(volume_gate),
+        "pattern_only": bool(pattern_only and not indicators_only),
+        "indicators_only": bool(indicators_only),
+        "patterns_v2": bool(patterns_v2 and not indicators_only),
+        "collect_first": bool(collect_first),
+        "collect_first_top_n": (
+            int(collect_first_top_n or 4) if collect_first else None
+        ),
+        "tv_stack_name": tv_stack_name or "",
+        "rule_name": rule_name or "",
+        "rule_filter_id": rule_filter_id or "",
+        "rule_filter_mode": rule_filter_mode or "off",
+        "rule_filter_position": rule_filter_position or "after",
+        "laya_mode": laya_mode or "off",
+        "laya_policy_id": laya_policy_id or "",
+        "duration_days": int(duration_days) if duration_days else None,
+        "session": session_label(profile.id),
+    }
+
+
+def paper_run_status(cfg: dict[str, Any]) -> str:
+    """One-line run header: 'Running — US ..., Volume gate=OFF, ...'."""
+    stream_note = (
+        f", stream from {cfg['stream_start']}"
+        if cfg.get("use_stream") and cfg.get("stream_start") else ""
+    )
+    rule_filter_on = bool(
+        cfg.get("rule_filter_id") and cfg.get("rule_filter_mode") != "off"
+    )
+    laya_mode = cfg.get("laya_mode") or "off"
+    laya_policy = (
+        "/" + str(cfg["laya_policy_id"])
+        if laya_mode != "off" and cfg.get("laya_policy_id") else ""
+    )
+    duration = (
+        ", Duration=" + str(int(cfg["duration_days"])) + " sessions"
+        if cfg.get("duration_days") else ""
+    )
+    return (
+        f"Running — {cfg['label']}, {int(cfg['n_symbols'])} symbols, {cfg['pace']}"
+        f"{stream_note}"
+        f", Volume gate={'ON' if cfg.get('volume_gate') else 'OFF'}"
+        f", Pattern-only={'ON' if cfg.get('pattern_only') else 'OFF'}"
+        f", Indicators-only={'ON' if cfg.get('indicators_only') else 'OFF'}"
+        f"{', TradingView=' + str(cfg['tv_stack_name']) if cfg.get('tv_stack_name') else ''}"
+        f"{', Rule=' + str(cfg['rule_name']) if cfg.get('rule_name') else ''}"
+        f"{', RuleFilter=' + str(cfg['rule_filter_mode']) if rule_filter_on else ''}"
+        f"{'/' + str(cfg['rule_filter_position']) if rule_filter_on else ''}"
+        f", Patternsv2={'ON' if cfg.get('patterns_v2') else 'OFF'}"
+        f", Collect-first={'ON' if cfg.get('collect_first') else 'OFF'}"
+        f", Laya={laya_mode.upper()}{laya_policy}"
+        f"{duration}"
+        f", session={cfg.get('session') or session_label(cfg['market'])}"
+    )
+
+
 class PaperBook:
     """One market's paper session: own thread, asyncio loop, scanner, ledger."""
 
@@ -145,6 +243,8 @@ class PaperBook:
         self.laya_mode: str = "off"
         self.laya_policy_id: str = ""
         self.duration_days: int | None = None
+        # Filters the current/last run was started with (export payload).
+        self.run_settings: dict[str, Any] = {}
 
     def snapshot(self, *, stream_blocked_by: Optional[str] = None) -> dict[str, Any]:
         with self.lock:
@@ -154,6 +254,7 @@ class PaperBook:
             status = self.status
             running = self.running
             error = self.error
+            run_settings = dict(self.run_settings)
 
         profile = get_market(account.market)
         clock = clock_payload(profile.id)
@@ -241,6 +342,10 @@ class PaperBook:
 
         result = account.to_result()
         stats = scanner.stats if scanner is not None else None
+        scan_timing = None
+        if scanner is not None:
+            timing = scanner.scan_timing()
+            scan_timing = timing if isinstance(timing, dict) else None
         signal_logs = []
         for row in reversed(load_signal_log(profile.id)):
             entry = dict(row)
@@ -280,6 +385,7 @@ class PaperBook:
         return json_safe({
             "running": running,
             "status": display_status,
+            "settings": run_settings,
             "error": error,
             "use_stream": use_stream,
             "account_model": "independent-fixed-notional",
@@ -293,6 +399,7 @@ class PaperBook:
             "closed_count": len(snap["closed"]),
             "exposure": exp,
             "scan_stats": stats,
+            "scan_timing": scan_timing,
             "positions": positions,
             "closed": closed,
             "signal_logs": signal_logs,
@@ -941,31 +1048,29 @@ class PaperBook:
                 if use_stream
                 else profile.scan_interval_seconds
             )
-            stream_note = (
-                f", stream from {effective_stream_start}"
-                if use_stream and effective_stream_start else ""
+            run_settings = paper_run_settings(
+                market=profile.id,
+                n_symbols=len(symbols),
+                use_stream=use_stream,
+                interval_seconds=interval,
+                stream_start=effective_stream_start,
+                volume_gate=volume_gate,
+                pattern_only=pattern_only,
+                indicators_only=indicators_only,
+                patterns_v2=patterns_v2,
+                collect_first=collect_first,
+                collect_first_top_n=collect_first_top_n,
+                tv_stack_name=self.tv_stack_name,
+                rule_name=self.rule_name,
+                rule_filter_id=rule_filter_id,
+                rule_filter_mode=rule_filter_mode,
+                rule_filter_position=rule_filter_position,
+                laya_mode=laya_mode,
+                laya_policy_id=laya_policy_id,
+                duration_days=duration_days,
             )
-            if use_stream and interval <= 0:
-                pace = "scan-paced replay"
-            else:
-                pace = f"scanning every {interval}s"
-            self.status = (
-                f"Running — {profile.label}, {len(symbols)} symbols, {pace}"
-                f"{stream_note}"
-                f", Volume gate={'ON' if volume_gate else 'OFF'}"
-                f", Pattern-only={'ON' if pattern_only and not indicators_only else 'OFF'}"
-                f", Indicators-only={'ON' if indicators_only else 'OFF'}"
-                f"{', TradingView=' + self.tv_stack_name if self.tv_stack_name else ''}"
-                f"{', Rule=' + self.rule_name if self.rule_name else ''}"
-                f"{', RuleFilter=' + self.rule_filter_mode if self.rule_filter_id and self.rule_filter_mode != 'off' else ''}"
-                f"{'/' + self.rule_filter_position if self.rule_filter_id and self.rule_filter_mode != 'off' else ''}"
-                f", Patternsv2={'ON' if patterns_v2 and not indicators_only else 'OFF'}"
-                f", Collect-first={'ON' if collect_first else 'OFF'}"
-                f", Laya={(laya_mode or 'off').upper()}"
-                f"{'/' + laya_policy_id if (laya_mode or 'off') != 'off' and laya_policy_id else ''}"
-                f"{', Duration=' + str(int(duration_days)) + ' sessions' if duration_days else ''}"
-                f", session={session_label(profile.id)}"
-            )
+            self.run_settings = run_settings
+            self.status = paper_run_status(run_settings)
 
         error_msg: Optional[str] = None
         try:

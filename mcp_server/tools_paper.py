@@ -99,7 +99,13 @@ def paper_reset_logs(market: str = "all") -> dict:
 
 
 def paper_export_trades(market: str = "all") -> dict:
-    """Export open + closed paper trades as JSON (market: us, ph, or all)."""
+    """Export open + closed paper trades as JSON (market: us, ph, or all).
+
+    Each book carries `status` (the desk header verbatim, e.g. "Running — US
+    (NASDAQ/NYSE), 2000 symbols, scan-paced replay, stream from 2025-11-03,
+    Volume gate=OFF, ...") and `settings` (the same run filters as structured
+    fields), so a review knows which gates produced the trades.
+    """
     return get_client().get("/api/paper/export", params={"market": market})
 
 

@@ -141,6 +141,15 @@ def _scan_stats(raw: Any) -> Optional[dict[str, Any]]:
         "scan_duration_s",
         "sim_days",
         "rejection_by_gate",
+        # Scan clock: when the scan in flight started/finished and the run's
+        # cumulative scanning time (the CLI path has no live scanner object).
+        "scan_started_at",
+        "scan_finished_at",
+        "scan_in_progress",
+        "scan_total_s",
+        "scans_completed",
+        "run_started_at",
+        "run_finished_at",
     )
     out = {k: raw[k] for k in keep if k in raw}
     return out or None
@@ -157,6 +166,13 @@ def _book_export(snap: dict[str, Any]) -> dict[str, Any]:
         "long_only": snap.get("long_only"),
         "session": snap.get("session"),
         "running": bool(snap.get("running")),
+        # The desk header verbatim, plus the same filters as structured JSON,
+        # so a review knows which gates produced these trades.
+        "status": snap.get("status"),
+        "settings": dict(snap.get("settings") or {}),
+        "use_stream": snap.get("use_stream"),
+        "duration_days": snap.get("duration_days"),
+        "laya": snap.get("laya"),
         "cash": _round(snap.get("cash"), 2),
         "equity": _round(snap.get("equity"), 2),
         "open_count": snap.get("open_count"),
@@ -168,6 +184,7 @@ def _book_export(snap: dict[str, Any]) -> dict[str, Any]:
         "pending_entries": snap.get("pending_entries", []),
         "order_events": snap.get("order_events", []),
         "scan_stats": _scan_stats(snap.get("scan_stats")),
+        "scan_timing": snap.get("scan_timing"),
         "signal_logs": [_signal_row(s) for s in (snap.get("signal_logs") or [])],
         "open_positions": [_open_row(p) for p in (snap.get("positions") or [])],
         "closed_trades": [_closed_row(t) for t in (snap.get("closed") or [])],
@@ -178,6 +195,8 @@ def snapshot_from_paper_account(
     account,
     *,
     scan_stats: dict[str, Any] | None = None,
+    settings: dict[str, Any] | None = None,
+    status: str | None = None,
 ) -> dict[str, Any]:
     """PaperBook-shaped snapshot so CLI dumps reuse the same export schema."""
     from core.paper_trader import (
@@ -279,6 +298,14 @@ def snapshot_from_paper_account(
         "long_only": profile.long_only,
         "session": clock["session"],
         "running": False,
+        "status": status,
+        "settings": dict(settings or {}),
+        "use_stream": bool((settings or {}).get("use_stream")),
+        "duration_days": (settings or {}).get("duration_days"),
+        "laya": {
+            "mode": (settings or {}).get("laya_mode") or "off",
+            "policy_id": (settings or {}).get("laya_policy_id") or "",
+        },
         "account_model": "independent-fixed-notional",
         "pending_entries": [{"symbol": s.symbol, "pattern": s.pattern,
                              "decision_date": s.signal_bar_timestamp.isoformat()} for s in account.pending_entries],
@@ -318,9 +345,16 @@ def build_paper_account_export(
     account,
     *,
     scan_stats: dict[str, Any] | None = None,
+    settings: dict[str, Any] | None = None,
+    status: str | None = None,
 ) -> dict[str, Any]:
     """CLI paper dump: same JSON as the UI Export Trades button, one book."""
-    snap = snapshot_from_paper_account(account, scan_stats=scan_stats)
+    snap = snapshot_from_paper_account(
+        account,
+        scan_stats=scan_stats,
+        settings=settings,
+        status=status,
+    )
     return build_paper_trade_export(
         {"books": {snap["market"]: snap}},
         market=snap["market"],
@@ -351,6 +385,10 @@ def build_paper_trade_export(
         "review_prompt": REVIEW_PROMPT.strip(),
         "notes": [
             "Open and closed paper trades from the operator desk.",
+            "Each book's `status` is the desk header verbatim and `settings`"
+            " carries the same run filters as structured fields (market,"
+            " symbols, pace, stream start, volume gate, pattern-only,"
+            " indicators-only, patternsv2, collect-first, Laya, session).",
             "signal_logs holds every detected signal with its accept/fill/reject"
             " outcome and reason, newest first, as shown in the Paper Logs tab.",
             "Each book is a separate ledger. Do not mix $ and ₱.",
