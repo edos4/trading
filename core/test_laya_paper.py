@@ -22,6 +22,21 @@ def _candle(close: float, ts: datetime) -> OHLCVCandle:
                        volume=1.0, timestamp=ts)
 
 
+@pytest.fixture(autouse=True)
+def _pin_dii_to_a_passing_read(monkeypatch):
+    """These tests are about Laya shadow/filter behaviour, not breadth geometry.
+
+    The feed below is flat, which reads 50% DII — inside the SELL band (40–60)
+    but outside the BUY band (16–40), so the live gate would reject the BUY
+    these fixtures emit. Pin the BUY band open so the gate keeps passing and
+    the assertions stay about Laya. `analysis/test_pattern_dii.py` owns the
+    band values.
+    """
+    import analysis.pattern_dii as dii
+    monkeypatch.setattr(dii, 'LONG_MIN_BULLS', 40.0)
+    monkeypatch.setattr(dii, 'LONG_MAX_BULLS', 60.0)
+
+
 class _BuyOnce(BasePattern):
     name = "test_laya_pattern"
     fired = False
@@ -65,7 +80,8 @@ class _Feed:
         if store is not None:
             if self.bar == 0:
                 tz = candle.timestamp.tzinfo
-                # Flat warmup keeps the DII inside its 40–60% band, with 100+ candles.
+                # Flat warmup reads a balanced DII; the module fixture pins the
+                # BUY band around it. 100+ candles keep the gate's warmup satisfied.
                 warmup = [
                     _candle(90.0, datetime(2023, 11, 20, 16, 5, tzinfo=tz) + timedelta(days=i))
                     for i in range(120)

@@ -1,8 +1,8 @@
 """Trade bounces at the automatic support/resistance rails, DII-gated.
 
 The rails are the same pivot-anchored trend lines drawn on trade charts. The
-strategy only considers a rail bounce while the DII bullish percentage sits in
-its 40%–60% consideration band, the same band the pattern scan gate enforces.
+The strategy only considers a rail bounce while the DII bullish percentage sits
+in the pattern scan gate band (16%–40% for BUY, 40%–60% for SELL).
 A BUY needs a touch/hold of confirmed, unbroken support; a SELL needs a
 rejection at confirmed, unbroken resistance.
 """
@@ -11,7 +11,8 @@ from __future__ import annotations
 import numpy as np
 
 from analysis.indicator_engine import IndicatorEngine
-from analysis.pattern_dii import LENGTH, MAX_BULLS, MIN_BULLS, PERIOD, dii_consideration
+from analysis.pattern_dii import (LENGTH, LONG_MAX_BULLS, LONG_MIN_BULLS,
+                                PERIOD, SHORT_MAX_BULLS, SHORT_MIN_BULLS, dii_consideration)
 from analysis.trendlines import detect_trendlines
 from indicators._signal import BaseIndicator, emit, reward_bracket
 
@@ -37,8 +38,6 @@ class SupportResistanceIndicator(BaseIndicator):
             return None
         engine = IndicatorEngine(df)
         bulls, bears = dii_consideration(engine.directional_imbalance_index(LENGTH, PERIOD))
-        if not np.isfinite(bulls) or not MIN_BULLS <= bulls <= MAX_BULLS:
-            return None
         atr = float(engine.atr().iloc[-1])
         if not np.isfinite(atr) or atr <= 0:
             return None
@@ -57,6 +56,10 @@ class SupportResistanceIndicator(BaseIndicator):
                 continue
             level = self._level(rail, index)
             if not np.isfinite(level) or level <= 0:
+                continue
+            band = ((LONG_MIN_BULLS, LONG_MAX_BULLS)
+                    if action == "BUY" else (SHORT_MIN_BULLS, SHORT_MAX_BULLS))
+            if not np.isfinite(bulls) or not band[0] <= bulls <= band[1]:
                 continue
             if action == "BUY":
                 touched = level < price and low <= level + tolerance and price >= opening

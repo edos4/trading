@@ -69,6 +69,35 @@ def describe_confidence_rejection(_signal, _min=None) -> str:
 
 
 def describe_min_share_price_rejection(_signal, _min=None, *, market=None):
+    """Reject a signal on a sub-floor share price.
+
+    The floor comes from the market profile (``US_MIN_SHARE_PRICE = 10``; PH has
+    none) or from an explicit ``_min``. This was a no-op stub while the call site
+    and the profile constant both existed, so the declared floor never fired and
+    sub-$5 names traded with a stop sized for a blue chip: over 2025-11..2026-10
+    the sub-$5 cohort ran -0.84R/trade at a 7% win rate against +0.27R/trade for
+    everything above it.
+
+    An unknown price is not a rejection — a missing quote is a data problem, not
+    a signal-quality verdict.
+    """
+    floor = _min
+    if floor is None:
+        try:
+            floor = get_market(market).min_share_price
+        except Exception:
+            floor = None
+    if floor is None or not math.isfinite(float(floor)) or float(floor) <= 0:
+        return None
+    price = getattr(_signal, "price", None)
+    if price is None or not math.isfinite(float(price)) or float(price) <= 0:
+        return None
+    if float(price) < float(floor):
+        label = get_market(market).label if market else "market"
+        return (
+            f"Share price {float(price):,.4f} is below the {label} minimum of "
+            f"{float(floor):,.2f}."
+        )
     return None
 
 
@@ -1289,7 +1318,7 @@ class MarketScanner:
             from analysis.pattern_dii import MIN_BARS, describe_pattern_dii_rejection
 
             df = self._store.get_df(signal.symbol, signal.timeframe, min_bars=MIN_BARS)
-            dii_reason = describe_pattern_dii_rejection(df)
+            dii_reason = describe_pattern_dii_rejection(df, action=signal.action)
             if dii_reason is not None:
                 log.info(
                     f"Signal REJECTED by DII gate — {signal.symbol} "
