@@ -342,10 +342,14 @@ class PaperBook:
 
         result = account.to_result()
         stats = scanner.stats if scanner is not None else None
-        scan_timing = None
+        # The book's cumulative scan clock is persisted on the account, so a
+        # stopped or restarted desk still shows total scanning time. The
+        # scanner contributes only the scan currently in flight.
+        scan_timing = account.scan_clock()
         if scanner is not None:
             timing = scanner.scan_timing()
-            scan_timing = timing if isinstance(timing, dict) else None
+            if isinstance(timing, dict):
+                scan_timing.update(timing)
         signal_logs = []
         for row in reversed(load_signal_log(profile.id)):
             entry = dict(row)
@@ -707,6 +711,9 @@ class PaperBook:
             self.running = True
             self._stop_requested.clear()
             self.error = None
+            # The previous run's scanner must not keep feeding the scan clock
+            # while this run builds its own.
+            self.scanner = None
             self.use_stream = use_stream
             self.tv_stack_id = tv_stack_id
             self.tv_stack_name = stack_name
@@ -785,6 +792,7 @@ class PaperBook:
             self.status = f"{profile.label} account reset."
             self.error = None
             scanner = self.scanner
+            self.scanner = None
         reset_signal_log(self.market)
         if scanner is not None:
             scanner.clear_signal_log_memory()

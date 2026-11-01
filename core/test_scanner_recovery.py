@@ -290,3 +290,39 @@ def test_incomplete_scan_paced_replay_waits(monkeypatch):
     scanner.stats["scan_complete"] = True
     asyncio.run(scanner._sleep_until_next_scan())
     assert slept == [1.0]
+
+
+def test_completed_scans_accumulate_on_the_book_clock(monkeypatch):
+    """The clock is the book's total, so a fresh run continues it."""
+
+    class Feed:
+        snapshot_batch_size = 10
+
+        async def fetch_snapshots(self, symbols, timeframe, **kwargs):
+            return {symbol: None for symbol in symbols}
+
+        async def advance_replay(self, session):
+            return True, False
+
+    from core.paper_trader import PaperAccount
+
+    acct = PaperAccount(market="us")
+    scanner = MarketScanner(symbols=["AAA"], data_feed=Feed(), paper_account=acct)
+    scanner._patterns = [SimpleNamespace(timeframes=["1d"])]
+    monkeypatch.setattr(scanner, "_note_worker", lambda: None)
+    monkeypatch.setattr(scanner, "_apply_bar", lambda symbol, *_: (False, None))
+    scanner._running = True
+
+    asyncio.run(scanner._scan_all(feed_sessions=[object()]))
+    asyncio.run(scanner._scan_all(feed_sessions=[object()]))
+    timing = scanner.scan_timing()
+    assert timing["scans_completed"] == 2
+    assert timing["scan_total_s"] == pytest.approx(
+        acct.scan_clock()["scan_total_s"])
+
+    # A new run builds a new scanner on the same account: the total stays.
+    restarted = MarketScanner(
+        symbols=["AAA"], data_feed=Feed(), paper_account=acct,
+    )
+    monkeypatch.setattr(restarted, "_note_worker", lambda: None)
+    assert restarted.scan_timing()["scans_completed"] == 2
