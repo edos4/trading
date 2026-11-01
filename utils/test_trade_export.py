@@ -13,6 +13,26 @@ def _envelope():
                 "long_only": False,
                 "session": "RTH",
                 "running": True,
+                "status": "Running — US (NASDAQ/NYSE), 2000 symbols, scan-paced replay",
+                "settings": {
+                    "market": "us",
+                    "n_symbols": 2000,
+                    "use_stream": True,
+                    "pace": "scan-paced replay",
+                    "stream_start": "2025-11-03",
+                    "volume_gate": False,
+                    "patterns_v2": True,
+                },
+                "use_stream": True,
+                "scan_timing": {
+                    "run_started_at": "2026-01-05T13:30:00+00:00",
+                    "scan_in_progress": False,
+                    "last_scan_duration_s": 32.5,
+                    "scan_total_s": 97.5,
+                    "scans_completed": 3,
+                    "avg_scan_s": 32.5,
+                    "run_elapsed_s": 420.0,
+                },
                 "cash": 90_000.1234,
                 "equity": 102_410.0,
                 "open_count": 1,
@@ -170,6 +190,19 @@ def test_export_includes_both_books_and_review_prompt():
     assert "equity_png_b64" not in us["metrics"]
     assert us["scan_stats"]["rejection_by_gate"] == {"volume": 2}
     assert "noise" not in us["scan_stats"]
+    # Run filters travel with the book: header verbatim + structured settings.
+    assert us["status"].startswith("Running — US (NASDAQ/NYSE)")
+    assert us["settings"]["n_symbols"] == 2000
+    assert us["settings"]["patterns_v2"] is True
+    assert us["settings"]["stream_start"] == "2025-11-03"
+    assert us["use_stream"] is True
+    assert us["duration_days"] is None
+    assert us["scan_timing"]["last_scan_duration_s"] == 32.5
+    assert us["scan_timing"]["scans_completed"] == 3
+    # A hand-built book without run settings still exports the keys.
+    assert ph["settings"] == {}
+    assert ph["status"] is None
+    assert any("settings" in note for note in payload["notes"])
 
 
 def test_export_includes_log_tab_signals():
@@ -293,6 +326,9 @@ def test_export_from_paper_account():
                return_value=[{"symbol": "MSFT", "status": "accepted", "market": "us"}]):
         payload = build_paper_account_export(
             acct, scan_stats={"trades_opened": 2, "rejection_by_gate": {}},
+            settings={"market": "us", "n_symbols": 2000, "use_stream": True,
+                      "volume_gate": False, "laya_mode": "off"},
+            status="Running — US (NASDAQ/NYSE), 2000 symbols",
         )
     assert payload["purpose"] == "paper_trade_evaluation"
     assert payload["filter"] == "us"
@@ -310,6 +346,10 @@ def test_export_from_paper_account():
     assert book["scan_stats"]["trades_opened"] == 2
     assert book["signal_logs"][0]["symbol"] == "MSFT"
     assert book["metrics"]["profit_factor"] is None
+    assert book["status"] == "Running — US (NASDAQ/NYSE), 2000 symbols"
+    assert book["settings"]["n_symbols"] == 2000
+    assert book["use_stream"] is True
+    assert book["laya"] == {"mode": "off", "policy_id": ""}
     json.dumps(payload, allow_nan=False)
 
 

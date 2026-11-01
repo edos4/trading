@@ -17,7 +17,12 @@ import pandas as pd
 
 from core.backtester import BacktestTrade
 from core.market import PH
-from core.paper_books import PaperBook, PaperBookManager
+from core.paper_books import (
+    PaperBook,
+    PaperBookManager,
+    paper_run_settings,
+    paper_run_status,
+)
 from core import signal_log_store as sls
 
 
@@ -744,3 +749,47 @@ def test_pattern_paper_open_and_closed_charts_include_dii():
             assert "error" not in result
             assert result["dii"]["bulls"][-1]["value"] == 50
             assert result["dii"]["up"][-1]["value"] == 40
+
+
+def test_run_settings_header_lists_every_paper_filter():
+    """The desk header is the export header: same filters, same wording."""
+    from core.market import session_label
+
+    cfg = paper_run_settings(
+        market="us", n_symbols=2000, use_stream=True, interval_seconds=0,
+        stream_start="2025-11-03", patterns_v2=True,
+    )
+    assert paper_run_status(cfg) == (
+        "Running — US (NASDAQ/NYSE), 2000 symbols, scan-paced replay, "
+        "stream from 2025-11-03, Volume gate=OFF, Pattern-only=OFF, "
+        "Indicators-only=OFF, Patternsv2=ON, Collect-first=OFF, Laya=OFF, "
+        f"session={session_label('us')}"
+    )
+    assert cfg["market"] == "us"
+    assert cfg["n_symbols"] == 2000
+    assert cfg["pace"] == "scan-paced replay"
+    assert cfg["stream_start"] == "2025-11-03"
+    assert (cfg["volume_gate"], cfg["pattern_only"], cfg["patterns_v2"]) == (
+        False, False, True)
+    assert cfg["collect_first"] is False
+    assert cfg["laya_mode"] == "off"
+
+
+def test_run_settings_indicators_only_wins_over_pattern_flags():
+    cfg = paper_run_settings(
+        market="ph", n_symbols=500, use_stream=False, interval_seconds=60,
+        pattern_only=True, patterns_v2=True, indicators_only=True,
+        collect_first=True, collect_first_top_n=6, laya_mode="shadow",
+        laya_policy_id="pol-1", duration_days=12,
+    )
+    status = paper_run_status(cfg)
+    assert "Pattern-only=OFF" in status
+    assert "Patternsv2=OFF" in status
+    assert "Indicators-only=ON" in status
+    assert "Collect-first=ON" in status
+    assert "Laya=SHADOW/pol-1" in status
+    assert "Duration=12 sessions" in status
+    assert "stream from" not in status
+    assert cfg["collect_first_top_n"] == 6
+    assert cfg["stream_start"] is None
+    assert cfg["duration_days"] == 12

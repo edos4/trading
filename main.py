@@ -124,10 +124,15 @@ def _write_trades_log(
     path: str,
     account: PaperAccount,
     scan_stats: dict | None = None,
+    *,
+    run_settings: dict | None = None,
+    status: str | None = None,
 ) -> None:
     from utils.trade_export import build_paper_account_export
 
-    payload = build_paper_account_export(account, scan_stats=scan_stats)
+    payload = build_paper_account_export(
+        account, scan_stats=scan_stats, settings=run_settings, status=status,
+    )
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     json.dump(payload, out.open("w", encoding="utf-8"), indent=2)
@@ -245,6 +250,23 @@ async def run_paper(
         if use_stream
         else profile.scan_interval_seconds
     )
+    # The same filters the desk header shows, carried into --export-trades-log.
+    from core.paper_books import paper_run_settings, paper_run_status
+
+    run_settings = paper_run_settings(
+        market=profile.id,
+        n_symbols=n_symbols,
+        use_stream=use_stream,
+        interval_seconds=scan_interval,
+        stream_start=effective_stream_start,
+        volume_gate=use_volume,
+        pattern_only=pattern_only,
+        patterns_v2=False,
+        collect_first=cf_on,
+        collect_first_top_n=cf_n,
+        duration_days=duration_days,
+    )
+    run_status = paper_run_status(run_settings)
 
     log.info("=" * 60)
     log.info("  Trading Bot — PAPER TRADING MODE (simulated fills, no broker)")
@@ -342,7 +364,10 @@ async def run_paper(
         if export_trades_log:
             stats = scanner.stats if scanner is not None else None
             try:
-                _write_trades_log(export_trades_log, account, stats)
+                _write_trades_log(
+                    export_trades_log, account, stats,
+                    run_settings=run_settings, status=run_status,
+                )
             except OSError:
                 log.exception(
                     f"Paper | failed to write trades log {export_trades_log}"
