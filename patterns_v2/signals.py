@@ -335,13 +335,18 @@ def detect_trade_signals(
     if df is None or len(df) < MIN_BARS:
         return []
     fn = detect or detect_fn()
-    found = fn(
-        df["high"].to_numpy(dtype=float),
-        df["low"].to_numpy(dtype=float),
-        df["close"].to_numpy(dtype=float),
-    )
     n = len(df)
     latest = n - 1
+    high = df["high"].to_numpy(dtype=float)
+    low = df["low"].to_numpy(dtype=float)
+    close = df["close"].to_numpy(dtype=float)
+    if latest_bar_only and getattr(fn, "supports_latest_only", False):
+        # One bar is wanted; let the bounded-pattern search skip the pivot pairs
+        # that can only break out on a bar this call drops. Same answer for the
+        # bar it keeps (verified against the full search), a fraction of the work.
+        found = fn(high, low, close, latest=latest)
+    else:
+        found = fn(high, low, close)
     floor = 0 if lookback is None else max(0, n - int(lookback))
     best: dict[str, tuple[int, float, dict]] = {}
     for raw in found or ():

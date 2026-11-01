@@ -32,10 +32,10 @@ except ImportError:  # standalone checkout without the bot's logging stack
     _log = logging.getLogger(__name__)
 
 
-def _safe(fn, *args):
+def _safe(fn, *args, **kwargs):
     """One detector's numerical failure must not erase the symbol's other shapes."""
     try:
-        return fn(*args)
+        return fn(*args, **kwargs)
     except Exception:
         _log.exception("Patternsv2 detector %s failed", getattr(fn, "__module__", fn))
         return []
@@ -67,8 +67,13 @@ _BULLISH_DETECTORS = (
 )
 
 
-def detect(h, l, c, zz_mult=2.0):
-    """h, l, c: float numpy arrays for ONE symbol, sorted by date. Returns list of signal dicts."""
+def detect(h, l, c, zz_mult=2.0, latest=None):
+    """h, l, c: float numpy arrays for ONE symbol, sorted by date. Returns list of signal dicts.
+
+    ``latest`` restricts the bounded-pattern search to pivots that can break out
+    on that bar (see ``_triangle_base.detect``). It drops only signals on other
+    bars, so a live scan asking for the last bar gets the same answer for it.
+    """
     h, l, c = (np.asarray(x, float) for x in (h, l, c))
     if len(c) < 60:
         return []
@@ -92,7 +97,7 @@ def detect(h, l, c, zz_mult=2.0):
             if d == -1:
                 _mirror_signal(s)
             sigs.append(s)
-    sigs += _safe(detect_triangles, h, l, c, a, bullish_pivots)
+    sigs += _safe(detect_triangles, h, l, c, a, bullish_pivots, latest=latest)
     sigs = [s for s in sigs if s["pattern"] not in DISABLED and tradable(h, l, c, s["start"], s["signal"])]
     seen, uniq = set(), []
     for s in sorted(sigs, key=lambda s: (s["signal"], -s["score"])):
@@ -101,6 +106,12 @@ def detect(h, l, c, zz_mult=2.0):
             seen.add(key)
             uniq.append(s)
     return uniq
+
+
+# Callers that can consume a single bar's signals pass ``latest=``; the flag
+# lets them detect that support instead of raising TypeError on an older
+# patterns package (PATTERNS_V2_ROOT can point at an external checkout).
+detect.supports_latest_only = True
 
 
 def add_forward_returns(sig, o, c, horizons=(5, 10, 20)):
