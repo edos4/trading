@@ -16,7 +16,7 @@ Before each implementation step, inspect current callers, fixtures, configuratio
 
 ## 1. Establish regression tests and result labels
 
-Relevant files: `core/backtester.py`, `core/backtest_service.py`, `core/backtest_params.py`, `tests/test_backtest_paper_parity.py`, `core/test_stream_backtest.py`, and web/desktop/CLI consumers of these settings and results.
+Relevant files: `core/backtester.py`, `core/backtest_service.py`, `core/backtest_params.py`, `tests/test_backtest_paper_parity.py`, `core/test_stream_backtest.py`, and web/CLI consumers of these settings and results.
 
 - [x] Add small deterministic regression cases for future-dependent detection, more than 512 input bars, gap-through stops, same-bar trailing updates, entry timing, and open-position fees. Keep each test next to the behavior it protects.
 - [x] Identify legacy offline results as historical replication in result metadata and consuming interfaces. Make historical-stream the normal evaluation choice wherever supported; fail explicitly for unsupported combinations.
@@ -116,7 +116,7 @@ No production deployment, live orders, automatic paper-book reset, broad archite
 
 ## Implementation log
 
-- 2026-10-16: Labeled legacy summaries/exports and web/desktop mode selection; historical-stream is the interactive default. Explicit API calls without a mode retain compatibility and still resolve to offline. Fixed the legacy store capacity locally. Added deterministic history-alignment and corrected-exit regression tests.
+- 2026-10-16: Labeled legacy summaries/exports and web mode selection; historical-stream is the interactive default. Explicit API calls without a mode retain compatibility and still resolve to offline. Fixed the legacy store capacity locally. Added deterministic history-alignment and corrected-exit regression tests.
 - In progress: versioned causal exit rules, persistent next-open orders, entry-fee accounting, and shared collect-first selection. Existing saved trades default to legacy semantics; no saved results or books have been rewritten. Tests and compatibility checks are being completed before marking these steps done.
 
 ### 2026-10-17 progress

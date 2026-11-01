@@ -354,22 +354,18 @@ def test_paper_pages_have_indicators_only_checkbox():
     from pathlib import Path
     html = Path("web/templates/paper.html").read_text()
     script = Path("web/static/app.js").read_text()
-    desktop = Path("ui/paper_dashboard.py").read_text()
     assert 'id="{{ book.id }}-indicators-only"' in html
     assert "Indicators only" in html
     assert "indicators_only" in script
-    assert 'text="Indicators only"' in desktop
 
 
 def test_explorer_template_has_indicators_only_checkbox():
     from pathlib import Path
     html = Path("web/templates/explorer.html").read_text()
     script = Path("web/static/app.js").read_text()
-    desktop = Path("ui/app.py").read_text()
     assert 'id="indicators-only"' in html
     assert "Indicators only" in html
     assert "indicators_only" in script
-    assert 'text="Indicators only"' in desktop
 
 
 @pytest.mark.parametrize("direction", [1, -1])

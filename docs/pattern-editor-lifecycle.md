@@ -23,7 +23,7 @@ The scanner resolves at `MarketScanner.start()`. Each spawned analyze worker rec
 
 `Backtester` resolves once in its constructor, including explicit `version_set` selections. Symbol workers accept only `version:<id>` specifications and check the pattern identity. They do not import a module/class fallback or resolve new defaults. An archived version remains loadable by an already pinned worker. New starts must go through `resolve()`; the explicit-ID loader is an internal execution/historical-read API, not a public new-run validation endpoint.
 
-Web and desktop explorer discovery use the same PostgreSQL loader and retain their loaded set for the explorer instance's lifetime. Recreate the explorer/application to adopt new defaults. Their Patterns lifecycle controls remain P09/P10 work. Connections are opened per operation/process; only configuration and version IDs cross spawned-worker boundaries.
+The web explorer uses the same PostgreSQL loader and retains its loaded set for the explorer instance's lifetime. Recreate the explorer/application to adopt new defaults. Connections are opened per operation/process; only configuration and version IDs cross spawned-worker boundaries.
 
 Signals carry immutable version IDs, signal IDs and requested rule snapshots. Existing trade, position, ledger, signal-log and export adapters preserve them. Annotation anchors also carry version IDs. Imported versions' chart descriptions use their captured helper/detector namespace. Generated code is never executed in the chart process; its saved annotations are displayed. Legacy charts retain saved anchors/geometry but no longer re-detect a setup or invent detector-rule explanations using current files.
 
@@ -35,7 +35,7 @@ Signals carry immutable version IDs, signal IDs and requested rule snapshots. Ex
 | Baseline snapshots / source-mirror recovery | Explicit import/test tooling only; never invoked by startup; legacy unfinished activation journals still fail without writing sources |
 | Scanner / analyze pool | One version set per start; PostgreSQL acknowledgements; diagnostics identify versions |
 | Backtester / UI pattern-name enumeration | PostgreSQL names and pinned worker specs; no runtime class enumeration |
-| Web and desktop explorers | Existing adapters call database-only `discover()` |
+| Web explorer | Existing adapters call database-only `discover()` |
 | Paper account legacy cap lookup | Published PostgreSQL metadata; versioned signals use their saved cap |
 | Chart reconstruction / dynamic rationale imports | Saved anchors, version-bound import helpers; no current detector re-import |
 | Comparison utility | Shared database discovery and current Backtester arguments |

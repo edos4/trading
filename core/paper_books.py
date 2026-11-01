@@ -1,6 +1,6 @@
 """Dual-market paper books: one US thread, one PH thread.
 
-`--ui` and `--web` both drive this manager. Ledgers stay separate
+`--web` drives this manager. Ledgers stay separate
 (`paper_account.json` vs `paper_account_ph.json`). Currencies never mix.
 """
 

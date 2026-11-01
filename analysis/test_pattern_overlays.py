@@ -99,20 +99,10 @@ def test_geometry_does_not_snap_missing_pivots_to_unrelated_candles():
     assert {l["color"] for l in payload["levels"]} == {"#ef5350", "#26a69a"}
 
 
-def test_curve_draws_multiple_legs_when_panned_on_desktop_and_png():
-    from ui.tv_chart import TradingViewChart
+def test_curve_draws_multiple_legs_in_png():
     df = frame(40)
     points = [(str(df.index[i].date()), price) for i, price in [(5, 110), (15, 90), (25, 110)]]
     ann = ann_path(points)
-    payload = build_trade_viewer_payload(df, symbol="TEST", annotations=[ann])
-    chart = object.__new__(TradingViewChart)
-    chart._canvas = Mock()
-    chart._candles, chart._payload = payload["candles"], payload
-    chart._start, chart._visible = 10, 11
-    chart._plot = (0, 0, 110, 100)
-    chart._price_lo, chart._price_hi = 90, 110
-    chart._draw_pattern_segments(chart._candles[10:21])
-    assert chart._canvas.create_line.call_args.args == (5, 50, 55, 100, 105, 50)
     axis = Mock()
     ChartRenderer()._draw_annotations(axis, df, [ann])
     assert list(axis.plot.call_args.args[0]) == [5, 15, 25]
@@ -232,115 +222,6 @@ def test_png_renderer_prints_the_reason_under_each_part(published_pattern_catalo
     captions = [call.args[0] for call in axis.annotate.call_args_list]
     assert any("swing low" in str(text) for text in captions)
     assert any("higher low" in str(text) for text in captions)
-
-
-def test_desktop_label_prints_the_reason_under_it():
-    from ui.tv_chart import TradingViewChart
-    chart = object.__new__(TradingViewChart)
-    chart._canvas = Mock()
-    chart._canvas.bbox.return_value = (0, 0, 80, 12)
-    chart._plot = (0, 0, 400, 200)
-    chart._pattern_label(100, 60, "Second bottom (L2)", "#ffeb3b", "higher low +7.1%")
-    calls = chart._canvas.create_text.call_args_list
-    assert [call.kwargs["text"] for call in calls] == [
-        "Second bottom (L2)", "higher low +7.1%",
-    ]
-    note = calls[1].kwargs
-    assert note["fill"] == "#787b86"
-    assert note["font"] == ("Trebuchet MS", 7)
-    assert calls[0].kwargs["font"] == ("Trebuchet MS", 9, "bold")
-    assert chart._canvas.create_rectangle.called
-    assert chart._canvas.tag_lower.called
-
-
-def test_desktop_markers_hand_their_reason_to_the_label():
-    from ui.tv_chart import TradingViewChart
-    chart = object.__new__(TradingViewChart)
-    chart._canvas = Mock()
-    chart._plot = (0, 0, 400, 200)
-    chart._price_lo, chart._price_hi = 0, 100
-    chart._visible = 1
-    candles = [{"time": "2024-01-02", "low": 90., "high": 100., "close": 95., "open": 94.}]
-    chart._markers = {"2024-01-02": [{
-        "time": "2024-01-02", "price": 92., "position": "belowBar",
-        "color": "#ffeb3b", "shape": "arrowUp", "text": "First bottom (L1)",
-        "reason": "swing low, RSI 8",
-    }]}
-    seen = []
-    chart._pattern_label = lambda x, y, text, color, reason="": seen.append((text, reason))
-    chart._draw_markers(candles)
-    assert seen == [("First bottom (L1)", "swing low, RSI 8")]
-
-
-def test_desktop_trendline_clips_to_the_visible_window():
-    from ui.tv_chart import TradingViewChart
-    chart = object.__new__(TradingViewChart)
-    chart._start, chart._visible = 10, 20          # bars 10..29 in view
-    chart._plot = (0, 0, 400, 200)
-    chart._rsi_plot = (0, 300, 400, 400)
-    chart._price_lo, chart._price_hi = 0.0, 200.0
-    shape = {"kind": "trend", "i1": 0, "p1": 100.0, "i2": 40, "p2": 140.0}
-    assert chart._clip_trend(shape) == (0.0, 90.5, 400.0, 70.5)
-    assert chart._clip_trend({"kind": "trend", "i1": 0, "p1": 1, "i2": 5, "p2": 6}) is None
-    assert chart._clip_trend({"kind": "trend", "i1": 12, "p1": 5, "i2": 12, "p2": 9}) is None
-
-
-def test_desktop_trendline_can_span_price_and_rsi_panes():
-    from ui.tv_chart import TradingViewChart
-    chart = object.__new__(TradingViewChart)
-    chart._start, chart._visible = 0, 10
-    chart._plot = (0, 0, 400, 200)
-    chart._rsi_plot = (0, 300, 400, 400)
-    chart._price_lo, chart._price_hi = 0.0, 100.0
-    # Price end at chart top, RSI end at RSI 100 (top of the RSI panel).
-    shape = {"kind": "trend", "pane1": "price", "p1": 100.0,
-             "pane2": "rsi", "p2": 100.0, "i1": 0, "i2": 9}
-    assert chart._shape_points(shape) == ((20.0, 0.0), (380.0, 300.0))
-    assert chart._clip_trend(shape) == (20.0, 0.0, 380.0, 300.0)
-
-
-def test_desktop_pattern_refuses_forecast_bars(monkeypatch):
-    from ui import tv_chart
-    chart = object.__new__(tv_chart.TradingViewChart)
-    chart._tool = "pattern"
-    chart._draft = None
-    chart._drawings = []
-    chart._editing = None
-    chart._canvas = Mock()
-    chart._plot = (0, 0, 400, 200)
-    chart._rsi_plot = (0, 300, 400, 400)
-    chart._price_lo, chart._price_hi = 0.0, 100.0
-    chart._start, chart._visible = 0, 2
-    chart._candles = [{"time": "2026-01-01"}, {"time": "2026-01-02", "predicted": True}]
-    notes = []
-    monkeypatch.setattr(tv_chart.messagebox, "showinfo", lambda *args, **kwargs: notes.append(args))
-    chart._on_press(SimpleNamespace(x=300, y=100))
-    assert chart._draft is None
-    assert notes and "forecast" in notes[0][1].lower()
-
-
-def test_desktop_drawings_use_the_pane_under_the_cursor():
-    from types import SimpleNamespace
-    from ui.tv_chart import TradingViewChart
-    chart = object.__new__(TradingViewChart)
-    chart._plot = (0, 0, 400, 200)         # price pane
-    chart._rsi_plot = (0, 300, 400, 400)   # RSI pane, with a gap between them
-    chart._price_lo, chart._price_hi = 0.0, 100.0
-    chart._start, chart._visible = 0, 10
-    chart._candles = [{"time": str(i)} for i in range(10)]
-    chart._draft = None
-
-    assert chart._locate_point(SimpleNamespace(x=200, y=100)) == (5, 50.0, "price")
-    assert chart._locate_point(SimpleNamespace(x=200, y=300)) == (5, 100.0, "rsi")
-    assert chart._locate_point(SimpleNamespace(x=200, y=250)) is None
-
-    # An RSI-pane trendline maps through the RSI scale, not the price scale.
-    chart._canvas = Mock()
-    chart._paint_shape(
-        {"kind": "trend", "pane1": "rsi", "pane2": "rsi",
-         "i1": 0, "p1": 100.0, "i2": 9, "p2": 0.0}, "#42a5f5",
-    )
-    assert chart._canvas.create_line.call_args.args[1::2] == (300.0, 400.0)
 
 
 def pin_annotations(monkeypatch, store, pattern):

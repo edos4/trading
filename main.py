@@ -16,7 +16,6 @@ Usage:
         --stream=01/05/2026 --duration-days=30 --export-trades-log=output_trades.json
                                                     # 500-name paper stream from 2026-01-05, 30 sessions,
                                                     # top-4 R:R, dump open+closed trades on exit
-    python main.py --ui                             # Launch the symbol explorer GUI
     python main.py --web                            # Launch the authenticated web UI (VPS)
                                                     # On start: connect to stocks_history and
                                                     # backfill missing/stale daily bars per symbol.
@@ -36,7 +35,7 @@ Prerequisites:
   - .env file filled in (copy from .env.example)
   - pip install -r requirements.txt
   - Scanner/backtester only: TWS or IB Gateway running locally
-    (paper: 7497, live: 7496) - not required for --ui
+    (paper: 7497, live: 7496) - not required for --web/--backtest
 """
 
 import argparse
@@ -629,11 +628,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "side-by-side A/B report; writes backtest_volume_ab_*.json.",
     )
     parser.add_argument(
-        "--ui",
-        action="store_true",
-        help="Launch the tkinter symbol explorer GUI instead of scanning.",
-    )
-    parser.add_argument(
         "--web",
         action="store_true",
         help="Launch the authenticated FastAPI web UI (requires WEB_UI_PASSWORD). "
@@ -666,7 +660,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Run the paper trade stream server: replays daily bars from "
         "GET /api/history (https://33ai.rootlabs.dev by default) over a local "
-        "WebSocket so paper trading (--paper / --ui) can run with the "
+        "WebSocket so paper trading (--paper) can run with the "
         "'Use paper trade stream' option even when US markets are closed.",
     )
     parser.add_argument(
@@ -902,14 +896,10 @@ def _run_async_entry(args) -> int:
 
 
 if __name__ == "__main__":
-    # --ui / --web own their own event loop (tk / uvicorn). Running them
+    # --web / --mcp own their own event loop (uvicorn / stdio). Running them
     # inside asyncio.run(main()) nests asyncio.run and crashes uvicorn.
     _args = _parse_args()
-    if _args.ui:
-        from ui.app import run as run_ui
-
-        run_ui()
-    elif _args.web:
+    if _args.web:
         from web.app import run as run_web
 
         run_web()

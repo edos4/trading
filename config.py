@@ -199,8 +199,8 @@ class Settings(BaseSettings):
     hourly_fetch_batch_size: int = 25
     # Concurrent batch workers, each with its own connection + temp staging table.
     hourly_fetch_workers: int = 8
-    # ── Remote stocks_history API (local --ui / --web) ──────────────────────
-    # Local --ui/--web auto-use https://33ai.rootlabs.dev when this is empty (charts
+    # ── Remote stocks_history API (local --web) ─────────────────────────────
+    # Local --web auto-use https://33ai.rootlabs.dev when this is empty (charts
     # included; no Yahoo). All OHLCV reads use this API, never local Postgres.
     # VPS --web must leave this empty and set owner so it still writes Postgres
     # via --update-db and serves GET /api/history.

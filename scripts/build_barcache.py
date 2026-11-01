@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--root", default=str(BARCACHE_ROOT))
     args = ap.parse_args(argv)
 
-    # --ui/--web history mode: facade first, no Yahoo surprises on a laptop.
+    # --web history mode: facade first, no Yahoo surprises on a laptop.
     from data.history import enable_ui_web_history, fetch_ohlcv_candles
     enable_ui_web_history()
 

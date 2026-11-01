@@ -18,7 +18,6 @@ SQLite or file-store fallback in any path.
 | Edit coordinator + provider | `core/pattern_edit_service.py`, `ai/providers/deepseek.py` |
 | Shared UI facade | `core/pattern_editor_api.py` |
 | Web tab | `web/templates/patterns.html`, `web/static/patterns.js`, `web/app.py`, `web/patterns.py` |
-| Desktop dialog | `ui/patterns_dialog.py`, `ui/app.py` |
 
 ## Configuration (server-side only)
 
@@ -207,7 +206,7 @@ an offline or incomplete preset instead of choosing defaults for you.
 
 ## Provider balance
 
-The Patterns tab (web) and the Patterns dialog (desktop) show the DeepSeek
+The Patterns tab shows the DeepSeek
 account balance in the AI-edit panel, so a submission cannot run out of credit
 unexpectedly:
 
@@ -328,8 +327,8 @@ a configuration toggle.
 
 ```bash
 PATTERN_EDITOR_TEST_DATABASE_URL=postgresql:///pattern_editor_test?host=/tmp/sock&port=55484 \
-WATCHLIST=FIXTURE TV_SCREENER=america TV_EXCHANGE=NASDAQ DISPLAY=:1 \
-.venv/bin/python -m pytest -q core/test_patterns_web.py core/test_patterns_desktop.py
+WATCHLIST=FIXTURE TV_SCREENER=america TV_EXCHANGE=NASDAQ \
+.venv/bin/python -m pytest -q core/test_patterns_web.py core/test_pattern_edit_requests.py
 ```
 
 Tests create a random `pattern_editor_test_<uuid>` schema and drop only that

@@ -20,9 +20,9 @@ HTML or shelling out to `main.py`.
 ## 2. Codebase map (what exists today)
 
 **Entry points** (`main.py`, 999 lines): one `argparse` dispatcher. Modes: live/paper scan (`run_scanner`),
-`--paper` (`run_paper`), `--backtest` (`run_backtest`), `--ui` (tkinter), `--web` (FastAPI), `--papertrade-stream`,
+`--paper` (`run_paper`), `--backtest` (`run_backtest`), `--web` (FastAPI), `--papertrade-stream`,
 `--kronos-test`/`--kronos-finetune`, `--check-db`/`--update-db`, `--ingest/export/import-pse`.
-`--ui`/`--web` own their own event loop and are dispatched directly in `__main__`.
+`--web` owns its own event loop and is dispatched directly in `__main__`.
 
 **Core engine** (`core/`):
 - `scanner.py::MarketScanner` — infinite `async run()` loop; `start()`/`stop()` are sync flag-setters; no self-owned thread.
@@ -120,7 +120,7 @@ New package `mcp_server/` (repo root):
 
 Modified files:
 - `main.py` — add `--mcp`; in the `__main__` block dispatch `from mcp_server.server import run; run()`
-  (alongside `--ui`/`--web`, since FastMCP stdio owns its own loop).
+  (alongside `--web`, since FastMCP stdio owns its own loop).
 - `config.py` — add MCP settings (see §6).
 - `.env.example` — document the new `MCP_*` vars in the existing commented style.
 - `README.md` — new "Operate via MCP" section (client config + example calls).
@@ -281,7 +281,6 @@ Client wiring (README): a `.mcp.json` / agent-config entry that runs
 
 - **Live order placement is not in scope** (no broker/risk code exists). If real execution is later added
   (`broker/`, `risk/`), the MCP surface would grow behind a hard live-mode gate — not part of this plan.
-- **`--ui` (tkinter) is not exposed** — no reason to drive a desktop GUI over MCP.
 - **HTTP transport** was explicitly deferred (user chose stdio). If a remote agent later needs it, add an
   env-gated streamable-HTTP mode + token + `deploy/trading-mcp.service`, mirroring the deploy gateway.
 - The web UI must be running for stateful tools. If it is down, tools return a clear "web service unreachable"

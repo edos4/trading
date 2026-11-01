@@ -416,10 +416,10 @@ def test_fetch_no_tv_in_ui_web_mode() -> None:
 
     class _TV:
         def _fetch_history_chart(self, symbol, timeframe):
-            raise AssertionError("Yahoo must not run in --ui/--web")
+            raise AssertionError("Yahoo must not run in --web")
 
         def _fetch_history_screener(self, symbol, exchange, timeframe):
-            raise AssertionError("Yahoo must not run in --ui/--web")
+            raise AssertionError("Yahoo must not run in --web")
 
     try:
         with patch("data.history.owns_local_stocks_history", return_value=True):

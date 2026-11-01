@@ -51,14 +51,12 @@ record the actual rollout status truthfully.
 - [ ] Confirm no process still enumerates `patterns/*.py` for discovery and that
       no SQLite/file store is created or opened.
 
-## 5. Health checks (both launch modes)
+## 5. Health checks (web)
 
 - [ ] `main.py --web`: `/health` 200; unauthenticated `/patterns` and
       `/api/patterns` return 401; login works; `/patterns` renders with the nav
-- [ ] `main.py --ui`: the Patterns toolbar opens the dialog; catalog/versions
-      load; the desktop is responsive during a run.
-- [ ] Start, inspect, cancel and revisit a historical stream backtest from each
-      mode with a pinned version; results persist across a restart.
+- [ ] Start, inspect, cancel and revisit a historical stream backtest with a
+      pinned version; results persist across a restart.
 
 ## 6. Post-cutover sanity
 
@@ -67,8 +65,7 @@ record the actual rollout status truthfully.
 - [ ] A deliberately failing candidate leaves the default unchanged and its
       version/diagnostics visible.
 - [ ] `Backtest again` recovers a transient failure with no provider call.
-- [ ] A default changed in one frontend is observed (and conflict-handled) in
-      the other.
+- [ ] A default changed elsewhere is observed (and conflict-handled) on reload.
 
 ## 7. Rollback conditions and steps
 
@@ -77,11 +74,11 @@ Roll back if any of the following hold:
 - Migration or import fails or reports an unexplained difference.
 - A required consumer still needs a file-backed catalog.
 - Blob hash / default / report verification fails on the target.
-- Both launch modes cannot run or cancel a pinned stream backtest.
+- The web UI cannot run or cancel a pinned stream backtest.
 
 Rollback:
 
-- [ ] Stop the new workers and web/desktop processes.
+- [ ] Stop the new workers and web processes.
 - [ ] Restore the verified PostgreSQL backup (or redeploy the prior
       application) — this is the only rollback path.
 - [ ] Do **not** downgrade migrations or fall back to SQLite/files at runtime.

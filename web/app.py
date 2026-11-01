@@ -1484,7 +1484,7 @@ def replay_param_schema() -> list[dict[str, Any]]:
 
 
 def _stream_start_default() -> str:
-    """Default stream start date — mirrors the tkinter UI datepicker:
+    """Default stream start date — mirrors the web paper-tab datepicker:
     PAPERTRADE_STREAM_START_DATE if set, else ~1 year ago on a weekday
     (weekends/NYSE fixed holidays roll forward so pin_asof does not land
     on an empty cash session)."""

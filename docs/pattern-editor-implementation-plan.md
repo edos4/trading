@@ -28,10 +28,10 @@ Allowed status values: `not started`, `in progress`, `blocked`, `complete`. Coun
 | P07 | Stream backtests in both existing frontends | P06 | complete | 6/6 |
 | P08 | DeepSeek edit and automatic evaluation pipeline | P07 | complete | 8/8 |
 | P09 | Web Patterns tab | P08 | complete | 6/6 |
-| P10 | Desktop Patterns dialog | P09 | complete | 6/6 |
+| P10 | Desktop Patterns dialog | P09 | superseded (desktop UI removed) | 6/6 |
 | P11 | Integration, recovery, and release readiness | P10 | complete | 7/7 |
 
-**Current resume point:** implementation complete. The editor is PostgreSQL-authoritative, both frontends expose the Patterns workflow over one shared facade, and the required suites, migration/bootstrap, backup/restore, restart, concurrency and browser/desktop smokes pass. Remaining gates are operational: a live DeepSeek key, a real delegated candidate sandbox, and an authorized production cutover (see [acceptance review](pattern-editor-acceptance.md)).
+**Current resume point:** implementation complete. The editor is PostgreSQL-authoritative, the web frontend exposes the Patterns workflow over one shared facade, and the required suites, migration/bootstrap, backup/restore, restart, concurrency and browser smokes pass. Remaining gates are operational: a live DeepSeek key, a real delegated candidate sandbox, and an authorized production cutover (see [acceptance review](pattern-editor-acceptance.md)). The P10 desktop frontend has since been removed; the web Patterns tab is the sole frontend.
 
 ## Requirements that apply to every phase
 
@@ -40,7 +40,7 @@ Allowed status values: `not started`, `in progress`, `blocked`, `complete`. Coun
 - Pattern helpers must be versioned where required. Trusted engine/interface code stays application code with compatibility checks. A database outage, missing blob, or runtime mismatch must not silently load a different file or version.
 - Generated code executes through the existing isolation boundary. An unavailable sandbox blocks execution; no unrestricted fallback.
 - Versions are immutable. Deletion archives; default replacement is explicit and atomic. New AI versions never automatically become defaults. Running sessions keep pinned version IDs.
-- Both frontends support historical stream backtests. AI edits automatically use a saved preset and compare against the base on identical frozen inputs.
+- The web frontend supports historical stream backtests. AI edits automatically use a saved preset and compare against the base on identical frozen inputs.
 - Use DeepSeek directly with the source document's verified API model ID `deepseek-flash`; verify API compatibility when implementing the adapter and retain provider/model provenance.
 
 ## P01 — Contracts and verification baseline
@@ -204,7 +204,9 @@ Build the explicit database loader here so verification can exercise it before t
 
 ## P10 — Desktop Patterns dialog
 
-**Status:** complete · **Progress:** 6/6 · **Depends on:** P09
+**Status:** superseded — the desktop UI (`ui/`) has been removed; the web Patterns tab (P09) is the sole frontend. The steps below are retained as history.
+
+**Progress:** 6/6 · **Depends on:** P09
 
 **Primary files:** `ui/app.py`, new `ui/patterns_dialog.py`, shared services and desktop tests.
 

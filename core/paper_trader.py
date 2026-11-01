@@ -342,8 +342,8 @@ class PaperAccount:
         self.pattern_only = False
         self.indicators_only = False
         # The scanner runs in a background thread with its own asyncio loop
-        # (see ui/paper_dashboard.py) while the UI polls this same account
-        # from the Tk main thread every second. Without a lock, the UI's
+        # while the web UI polls this same account from another thread every
+        # second. Without a lock, the UI's
         # `for sym, p in self.positions.items()` can crash with "dictionary
         # changed size during iteration" the instant a scan opens/closes a
         # trade mid-refresh. RLock (not Lock) because open_position() calls

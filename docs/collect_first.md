@@ -51,7 +51,6 @@ Returns `None` when `price <= 0`, `stop_loss is None`, `take_profit is None`, or
 - Add `--collect-first` (store_true) and `--collect-first-top-n N` (int) flags; thread them into `run_paper`/`run_scanner`. Log the mode in the startup banner.
 
 - `web/app.py` payload + `web/services.py` + `web/jobs.py`: add `collect_first` (bool) and `collect_first_top_n` (int) passthrough to `MarketScanner`.
-- `ui/paper_dashboard.py` + `ui/backtest_dialog.py`: add a "Collect-first (top-N)" checkbox + spin (default off; disabled unless a real pattern path is active).
 
 ### 6. Tests (`core/test_scanner_collect_first.py`)
 

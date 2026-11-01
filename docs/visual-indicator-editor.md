@@ -534,7 +534,7 @@ README.md                     full Builder section: how it works, setup, config 
 docs/visual-indicator-editor.md    this design document
 ```
 
-Out of scope on purpose: the Tk desktop UI (`ui/`), the main `Backtester`/`BacktestService`
+Out of scope on purpose: the main `Backtester`/`BacktestService`
 path, and TradingView stack plots as rule operands (rules are self-contained local math).
 
 ## 10. Verification

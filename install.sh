@@ -43,7 +43,7 @@ fi
 # ── 2. System packages (apt) ──────────────────────────────────────────────
 if [[ "$DO_SYSTEM" -eq 1 ]]; then
   if ! command -v apt-get >/dev/null 2>&1; then
-    warn "apt-get not found — skipping system packages. Install manually: python3-venv python3-tk postgresql bubblewrap"
+    warn "apt-get not found — skipping system packages. Install manually: python3-venv postgresql bubblewrap"
   elif [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
     SUDO=""
   elif command -v sudo >/dev/null 2>&1; then
@@ -56,12 +56,11 @@ if [[ "$DO_SYSTEM" -eq 1 ]]; then
   if command -v apt-get >/dev/null 2>&1 && { [[ "${EUID:-$(id -u)}" -eq 0 ]] || command -v sudo >/dev/null 2>&1; }; then
     say "Installing system packages (apt)"
     $SUDO apt-get update -y
-    # python3-tk: required for `python main.py --ui` (tkinter + tkcalendar)
     # postgresql: local stocks_history DB for --check-db/--update-db + pattern editor
     # bubblewrap+prlimit(util-linux): pattern-version sandbox (optional at runtime)
     # libfreetype/png: matplotlib/mplfinance chart rendering
     $SUDO apt-get install -y \
-      python3 python3-venv python3-pip python3-dev python3-tk \
+      python3 python3-venv python3-pip python3-dev \
       build-essential git curl rsync pkg-config \
       libpq-dev postgresql postgresql-contrib \
       libfreetype6 libpng16-16 \
@@ -103,7 +102,7 @@ fi
 say "Creating runtime dirs"
 mkdir -p logs charts data/barcache trade_histories pattern_versions
 
-chmod +x run_ui.sh run_web.sh run_deploy.sh paper_stream.sh deploy_to_contabo.sh deploy_to_engine.sh 2>/dev/null || true
+chmod +x run_web.sh run_deploy.sh paper_stream.sh deploy_to_contabo.sh deploy_to_engine.sh 2>/dev/null || true
 
 # ── 5. PostgreSQL (local stocks_history) ──────────────────────────────────
 if [[ "$DO_DB" -eq 1 ]]; then
@@ -167,11 +166,6 @@ for mod, hint in [
     except Exception as exc:
         ok = False
         print(f"    FAIL {mod}: {exc} ({hint})")
-try:
-    import tkinter
-    print(f"    OK   tkinter {tkinter.TkVersion} (--ui will work)")
-except Exception as exc:
-    print(f"    NOTE tkinter unavailable ({exc}) — --web/--paper/--backtest still work; install python3-tk for --ui")
 sys.exit(0)
 EOF
 
@@ -181,7 +175,6 @@ echo "  1. Edit .env (at minimum: WATCHLIST, WEB_UI_PASSWORD for --web)"
 echo "  2. Headless (fastest on Lubuntu):  .venv/bin/python main.py --paper --symbols=50"
 echo "     Backtest offline:               .venv/bin/python main.py --backtest 50"
 echo "     Web dashboard:                  ./run_web.sh   # or: .venv/bin/python main.py --web"
-echo "     Desktop explorer (needs X):     ./run_ui.sh    # needs python3-tk"
 echo
 echo "Not installed by design (heavy/optional):"
 echo "  - IB TWS/Gateway: not required (execution is disabled in core/scanner.py). For live,"
