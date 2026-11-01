@@ -13,7 +13,7 @@ import json
 from datetime import date, datetime, timedelta, timezone
 from tkinter import ttk, filedialog, messagebox
 import tkinter as tk
-from typing import Optional
+from typing import Any, Optional
 
 from PIL import Image, ImageTk
 from tkcalendar import DateEntry
@@ -92,6 +92,7 @@ class MarketBookFrame(ttk.LabelFrame):
         self.equity_var = tk.StringVar()
         self.exposure_var = tk.StringVar()
         self.scan_var = tk.StringVar(value="Last scan: —")
+        self.scan_clock_var = tk.StringVar(value="")
         self.status_var = tk.StringVar(value="Idle.")
 
         ttk.Label(self, textvariable=self.equity_var, font=("TkDefaultFont", 10, "bold")).pack(
@@ -101,6 +102,9 @@ class MarketBookFrame(ttk.LabelFrame):
             anchor=tk.W, padx=8,
         )
         ttk.Label(self, textvariable=self.scan_var, foreground=COLOR_MUTED).pack(
+            anchor=tk.W, padx=8,
+        )
+        ttk.Label(self, textvariable=self.scan_clock_var, foreground=COLOR_MUTED).pack(
             anchor=tk.W, padx=8,
         )
         ttk.Label(self, textvariable=self.status_var, foreground=COLOR_MUTED).pack(
@@ -258,12 +262,47 @@ class MarketBookFrame(ttk.LabelFrame):
                 f"Opened: {stats.get('trades_opened')}   Rejected: {stats.get('signals_rejected')}   "
                 f"Scan: {float(stats.get('scan_duration_s') or 0):.1f}s"
             )
+        timing = snap.get("scan_timing") or {}
+        if timing.get("run_started_at"):
+            self.scan_clock_var.set(self._scan_clock_text(timing))
+        else:
+            self.scan_clock_var.set("")
         self.status_var.set(snap.get("error") or snap.get("status") or "")
         running = bool(snap.get("running"))
         self.start_btn.config(state=tk.DISABLED if running else tk.NORMAL)
         self.stop_btn.config(state=tk.NORMAL if running else tk.DISABLED)
         blocked = snap.get("stream_blocked_by")
         self.stream_check.config(state=tk.DISABLED if blocked else tk.NORMAL)
+
+    @staticmethod
+    def _fmt_duration(seconds: Any) -> str:
+        try:
+            s = float(seconds or 0.0)
+        except (TypeError, ValueError):
+            return "—"
+        if s < 0:
+            return "—"
+        if s < 60:
+            return f"{s:.1f}s"
+        total = int(round(s))
+        minutes = total // 60
+        if minutes < 60:
+            return f"{minutes}m {total % 60:02d}s"
+        return f"{minutes // 60}h {minutes % 60:02d}m"
+
+    def _scan_clock_text(self, timing: dict) -> str:
+        """Just the scan in flight (or the last one): how long it takes."""
+        if timing.get("scan_in_progress"):
+            return (
+                f"Scanning… {self._fmt_duration(timing.get('scan_elapsed_s'))}"
+            )
+        scans = int(timing.get("scans_completed") or 0)
+        if scans:
+            return (
+                f"Scan {scans} took "
+                f"{self._fmt_duration(timing.get('last_scan_duration_s'))}"
+            )
+        return ""
 
 
 class PaperDashboard:

@@ -2,6 +2,8 @@
 
 import asyncio
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from core.pattern_editor_db import DatabaseUnavailable
@@ -145,3 +147,67 @@ def test_stop_tolerates_database_outage(monkeypatch):
 
     monkeypatch.setattr(loader, "acknowledge_worker", unavailable)
     _scanner().stop()
+
+
+def _clock_stats(**over):
+    started = datetime(2026, 11, 1, 14, 0, tzinfo=timezone.utc)
+    stats = {
+        "run_started_at": started.isoformat(),
+        "run_finished_at": None,
+        "scan_started_at": started.isoformat(),
+        "scan_finished_at": None,
+        "scan_in_progress": True,
+        "scan_duration_s": 12.5,
+        "scan_total_s": 12.5,
+        "scans_completed": 1,
+    }
+    stats.update(over)
+    return stats
+
+
+def test_scan_clock_counts_the_scan_in_flight(monkeypatch):
+    scanner = _scanner()
+    monkeypatch.setattr("core.scanner.time.monotonic", lambda: 500.0)
+    started = datetime.now(timezone.utc) - timedelta(seconds=70)
+    scanner.stats = _clock_stats(run_started_at=started.isoformat())
+    scanner._scan_started_monotonic = 495.8
+    timing = scanner.scan_timing()
+    assert timing["scan_in_progress"] is True
+    assert timing["scan_elapsed_s"] == 4.2
+    assert timing["scans_completed"] == 1
+    # Run elapsed is wall-clock, from the ISO stamp rather than monotonic.
+    assert 69 <= timing["run_elapsed_s"] <= 300
+
+
+def test_scan_clock_freezes_after_the_run_stops():
+    start = datetime(2026, 11, 1, 14, 0, tzinfo=timezone.utc)
+    finish = datetime(2026, 11, 1, 14, 5, tzinfo=timezone.utc)
+    scanner = _scanner()
+    scanner.stats = _clock_stats(
+        run_finished_at=finish.isoformat(),
+        scan_finished_at=finish.isoformat(),
+        scan_in_progress=False,
+        scan_duration_s=30.0,
+        scan_total_s=90.0,
+        scans_completed=3,
+    )
+    scanner._scan_started_monotonic = None
+    timing = scanner.scan_timing()
+    assert timing["run_elapsed_s"] == 300.0
+    assert timing["scan_in_progress"] is False
+    assert timing["scan_elapsed_s"] is None
+    assert timing["last_scan_duration_s"] == 30.0
+    assert timing["scan_total_s"] == 90.0
+    assert timing["scans_completed"] == 3
+    assert timing["avg_scan_s"] == 30.0
+
+
+def test_scan_clock_is_empty_before_the_first_scan():
+    scanner = _scanner()
+    scanner.stats = {}
+    scanner._scan_started_monotonic = None
+    timing = scanner.scan_timing()
+    assert timing["run_started_at"] is None
+    assert timing["run_elapsed_s"] is None
+    assert timing["scans_completed"] == 0
+    assert timing["avg_scan_s"] is None
