@@ -132,11 +132,13 @@ balanced/invalid/short history, and existing indicator scan regressions.
 
 **Mandatory pattern scan gate — follow-up requirement**
 
-Patterns and Patternsv2 entry candidates now require **40 <= bulls <= 60**
-(inclusive), with the same default DII calculation (20, 40) and the candidate's
-timeframe. The band is directional-neutral and applies to BUY and SELL alike;
-it covers every support/resistance-based pattern entry, so a level is only
-traded while the DII sits in that balanced band. Missing history (fewer than 60
+Patterns and Patternsv2 entry candidates now require a **per-side** band, with
+the same default DII calculation (20, 40) and the candidate's timeframe: a BUY
+needs **16 <= bulls <= 40**, a SELL needs **16 <= bears <= 40** (equivalently
+`60 <= bulls <= 84`). Because `bulls + bears == 100`, the bands are mirror images
+and do not overlap — the balanced 40–60 zone passes neither side. They cover
+every support/resistance-based pattern entry, so a level is only traded in the
+band matching its direction. Missing history (fewer than 60
 candles, e.g. the short window held while bulk history is still preloading at
 process startup) is skipped without rejection; invalid dependent windows fail
 closed. A zero-total window (no new `length`-bar high or low in the last
@@ -155,15 +157,15 @@ eligibility. Standalone indicators and saved-rule strategies are excluded;
 position management and exits retain their own rules. This requirement
 supersedes the earlier optional-only pattern-filter scope.
 
-Verification: **57 passed** across the band gate, both pattern scanners, the
+Verification: **passed** across the band gate, both pattern scanners, the
 Explorer prefix/action cases, and the support/resistance strategy tests.
-Boundary checks include 40 and 60 (accepted), just outside either boundary, both
-actions, short warmup, invalid values, zero-event balance, and causal Explorer
-evaluation.
+Boundary checks include 16 and 40 (accepted) and just outside either boundary for
+each side's own metric, both actions, the non-overlapping 40/60 split, short
+warmup, invalid values, zero-event balance, and causal Explorer evaluation.
 
 **How to use it**
 
-Start with a daily context rule such as `bulls > bears` (equivalently `bulls > 50` when the total is positive). The mandatory pattern gate instead only considers readings between 40% and 60%, inclusive. These are evaluation examples, not thresholds supplied by BigBeluga or established profitable settings. A balanced flat series produces 50/50 because ties count, so strict dominance excludes that case. Strong relative dominance can still arise from very few events; it is not independently a measure of trend strength or liquidity.
+Start with a daily context rule such as `bulls > bears` (equivalently `bulls > 50` when the total is positive). The mandatory pattern gate instead requires 16%–40% bullish for BUY or 16%–40% bearish for SELL, leaving the balanced middle untraded. These are evaluation examples, not thresholds supplied by BigBeluga or established profitable settings. A balanced flat series produces 50/50 because ties count, so strict dominance excludes that case. Strong relative dominance can still arise from very few events; it is not independently a measure of trend strength or liquidity.
 
 For a pattern filter, evaluate the persistent state with `gt`/`gte`, not a one-bar crossing. Existing scanner integration provides:
 
