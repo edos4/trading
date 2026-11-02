@@ -61,7 +61,6 @@ def test_both_pattern_scanners_gate_before_other_entry_checks(
     scanner._store.get_df = Mock(return_value=frame)
     scanner._append_signal_log = Mock()
     scanner._finish_signal = AsyncMock()
-    scanner._min_share_price = 0
     scanner._pattern_only = True
     monkeypatch.setattr('core.scanner.regime_filter_required', lambda *a: False)
     monkeypatch.setattr('core.scanner.describe_risk_gate_rejection', lambda *a, **kw: None)

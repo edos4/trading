@@ -69,39 +69,6 @@ def describe_confidence_rejection(_signal, _min=None) -> str:
     return ""
 
 
-def describe_min_share_price_rejection(_signal, _min=None, *, market=None):
-    """Reject a signal on a sub-floor share price.
-
-    The floor comes from the market profile (``US_MIN_SHARE_PRICE = 10``; PH has
-    none) or from an explicit ``_min``. This was a no-op stub while the call site
-    and the profile constant both existed, so the declared floor never fired and
-    sub-$5 names traded with a stop sized for a blue chip: over 2025-11..2026-10
-    the sub-$5 cohort ran -0.84R/trade at a 7% win rate against +0.27R/trade for
-    everything above it.
-
-    An unknown price is not a rejection — a missing quote is a data problem, not
-    a signal-quality verdict.
-    """
-    floor = _min
-    if floor is None:
-        try:
-            floor = get_market(market).min_share_price
-        except Exception:
-            floor = None
-    if floor is None or not math.isfinite(float(floor)) or float(floor) <= 0:
-        return None
-    price = getattr(_signal, "price", None)
-    if price is None or not math.isfinite(float(price)) or float(price) <= 0:
-        return None
-    if float(price) < float(floor):
-        label = get_market(market).label if market else "market"
-        return (
-            f"Share price {float(price):,.4f} is below the {label} minimum of "
-            f"{float(floor):,.2f}."
-        )
-    return None
-
-
 def describe_cooldown_rejection(_signal, _bar_idx=None, _tracker=None, *, cooldown_bars=None):
     return None
 
@@ -219,7 +186,6 @@ class MarketScanner:
         self._disabled_patterns = set(disabled_patterns or [])
         profile = get_market(market if market is not None else getattr(paper_account, "market", None))
         self._market = profile.id
-        self._min_share_price = profile.min_share_price
         from data.edgar_client import set_skip_edgar
 
         set_skip_edgar(profile.skip_edgar)
@@ -509,8 +475,6 @@ class MarketScanner:
                 gate = "collect_first"
             elif "confidence" in reason_lower:
                 gate = "confidence"
-            elif "share-price" in reason_lower or "share price" in reason_lower:
-                gate = "min_price"
             elif "regime" in reason_lower or "sma200" in reason_lower:
                 gate = "regime"
             elif "cooldown" in reason_lower:
@@ -1419,27 +1383,11 @@ class MarketScanner:
             self._append_signal_log(signal, status="rejected", reason=reason)
             return
 
-        # Execution risk gates — enforced regardless of Pattern-only.
-        # Pattern-only exists to isolate raw pattern edge from *signal-quality*
-        # filters (confidence / regime / long-only) below, but the min-price
-        # floor and post-loss cooldown are basic account-risk controls, not
-        # pattern-quality opinions: skipping them let real (paper) money into
-        # sub-$1 names with outsized slippage risk (2026-08-30 review: a
-        # $0.003 stock lost -10.3% against a stop sized for ~6%) and allowed
-        # same-session re-entry into a name that had just stopped out. Both
-        # now apply even when Pattern-only is checked.
-        price_reason = describe_min_share_price_rejection(
-            signal, self._min_share_price, market=self._market,
-        )
-        if price_reason is not None:
-            log.info(
-                f"Signal REJECTED by min share price — {signal.symbol} "
-                f"{signal.pattern} | {price_reason}"
-            )
-            self.stats["signals_rejected"] += 1
-            self._append_signal_log(signal, status="rejected", reason=price_reason)
-            return
-
+        # Post-loss cooldown — enforced regardless of Pattern-only. Pattern-only
+        # isolates raw pattern edge from *signal-quality* filters below, but the
+        # cooldown is a basic account-risk control, not a pattern-quality
+        # opinion: skipping it allowed same-session re-entry into a name that
+        # had just stopped out. It still applies when Pattern-only is checked.
         bar_idx = (
             self._paper.bar_count(signal.symbol, signal.timeframe)
             if self._paper is not None else 0

@@ -26,12 +26,6 @@ PH_MIN_ADV_PHP = 5_000_000.0
 # US paper 2026-08-17: 77 tickers off a huge tape, noise W-patterns on
 # names like CDE/NIO. Floor ~$20M dollar volume (TV `value`).
 US_MIN_ADV_USD = 20_000_000.0
-# US paper 2026-08-18: sub-$5 names (TGLO −35%, QMCI, AHMA, IBIO) dominated
-# stop-loss churn despite ADV filter — gap risk and OTC-style wicks.
-# 2026-09-01: $6/$6 names (LICN, WEST) gapped straight through a 10% stop
-# overnight; sub-$10 still carries outsized gap/wick risk even with an ADV
-# filter, so raise the floor to $10.
-US_MIN_SHARE_PRICE = 10.0
 
 
 @dataclass(frozen=True)
@@ -57,7 +51,6 @@ class MarketProfile:
     universe_order: str
     default_n_symbols: int
     min_adv: float | None
-    min_share_price: float | None
     skip_edgar: bool
     lot_round: bool
 
@@ -82,7 +75,6 @@ US = MarketProfile(
     universe_order="value",
     default_n_symbols=50,
     min_adv=US_MIN_ADV_USD,
-    min_share_price=US_MIN_SHARE_PRICE,
     skip_edgar=False,
     lot_round=False,
 )
@@ -107,7 +99,6 @@ PH = MarketProfile(
     universe_order="Value.Traded",
     default_n_symbols=30,
     min_adv=PH_MIN_ADV_PHP,
-    min_share_price=None,
     skip_edgar=True,
     lot_round=True,
 )
