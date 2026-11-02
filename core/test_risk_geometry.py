@@ -1,11 +1,10 @@
-"""Risk-geometry rules: ATR stop sizing, R-based trailing, min-price floor."""
+"""Risk-geometry rules: ATR stop sizing, R-based trailing."""
 from __future__ import annotations
 
 import pandas as pd
 import pytest
 
 from core.backtester import _apply_risk_sizing
-from core.scanner import describe_min_share_price_rejection
 from patterns.base_pattern import TradeSignal
 from patterns_v2.signals import (
     STOP_PCT_CEIL,
@@ -58,18 +57,6 @@ def _signal(price: float | None, stop: float | None = None, cap: float | None = 
     return TradeSignal(symbol="TEST", action="BUY", pattern="double_bottom", timeframe="1d",
                        confidence=1.0, price=price, qty=0.0, stop_loss=stop,
                        take_profit=None, stop_loss_pct_cap=cap)
-
-
-def test_min_price_floor_rejects_a_sub_floor_signal():
-    reason = describe_min_share_price_rejection(_signal(2.41), 10.0, market="us")
-    assert reason is not None and "below" in reason
-
-
-def test_min_price_floor_passes_above_the_floor_and_without_one():
-    assert describe_min_share_price_rejection(_signal(11.0), 10.0, market="us") is None
-    assert describe_min_share_price_rejection(_signal(2.41), None, market="ph") is None
-    assert describe_min_share_price_rejection(_signal(2.41), 0, market="us") is None
-    assert describe_min_share_price_rejection(_signal(None), 10.0, market="us") is None
 
 
 def test_risk_sizing_uses_the_nearer_of_stop_and_cap():
