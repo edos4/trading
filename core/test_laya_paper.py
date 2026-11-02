@@ -26,11 +26,11 @@ def _candle(close: float, ts: datetime) -> OHLCVCandle:
 def _pin_dii_to_a_passing_read(monkeypatch):
     """These tests are about Laya shadow/filter behaviour, not breadth geometry.
 
-    The feed below is flat, which reads 50% DII — inside the SELL band (40–60)
-    but outside the BUY band (16–40), so the live gate would reject the BUY
-    these fixtures emit. Pin the BUY band open so the gate keeps passing and
-    the assertions stay about Laya. `analysis/test_pattern_dii.py` owns the
-    band values.
+    The feed below is flat, which reads 50% DII — outside both live pattern
+    bands (bullish 16–40 for BUY, bearish 16–40 for SELL), so the live gate would
+    reject the BUY these fixtures emit. Pin the BUY band open so the gate keeps
+    passing and the assertions stay about Laya. `analysis/test_pattern_dii.py`
+    owns the band values.
     """
     import analysis.pattern_dii as dii
     monkeypatch.setattr(dii, 'LONG_MIN_BULLS', 40.0)

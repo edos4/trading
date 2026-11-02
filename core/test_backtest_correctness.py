@@ -118,11 +118,12 @@ def test_multisymbol_scanner_and_replay_match_top_four_gates_and_equity(monkeypa
     from data.tv_client import OHLCVCandle
     import analysis.price_volume
     symbols = ['AAA','BBB','CCC','DDD','EEE','FFF']
-    # Flat bars read 50% DII: inside the SELL band (40–60) but outside the BUY
-    # band (16–40), so the live gate would reject every BUY signal here. Pin the
-    # BUY band open so both engines get the same gate outcome — StreamReplay has
-    # no DII gate at all, so a rejecting fixture would diverge on the gate rather
-    # than on the top-four/equity logic this test exists to compare.
+    # Flat bars read 50% DII: outside both live pattern bands (bullish 16–40 for
+    # BUY, bearish 16–40 for SELL), so the live gate would reject every BUY
+    # signal here. Pin the BUY band open so both engines get the same gate
+    # outcome — StreamReplay has no DII gate at all, so a rejecting fixture would
+    # diverge on the gate rather than on the top-four/equity logic this test
+    # exists to compare.
     import analysis.pattern_dii as dii
     monkeypatch.setattr(dii, 'LONG_MIN_BULLS', 40.0)
     monkeypatch.setattr(dii, 'LONG_MAX_BULLS', 60.0)

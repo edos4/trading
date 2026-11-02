@@ -1,4 +1,4 @@
-"""Mandatory DII context gate for pattern scanning (long 16–40, short 40–60)."""
+"""Mandatory DII context gate for pattern scanning (BUY bulls 16–40, SELL bears 16–40)."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ PERIOD = 40
 MIN_BARS = LENGTH + PERIOD
 LONG_MIN_BULLS = 16.0
 LONG_MAX_BULLS = 40.0
-SHORT_MIN_BULLS = 40.0
-SHORT_MAX_BULLS = 60.0
+SHORT_MIN_BEARS = 16.0
+SHORT_MAX_BEARS = 40.0
 BALANCED = 50.0
 
 
@@ -35,7 +35,10 @@ def dii_consideration(state) -> tuple[float, float]:
 def describe_pattern_dii_rejection(df, *, action: str = "BUY") -> str | None:
     """Accept the DII consideration band for the signal's side.
 
-    BUY (long) accepts 16 <= bulls <= 40; SELL (short) accepts 40 <= bulls <= 60.
+    BUY (long) accepts 16 <= bulls <= 40; SELL (short) accepts 16 <= bears <= 40.
+    Because bulls + bears == 100, those bands are mirror images and do not
+    overlap: a bullish-majority tape only passes SELL, a bearish-majority tape
+    only passes BUY, and the balanced 40–60 zone passes neither.
     A short warmup window (e.g. the first PATTERN_SCAN_HISTORY_BARS bars after
     a process start, while bulk history is still preloading) carries no
     rejection — the gate engages once enough candles are stored. A zero-event
@@ -43,12 +46,17 @@ def describe_pattern_dii_rejection(df, *, action: str = "BUY") -> str | None:
     """
     if df is None or len(df) < MIN_BARS:
         return None
-    bulls, _bears = dii_consideration(
+    bulls, bears = dii_consideration(
         IndicatorEngine(df).directional_imbalance_index(LENGTH, PERIOD))
-    if not np.isfinite(bulls):
-        return f"DII bullish percentage unavailable ({LENGTH}, {PERIOD})."
-    lo, hi = (LONG_MIN_BULLS, LONG_MAX_BULLS) if action == "BUY" else (SHORT_MIN_BULLS, SHORT_MAX_BULLS)
-    if not lo <= bulls <= hi:
-        return (f"DII bullish percentage {bulls:.2f}% outside required "
+    if action == "SELL":
+        value, label = bears, "bearish"
+        lo, hi = SHORT_MIN_BEARS, SHORT_MAX_BEARS
+    else:
+        value, label = bulls, "bullish"
+        lo, hi = LONG_MIN_BULLS, LONG_MAX_BULLS
+    if not np.isfinite(value):
+        return f"DII {label} percentage unavailable ({LENGTH}, {PERIOD})."
+    if not lo <= value <= hi:
+        return (f"DII {label} percentage {value:.2f}% outside required "
                 f"{lo:.0f}%–{hi:.0f}% for {action} ({LENGTH}, {PERIOD}).")
     return None

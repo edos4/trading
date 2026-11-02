@@ -34,14 +34,16 @@ def _run(monkeypatch, patterns_v2, candles, action, index):
 def _pin_dii_bands_around_the_fixture_read(monkeypatch):
     """The subject here is *which bar* the gate reads, not the band values.
 
-    Every fixture below is a flat prefix (50% DII), which sits inside the SELL
-    band but outside the BUY band, so with the live bands the accepted-BUY case
-    could never fire. Pin both sides to 40–60 for this module and leave the band
-    values to `analysis/test_pattern_dii.py`.
+    Every fixture below is a flat prefix (50% DII), which sits outside both the
+    live BUY band (bullish 16–40) and the live SELL band (bearish 16–40), so with
+    the live bands neither accepted case could fire. Pin both sides to 40–60 for
+    this module and leave the band values to `analysis/test_pattern_dii.py`.
     """
     import analysis.pattern_dii as dii
     monkeypatch.setattr(dii, 'LONG_MIN_BULLS', 40.0)
     monkeypatch.setattr(dii, 'LONG_MAX_BULLS', 60.0)
+    monkeypatch.setattr(dii, 'SHORT_MIN_BEARS', 40.0)
+    monkeypatch.setattr(dii, 'SHORT_MAX_BEARS', 60.0)
 
 
 @pytest.mark.parametrize('patterns_v2', [False, True])

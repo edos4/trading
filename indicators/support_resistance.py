@@ -1,8 +1,8 @@
 """Trade bounces at the automatic support/resistance rails, DII-gated.
 
 The rails are the same pivot-anchored trend lines drawn on trade charts. The
-The strategy only considers a rail bounce while the DII bullish percentage sits
-in the pattern scan gate band (16%–40% for BUY, 40%–60% for SELL).
+The strategy only considers a rail bounce while the DII side percentage sits
+in the pattern scan gate band (16%–40% bullish for BUY, 16%–40% bearish for SELL).
 A BUY needs a touch/hold of confirmed, unbroken support; a SELL needs a
 rejection at confirmed, unbroken resistance.
 """
@@ -12,7 +12,7 @@ import numpy as np
 
 from analysis.indicator_engine import IndicatorEngine
 from analysis.pattern_dii import (LENGTH, LONG_MAX_BULLS, LONG_MIN_BULLS,
-                                PERIOD, SHORT_MAX_BULLS, SHORT_MIN_BULLS, dii_consideration)
+                                PERIOD, SHORT_MAX_BEARS, SHORT_MIN_BEARS, dii_consideration)
 from analysis.trendlines import detect_trendlines
 from indicators._signal import BaseIndicator, emit, reward_bracket
 
@@ -57,9 +57,11 @@ class SupportResistanceIndicator(BaseIndicator):
             level = self._level(rail, index)
             if not np.isfinite(level) or level <= 0:
                 continue
-            band = ((LONG_MIN_BULLS, LONG_MAX_BULLS)
-                    if action == "BUY" else (SHORT_MIN_BULLS, SHORT_MAX_BULLS))
-            if not np.isfinite(bulls) or not band[0] <= bulls <= band[1]:
+            if action == "BUY":
+                value, band = bulls, (LONG_MIN_BULLS, LONG_MAX_BULLS)
+            else:
+                value, band = bears, (SHORT_MIN_BEARS, SHORT_MAX_BEARS)
+            if not np.isfinite(value) or not band[0] <= value <= band[1]:
                 continue
             if action == "BUY":
                 touched = level < price and low <= level + tolerance and price >= opening
