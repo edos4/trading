@@ -133,6 +133,53 @@ theirs.
 `--collect-first --collect-first-top-n 4` still works; `--collect-first=4` is
 the short form.
 
+### Self-improving loop (`si.sh`)
+
+`./si.sh` runs unattended iterations of: replay a fixed US Patternsv2 paper
+stream from a fresh ledger → score the export deterministically → have
+`commandcode -p --yolo` diagnose it and apply one change → re-replay and rescore
+→ commit only a verified improvement, otherwise revert and try again.
+
+```bash
+./si.sh                                # 5 iterations, stops after 2 non-improving
+SI_MAX_ITERATIONS=20 ./si.sh           # longer campaign
+SI_MIN_CLOSED=30 ./si.sh               # demand a bigger sample before judging
+```
+
+Every iteration replays exactly (`--paper-reset` each time, so runs are
+comparable):
+
+```bash
+VOLUME_GATE_ENABLED=false .venv/bin/python main.py --paper --patterns-v2 --paper-reset \
+  --market us --symbols=2000 --stream=2025-11-03 --kronos-gate-mode off \
+  --export-trades-log=runs/NN/pt.json
+```
+
+- **Scoring** — `scripts/si_score.py` computes win rate, profit factor,
+  expectancy in R, hold time, exit mix and per-pattern/side tables from the
+  export alone. It is hash-pinned in `runs/.si_manifest` together with `si.sh`
+  and the two agent prompts, so neither agent can rewrite the judge
+  (`SI_REPIN=1` re-pins after a deliberate edit). A run is **invalid** below
+  `SI_MIN_CLOSED` closed trades (default 10; raise it for stricter evidence).
+- **Improvement rule** — vs the best accepted run: win rate `>=`, profit factor
+  `>=`, at least one of the two strictly better, and trade count within ±25%.
+  Win rate bought by trading less, or a no-op rerun, is rejected. Accepted
+  scores are copied to `runs/accepted/NN.json`.
+- **Artifacts** — `runs/NN/{pt.json,score_before.json,pt_after.json,score_after.json,findings.md,change.md,run.md}`,
+  a `runs/leaderboard.md` row per iteration, and `logs/si/NN.log`. All gitignored;
+  only code/config is committed (no AI attribution, no run data).
+- **Safety** — requires a clean tracked tree (revert restores `HEAD` exactly);
+  backs up the operator's `data/cache/paper_account.json` and
+  `logs/paper_signals_us.jsonl` and restores them afterwards; stops the stream
+  server it started; `flock` lock at `runs/.si.lock`; bounded replay/agent
+  timeouts with retries; failures are recorded and the loop continues instead of
+  waiting for a human. Don't run the web Paper desk or another replay against
+  the US ledger while `si.sh` is running — it owns that ledger during an
+  iteration.
+- **Tunables** — `SI_MAX_ITERATIONS`, `SI_MAX_STALE`, `SI_MIN_CLOSED`,
+  `SI_REPLAY_TIMEOUT`, `SI_AGENT_TIMEOUT`, `SI_AGENT_MODEL`, `SI_CMD_BIN`,
+  `SI_REPIN`.
+
 ## Backtesting
 
 Test the strategy against historical data (no live connection needed):
