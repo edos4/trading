@@ -1478,6 +1478,18 @@ class MarketScanner:
         stop = ref * (1 - pct if signal.action == "BUY" else 1 + pct)
         signal.stop_loss = round(stop, 4)
         signal.stop_loss_pct_cap = pct
+        # The pattern's trail was sized from its ATR stop, which no longer
+        # matches the executed stop. Re-express it in R of the fixed stop so
+        # the trail actually arms (opening_candidate refines it again from the
+        # effective risk after any opening gap).
+        trail_r = float(settings.stop_loss_trail_r or 0.0)
+        if trail_r > 0:
+            signal.trailing_stop_pct = round(trail_r * pct, 6)
+            signal.trailing_activation_pct = round(
+                float(settings.stop_loss_arm_r or 0.0) * pct, 6)
+            if signal.trailing_stop_mode is None:
+                signal.trailing_stop_mode = (
+                    "highest_close" if signal.action == "BUY" else "lowest_close")
 
     async def _process_signal(
         self, signal: TradeSignal, pattern: BasePattern | None = None, candle=None,
@@ -1501,6 +1513,45 @@ class MarketScanner:
         # instead of its pattern's structural level.
         self._apply_fixed_stop(signal, candle)
 
+        # Operator kill-switch: set SHORT_ENTRIES_ENABLED=false to paper a
+        # long-only book. It defaults on — the current ledger has shorts
+        # profitable, so a blanket short block is not supported by the data.
+        if (
+            not self._indicators_only
+            and signal.action == "SELL"
+            and not settings.short_entries_enabled
+        ):
+            reason = (
+                "Short entries are disabled (SHORT_ENTRIES_ENABLED=false). "
+                "Set it true to re-enable SELL/short pattern entries."
+            )
+            log.info(f"Signal REJECTED by short gate — {signal.symbol} {signal.pattern}")
+            self.stats["signals_rejected"] += 1
+            self.stats["short_rejected"] = self.stats.get("short_rejected", 0) + 1
+            self._append_signal_log(signal, status="rejected", reason=reason)
+            return
+
+        # Optional US price floor. Off by default: the sub-$10 cohort in the
+        # 2026-11 export was +$1,691 and held both winners.
+        price_floor = float(settings.min_signal_price_usd or 0.0)
+        if (
+            not self._indicators_only
+            and self._market == "us"
+            and signal.action in ("BUY", "SELL")
+            and price_floor > 0
+            and 0 < float(signal.price or 0) < price_floor
+        ):
+            reason = (
+                f"Signal price {float(signal.price):.2f} is below the "
+                f"{price_floor:.2f} minimum (MIN_SIGNAL_PRICE_USD)."
+            )
+            log.info(f"Signal REJECTED by price floor — {signal.symbol} {signal.pattern}")
+            self.stats["signals_rejected"] += 1
+            self.stats["price_floor_rejected"] = (
+                self.stats.get("price_floor_rejected", 0) + 1)
+            self._append_signal_log(signal, status="rejected", reason=reason)
+            return
+
         # Mandatory for both pattern scanners, including worker-produced detections.
         if not self._indicators_only and signal.action in ("BUY", "SELL"):
             from analysis.pattern_dii import MIN_BARS, describe_pattern_dii_rejection
@@ -1508,14 +1559,25 @@ class MarketScanner:
             df = self._store.get_df(signal.symbol, signal.timeframe, min_bars=MIN_BARS)
             dii_reason = describe_pattern_dii_rejection(df, action=signal.action)
             if dii_reason is not None:
-                log.info(
-                    f"Signal REJECTED by DII gate — {signal.symbol} "
-                    f"{signal.pattern} | {dii_reason}"
-                )
-                self.stats["signals_rejected"] += 1
-                self.stats["dii_rejected"] = self.stats.get("dii_rejected", 0) + 1
-                self._append_signal_log(signal, status="rejected", reason=dii_reason)
-                return
+                if settings.dii_gate_shadow:
+                    # A/B mode: record what the gate would have done but let
+                    # the entry continue, so both books can be compared.
+                    log.info(
+                        f"Signal DII gate SHADOW — {signal.symbol} "
+                        f"{signal.pattern} | {dii_reason}"
+                    )
+                    self.stats["dii_shadow"] = self.stats.get("dii_shadow", 0) + 1
+                    self._append_signal_log(
+                        signal, status="shadow", reason=dii_reason)
+                else:
+                    log.info(
+                        f"Signal REJECTED by DII gate — {signal.symbol} "
+                        f"{signal.pattern} | {dii_reason}"
+                    )
+                    self.stats["signals_rejected"] += 1
+                    self.stats["dii_rejected"] = self.stats.get("dii_rejected", 0) + 1
+                    self._append_signal_log(signal, status="rejected", reason=dii_reason)
+                    return
 
         reason = signal.blocked_reason or signal.filtered_reason
         if reason:

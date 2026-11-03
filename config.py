@@ -72,6 +72,29 @@ class Settings(BaseSettings):
     # from the signal price (BUY below, SELL above). 0 disables the override
     # and leaves each pattern's own structural stop in place.
     stop_loss_pct: float = 0.03
+    # Trail geometry for the fixed stop, in R of the executed stop distance.
+    # Patterns derive their own trail from the ATR stop; once the scanner
+    # replaces that stop with STOP_LOSS_PCT those values are 4-5x too wide and
+    # the trail never arms (2026-11 export: 0 trailing exits in 18 trades).
+    stop_loss_trail_r: float = 2.0
+    stop_loss_arm_r: float = 2.0
+    # Cancel a next-open fill when an adverse gap leaves less than this
+    # fraction of the planned stop distance. 0 disables the guard.
+    stop_loss_min_risk_frac: float = 0.5
+    # Cap a measured-move target at N R of the executed stop. 0 keeps the
+    # pattern's own target.
+    target_max_r: float = 0.0
+    # Reject US pattern entries below this price (0 disables). Off by default:
+    # the current ledger's sub-$10 cohort is +$2,989 and holds the two biggest
+    # winners (UPXI, RUM).
+    min_signal_price_usd: float = 0.0
+    # US SELL/short pattern entries. On: the committed 2026-11-03 02:18Z ledger
+    # has shorts +$1,047 (double_top 2/8, +$1,233), so a blanket short block is
+    # not supported. Set false to paper a long-only book.
+    short_entries_enabled: bool = True
+    # Record DII rejections but let the entry through, so the gate can be A/B'd
+    # against an ungated book without changing production behaviour.
+    dii_gate_shadow: bool = False
 
     # ── Collect-first ─────────────────────────────────────────────────────
     # When enabled, a scan pass collects chart-pattern signals without opening
@@ -466,6 +489,14 @@ class Settings(BaseSettings):
     @classmethod
     def _clamp_stop_loss_pct(cls, value: float) -> float:
         return max(0.0, min(float(value), 1.0))
+
+    @field_validator(
+        "stop_loss_trail_r", "stop_loss_arm_r", "stop_loss_min_risk_frac",
+        "target_max_r", "min_signal_price_usd",
+    )
+    @classmethod
+    def _clamp_non_negative(cls, value: float) -> float:
+        return max(0.0, float(value))
 
     @field_validator("collect_first_top_n")
     @classmethod
