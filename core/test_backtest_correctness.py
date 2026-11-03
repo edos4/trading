@@ -377,3 +377,58 @@ def test_nonfinite_saved_entry_fee_is_rejected():
     raw['entry_fee_paid']=float('nan')
     with pytest.raises(ValueError,match='entry fee'):
         _trade_from_dict(raw)
+
+
+def _execution_signal(action="BUY", price=100.0, stop_pct=0.03, target=None):
+    from datetime import datetime, timezone
+    from patterns.base_pattern import TradeSignal
+    stop = price * (1 - stop_pct if action == "BUY" else 1 + stop_pct)
+    take = target if target is not None else (
+        price * 1.30 if action == "BUY" else price * 0.70)
+    s = TradeSignal(
+        symbol="TEST", timeframe="1d", pattern="test", action=action,
+        confidence=1, price=price, qty=0, stop_loss=stop,
+        take_profit=take, stop_loss_pct_cap=stop_pct,
+    )
+    s.signal_bar_timestamp = datetime(2026, 1, 5, tzinfo=timezone.utc)
+    return s
+
+
+def _execution_bar(price):
+    from datetime import datetime, timezone
+    from data.tv_client import OHLCVCandle
+    return OHLCVCandle(
+        open=price, high=price, low=price, close=price, volume=0,
+        timestamp=datetime(2026, 1, 6, tzinfo=timezone.utc),
+    )
+
+
+def test_opening_gap_that_erases_the_risk_is_rejected(monkeypatch):
+    from config import settings
+    from core.execution import opening_candidate
+    monkeypatch.setattr(settings, "stop_loss_min_risk_frac", 0.5)
+    with pytest.raises(ValueError, match="Opening gap left"):
+        opening_candidate(_execution_signal(), _execution_bar(98.0), 10_000, "us")
+
+
+def test_opening_candidate_rescales_the_trail_to_the_fill(monkeypatch):
+    from config import settings
+    from core.execution import opening_candidate
+    monkeypatch.setattr(settings, "stop_loss_min_risk_frac", 0.0)
+    monkeypatch.setattr(settings, "stop_loss_trail_r", 2.0)
+    monkeypatch.setattr(settings, "stop_loss_arm_r", 2.0)
+    fill = opening_candidate(
+        _execution_signal(), _execution_bar(100.0), 10_000, "us")
+    assert fill.trailing_stop_pct == pytest.approx(0.06)
+    assert fill.trailing_activation_pct == pytest.approx(0.06)
+    assert fill.trailing_stop_mode == "highest_close"
+
+
+def test_target_can_be_capped_in_r(monkeypatch):
+    from config import settings
+    from core.execution import opening_candidate
+    monkeypatch.setattr(settings, "stop_loss_min_risk_frac", 0.0)
+    monkeypatch.setattr(settings, "target_max_r", 3.0)
+    fill = opening_candidate(
+        _execution_signal(target=130.0), _execution_bar(100.0), 10_000, "us")
+    assert fill.take_profit == pytest.approx(109.0)

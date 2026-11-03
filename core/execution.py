@@ -40,6 +40,30 @@ def rank_candidates(pool, limit):
     return ranked[:limit], ranked[limit:]
 
 
+def _effective_stop_for(signal, price):
+    """Nearer-to-entry of the structural stop and the fixed % cap at ``price``."""
+    base = signal.stop_loss
+    cap = None
+    if signal.stop_loss_pct_cap is not None and price > 0:
+        c = signal.stop_loss_pct_cap
+        cap = price * (1 + c) if signal.action == "SELL" else price * (1 - c)
+    if base is None:
+        return cap
+    if cap is None:
+        return base
+    return min(base, cap) if signal.action == "SELL" else max(base, cap)
+
+
+def _planned_risk_frac(signal):
+    """Stop distance the signal intended, as a fraction of its own price."""
+    if not signal.price or signal.price <= 0:
+        return None
+    stop = _effective_stop_for(signal, signal.price)
+    if stop is None:
+        return None
+    return abs(signal.price - stop) / signal.price
+
+
 def opening_candidate(signal, candle, notional, market, slippage=0):
     """Fixed structural levels; cancel gaps beyond them rather than erase risk."""
     from core.backtester import _apply_notional_sizing
@@ -73,7 +97,48 @@ def opening_candidate(signal, candle, notional, market, slippage=0):
         raise ValueError('Opening gap crossed the structural stop')
     if signal.take_profit is not None and (price <= signal.take_profit if short else price >= signal.take_profit):
         raise ValueError('Opening gap crossed the target')
+    from config import settings
+
+    effective_stop = _effective_stop_for(signal, price)
+    risk = (
+        abs(price - effective_stop) / price
+        if effective_stop is not None and price > 0 else None
+    )
+    # The fixed stop is anchored to the signal close while the fill is the next
+    # open. An adverse gap can leave a nearly zero risk distance (the 2026-11
+    # export had a 0.03% stop), which is a coin flip, not a trade.
+    planned_risk = _planned_risk_frac(signal)
+    min_frac = float(settings.stop_loss_min_risk_frac or 0.0)
+    if (
+        risk is not None
+        and signal.stop_loss_pct_cap is not None
+        and planned_risk is not None
+        and min_frac > 0
+        and risk < min_frac * planned_risk
+    ):
+        raise ValueError(
+            f"Opening gap left {risk:.2%} to the stop, below "
+            f"{min_frac:.0%} of the {planned_risk:.2%} planned risk"
+        )
     fill = replace(signal, price=price)
+    if risk is not None and risk > 0:
+        # Express the trail in R of the risk this fill actually took, not the
+        # pattern's ATR stop that the scanner replaced.
+        trail_r = float(settings.stop_loss_trail_r or 0.0)
+        if trail_r > 0:
+            fill.trailing_stop_pct = round(trail_r * risk, 6)
+            fill.trailing_activation_pct = round(
+                float(settings.stop_loss_arm_r or 0.0) * risk, 6)
+            if fill.trailing_stop_mode is None:
+                fill.trailing_stop_mode = (
+                    "highest_close" if fill.action == "BUY" else "lowest_close")
+        max_r = float(settings.target_max_r or 0.0)
+        if max_r > 0 and fill.take_profit is not None:
+            cap_dist = max_r * risk * price
+            if fill.action == "BUY" and fill.take_profit - price > cap_dist:
+                fill.take_profit = round(price + cap_dist, 4)
+            elif fill.action == "SELL" and price - fill.take_profit > cap_dist:
+                fill.take_profit = round(price - cap_dist, 4)
     _apply_notional_sizing(fill, notional, fractional=is_fractional_qty(fill.pattern))
     profile = get_market(market)
     if profile.long_only and short:

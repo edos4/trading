@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from config import settings
 from core.scanner import MarketScanner
 from patterns.base_pattern import TradeSignal
 
@@ -48,6 +49,7 @@ def _frame_at(bulls: float, n: int = 100) -> pd.DataFrame:
 ])
 def test_both_pattern_scanners_gate_before_other_entry_checks(
         monkeypatch, patterns_v2, direction, short, action, accepted):
+    monkeypatch.setattr(settings, "short_entries_enabled", True)
     scanner = MarketScanner(symbols=['TEST'], market='us', patterns_v2=patterns_v2, volume_gate=False)
     if direction == 'flat':
         if action == 'BUY':
