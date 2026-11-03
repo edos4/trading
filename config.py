@@ -68,6 +68,11 @@ class Settings(BaseSettings):
     # Skip leftover crumbs after risk/exposure caps (e.g. BUY 1 share).
     min_position_notional: float = 1000.0
 
+    # Fixed stop-loss override for every scanner entry. 0.03 = stop exactly 3%
+    # from the signal price (BUY below, SELL above). 0 disables the override
+    # and leaves each pattern's own structural stop in place.
+    stop_loss_pct: float = 0.03
+
     # ── Collect-first ─────────────────────────────────────────────────────
     # When enabled, a scan pass collects chart-pattern signals without opening
     # anything, then ranks them by reward:risk and opens only the top N
@@ -424,6 +429,11 @@ class Settings(BaseSettings):
     @classmethod
     def _clamp_tv_chart_connections(cls, value: int) -> int:
         return max(1, min(int(value), 200))
+
+    @field_validator("stop_loss_pct")
+    @classmethod
+    def _clamp_stop_loss_pct(cls, value: float) -> float:
+        return max(0.0, min(float(value), 1.0))
 
     @field_validator("collect_first_top_n")
     @classmethod

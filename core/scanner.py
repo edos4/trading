@@ -1343,6 +1343,27 @@ class MarketScanner:
 
 
     # ── Signal pipeline ────────────────────────────────────────────────────────
+    def _apply_fixed_stop(self, signal: TradeSignal, candle) -> None:
+        """Replace the pattern's structural stop with the configured fixed %."""
+        pct = float(settings.stop_loss_pct or 0.0)
+        if pct <= 0 or signal.action not in ("BUY", "SELL"):
+            return
+        reference = getattr(signal, "price", None)
+        try:
+            ref = float(reference)
+        except (TypeError, ValueError):
+            ref = 0.0
+        if not math.isfinite(ref) or ref <= 0:
+            try:
+                ref = float(getattr(candle, "close", 0.0))
+            except (TypeError, ValueError):
+                ref = 0.0
+        if not math.isfinite(ref) or ref <= 0:
+            return
+        stop = ref * (1 - pct if signal.action == "BUY" else 1 + pct)
+        signal.stop_loss = round(stop, 4)
+        signal.stop_loss_pct_cap = pct
+
     async def _process_signal(
         self, signal: TradeSignal, pattern: BasePattern | None = None, candle=None,
     ) -> None:
@@ -1360,6 +1381,10 @@ class MarketScanner:
                 if self._paper is not None else None
             )
             signal.signal_bar_timestamp = candle.timestamp
+
+        # Bot-wide fixed stop: every entry carries the same 3% risk distance
+        # instead of its pattern's structural level.
+        self._apply_fixed_stop(signal, candle)
 
         # Mandatory for both pattern scanners, including worker-produced detections.
         if not self._indicators_only and signal.action in ("BUY", "SELL"):
