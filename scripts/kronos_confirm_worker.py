@@ -9,8 +9,8 @@ index) so a rerun reproduces the same votes and the scanner cache is truthful.
         --symbols AAPL MSFT --samples 3 --model finetuned --out /tmp/confirm.json
 
 The JSON payload is written to ``--out`` (log lines go to stdout):
-``{"model": ..., "samples": ..., "results": [{"symbol": ..., "anchor_close": ...,
-"anchor_date": ..., "returns": [...], "error": "..."}]}``.
+``{"model": ..., "samples": ..., "device": ..., "results": [{"symbol": ...,
+"anchor_close": ..., "anchor_date": ..., "returns": [...], "error": "..."}]}``.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
 
-from core.kronos_eval import LOOKBACK, MAX_CONTEXT, _load_predictor, with_amount
+from core.kronos_eval import LOOKBACK, MAX_CONTEXT, load_predictor, with_amount
 from utils.logger import log
 
 MIN_BARS = 60
@@ -147,12 +147,10 @@ def main(argv: list[str] | None = None) -> int:
     samples = max(1, min(int(args.samples), 9))
     samples = samples if samples % 2 else max(1, samples - 1)
 
-    import torch
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    predictor = _load_predictor(
-        device=device, use_finetuned=args.model == "finetuned",
+    predictor, device = load_predictor(
+        use_finetuned=args.model == "finetuned",
     )
+    log.info(f"Kronos-confirm | device={device}")
     results = []
     for symbol in symbols:
         try:
@@ -170,7 +168,12 @@ def main(argv: list[str] | None = None) -> int:
                 "error": f"{type(exc).__name__}: {exc}",
             })
 
-    payload = {"model": args.model, "samples": samples, "results": results}
+    payload = {
+        "model": args.model,
+        "samples": samples,
+        "device": device,
+        "results": results,
+    }
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload), encoding="utf-8")

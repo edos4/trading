@@ -8,6 +8,7 @@ historical daily bars in stocks_history and score its +1 day /
 from __future__ import annotations
 
 import math
+import os
 import random
 import sys
 from dataclasses import dataclass
@@ -384,6 +385,59 @@ class WindowResult:
     persist_1w: float = float("nan")
 
 
+# `auto` selects CUDA only when the card has real headroom. A local LLM server
+# (llama.cpp/FreeToken) can hold almost a whole 16 GB card, so choosing CUDA
+# merely because `torch.cuda.is_available()` is true makes every load OOM.
+CUDA_MIN_FREE_MB = 2048
+
+
+def select_device(preferred: str | None = None) -> str:
+    """Resolve ``auto|cuda|cpu`` (or ``KRONOS_DEVICE``) to a usable torch device."""
+    choice = (preferred or os.environ.get("KRONOS_DEVICE") or "auto").strip().lower()
+    if choice == "cpu":
+        return "cpu"
+    try:
+        import torch
+    except Exception:
+        return "cpu"
+    if not torch.cuda.is_available():
+        return "cpu"
+    if choice == "cuda":
+        return "cuda"
+    try:
+        free, _total = torch.cuda.mem_get_info()
+    except Exception:
+        return "cuda"
+    if free < CUDA_MIN_FREE_MB * 1024 * 1024:
+        log.info(
+            f"Kronos | CUDA has {free / 1024 / 1024:.0f} MiB free "
+            f"(< {CUDA_MIN_FREE_MB} MiB) — using CPU"
+        )
+        return "cpu"
+    return "cuda"
+
+
+def load_predictor(device: str | None = None, *, use_finetuned: bool = False):
+    """Load one predictor on the selected device, falling back to CPU on OOM.
+
+    Returns ``(predictor, device)`` so a worker can report where it actually ran.
+    """
+    chosen = select_device(device)
+    try:
+        return _load_predictor(device=chosen, use_finetuned=use_finetuned), chosen
+    except Exception as exc:
+        if chosen != "cuda" or not _is_cuda_oom(exc):
+            raise
+        log.warning(f"Kronos | CUDA load failed ({exc}) — retrying on CPU")
+    try:
+        import torch
+
+        torch.cuda.empty_cache()
+    except Exception:
+        pass
+    return _load_predictor(device="cpu", use_finetuned=use_finetuned), "cpu"
+
+
 def _load_predictor(device: str = "cpu", use_finetuned: bool = False):
     from model import Kronos, KronosPredictor, KronosTokenizer
 
@@ -651,9 +705,7 @@ def run_kronos_test(
     use_finetuned: bool = False,
 ) -> None:
     if device is None:
-        import torch
-
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = select_device()
     log.info(
         f"Kronos-test | stocks_history symbols={n_symbols} device={device} "
         f"windows/symbol={windows_per_symbol} lookback={lookback} liquid_only={liquid_only} "

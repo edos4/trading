@@ -186,6 +186,28 @@ The worker loads `finetuned` by default and never both models — that is why th
 separate script rather than a flag on `scripts/kronos_web_forecast.py`, which always loads
 base **and** fine-tuned.
 
+### Device selection
+
+`KRONOS_DEVICE` (`auto` by default) resolves once per worker, in
+`core.kronos_eval.select_device`:
+
+| Value | Behaviour |
+|---|---|
+| `auto` | CUDA when it is available **and** has ≥ 2 GiB free, otherwise CPU |
+| `cuda` | Always CUDA; a load failure surfaces as a worker error |
+| `cpu` | Always CPU |
+
+`torch.cuda.is_available()` alone is not enough: this host runs a local
+`llama.cpp` server that can hold ~15 GB of a 16 GB card, so a "CUDA is
+available" check loads the model straight into an out-of-memory error and the
+gate would then block every entry (fail-closed). `auto` inspects
+`torch.cuda.mem_get_info()` first and, as a second line of defence, retries the
+load on CPU if CUDA still OOMs. The device actually used is logged and written
+to the worker payload; `kronos_evidence["device"]` records it on the signal.
+
+`core/kronos_process.run_worker` forwards `settings.kronos_device` to the
+subprocess as `KRONOS_DEVICE`, because the worker does not read `.env` itself.
+
 ### Failure behaviour
 
 | Condition | Result in `shadow` | Result in `confirm` |
@@ -210,6 +232,7 @@ and `CLOSE`/exit handling are unaffected in every mode.
 | `kronos_gate_mode` | `KRONOS_GATE_MODE` | `off` | `off` / `shadow` / `confirm` |
 | `kronos_gate_samples` | `KRONOS_GATE_SAMPLES` | `3` | Simulations per symbol (odd, 1–9) |
 | `kronos_gate_model` | `KRONOS_GATE_MODEL` | `finetuned` | `base` or `finetuned` |
+| `kronos_device` | `KRONOS_DEVICE` | `auto` | `auto` / `cuda` / `cpu` — see §5 |
 | `kronos_gate_sideways_atr` | `KRONOS_GATE_SIDEWAYS_ATR` | `0.35` | `k` in `band = k × ATR%` |
 | `kronos_gate_sideways_min_pct` | `KRONOS_GATE_SIDEWAYS_MIN_PCT` | `0.25` | Floor for the sideways band (%) |
 | `kronos_gate_sideways_max_pct` | `KRONOS_GATE_SIDEWAYS_MAX_PCT` | `3.0` | Cap for the sideways band (%) |

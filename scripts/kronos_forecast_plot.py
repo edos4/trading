@@ -83,13 +83,14 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"no asof dates >= {args.start} with full horizons")
 
     sys.path.insert(0, str(Path.home() / "Kronos"))
-    from core.kronos_eval import _load_predictor
+    from core.kronos_eval import load_predictor
 
     models = ["base", "finetuned"] if args.compare else (
         ["base"] if args.use_base else ["finetuned"])
     results: dict[str, dict[str, dict]] = {}
     for tag in models:
-        predictor = _load_predictor(device="cuda", use_finetuned=(tag == "finetuned"))
+        predictor, device = load_predictor(use_finetuned=(tag == "finetuned"))
+        print(f"{tag} on {device}", flush=True)
         pred_1d: dict[pd.Timestamp, float] = {}
         pred_hd: dict[pd.Timestamp, float] = {}
         for asof in asofs:

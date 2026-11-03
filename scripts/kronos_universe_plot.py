@@ -83,10 +83,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"universe: {len(universe)} symbols", flush=True)
 
     sys.path.insert(0, str(Path.home() / "Kronos"))
-    from core.kronos_eval import _load_predictor
+    from core.kronos_eval import load_predictor
 
-    models = {"base": _load_predictor(device="cuda", use_finetuned=False),
-              "finetuned": _load_predictor(device="cuda", use_finetuned=True)}
+    models = {"base": load_predictor(use_finetuned=False)[0],
+              "finetuned": load_predictor(use_finetuned=True)[0]}
 
     act_series, pred_series = {}, {}
     hits = {m: [0, 0] for m in models}
