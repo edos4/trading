@@ -1,4 +1,4 @@
-from utils.trade_export import build_paper_trade_export
+from utils.trade_export import _closed_row, _signal_row, build_paper_trade_export
 
 
 def _envelope():
@@ -372,3 +372,31 @@ def test_export_preserves_pattern_geometry_for_replay():
     assert loaded['closed_trades'][0]['chart_annotations'] == annotations
     annotations[0]['start_price'] = 999
     assert exported['books'][0]['closed_trades'][0]['chart_annotations'][0]['start_price'] == 9.12345678
+
+
+def test_closed_row_flags_a_kronos_exit():
+    row = _closed_row({
+        "reason": "kronos_exit",
+        "kronos_exit_evidence": {"decision": "oppose", "reason": "3/3 down"},
+    })
+    assert row["exit_reason"] == "kronos_exit"
+    assert row["kronos_exit"] is True
+    assert row["kronos_exit_evidence"]["decision"] == "oppose"
+
+
+def test_closed_row_flags_non_kronos_exits_false():
+    row = _closed_row({"reason": "stop_loss"})
+    assert row["kronos_exit"] is False
+    assert row["exit_reason"] == "stop_loss"
+
+
+def test_signal_row_keeps_exit_evidence():
+    row = _signal_row({
+        "status": "exited",
+        "exit_reason": "kronos_exit",
+        "kronos_exit_evidence": {"decision": "oppose"},
+    })
+    assert row["status"] == "exited"
+    assert row["exit_reason"] == "kronos_exit"
+    assert row["kronos_exit_evidence"]["decision"] == "oppose"
+

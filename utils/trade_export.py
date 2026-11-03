@@ -65,6 +65,8 @@ def _open_row(row: dict[str, Any]) -> dict[str, Any]:
         # Replay renders those as "Laya assessment unavailable" and never
         # reruns today's model when viewing.
         "laya_assessment": row.get("laya_assessment"),
+        "kronos_evidence": row.get("kronos_evidence"),
+        "kronos_exit_evidence": row.get("kronos_exit_evidence"),
     }
 
 
@@ -104,6 +106,7 @@ def _closed_row(row: dict[str, Any]) -> dict[str, Any]:
         "hold_days": _round(row.get("days")),
         "hold_bars": row.get("bars"),
         "exit_reason": row.get("reason"),
+        "kronos_exit": row.get("reason") == "kronos_exit",
         "time_exit_bars_elapsed": row.get("time_exit_bars_elapsed"),
         "time_exit_bars_configured": row.get("time_exit_bars_configured"),
         "opened": row.get("opened"),
@@ -113,6 +116,8 @@ def _closed_row(row: dict[str, Any]) -> dict[str, Any]:
         "daily_marks": [_daily_mark(m) for m in (row.get("daily_marks") or [])],
         # Additive Laya evidence; legacy exports omit it ("unavailable").
         "laya_assessment": row.get("laya_assessment"),
+        "kronos_evidence": row.get("kronos_evidence"),
+        "kronos_exit_evidence": row.get("kronos_exit_evidence"),
     }
 
 
@@ -127,6 +132,11 @@ def _signal_row(row: dict[str, Any]) -> dict[str, Any]:
     out = {key: _round(row.get(key)) for key in SIGNAL_LOG_FIELDS}
     out.update(
         __import__("core.pattern_provenance", fromlist=["row_payload"]).row_payload(row))
+    # Only present on Kronos-tagged rows, so legacy log exports stay unchanged.
+    for key in ("kronos_evidence", "kronos_exit_evidence", "exit_reason"):
+        value = row.get(key)
+        if value is not None:
+            out[key] = value
     return out
 
 
@@ -248,6 +258,12 @@ def snapshot_from_paper_account(
                 "laya_assessment": (
                     dict(p.laya_assessment)
                     if getattr(p, "laya_assessment", None) else None),
+                "kronos_evidence": (
+                    dict(p.kronos_evidence)
+                    if getattr(p, "kronos_evidence", None) else None),
+                "kronos_exit_evidence": (
+                    dict(p.kronos_exit_evidence)
+                    if getattr(p, "kronos_exit_evidence", None) else None),
             }
         )
 
@@ -273,6 +289,7 @@ def snapshot_from_paper_account(
                 "time_exit_bars_elapsed": t.time_exit_bars_elapsed,
                 "time_exit_bars_configured": t.exit_bars_after_neckline_break,
                 "reason": t.exit_reason,
+                "kronos_exit": t.exit_reason == "kronos_exit",
                 "stop": t.stop_loss,
                 "target": t.take_profit,
                 "opened": t.entry_date.isoformat() if t.entry_date else "",
@@ -284,6 +301,12 @@ def snapshot_from_paper_account(
                 "laya_assessment": (
                     dict(t.laya_assessment)
                     if getattr(t, "laya_assessment", None) else None),
+                "kronos_evidence": (
+                    dict(t.kronos_evidence)
+                    if getattr(t, "kronos_evidence", None) else None),
+                "kronos_exit_evidence": (
+                    dict(t.kronos_exit_evidence)
+                    if getattr(t, "kronos_exit_evidence", None) else None),
             }
         )
 
@@ -390,7 +413,10 @@ def build_paper_trade_export(
             " symbols, pace, stream start, volume gate, pattern-only,"
             " indicators-only, patternsv2, collect-first, Laya, session).",
             "signal_logs holds every detected signal with its accept/fill/reject"
-            " outcome and reason, newest first, as shown in the Paper Logs tab.",
+            " outcome and reason, plus status='exited' rows for Kronos closes,"
+            " newest first, as shown in the Paper Logs tab.",
+            "closed_trades[].kronos_exit is true when Kronos opposed the open"
+            " position; its vote is in kronos_exit_evidence.",
             "Each book is a separate ledger. Do not mix $ and ₱.",
             "Identity is (market, symbol), not ticker alone.",
         ],

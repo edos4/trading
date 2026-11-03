@@ -921,6 +921,16 @@ class PaperAccount:
             return position
 
     # ── Per-bar update / exit check ──────────────────────────────────────
+    def request_exit(self, position: BacktestTrade, reason: str = "kronos_exit") -> bool:
+        """Queue a next-open exit for an open position (Kronos protection)."""
+        with self._lock:
+            open_list = self.positions.get(position.symbol)
+            if not open_list or position not in open_list:
+                return False
+            if not position.pending_exit_reason:
+                position.pending_exit_reason = reason
+            return True
+
     def on_bar(
         self,
         symbol: str,

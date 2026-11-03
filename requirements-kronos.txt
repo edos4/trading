@@ -16,6 +16,7 @@ einops==0.8.1           # upstream Kronos pins
 huggingface_hub==0.33.1
 safetensors==0.6.2
 tqdm>=4.67.1
+matplotlib>=3.10      # scripts/kronos_forecast_plot.py
 # pandas/numpy intentionally unpinned here: they follow the app's pins.
 # Do NOT pin upstream's pandas==2.2.2 — it fights the app venv's pandas 3.x.
 # Upstream Kronos source (not pip): git clone https://github.com/shiyu-coder/Kronos.git ~/Kronos

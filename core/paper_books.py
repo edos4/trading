@@ -133,6 +133,8 @@ def paper_run_settings(
     laya_mode: str = "off",
     laya_policy_id: str = "",
     duration_days: int | None = None,
+    kronos_gate_mode: str = "off",
+    kronos_gate_samples: int | None = None,
 ) -> dict[str, Any]:
     """The filters one paper run was started with, as exportable JSON.
 
@@ -169,6 +171,10 @@ def paper_run_settings(
         "rule_filter_position": rule_filter_position or "after",
         "laya_mode": laya_mode or "off",
         "laya_policy_id": laya_policy_id or "",
+        "kronos_gate_mode": (kronos_gate_mode or "off").strip().lower(),
+        "kronos_gate_samples": (
+            int(kronos_gate_samples) if kronos_gate_samples else None
+        ),
         "duration_days": int(duration_days) if duration_days else None,
         "session": session_label(profile.id),
     }
@@ -192,6 +198,13 @@ def paper_run_status(cfg: dict[str, Any]) -> str:
         ", Duration=" + str(int(cfg["duration_days"])) + " sessions"
         if cfg.get("duration_days") else ""
     )
+    kronos_mode = cfg.get("kronos_gate_mode") or "off"
+    kronos_note = (
+        f", Kronos={kronos_mode.upper()}"
+        + (f"/{int(cfg['kronos_gate_samples'])}"
+           if cfg.get("kronos_gate_samples") else "")
+        if kronos_mode != "off" else ""
+    )
     return (
         f"Running — {cfg['label']}, {int(cfg['n_symbols'])} symbols, {cfg['pace']}"
         f"{stream_note}"
@@ -205,6 +218,7 @@ def paper_run_status(cfg: dict[str, Any]) -> str:
         f", Patternsv2={'ON' if cfg.get('patterns_v2') else 'OFF'}"
         f", Collect-first={'ON' if cfg.get('collect_first') else 'OFF'}"
         f", Laya={laya_mode.upper()}{laya_policy}"
+        f"{kronos_note}"
         f"{duration}"
         f", session={cfg.get('session') or session_label(cfg['market'])}"
     )
@@ -301,6 +315,12 @@ class PaperBook:
                     "laya_assessment": (
                         dict(p.laya_assessment)
                         if getattr(p, "laya_assessment", None) else None),
+                    "kronos_evidence": (
+                        dict(p.kronos_evidence)
+                        if getattr(p, "kronos_evidence", None) else None),
+                    "kronos_exit_evidence": (
+                        dict(p.kronos_exit_evidence)
+                        if getattr(p, "kronos_exit_evidence", None) else None),
                 }
             )
 
@@ -326,6 +346,7 @@ class PaperBook:
                     "time_exit_bars_elapsed": t.time_exit_bars_elapsed,
                     "time_exit_bars_configured": t.exit_bars_after_neckline_break,
                     "reason": t.exit_reason,
+                    "kronos_exit": t.exit_reason == "kronos_exit",
                     "stop": t.stop_loss,
                     "target": t.take_profit,
                     "opened": t.entry_date.isoformat() if t.entry_date else "",
@@ -337,6 +358,12 @@ class PaperBook:
                     "laya_assessment": (
                         dict(t.laya_assessment)
                         if getattr(t, "laya_assessment", None) else None),
+                    "kronos_evidence": (
+                        dict(t.kronos_evidence)
+                        if getattr(t, "kronos_evidence", None) else None),
+                    "kronos_exit_evidence": (
+                        dict(t.kronos_exit_evidence)
+                        if getattr(t, "kronos_exit_evidence", None) else None),
                 }
             )
 
@@ -642,6 +669,8 @@ class PaperBook:
         rule_filter_id: str = "",
         rule_filter_mode: str = "off",
         rule_filter_position: str = "after",
+        kronos_gate_mode: str = "off",
+        kronos_gate_samples: int | None = None,
     ) -> str | None:
         stack_name = ""
         tv_stack_id = (tv_stack_id or "").strip()
@@ -724,6 +753,8 @@ class PaperBook:
             self.rule_filter_position = rule_filter_position
             self.laya_mode = laya_mode
             self.laya_policy_id = (laya_policy_id or "").strip()
+            self.kronos_gate_mode = (kronos_gate_mode or "off").strip().lower()
+            self.kronos_gate_samples = kronos_gate_samples
             self.duration_days = duration_days
             self.status = "Fetching symbols..."
         self._thread = threading.Thread(
@@ -733,7 +764,7 @@ class PaperBook:
                 indicators_only, patterns_v2, collect_first, collect_first_top_n,
                 stream_start, tv_stack_id, laya_mode, laya_policy_id,
                 duration_days, rule_id, rule_filter_id, rule_filter_mode,
-                rule_filter_position,
+                rule_filter_position, kronos_gate_mode, kronos_gate_samples,
             ),
             name=f"paper-{self.market}",
             daemon=True,
@@ -955,6 +986,8 @@ class PaperBook:
         rule_filter_id: str = "",
         rule_filter_mode: str = "off",
         rule_filter_position: str = "after",
+        kronos_gate_mode: str = "off",
+        kronos_gate_samples: int | None = None,
     ) -> None:
         data_feed = None
         profile = get_market(self.market)
@@ -1046,6 +1079,8 @@ class PaperBook:
                 rule_filter_id=rule_filter_id,
                 rule_filter_mode=rule_filter_mode,
                 rule_filter_position=rule_filter_position,
+                kronos_gate_mode=kronos_gate_mode,
+                kronos_gate_samples=kronos_gate_samples,
             )
             self.scanner = scanner
             self.task = loop.create_task(scanner.run())
@@ -1076,6 +1111,8 @@ class PaperBook:
                 laya_mode=laya_mode,
                 laya_policy_id=laya_policy_id,
                 duration_days=duration_days,
+                kronos_gate_mode=kronos_gate_mode,
+                kronos_gate_samples=kronos_gate_samples,
             )
             self.run_settings = run_settings
             self.status = paper_run_status(run_settings)
@@ -1197,6 +1234,8 @@ class PaperBookManager:
         rule_filter_id: str = "",
         rule_filter_mode: str = "off",
         rule_filter_position: str = "after",
+        kronos_gate_mode: str = "off",
+        kronos_gate_samples: int | None = None,
     ) -> str | None:
         with self._start_lock:
             book = self._book(market)
@@ -1226,6 +1265,8 @@ class PaperBookManager:
                 rule_filter_id=rule_filter_id,
                 rule_filter_mode=rule_filter_mode,
                 rule_filter_position=rule_filter_position,
+                kronos_gate_mode=kronos_gate_mode,
+                kronos_gate_samples=kronos_gate_samples,
             )
 
     def start_both(self, specs: dict[str, dict[str, Any]]) -> dict[str, str]:
@@ -1255,6 +1296,8 @@ class PaperBookManager:
                 rule_filter_id=str(payload.get("rule_filter_id") or ""),
                 rule_filter_mode=str(payload.get("rule_filter_mode") or "off"),
                 rule_filter_position=str(payload.get("rule_filter_position") or "after"),
+                kronos_gate_mode=str(payload.get("kronos_gate_mode") or "off"),
+                kronos_gate_samples=payload.get("kronos_gate_samples"),
             )
             if err:
                 errors[mid] = err

@@ -142,6 +142,9 @@ class BacktestTrade:
     # None when no gate ran.
     laya_assessment: dict | None = None
     rule_evidence: dict | None = None
+    kronos_evidence: dict | None = None
+    # Open-position Kronos vote stamped by the scanner before a protective exit.
+    kronos_exit_evidence: dict | None = None
 
     execution_model: str = "legacy"
     pending_exit_reason: str = ""
@@ -692,6 +695,9 @@ def _check_exit_legacy(
         saved_engine = position.resolved_rules.get("engine_sha256")
         if saved_engine != engine_hash() and saved_engine not in _COMPATIBLE_EXIT_ENGINE_HASHES:
             raise RuntimeError("Position exit runtime changed; restore its compatible engine before management")
+    if position.pending_exit_reason:
+        position.exit_bar_idx = bar_idx
+        return candle.open, position.pending_exit_reason
     is_short = position.action == "SELL"
     at_close = position.exit_fill_at_close
     if position.provenance == "patternsv2":
@@ -940,6 +946,8 @@ def _open_trade(
                          if getattr(signal, "laya_assessment", None) else None),
         rule_evidence=(dict(signal.rule_evidence)
                        if getattr(signal, "rule_evidence", None) else None),
+        kronos_evidence=(dict(signal.kronos_evidence)
+                         if getattr(signal, "kronos_evidence", None) else None),
     )
     # Start the neckline time-stop clock only once the close is actually
     # through the neckline. If entry is a day-7 fill with no break yet,

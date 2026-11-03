@@ -156,6 +156,9 @@ class TradeSignal:
     resolved_rules: dict | None = None
     laya_assessment: dict | None = None
     rule_evidence: dict | None = None
+    # One-day Kronos confirmation stamped by the scanner gate
+    # (docs/kronos-3-preds.md). None when the gate is off.
+    kronos_evidence: dict | None = None
 
 
 

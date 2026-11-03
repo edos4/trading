@@ -145,6 +145,8 @@ async def run_scanner(
     market: str | None = None,
     collect_first: bool | None = None,
     collect_first_top_n: int | None = None,
+    kronos_gate_mode: str | None = None,
+    kronos_gate_samples: int | None = None,
 ) -> None:
     os.makedirs("logs", exist_ok=True)
     os.makedirs("charts", exist_ok=True)
@@ -194,6 +196,8 @@ async def run_scanner(
         market=profile.id,
         collect_first=collect_first,
         collect_first_top_n=collect_first_top_n,
+        kronos_gate_mode=kronos_gate_mode,
+        kronos_gate_samples=kronos_gate_samples,
     )
     await scanner.run()
 
@@ -211,6 +215,8 @@ async def run_paper(
     stream_start: str | None = None,
     export_trades_log: str | None = None,
     duration_days: int | None = None,
+    kronos_gate_mode: str | None = None,
+    kronos_gate_samples: int | None = None,
 ) -> None:
     os.makedirs("logs", exist_ok=True)
     os.makedirs("charts", exist_ok=True)
@@ -264,6 +270,8 @@ async def run_paper(
         collect_first=cf_on,
         collect_first_top_n=cf_n,
         duration_days=duration_days,
+        kronos_gate_mode=kronos_gate_mode or settings.kronos_gate_mode,
+        kronos_gate_samples=kronos_gate_samples,
     )
     run_status = paper_run_status(run_settings)
 
@@ -348,6 +356,8 @@ async def run_paper(
             collect_first=collect_first,
             collect_first_top_n=collect_first_top_n,
             duration_days=duration_days,
+            kronos_gate_mode=kronos_gate_mode,
+            kronos_gate_samples=kronos_gate_samples,
         )
         await scanner.run()
     finally:
@@ -622,6 +632,22 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "(stream replay: N daily bars). E.g. --duration-days=30.",
     )
     parser.add_argument(
+        "--kronos-gate-mode",
+        choices=["off", "shadow", "confirm"],
+        default=None,
+        help="Kronos 1-day entry confirmation (docs/kronos-3-preds.md). "
+        "off = absent; shadow = record a vote without blocking; confirm = "
+        "queue an entry only when a majority agrees. Default: KRONOS_GATE_MODE.",
+    )
+    parser.add_argument(
+        "--kronos-gate-samples",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Independent one-day Kronos forecasts per symbol (odd, 1–9). "
+        "Default: KRONOS_GATE_SAMPLES (3).",
+    )
+    parser.add_argument(
         "--volume-gate-compare",
         action="store_true",
         help="With --backtest, run twice (volume gate OFF then ON) and print a "
@@ -860,6 +886,8 @@ async def main(args: argparse.Namespace | None = None) -> None:
             stream_start=stream_start,
             export_trades_log=args.export_trades_log,
             duration_days=args.duration_days,
+            kronos_gate_mode=args.kronos_gate_mode,
+            kronos_gate_samples=args.kronos_gate_samples,
         )
     elif args.backtest is not None:
         await run_backtest(
@@ -877,6 +905,8 @@ async def main(args: argparse.Namespace | None = None) -> None:
             market=args.market,
             collect_first=collect_first,
             collect_first_top_n=collect_first_top_n,
+            kronos_gate_mode=args.kronos_gate_mode,
+            kronos_gate_samples=args.kronos_gate_samples,
         )
 
 
