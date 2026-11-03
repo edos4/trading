@@ -42,6 +42,21 @@ def local_pattern_registry(monkeypatch):
     monkeypatch.setenv("PATTERN_API_OWNER", "false")
 
 
+@pytest.fixture(autouse=True)
+def local_kronos_gate(monkeypatch):
+    """Scanner tests never launch the real ``.venv-kronos`` GPU worker.
+
+    The gate is off unless a test constructs ``MarketScanner`` with an explicit
+    ``kronos_gate_mode``; the scanner tests for the gate do exactly that.
+    """
+    from config import settings
+
+    monkeypatch.setattr(settings, "kronos_gate_mode", "off")
+    monkeypatch.setattr(settings, "kronos_exit_mode", "off")
+    monkeypatch.setenv("KRONOS_GATE_MODE", "off")
+    monkeypatch.setenv("KRONOS_EXIT_MODE", "off")
+
+
 @pytest.fixture
 def editor_store_factory():
     from psycopg import sql

@@ -167,6 +167,33 @@ class Settings(BaseSettings):
     # strength. Validated at 5; change only with a fresh walk-forward check.
     kronos_regime_days: int = 5
 
+    # ── Kronos 3-prediction entry confirmation (docs/kronos-3-preds.md) ─────
+    # off = gate absent; shadow = stamp evidence but never block; confirm =
+    # queue an entry only when a majority of one-day forecasts agree.
+    kronos_gate_mode: str = "confirm"
+    # Independent one-day simulations per symbol (odd, 1–9).
+    kronos_gate_samples: int = 3
+    # Which checkpoint the GPU worker loads (never both).
+    kronos_gate_model: str = "finetuned"
+    # Sideways dead zone: band = clamp(k × ATR%(14), min, max).
+    kronos_gate_sideways_atr: float = 0.35
+    kronos_gate_sideways_min_pct: float = 0.25
+    kronos_gate_sideways_max_pct: float = 3.0
+    # Votes needed to confirm or oppose the signal's direction.
+    kronos_gate_min_agree: int = 2
+    # TTL of the per-(symbol, anchor date, model, samples) vote cache.
+    kronos_gate_cache_minutes: int = 30
+    # Subprocess deadline for one batched worker call.
+    kronos_gate_timeout_s: float = 180.0
+    # Hard per-flush cap on unique symbols; over-cap symbols vote no_opinion.
+    kronos_gate_max_checks_per_scan: int = 100
+    # Open-position protection. off = no check; shadow = record the vote only;
+    # exit = queue a next-open exit when a majority forecasts against the
+    # position (BUY needs `down` votes, SELL needs `up` votes).
+    kronos_exit_mode: str = "exit"
+    # Votes needed to oppose an open position.
+    kronos_exit_min_agree: int = 2
+
     # ── Vision ────────────────────────────────────────────────────────────
     anthropic_api_key: str = ""
     vision_confirmation_enabled: bool = False
@@ -449,6 +476,70 @@ class Settings(BaseSettings):
     @classmethod
     def _clamp_kronos_save_days(cls, value: int) -> int:
         return max(1, min(int(value), 60))
+
+    @field_validator("kronos_gate_mode")
+    @classmethod
+    def _normalize_kronos_gate_mode(cls, value: str) -> str:
+        mode = (value or "off").strip().lower()
+        if mode not in ("off", "shadow", "confirm"):
+            raise ValueError("KRONOS_GATE_MODE must be off, shadow, or confirm")
+        return mode
+
+    @field_validator("kronos_gate_model")
+    @classmethod
+    def _normalize_kronos_gate_model(cls, value: str) -> str:
+        model = (value or "finetuned").strip().lower()
+        if model not in ("base", "finetuned"):
+            raise ValueError("KRONOS_GATE_MODEL must be base or finetuned")
+        return model
+
+    @field_validator("kronos_exit_mode")
+    @classmethod
+    def _normalize_kronos_exit_mode(cls, value: str) -> str:
+        mode = (value or "off").strip().lower()
+        if mode not in ("off", "shadow", "exit"):
+            raise ValueError("KRONOS_EXIT_MODE must be off, shadow, or exit")
+        return mode
+
+    @field_validator("kronos_exit_min_agree")
+    @classmethod
+    def _clamp_kronos_exit_min_agree(cls, value: int) -> int:
+        return max(1, min(int(value), 9))
+
+    @field_validator("kronos_gate_samples")
+    @classmethod
+    def _clamp_kronos_gate_samples(cls, value: int) -> int:
+        samples = max(1, min(int(value), 9))
+        return samples if samples % 2 else max(1, samples - 1)
+
+    @field_validator("kronos_gate_min_agree")
+    @classmethod
+    def _clamp_kronos_gate_min_agree(cls, value: int) -> int:
+        return max(1, min(int(value), 9))
+
+    @field_validator("kronos_gate_cache_minutes")
+    @classmethod
+    def _clamp_kronos_gate_cache(cls, value: int) -> int:
+        return max(0, int(value))
+
+    @field_validator("kronos_gate_timeout_s")
+    @classmethod
+    def _clamp_kronos_gate_timeout(cls, value: float) -> float:
+        return max(1.0, float(value))
+
+    @field_validator("kronos_gate_max_checks_per_scan")
+    @classmethod
+    def _clamp_kronos_gate_max_checks(cls, value: int) -> int:
+        return max(1, int(value))
+
+    @field_validator(
+        "kronos_gate_sideways_atr",
+        "kronos_gate_sideways_min_pct",
+        "kronos_gate_sideways_max_pct",
+    )
+    @classmethod
+    def _clamp_kronos_gate_sideways(cls, value: float) -> float:
+        return max(0.0, float(value))
 
     @property
     def stocks_history_auth(self) -> tuple[str, str]:

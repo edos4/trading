@@ -181,6 +181,10 @@ class MarketScanner:
         rule_filter_id: str = "",
         rule_filter_mode: str = "off",
         rule_filter_position: str = "after",
+        kronos_gate_mode: str | None = None,
+        kronos_gate_samples: int | None = None,
+        kronos_exit_mode: str | None = None,
+        kronos_exit_min_agree: int | None = None,
     ):
         self._symbols = symbols or settings.symbols
         self._disabled_patterns = set(disabled_patterns or [])
@@ -303,6 +307,9 @@ class MarketScanner:
             "signals_rejected": 0,
             "volume_gate_rejected": 0,
             "dii_rejected": 0,
+            "kronos_rejected": 0,
+            "kronos_exit_shadow": 0,
+            "kronos_exits": 0,
             "collect_first_ranked": 0,
             "collect_first_selected": 0,
             "rule_filter_shadow": 0,
@@ -353,6 +360,44 @@ class MarketScanner:
         self._rule_filter_cache: dict = {}
         if self._rule_filter_id and self._rule_filter_mode != "off":
             self._load_rule_filter()
+        # Kronos 1-day confirmation (docs/kronos-3-preds.md). Off constructs no
+        # gate at all, so existing runs pay no import or subprocess cost.
+        self._kronos_mode = (
+            settings.kronos_gate_mode
+            if kronos_gate_mode is None else str(kronos_gate_mode).strip().lower()
+        )
+        self._kronos_exit_mode = (
+            settings.kronos_exit_mode
+            if kronos_exit_mode is None else str(kronos_exit_mode).strip().lower()
+        )
+        self._kronos_gate = None
+        self._kronos_pending: list = []
+        self._kronos_exit_pending: list = []
+        if self._kronos_mode != "off" or self._kronos_exit_mode != "off":
+            from core.kronos_confirm import KronosConfirmGate
+
+            self._kronos_gate = KronosConfirmGate(
+                mode=self._kronos_mode,
+                samples=(
+                    settings.kronos_gate_samples
+                    if kronos_gate_samples is None else int(kronos_gate_samples)
+                ),
+                model=settings.kronos_gate_model,
+                sideways_atr=settings.kronos_gate_sideways_atr,
+                sideways_min_pct=settings.kronos_gate_sideways_min_pct,
+                sideways_max_pct=settings.kronos_gate_sideways_max_pct,
+                min_agree=settings.kronos_gate_min_agree,
+                exit_mode=self._kronos_exit_mode,
+                exit_min_agree=(
+                    settings.kronos_exit_min_agree
+                    if kronos_exit_min_agree is None else int(kronos_exit_min_agree)
+                ),
+                cache_minutes=settings.kronos_gate_cache_minutes,
+                timeout_s=settings.kronos_gate_timeout_s,
+                max_checks_per_scan=settings.kronos_gate_max_checks_per_scan,
+            )
+            self._kronos_pending = self._kronos_gate.pending
+            self._kronos_exit_pending = self._kronos_gate.pending_exits
 
     def _load_rule_filter(self) -> None:
         from core.rule_contracts import RulePayload
@@ -448,6 +493,7 @@ class MarketScanner:
             ),
             "sim_bar_idx": signal.signal_bar_idx,
             "chart_annotations": deepcopy(signal.chart_annotations),
+            "kronos_evidence": deepcopy(getattr(signal, "kronos_evidence", None)),
             **__import__("core.pattern_provenance", fromlist=["payload"]).payload(signal),
         }
         with self._signal_log_lock:
@@ -459,7 +505,9 @@ class MarketScanner:
 
         if status == "rejected":
             reason_lower = reason.lower()
-            if reason_lower.startswith("execution r:r rejection"):
+            if "kronos" in reason_lower:
+                gate = "kronos"
+            elif reason_lower.startswith("execution r:r rejection"):
                 gate = "execution_rr"
             elif "portfolio full" in reason_lower:
                 gate = "max_positions"
@@ -494,6 +542,46 @@ class MarketScanner:
                 return
             by_gate = stats.setdefault("rejection_by_gate", {})
             by_gate[gate] = by_gate.get(gate, 0) + 1
+
+    def _append_exit_log(self, position) -> None:
+        """Record a Kronos-driven close in the Paper Logs JSONL."""
+        evidence = deepcopy(getattr(position, "kronos_exit_evidence", None)) or {}
+        reason = (
+            f"Kronos exit: {evidence.get('reason') or 'forecasts opposed the position'}"
+        )
+        entry = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "market": self._market,
+            "symbol": position.symbol,
+            "timeframe": position.timeframe,
+            "action": position.action,
+            "pattern": position.pattern,
+            "confidence": round(float(position.confidence or 0.0), 4),
+            "price": (
+                round(float(position.exit_price), 4)
+                if position.exit_price is not None else None
+            ),
+            "status": "exited",
+            "reason": reason,
+            "exit_reason": position.exit_reason,
+            "sim_bar": (
+                position.sim_exit_date.isoformat()
+                if position.sim_exit_date is not None else None
+            ),
+            "sim_bar_idx": position.exit_bar_idx,
+            "chart_annotations": deepcopy(position.chart_annotations),
+            "kronos_evidence": deepcopy(getattr(position, "kronos_evidence", None)),
+            "kronos_exit_evidence": evidence,
+            **__import__("core.pattern_provenance", fromlist=["payload"]).payload(position),
+        }
+        with self._signal_log_lock:
+            self._signal_log.append(entry)
+        try:
+            append_signal_log(self._market, entry)
+        except OSError:
+            log.exception(
+                f"Signal log | failed to persist Kronos exit for {position.symbol}"
+            )
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
     def start(self) -> None:
@@ -834,6 +922,8 @@ class MarketScanner:
         self.stats["scan_finished_at"] = None
         self.stats["scan_in_progress"] = True
         self._collect_pool = []
+        self._kronos_pending.clear()
+        self._kronos_exit_pending.clear()
         self.stats["patterns_found"] = 0
         self.stats["signals_rejected"] = 0
         self.stats["trades_opened"] = 0
@@ -982,6 +1072,7 @@ class MarketScanner:
                 if isinstance(result, BaseException):
                     if self._collect_first:
                         await self._flush_collect_first()
+                    await self._flush_kronos_confirm()
                     raise result
         finally:
             # Drain cancellation too: no workers may outlive this scan.
@@ -993,7 +1084,9 @@ class MarketScanner:
 
         if self._collect_first:
             await self._flush_collect_first()
-
+        # One batched Kronos call per scan. collect-first may have added
+        # pendings, so this must run after that flush.
+        await self._flush_kronos_confirm()
 
         # Mark equity against the completed simulated bar BEFORE advancing the
         # replay. PaperAccount deduplicates marks to one point per market
@@ -1121,7 +1214,14 @@ class MarketScanner:
                 self._cooldown_tracker[
                     (closed.symbol, closed.pattern)
                 ] = (bar_idx, closed.pnl < 0)
+                if closed.exit_reason == "kronos_exit":
+                    log.info(
+                        f"Kronos EXIT FILLED | {closed.symbol} "
+                        f"{closed.pattern} | pnl={closed.pnl_pct:+.2f}%"
+                    )
+                    self._append_exit_log(closed)
             if is_new_bar:
+                self._queue_kronos_exits(symbol, timeframe, snapshot.candle)
                 self._trail_indicators(symbol, timeframe, snapshot.candle)
 
         if identity is not None and closed_bar:
@@ -1135,6 +1235,21 @@ class MarketScanner:
         if self._has_ready_pattern(symbol, timeframe):
             return new_closed_daily, snapshot
         return new_closed_daily, None
+
+    def _queue_kronos_exits(self, symbol: str, timeframe: str, candle) -> None:
+        """Queue one open-position vote per symbol/timeframe/new bar."""
+        gate = self._kronos_gate
+        if gate is None or gate.exit_mode == "off" or self._paper is None:
+            return
+        positions = [
+            position
+            for position in self._paper.positions.get(symbol, [])
+            if position.timeframe == timeframe and not position.pending_exit_reason
+        ]
+        if not positions:
+            return
+        df = self._store.get_df(symbol, timeframe, min_bars=2)
+        gate.prepare_exit(positions, candle, df)
 
     def _trail_indicators(self, symbol: str, timeframe: str, candle) -> None:
         """Move open indicator stops to each indicator's own line.
@@ -1669,6 +1784,23 @@ class MarketScanner:
                     self._append_signal_log(signal, status="rejected", reason=reason)
                     return
 
+        # Kronos 1-day confirmation (docs/kronos-3-preds.md): every surviving
+        # entry waits for the end-of-scan batch so one worker call covers all
+        # pending symbols. Shadow stamps evidence and queues anyway; confirm
+        # queues only when the vote agrees.
+        if (
+            self._kronos_gate is not None
+            and self._kronos_mode != "off"
+            and signal.action in ("BUY", "SELL")
+            and candle is not None
+        ):
+            df = self._store.get_df(signal.symbol, signal.timeframe, min_bars=2)
+            self._kronos_gate.queue(signal, candle, df)
+            return
+
+        await self._queue_entry(signal, candle)
+
+    async def _queue_entry(self, signal: TradeSignal, candle) -> None:
         # Completed-bar decisions queue for retrospective next-open simulation.
         if self._paper is not None and candle is not None:
             if not self._paper.assume_session_open:
@@ -1714,6 +1846,59 @@ class MarketScanner:
         #     )
         # elif signal.action == "CLOSE":
         #     self._orders.close_position(signal.symbol, signal.qty, signal.pattern)
+
+    async def _flush_kronos_confirm(self) -> None:
+        """Resolve pending entry and open-position votes in one worker call."""
+        gate = self._kronos_gate
+        if gate is None:
+            return
+        entry_rows, exit_rows = await asyncio.to_thread(gate.flush_with_exits)
+        for signal, candle, verdict, evidence in entry_rows:
+            signal.kronos_evidence = evidence
+            if gate.mode == "shadow" or verdict.decision == "confirm":
+                await self._guard_signal(
+                    signal, self._queue_entry, signal, candle,
+                )
+                continue
+            reason = f"Kronos {verdict.decision}: {verdict.reason}"
+            log.info(
+                f"Kronos REJECT | {signal.symbol} {signal.pattern} | {reason}"
+            )
+            self.stats["signals_rejected"] += 1
+            self.stats["kronos_rejected"] = self.stats.get("kronos_rejected", 0) + 1
+            self._append_signal_log(signal, status="rejected", reason=reason)
+        for position, verdict, evidence in exit_rows:
+            self._handle_kronos_exit(position, verdict, evidence)
+
+    def _handle_kronos_exit(self, position, verdict, evidence: dict) -> None:
+        """Apply one open-position vote: record it, and exit on `oppose`."""
+        gate = self._kronos_gate
+        if gate is None:
+            return
+        position.kronos_exit_evidence = evidence
+        if gate.exit_mode == "shadow":
+            self.stats["kronos_exit_shadow"] = (
+                self.stats.get("kronos_exit_shadow", 0) + 1
+            )
+            log.info(
+                f"Kronos EXIT-SHADOW | {position.symbol} {position.pattern} | "
+                f"{verdict.decision}: {verdict.reason}"
+            )
+            return
+        if verdict.decision != "oppose":
+            return
+        if self._paper is None or not self._paper.request_exit(position, "kronos_exit"):
+            log.warning(
+                f"Kronos EXIT skipped | {position.symbol} {position.pattern} "
+                f"(position no longer open)"
+            )
+            return
+        self.stats["kronos_exits"] = self.stats.get("kronos_exits", 0) + 1
+        log.info(
+            f"Kronos EXIT | {position.symbol} {position.pattern} | "
+            f"{verdict.reason} — queued for the next open"
+        )
+
 
     def ohlcv_frame(self, symbol: str, timeframe: str, min_bars: int = 2):
         """OHLCV for on-demand chart rendering (open/closed row click)."""
