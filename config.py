@@ -76,7 +76,9 @@ class Settings(BaseSettings):
     # Patterns derive their own trail from the ATR stop; once the scanner
     # replaces that stop with STOP_LOSS_PCT those values are 4-5x too wide and
     # the trail never arms (2026-11 export: 0 trailing exits in 18 trades).
-    stop_loss_trail_r: float = 2.0
+    # Give back one R, not two: a 2R/2R ladder parked the trail at breakeven, so
+    # every armed trade returned its whole gain unless it hit target first.
+    stop_loss_trail_r: float = 1.0
     stop_loss_arm_r: float = 2.0
     # Cancel a next-open fill when an adverse gap leaves less than this
     # fraction of the planned stop distance. 0 disables the guard.
