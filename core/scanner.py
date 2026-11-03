@@ -1949,6 +1949,27 @@ class MarketScanner:
             return
         if verdict.decision != "oppose":
             return
+        # A one-day forecast is noisy relative to a swing trade's daily range.
+        # Defer while the position is still inside its normal noise band; the
+        # stop/trail owns losses beyond it.
+        min_atr = float(settings.kronos_exit_min_adverse_atr or 0.0)
+        anchor = float((evidence or {}).get("anchor_close") or 0.0)
+        atr_pct = float((evidence or {}).get("atr_pct") or 0.0)
+        entry = float(getattr(position, "entry_price", 0.0) or 0.0)
+        if min_atr > 0 and anchor > 0 and atr_pct > 0 and entry > 0:
+            adverse = (
+                (anchor - entry) if position.action == "SELL" else (entry - anchor)
+            ) / entry
+            floor = min_atr * atr_pct / 100.0
+            if adverse < floor:
+                self.stats["kronos_exit_deferred"] = (
+                    self.stats.get("kronos_exit_deferred", 0) + 1
+                )
+                log.info(
+                    f"Kronos EXIT deferred | {position.symbol} {position.pattern} | "
+                    f"{adverse:.2%} move < {floor:.2%} ({min_atr:g} ATR) threshold"
+                )
+                return
         if self._paper is None or not self._paper.request_exit(position, "kronos_exit"):
             log.warning(
                 f"Kronos EXIT skipped | {position.symbol} {position.pattern} "

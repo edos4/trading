@@ -275,3 +275,18 @@ net loss**. A percentage stop cannot protect against this, and widening or
 tightening it changes nothing. The relevant controls are event/earnings
 avoidance and a per-trade notional or gap cap — neither was in the original
 note.
+
+### Kronos exit guard
+
+The NBR chart showed a `kronos_exit` at **87.65 (-2.57%, -0.8R)** on
+2026-08-12. The vote was 2/3 bearish with a mean **-2.5%** one-day forecast,
+but the price then rallied to ~97 before rolling back to the stop. The model was
+overriding a swing trade inside its normal daily range (the vote bar was only
+1.8% down against a 4.93% ATR).
+
+`KRONOS_EXIT_MIN_ADVERSE_ATR=0.5` now defers an exit vote until the position is
+at least half an ATR underwater at the vote bar. NBR (entry 89.78, anchor
+88.17, ATR 4.93% → 1.8% < 2.5%) is deferred; the stop/trail owns deeper losses.
+The vote is still recorded in `kronos_exit_evidence`. This complements the
+R-based trail: the trade would have armed the 2R trail on the rally and exited
+near +1.6% instead of -2.57%.
