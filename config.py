@@ -221,6 +221,11 @@ class Settings(BaseSettings):
     kronos_exit_mode: str = "exit"
     # Votes needed to oppose an open position.
     kronos_exit_min_agree: int = 2
+    # Only honour an exit vote when the position is at least this many ATRs
+    # underwater at the vote bar. A one-day forecast otherwise cuts a swing
+    # trade inside its normal daily range (NBR 2026-08-12 exited at -1.8%,
+    # then rallied ~8% before rolling over).
+    kronos_exit_min_adverse_atr: float = 0.5
 
     # ── Vision ────────────────────────────────────────────────────────────
     anthropic_api_key: str = ""
@@ -492,7 +497,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "stop_loss_trail_r", "stop_loss_arm_r", "stop_loss_min_risk_frac",
-        "target_max_r", "min_signal_price_usd",
+        "target_max_r", "min_signal_price_usd", "kronos_exit_min_adverse_atr",
     )
     @classmethod
     def _clamp_non_negative(cls, value: float) -> float:

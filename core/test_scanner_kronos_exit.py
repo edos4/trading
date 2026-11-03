@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from config import settings
 from core.backtester import _check_exit, _open_trade
 from core.paper_trader import PaperAccount
 from core.scanner import MarketScanner
@@ -85,6 +86,48 @@ def test_confirm_and_no_opinion_hold(returns):
     assert scanner._paper.requests == []
     assert position.pending_exit_reason == ""
     assert scanner.stats["kronos_exits"] == 0
+
+
+def _oppose():
+    return SimpleNamespace(
+        decision="oppose", reason="2/3 forecasts against the BUY (need 2)")
+
+
+def test_shallow_loss_defers_a_kronos_exit(monkeypatch):
+    monkeypatch.setattr(settings, "kronos_exit_min_adverse_atr", 0.5)
+    position = _position("BUY")
+    position.entry_price = 89.78
+    scanner = _scanner("exit", None, [position])
+    scanner._handle_kronos_exit(position, _oppose(), {
+        "anchor_close": 88.17, "atr_pct": 4.93, "decision": "oppose",
+    })
+    assert scanner._paper.requests == []
+    assert scanner.stats["kronos_exit_deferred"] == 1
+    assert position.pending_exit_reason == ""
+
+
+def test_profitable_position_is_not_exited_on_noise(monkeypatch):
+    monkeypatch.setattr(settings, "kronos_exit_min_adverse_atr", 0.5)
+    position = _position("BUY")
+    position.entry_price = 95.0
+    scanner = _scanner("exit", None, [position])
+    scanner._handle_kronos_exit(position, _oppose(), {
+        "anchor_close": 97.0, "atr_pct": 4.0, "decision": "oppose",
+    })
+    assert scanner._paper.requests == []
+    assert scanner.stats["kronos_exit_deferred"] == 1
+
+
+def test_deep_loss_still_honours_the_exit(monkeypatch):
+    monkeypatch.setattr(settings, "kronos_exit_min_adverse_atr", 0.5)
+    position = _position("BUY")
+    position.entry_price = 100.0
+    scanner = _scanner("exit", None, [position])
+    scanner._handle_kronos_exit(position, _oppose(), {
+        "anchor_close": 94.0, "atr_pct": 4.0, "decision": "oppose",
+    })
+    assert scanner._paper.requests == [(position, "kronos_exit")]
+    assert scanner.stats["kronos_exits"] == 1
 
 
 def test_shadow_records_without_exiting():
