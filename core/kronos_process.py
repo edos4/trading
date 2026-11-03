@@ -9,6 +9,7 @@ model loads on a 16 GB card must never overlap.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tempfile
 import threading
@@ -62,6 +63,18 @@ def run_worker(
     if not GPU_LOCK.acquire(blocking=False):
         raise KronosBusy("A Kronos forecast is already running.")
 
+    # Settings are read from .env by this process only; the worker is a plain
+    # subprocess, so forward its device choice explicitly. An operator's
+    # exported KRONOS_DEVICE wins over the .env value.
+    env = os.environ.copy()
+    if "KRONOS_DEVICE" not in env:
+        try:
+            from config import settings
+
+            env["KRONOS_DEVICE"] = settings.kronos_device
+        except Exception:
+            env["KRONOS_DEVICE"] = "auto"
+
     tmp = tempfile.NamedTemporaryFile(
         prefix=f"{label}_", suffix=".json", delete=False,
     )
@@ -74,6 +87,7 @@ def run_worker(
             capture_output=True,
             text=True,
             timeout=timeout_s,
+            env=env,
         )
         if proc.returncode != 0 or not tmp_path.exists() or tmp_path.stat().st_size == 0:
             detail = (proc.stderr or proc.stdout or "").strip().splitlines()

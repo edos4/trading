@@ -119,3 +119,57 @@ def test_as_naive_timestamp():
     assert as_naive_timestamp(pd.Timestamp("2026-06-01", tz="UTC")) == pd.Timestamp("2026-06-01")
     assert as_naive_timestamp(pd.Timestamp("2026-06-01")) == pd.Timestamp("2026-06-01")
     assert as_naive_timestamp(pd.Timestamp("2026-06-01").date()) == pd.Timestamp("2026-06-01")
+
+
+def test_select_device_honours_explicit_cpu(monkeypatch):
+    import core.kronos_eval as ke
+
+    monkeypatch.setenv("KRONOS_DEVICE", "cpu")
+    assert ke.select_device() == "cpu"
+    assert ke.select_device("cpu") == "cpu"
+
+
+class OutOfMemoryError(RuntimeError):
+    """Name matters: `_is_cuda_oom` matches the exception class name."""
+
+
+def test_load_predictor_reports_the_device_it_used(monkeypatch):
+    import core.kronos_eval as ke
+
+    monkeypatch.setattr(ke, "select_device", lambda _=None: "cpu")
+    monkeypatch.setattr(
+        ke, "_load_predictor",
+        lambda device="cpu", use_finetuned=False: (device, use_finetuned),
+    )
+    assert ke.load_predictor(use_finetuned=True) == (("cpu", True), "cpu")
+
+
+def test_load_predictor_falls_back_to_cpu_on_cuda_oom(monkeypatch):
+    import core.kronos_eval as ke
+
+    calls = []
+
+    def fake_load(device="cpu", use_finetuned=False):
+        calls.append(device)
+        if device == "cuda":
+            raise OutOfMemoryError("CUDA out of memory")
+        return "predictor"
+
+    monkeypatch.setattr(ke, "select_device", lambda _=None: "cuda")
+    monkeypatch.setattr(ke, "_load_predictor", fake_load)
+    assert ke.load_predictor() == ("predictor", "cpu")
+    assert calls == ["cuda", "cpu"]
+
+
+def test_load_predictor_does_not_swallow_other_errors(monkeypatch):
+    import pytest
+
+    import core.kronos_eval as ke
+
+    def boom(device="cpu", use_finetuned=False):
+        raise RuntimeError("weights are corrupt")
+
+    monkeypatch.setattr(ke, "select_device", lambda _=None: "cuda")
+    monkeypatch.setattr(ke, "_load_predictor", boom)
+    with pytest.raises(RuntimeError, match="weights are corrupt"):
+        ke.load_predictor()

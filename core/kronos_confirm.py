@@ -242,6 +242,8 @@ class KronosConfirmGate:
         self._cache: dict[tuple, tuple[float, tuple[float, ...]]] = {}
         self.pending: list[PendingConfirm] = []
         self.pending_exits: list[PendingExit] = []
+        # Device the last worker call actually used (cuda or cpu fallback).
+        self.last_device: str | None = None
 
     # ── pending batch ────────────────────────────────────────────────────
     def prepare(self, signal, candle, df: pd.DataFrame | None) -> PendingConfirm | None:
@@ -353,6 +355,9 @@ class KronosConfirmGate:
             timeout_s=self.timeout_s,
             label="confirm",
         )
+        device = payload.get("device")
+        if isinstance(device, str) and device:
+            self.last_device = device
         rows = payload.get("results")
         if not isinstance(rows, list):
             raise KronosError("confirm worker returned no results")
@@ -516,6 +521,7 @@ def _evidence(
         "mode": gate.mode if scope == "entry" else gate.exit_mode,
         "scope": scope,
         "model": gate.model,
+        "device": gate.last_device,
         "samples": gate.samples,
         "cached": bool(cached),
     }

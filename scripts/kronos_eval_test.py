@@ -494,9 +494,9 @@ def run(
         )
 
     if device is None:
-        import torch
+        from core.kronos_eval import select_device
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = select_device()
 
     if sample_count is None:
         sample_count = 1

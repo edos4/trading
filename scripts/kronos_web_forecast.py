@@ -183,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Load each model once, then forecast every symbol from it.
     sys.path.insert(0, str(Path.home() / "Kronos"))
-    from core.kronos_eval import _load_predictor
+    from core.kronos_eval import load_predictor
 
     if frames:
         for tag, use_ft in (("base", False), ("finetuned", True)):
@@ -192,7 +192,8 @@ def main(argv: list[str] | None = None) -> int:
                     f"Kronos-web | loading {tag} for "
                     f"{len(frames)} symbol(s) +{args.days}d ..."
                 )
-                predictor = _load_predictor(device="cuda", use_finetuned=use_ft)
+                predictor, device = load_predictor(use_finetuned=use_ft)
+                log.info(f"Kronos-web | {tag} on {device}")
             except Exception as exc:  # a missing/broken model must not hide bars
                 log.exception(f"Kronos-web | {tag} model failed to load")
                 for sym in frames:
@@ -207,9 +208,10 @@ def main(argv: list[str] | None = None) -> int:
                     log.exception(f"Kronos-web | {sym} {tag} failed")
                     results[sym]["errors"][tag] = f"{type(exc).__name__}: {exc}"
             del predictor
-            import torch as _torch
+            if device == "cuda":
+                import torch as _torch
 
-            _torch.cuda.empty_cache()
+                _torch.cuda.empty_cache()
 
     for entry in results.values():
         if not entry["errors"]:

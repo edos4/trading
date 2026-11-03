@@ -175,6 +175,11 @@ class Settings(BaseSettings):
     kronos_gate_samples: int = 3
     # Which checkpoint the GPU worker loads (never both).
     kronos_gate_model: str = "finetuned"
+    # Torch device for every Kronos worker (confirm gate + web tab):
+    # auto = CUDA when it has headroom, else CPU; cuda = require the GPU;
+    # cpu = always CPU. A local LLM server on the same card can hold nearly all
+    # VRAM, so auto degrades instead of failing with CUDA out-of-memory.
+    kronos_device: str = "auto"
     # Sideways dead zone: band = clamp(k × ATR%(14), min, max).
     kronos_gate_sideways_atr: float = 0.35
     kronos_gate_sideways_min_pct: float = 0.25
@@ -492,6 +497,14 @@ class Settings(BaseSettings):
         if model not in ("base", "finetuned"):
             raise ValueError("KRONOS_GATE_MODEL must be base or finetuned")
         return model
+
+    @field_validator("kronos_device")
+    @classmethod
+    def _normalize_kronos_device(cls, value: str) -> str:
+        device = (value or "auto").strip().lower()
+        if device not in ("auto", "cuda", "cpu"):
+            raise ValueError("KRONOS_DEVICE must be auto, cuda, or cpu")
+        return device
 
     @field_validator("kronos_exit_mode")
     @classmethod
