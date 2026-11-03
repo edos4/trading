@@ -12,6 +12,7 @@ Usage:
     python main.py --backtest 50 --volume-gate-compare  # A/B: gate OFF vs ON
     python main.py --paper                          # Paper trade top 50 liquid symbols (simulated fills)
     python main.py --paper --paper-reset            # ...starting from a fresh virtual account
+    python main.py --paper --patterns-v2            # ...with the Patternsv2 detectors (UI's Patternsv2 box)
     python main.py --paper --symbols=500 --pattern-only --collect-first=4 \\
         --stream=01/05/2026 --duration-days=30 --export-trades-log=output_trades.json
                                                     # 500-name paper stream from 2026-01-05, 30 sessions,
@@ -208,6 +209,7 @@ async def run_paper(
     *,
     volume_gate: bool | None = None,
     pattern_only: bool = False,
+    patterns_v2: bool = False,
     market: str | None = None,
     collect_first: bool | None = None,
     collect_first_top_n: int | None = None,
@@ -266,7 +268,7 @@ async def run_paper(
         stream_start=effective_stream_start,
         volume_gate=use_volume,
         pattern_only=pattern_only,
-        patterns_v2=False,
+        patterns_v2=patterns_v2,
         collect_first=cf_on,
         collect_first_top_n=cf_n,
         duration_days=duration_days,
@@ -352,6 +354,7 @@ async def run_paper(
             scan_interval_seconds=scan_interval if use_stream else None,
             volume_gate=use_volume,
             pattern_only=pattern_only,
+            patterns_v2=patterns_v2,
             market=profile.id,
             collect_first=collect_first,
             collect_first_top_n=collect_first_top_n,
@@ -573,6 +576,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Skip min share-price, SMA200 regime, min confidence, cooldown, "
         "and long-only. The volume confirm gate defaults OFF unless "
         "--volume-gate is passed. Use with --backtest / --paper.",
+    )
+    parser.add_argument(
+        "--patterns-v2",
+        action="store_true",
+        help="Use the Patternsv2 detector family (also marks the run's export "
+        "settings as Patternsv2=ON). Use with --paper.",
     )
     parser.add_argument(
         "--symbols",
@@ -856,6 +865,9 @@ async def main(args: argparse.Namespace | None = None) -> None:
     if args.duration_days is not None and args.paper is None:
         log.error("--duration-days requires --paper")
         raise SystemExit(2)
+    if args.patterns_v2 and args.paper is None:
+        log.error("--patterns-v2 requires --paper")
+        raise SystemExit(2)
     if args.duration_days is not None and args.duration_days < 1:
         log.error("--duration-days must be >= 1")
         raise SystemExit(2)
@@ -879,6 +891,7 @@ async def main(args: argparse.Namespace | None = None) -> None:
             reset=args.paper_reset,
             volume_gate=True if args.volume_gate else None,
             pattern_only=args.pattern_only,
+            patterns_v2=args.patterns_v2,
             market=args.market,
             collect_first=collect_first,
             collect_first_top_n=collect_first_top_n,

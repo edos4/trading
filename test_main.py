@@ -51,3 +51,37 @@ def test_real_failures_still_propagate(monkeypatch):
     monkeypatch.setattr(main_module, "main", boom)
     with pytest.raises(RuntimeError, match="real failure"):
         main_module._run_async_entry(object())
+
+
+def test_patterns_v2_flag_reaches_the_paper_run(monkeypatch):
+    import main as main_module
+
+    captured = {}
+
+    async def fake_run_paper(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(main_module, "run_paper", fake_run_paper)
+    asyncio.run(main_module.main(main_module._parse_args(["--paper", "--patterns-v2"])))
+    assert captured["patterns_v2"] is True
+
+
+def test_patterns_v2_is_off_unless_asked(monkeypatch):
+    import main as main_module
+
+    captured = {}
+
+    async def fake_run_paper(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(main_module, "run_paper", fake_run_paper)
+    asyncio.run(main_module.main(main_module._parse_args(["--paper"])))
+    assert captured["patterns_v2"] is False
+
+
+def test_patterns_v2_without_paper_is_rejected():
+    import main as main_module
+
+    with pytest.raises(SystemExit) as exc:
+        asyncio.run(main_module.main(main_module._parse_args(["--patterns-v2"])))
+    assert exc.value.code == 2

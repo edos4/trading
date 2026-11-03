@@ -114,11 +114,12 @@ python main.py --paper --symbols=500 --pattern-only --collect-first=4 \
 | `--paper` | Paper ledger + scanner (optional `N` is universe size, default 50) |
 | `--symbols=N` | Universe size; overrides the optional `N` on `--paper` / `--backtest` |
 | `--collect-first=N` | Collect chart-pattern hits for the scan, rank by R:R, open only the top N (default `COLLECT_FIRST_TOP_N`). Bare `--collect-first` uses the `.env` default |
+| `--patterns-v2` | Use the Patternsv2 detector family (same as the web Paper tab's **Patternsv2** box). The export's `settings.patterns_v2` / `Patternsv2=ON` then reflect it |
 | `--stream=DATE` | Replay daily bars from DATE. Auto-starts `main.py --papertrade-stream`. Resume a saved ledger from its last sim date when that date is later than DATE |
 | `--duration-days=N` | Stop after N unique market sessions (with `--stream`, N replayed daily bars). `--stream=01/05/2026 --duration-days=30` replays ~30 trading days then exits |
 | `--export-trades-log=PATH` | On exit (including Ctrl+C after the scan loop unwinds), write open + closed trades JSON — same schema as the UI **Export Trades** button |
 
-`--stream`, `--duration-days`, and `--export-trades-log` require `--paper`. You can still run the
+`--stream`, `--duration-days`, `--patterns-v2`, and `--export-trades-log` require `--paper`. You can still run the
 stream server on its own with `python main.py --papertrade-stream` and point
 the UI at it; the combined `--paper --stream=...` form is for unattended CLI
 replays.
