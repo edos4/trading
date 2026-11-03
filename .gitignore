@@ -31,6 +31,9 @@ data/barcache_flag/
 backtest_*_[0-9]*.json
 backtest_*_[0-9]*.txt
 
+# self-improving loop: per-run exports, scores, logs (never committed)
+runs/
+logs/si/
 # for designer
 deploy/designer
 frontend
