@@ -1,6 +1,19 @@
 # Paper trade post-mortem — `pt.json`
 
-Export: `2026-11-03T05:59:02Z` (`filter: all`). Only the **US book** has data:
+> **Status update — the ledger moved while this was acted on.** `pt.json` is a
+> live paper-stream output. The committed file is now the **17-trade
+> `2026-11-03T02:18:56Z` export: -$2,326.09, 23.5% win rate, PF 0.667** — not
+> the 18-trade `05:59Z` snapshot below. The ledger **flipped sides**: shorts are
+> **+$1,047.12** (`double_top` 2/8, **+$1,233.48**) and longs are **-$3,373.21**,
+> dominated by one real **-40% overnight gap** (EFOR, -$4,041.28). Therefore the
+> "stop trading shorts" and "exclude `double_top`" conclusions **do not survive**
+> and were **not** shipped as defaults. The surviving, ledger-independent finding
+> is the trail/stop scale mismatch (still 0 trailing exits). See **Implementation
+> status** at the end. Keep validating on a frozen ledger; do not tune on a live
+> file.
+
+**Snapshot A (superseded, retained for the analysis).** Export:
+`2026-11-03T05:59:02Z` (`filter: all`). Only the **US book** had data:
 **18 closed, 0 open**. The PH book is empty (0 rows), so nothing below applies to
 PSE. All figures are USD.
 
@@ -227,3 +240,38 @@ Note: `scripts/replay_pt_exits.py` is currently stale for this export — it
 requires exactly one frozen tape per symbol (symbols now have 2–10) and it
 hard-codes the old 5%/5% trail. It fails before replaying. Fix it before using
 it as the regression harness for any of the changes above.
+
+## Implementation status (2026-11-03)
+
+Re-checked against the current committed ledger (`pt.json`,
+`2026-11-03T02:18:56Z`, 17 closed):
+
+| Metric | Value |
+|---|---:|
+| Net P&L | **-$2,326.09** |
+| Win rate / profit factor | 23.5% / 0.667 |
+| Longs | -$3,373.21 (`double_bottom` 2/8) |
+| Shorts | **+$1,047.12** (`double_top` 2/8, +$1,233.48) |
+| Exits | 11 stop_loss, 4 kronos_exit, 2 take_profit |
+| Largest loss | EFOR -$4,041.28 (real -40% gap: 40.43 close → 24.30 open) |
+| Trail vs executed risk | 8–16% vs 0.7–3% → **0 trailing exits** |
+
+| # | Recommendation | Disposition |
+|---|---|---|
+| 1 | Trail in R of the executed stop | **Shipped.** `STOP_LOSS_TRAIL_R` / `STOP_LOSS_ARM_R` (2/2) set in `_apply_fixed_stop`, then re-derived from the effective fill risk in `opening_candidate`. Restores the documented invariant; P&L effect on this ledger is mixed because a 2R trail cuts target-bound winners. |
+| 2 | Gap / minimum-risk guard | **Shipped.** `STOP_LOSS_MIN_RISK_FRAC=0.5` rejects a fill left with <1.5% of the planned 3% risk. Removes OXM (-$129.84) and KOS (-$93.70) from the current ledger. |
+| 3 | Cap/scale the target | **Knob only, off.** `TARGET_MAX_R=0`. The current winners are 5.2R (RUM) and 12.4R (UPXI); a 3R cap would have cut them. |
+| 4 | Turn risk sizing on | **Env-gated, off.** `TRADING_RISK_PCT=0`. EFOR shows sizing to the stop does not cap an overnight-gap loss and can enlarge notional; decide after event-risk handling. |
+| 5 | Stop shorts / exclude double_top | **Withdrawn.** Shorts are the profitable side now; `SHORT_ENTRIES_ENABLED=true`. The kill-switch remains for a long-only paper book. |
+| 6 | Shadow the DII gate | **Shipped.** `DII_GATE_SHADOW=false`; when on, the rejection is logged with status `shadow` and the entry continues. |
+| 7 | Price/liquidity floor | **Knob only, off.** `MIN_SIGNAL_PRICE_USD=0`. The sub-$10 cohort is +$2,989 and holds UPXI and RUM; a $10 floor would remove the winners. |
+| 8 | Independent-period validation | **Still required.** The ledger flip is the proof: every side/pattern conclusion changed within one replay. Freeze the ledger before the next tuning pass. |
+
+### Gap risk is now the headline, not stop width
+
+EFOR closed 40.43 and opened 24.30 the next session (10.0M shares vs ~0.55M);
+the 3% stop could only fill at the gap. That one trade is **174% of the book's
+net loss**. A percentage stop cannot protect against this, and widening or
+tightening it changes nothing. The relevant controls are event/earnings
+avoidance and a per-trade notional or gap cap — neither was in the original
+note.
