@@ -1318,9 +1318,15 @@ def create_app() -> FastAPI:
                 index = int(index_raw)
             except ValueError:
                 return JSONResponse({"detail": "index must be an integer"}, status_code=400)
+        timeframe = (request.query_params.get("timeframe") or "").strip() or None
+        if timeframe is not None and timeframe not in ("1d", "1W"):
+            return JSONResponse(
+                {"detail": "timeframe must be 1d or 1W."}, status_code=400,
+            )
         result = paper_books.chart(
             market, side=side, symbol=symbol, index=index,
             log_time=request.query_params.get("log_time") or None,
+            timeframe=timeframe,
             **({"trade_id":request.query_params["trade_id"]} if request.query_params.get("trade_id") else {}),
         )
         if result.get("error"):
