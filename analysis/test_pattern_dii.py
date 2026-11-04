@@ -26,11 +26,17 @@ def _state(bulls, bears):
             'up': pd.Series([1.0]), 'down': pd.Series([1.0])}
 
 
-@pytest.mark.parametrize('action', ['BUY', 'SELL'])
-@pytest.mark.parametrize('value,accepted', [
-    (16, True), (20, True), (30, True), (40, True), (45, True),
-    (15.999, False), (45.001, False), (0, False), (50, False),
-    (60, False), (100, False), (np.nan, False),
+@pytest.mark.parametrize('action,value,accepted', [
+    ('BUY', 16, True), ('BUY', 20, True), ('BUY', 30, True),
+    ('BUY', 40, True), ('BUY', 45, True),
+    ('BUY', 15.999, False), ('BUY', 45.001, False), ('BUY', 0, False),
+    ('BUY', 50, False), ('BUY', 60, False), ('BUY', 100, False),
+    ('BUY', np.nan, False),
+    ('SELL', 16, True), ('SELL', 20, True), ('SELL', 30, True),
+    ('SELL', 40, True), ('SELL', 42, True),
+    ('SELL', 15.999, False), ('SELL', 42.001, False), ('SELL', 45, False),
+    ('SELL', 0, False), ('SELL', 50, False), ('SELL', 60, False),
+    ('SELL', 100, False), ('SELL', np.nan, False),
 ])
 def test_inclusive_side_band(monkeypatch, action, value, accepted):
     # BUY reads the bullish percentage; SELL reads the bearish percentage.
@@ -55,7 +61,7 @@ def test_inclusive_side_band(monkeypatch, action, value, accepted):
 
 
 def test_bands_do_not_overlap(monkeypatch):
-    """The 45% boundary is not shared: 45/55 passes only BUY, 55/45 only SELL."""
+    """45/55 passes only BUY, 58/42 only SELL, and the 45–58 middle passes neither."""
 
     def reason_for(bulls, bears, action):
         monkeypatch.setattr(
@@ -65,8 +71,10 @@ def test_bands_do_not_overlap(monkeypatch):
 
     assert reason_for(45, 55, 'BUY') is None
     assert reason_for(45, 55, 'SELL') is not None
-    assert reason_for(55, 45, 'SELL') is None
+    assert reason_for(58, 42, 'SELL') is None
+    assert reason_for(58, 42, 'BUY') is not None
     assert reason_for(55, 45, 'BUY') is not None
+    assert reason_for(55, 45, 'SELL') is not None
     assert reason_for(50, 50, 'BUY') is not None
     assert reason_for(50, 50, 'SELL') is not None
 
@@ -106,4 +114,4 @@ def test_zero_event_window_is_balanced(monkeypatch):
     assert describe_pattern_dii_rejection(frame(), action="BUY") == (
         'DII bullish percentage 50.00% outside required 16%–45% for BUY (20, 40).')
     assert describe_pattern_dii_rejection(frame(), action="SELL") == (
-        'DII bearish percentage 50.00% outside required 16%–45% for SELL (20, 40).')
+        'DII bearish percentage 50.00% outside required 16%–42% for SELL (20, 40).')
