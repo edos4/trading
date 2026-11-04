@@ -33,9 +33,10 @@ def _state(bulls, bears):
     ('BUY', 0, False),
     ('BUY', 50, False), ('BUY', 60, False), ('BUY', 100, False),
     ('BUY', np.nan, False),
-    ('SELL', 16, True), ('SELL', 20, True), ('SELL', 30, True),
+    ('SELL', 21, True), ('SELL', 22, True), ('SELL', 30, True),
     ('SELL', 40, True), ('SELL', 42, True),
-    ('SELL', 15.999, False), ('SELL', 42.001, False), ('SELL', 45, False),
+    ('SELL', 20.999, False), ('SELL', 20, False), ('SELL', 16, False),
+    ('SELL', 42.001, False), ('SELL', 45, False),
     ('SELL', 0, False), ('SELL', 50, False), ('SELL', 60, False),
     ('SELL', 100, False), ('SELL', np.nan, False),
 ])
@@ -76,6 +77,10 @@ def test_bands_do_not_overlap(monkeypatch):
     assert reason_for(45, 55, 'SELL') is not None
     assert reason_for(58, 42, 'SELL') is None
     assert reason_for(58, 42, 'BUY') is not None
+    assert reason_for(79, 21, 'SELL') is None
+    assert reason_for(79, 21, 'BUY') is not None
+    assert reason_for(80, 20, 'SELL') is not None
+    assert reason_for(80, 20, 'BUY') is not None
     assert reason_for(55, 45, 'BUY') is not None
     assert reason_for(55, 45, 'SELL') is not None
     assert reason_for(50, 50, 'BUY') is not None
@@ -117,4 +122,4 @@ def test_zero_event_window_is_balanced(monkeypatch):
     assert describe_pattern_dii_rejection(frame(), action="BUY") == (
         'DII bullish percentage 50.00% outside required 17%–40% for BUY (20, 40).')
     assert describe_pattern_dii_rejection(frame(), action="SELL") == (
-        'DII bearish percentage 50.00% outside required 16%–42% for SELL (20, 40).')
+        'DII bearish percentage 50.00% outside required 21%–42% for SELL (20, 40).')

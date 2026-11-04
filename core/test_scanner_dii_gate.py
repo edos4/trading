@@ -56,7 +56,7 @@ def test_both_pattern_scanners_gate_before_other_entry_checks(
             # 40% bulls sits inside the BUY band (bulls 17–40).
             frame = _frame_at(40.0, n=120)
         else:
-            # 60% bulls → 40% bears sits inside the SELL band (bears 16–42).
+            # 60% bulls → 40% bears sits inside the SELL band (bears 21–42).
             frame = _frame_at(60.0, n=120)
     else:
         frame = _frame_at(0.0, n=120)

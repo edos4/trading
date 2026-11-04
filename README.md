@@ -518,7 +518,7 @@ no saved Builder rule is required.
 indicators-only strategy, `indicator_support_resistance`, on daily and weekly
 bars. It trades the same pivot-anchored support/resistance rails drawn on trade
 charts, only while the DII is inside the same per-side consideration band: bullish
-17%–40% for BUY, bearish 16%–42% for SELL. A BUY
+17%–40% for BUY, bearish 21%–42% for SELL. A BUY
 needs a touch/hold of a confirmed, unbroken support rail; a SELL needs a
 rejection at a confirmed, unbroken resistance rail. The stop sits half an ATR
 beyond the rail and the target is the opposite rail when it is at least one R
