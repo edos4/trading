@@ -208,3 +208,31 @@ def test_entry_and_exit_share_one_worker_call():
     entries, exits = gate.flush_with_exits()
     assert calls == [["AAA", "BBB"]]
     assert len(entries) == 1 and len(exits) == 1
+
+
+def test_worker_calls_are_cut_at_each_replay_anchor(monkeypatch):
+    calls = []
+
+    def fake_run(script, args, *, timeout_s, label):
+        calls.append(list(args))
+        symbols = args[args.index("--symbols") + 1:args.index("--samples")]
+        return {
+            "results": [
+                {"symbol": symbol, "returns": [0.01, 0.02, -0.01]}
+                for symbol in symbols
+            ],
+        }
+
+    monkeypatch.setattr("core.kronos_confirm.run_worker", fake_run)
+    gate = KronosConfirmGate(mode="confirm", exit_mode="exit", cache_minutes=0)
+    gate.queue(_signal(symbol="AAA"), _candle(), None)
+    gate.prepare_exit([_position(symbol="BBB")], _candle(ts="2026-11-02"), None)
+    gate.flush_with_exits()
+
+    anchors = {}
+    for args in calls:
+        start = args.index("--symbols") + 1
+        symbols = tuple(args[start:args.index("--samples")])
+        anchor = args[args.index("--as-of") + 1] if "--as-of" in args else None
+        anchors[symbols] = anchor
+    assert anchors == {("AAA",): "2026-10-30", ("BBB",): "2026-11-02"}

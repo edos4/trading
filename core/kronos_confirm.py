@@ -342,16 +342,23 @@ class KronosConfirmGate:
         self._cache[key] = (self._now() + self.cache_minutes * 60.0, returns)
 
     # ── worker ───────────────────────────────────────────────────────────
-    def _fetch(self, symbols: list[str]) -> dict[str, tuple[float, ...]]:
+    def _fetch(
+        self, symbols: list[str], as_of: str | None = None,
+    ) -> dict[str, tuple[float, ...]]:
         if self._fetch_fn is not None:
             return self._fetch_fn(symbols)
+        args = [
+            "--symbols", *symbols,
+            "--samples", str(self.samples),
+            "--model", self.model,
+        ]
+        if as_of:
+            # A replay date is a hard information boundary. Without it the
+            # worker loads the live series and the vote sees future bars.
+            args += ["--as-of", as_of]
         payload = run_worker(
             self.worker_script,
-            [
-                "--symbols", *symbols,
-                "--samples", str(self.samples),
-                "--model", self.model,
-            ],
+            args,
             timeout_s=self.timeout_s,
             label="confirm",
         )
@@ -409,24 +416,36 @@ class KronosConfirmGate:
         symbols = list(missing)
         checked = symbols[: self.max_checks_per_scan]
         over_cap = set(symbols[self.max_checks_per_scan:])
-        failure: str | None = None
+        failures: dict[str, str] = {}
         fetched: dict[str, tuple[float, ...]] = {}
         if checked:
-            try:
-                result = self._fetch(checked)
-                if not isinstance(result, dict):
-                    failure = "Kronos worker returned no payload"
-                else:
-                    fetched = result
-            except KronosUnavailable as exc:
-                failure = f"Kronos unavailable: {exc}"
-            except KronosBusy as exc:
-                failure = f"Kronos busy: {exc}"
-            except KronosError as exc:
-                failure = f"Kronos worker error: {exc}"
-            except Exception as exc:
-                log.exception("Kronos confirm | worker call failed")
-                failure = f"Kronos worker error: {exc}"
+            # One call per replay date: the batch may mix entry and exit votes,
+            # but every symbol must be cut at its own anchor bar.
+            groups: dict[str | None, list[str]] = {}
+            for symbol in checked:
+                as_of = missing[symbol].anchor_date or None
+                groups.setdefault(as_of, []).append(symbol)
+            for as_of, group in groups.items():
+                try:
+                    result = self._fetch(group, as_of=as_of)
+                    if not isinstance(result, dict):
+                        for symbol in group:
+                            failures[symbol] = "Kronos worker returned no payload"
+                    else:
+                        fetched.update(result)
+                except KronosUnavailable as exc:
+                    for symbol in group:
+                        failures[symbol] = f"Kronos unavailable: {exc}"
+                except KronosBusy as exc:
+                    for symbol in group:
+                        failures[symbol] = f"Kronos busy: {exc}"
+                except KronosError as exc:
+                    for symbol in group:
+                        failures[symbol] = f"Kronos worker error: {exc}"
+                except Exception as exc:
+                    log.exception("Kronos confirm | worker call failed")
+                    for symbol in group:
+                        failures[symbol] = f"Kronos worker error: {exc}"
             for symbol in checked:
                 returns = fetched.get(symbol)
                 if not returns:
@@ -438,7 +457,9 @@ class KronosConfirmGate:
         def _miss_reason(item: PendingConfirm | PendingExit) -> str:
             if item.symbol in over_cap:
                 return "Kronos check cap reached"
-            return failure or f"no forecast for {item.symbol}"
+            if item.symbol in failures:
+                return failures[item.symbol]
+            return f"no forecast for {item.symbol}"
 
         entry_rows: list[tuple[object, object, ConfirmVerdict, dict]] = []
         for item in entries:
