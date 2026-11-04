@@ -478,9 +478,9 @@ uses them two ways:
 
 **Mandatory DII gate for Patterns and Patternsv2.** Every detected pattern entry
 must pass a breadth band on the side it trades, using DII defaults (20, 40) on
-the scanned timeframe. A **BUY requires a bullish percentage between 16% and
-40%**, inclusive; a **SELL requires a bearish percentage between 16% and 42%**,
-inclusive (equivalently 58%–84% bulls). Because bulls and bears sum to 100, the
+the scanned timeframe. A **BUY requires a bullish percentage between 17% and
+40%**, inclusive; a **SELL requires a bearish percentage between 23% and 42%**,
+inclusive (equivalently 58%–77% bulls). Because bulls and bears sum to 100, the
 two bands do not overlap: the 40%–58% middle passes neither side. This covers the support/resistance-based pattern entries too, so a
 level is only traded in the band matching its direction. Outside-band or invalid
 readings skip the entry. Short history (fewer than 60 candles, e.g. while bulk
@@ -518,7 +518,7 @@ no saved Builder rule is required.
 indicators-only strategy, `indicator_support_resistance`, on daily and weekly
 bars. It trades the same pivot-anchored support/resistance rails drawn on trade
 charts, only while the DII is inside the same per-side consideration band: bullish
-17%–40% for BUY, bearish 21%–42% for SELL. A BUY
+17%–40% for BUY, bearish 23%–42% for SELL. A BUY
 needs a touch/hold of a confirmed, unbroken support rail; a SELL needs a
 rejection at a confirmed, unbroken resistance rail. The stop sits half an ATR
 beyond the rail and the target is the opposite rail when it is at least one R
