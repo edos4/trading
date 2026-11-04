@@ -27,9 +27,9 @@ def _state(bulls, bears):
 
 
 @pytest.mark.parametrize('action,value,accepted', [
-    ('BUY', 16, True), ('BUY', 20, True), ('BUY', 30, True),
+    ('BUY', 17, True), ('BUY', 20, True), ('BUY', 30, True),
     ('BUY', 40, True),
-    ('BUY', 15.999, False), ('BUY', 40.001, False), ('BUY', 45, False),
+    ('BUY', 16.999, False), ('BUY', 16, False), ('BUY', 40.001, False), ('BUY', 45, False),
     ('BUY', 0, False),
     ('BUY', 50, False), ('BUY', 60, False), ('BUY', 100, False),
     ('BUY', np.nan, False),
@@ -105,7 +105,7 @@ def test_actual_calculation_and_unavailable():
     contracting = frame()
     contracting['high'], contracting['low'] = 500 - np.arange(100.), np.arange(100.)
     assert describe_pattern_dii_rejection(contracting) == (
-        'DII bullish percentage 50.00% outside required 16%–40% for BUY (20, 40).')
+        'DII bullish percentage 50.00% outside required 17%–40% for BUY (20, 40).')
 
 
 def test_zero_event_window_is_balanced(monkeypatch):
@@ -115,6 +115,6 @@ def test_zero_event_window_is_balanced(monkeypatch):
         lambda self, *args: {'bulls': pd.Series([np.nan]), 'bears': pd.Series([np.nan]),
                              'up': zero, 'down': zero})
     assert describe_pattern_dii_rejection(frame(), action="BUY") == (
-        'DII bullish percentage 50.00% outside required 16%–40% for BUY (20, 40).')
+        'DII bullish percentage 50.00% outside required 17%–40% for BUY (20, 40).')
     assert describe_pattern_dii_rejection(frame(), action="SELL") == (
         'DII bearish percentage 50.00% outside required 16%–42% for SELL (20, 40).')

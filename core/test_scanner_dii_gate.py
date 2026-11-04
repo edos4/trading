@@ -53,7 +53,7 @@ def test_both_pattern_scanners_gate_before_other_entry_checks(
     scanner = MarketScanner(symbols=['TEST'], market='us', patterns_v2=patterns_v2, volume_gate=False)
     if direction == 'flat':
         if action == 'BUY':
-            # 40% bulls sits inside the BUY band (bulls 16–40).
+            # 40% bulls sits inside the BUY band (bulls 17–40).
             frame = _frame_at(40.0, n=120)
         else:
             # 60% bulls → 40% bears sits inside the SELL band (bears 16–42).

@@ -35,7 +35,7 @@ def _pin_dii_bands_around_the_fixture_read(monkeypatch):
     """The subject here is *which bar* the gate reads, not the band values.
 
     Every fixture below is a flat prefix (50% DII), which sits outside both the
-    live BUY band (bullish 16–40) and the live SELL band (bearish 16–42), so with
+    live BUY band (bullish 17–40) and the live SELL band (bearish 16–42), so with
     the live bands neither accepted case could fire. Pin both sides to 40–60 for
     this module and leave the band values to `analysis/test_pattern_dii.py`.
     """
