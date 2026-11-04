@@ -83,10 +83,10 @@ class Settings(BaseSettings):
     # Cancel a next-open fill when an adverse gap leaves less than this
     # fraction of the planned stop distance. 0 disables the guard.
     stop_loss_min_risk_frac: float = 0.5
-    # Cap a measured-move target at N R of the executed stop. 3.0 banks an
-    # armed winner once it has earned 3R instead of handing ~1R back to the
+    # Cap a measured-move target at N R of the executed stop. 2.0 banks an
+    # armed winner once it has earned 2R instead of handing ~1R back to the
     # trail; 0 keeps the pattern's own target.
-    target_max_r: float = 3.0
+    target_max_r: float = 2.0
     # Reject US pattern entries below this price (0 disables). Off by default:
     # the current ledger's sub-$10 cohort is +$2,989 and holds the two biggest
     # winners (UPXI, RUM).
