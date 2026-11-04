@@ -33,9 +33,10 @@ def _state(bulls, bears):
     ('BUY', 0, False),
     ('BUY', 50, False), ('BUY', 60, False), ('BUY', 100, False),
     ('BUY', np.nan, False),
-    ('SELL', 23, True), ('SELL', 24, True), ('SELL', 30, True),
+    ('SELL', 26, True), ('SELL', 27, True), ('SELL', 30, True),
     ('SELL', 40, True), ('SELL', 42, True),
-    ('SELL', 22.999, False), ('SELL', 22, False), ('SELL', 21, False), ('SELL', 16, False),
+    ('SELL', 25.999, False), ('SELL', 25, False), ('SELL', 23, False),
+    ('SELL', 22, False), ('SELL', 21, False), ('SELL', 16, False),
     ('SELL', 42.001, False), ('SELL', 45, False),
     ('SELL', 0, False), ('SELL', 50, False), ('SELL', 60, False),
     ('SELL', 100, False), ('SELL', np.nan, False),
@@ -79,8 +80,12 @@ def test_bands_do_not_overlap(monkeypatch):
     assert reason_for(58, 42, 'BUY') is not None
     assert reason_for(79, 21, 'SELL') is not None
     assert reason_for(79, 21, 'BUY') is not None
-    assert reason_for(77, 23, 'SELL') is None
+    assert reason_for(77, 23, 'SELL') is not None
     assert reason_for(77, 23, 'BUY') is not None
+    assert reason_for(75, 25, 'SELL') is not None
+    assert reason_for(75, 25, 'BUY') is not None
+    assert reason_for(74, 26, 'SELL') is None
+    assert reason_for(74, 26, 'BUY') is not None
     assert reason_for(78, 22, 'SELL') is not None
     assert reason_for(78, 22, 'BUY') is not None
     assert reason_for(55, 45, 'BUY') is not None
@@ -100,7 +105,7 @@ def test_actual_calculation_and_unavailable():
     assert '100.00%' in describe_pattern_dii_rejection(falling, action="SELL")
     assert 'bearish' in describe_pattern_dii_rejection(falling, action="SELL")
 
-    bullish_tape = _frame(100 + np.cumsum(np.random.default_rng(0).normal(0.05, 1, 120)))
+    bullish_tape = _frame(100 + np.cumsum(np.random.default_rng(7).normal(0.05, 1, 120)))
     assert describe_pattern_dii_rejection(bullish_tape, action="SELL") is None
     assert describe_pattern_dii_rejection(bullish_tape, action="BUY") is not None
 
@@ -124,4 +129,4 @@ def test_zero_event_window_is_balanced(monkeypatch):
     assert describe_pattern_dii_rejection(frame(), action="BUY") == (
         'DII bullish percentage 50.00% outside required 17%–40% for BUY (20, 40).')
     assert describe_pattern_dii_rejection(frame(), action="SELL") == (
-        'DII bearish percentage 50.00% outside required 23%–42% for SELL (20, 40).')
+        'DII bearish percentage 50.00% outside required 26%–42% for SELL (20, 40).')

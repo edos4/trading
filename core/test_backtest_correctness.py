@@ -119,7 +119,7 @@ def test_multisymbol_scanner_and_replay_match_top_four_gates_and_equity(monkeypa
     import analysis.price_volume
     symbols = ['AAA','BBB','CCC','DDD','EEE','FFF']
     # Flat bars read 50% DII: outside both live pattern bands (bullish 17–40 for
-    # BUY, bearish 23–42 for SELL), so the live gate would reject every BUY
+    # BUY, bearish 26–42 for SELL), so the live gate would reject every BUY
     # signal here. Pin the BUY band open so both engines get the same gate
     # outcome — StreamReplay has no DII gate at all, so a rejecting fixture would
     # diverge on the gate rather than on the top-four/equity logic this test
