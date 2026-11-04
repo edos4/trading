@@ -141,17 +141,24 @@ stream from a fresh ledger → score the export deterministically → have
 → commit only a verified improvement, otherwise revert and try again.
 
 ```bash
-./si.sh                                # 5 iterations, stops after 2 non-improving
-SI_MAX_ITERATIONS=20 ./si.sh           # longer campaign
-SI_MIN_CLOSED=30 ./si.sh               # demand a bigger sample before judging
+./si.sh                                # unlimited iterations, stops after 2 non-improving
+SI_MAX_STALE=0 ./si.sh                 # never stop; NN just keeps counting up
+SI_MIN_CLOSED=10 ./si.sh               # demand a bigger sample before judging
+SI_STREAM_START=2026-02-04 ./si.sh     # wider replay window (9 months)
 ```
 
+Run numbers never restart or repeat (`runs/NN` is always `max+1`), and a
+supervisor relaunches the loop after any unexpected exit — lock, ledger backup
+and pin manifest live in the supervisor, so they survive relaunches. Only a
+`SIGINT`/`SIGTERM` or the no-progress brake ends the campaign.
+
 Every iteration replays exactly (`--paper-reset` each time, so runs are
-comparable):
+comparable) over the last 6 months (`SI_STREAM_START`, default `date -d '6
+months ago'`):
 
 ```bash
 VOLUME_GATE_ENABLED=false .venv/bin/python main.py --paper --patterns-v2 --paper-reset \
-  --market us --symbols=2000 --stream=2025-11-03 --kronos-gate-mode off \
+  --market us --symbols=2000 --stream="$SI_STREAM_START" --kronos-gate-mode off \
   --export-trades-log=runs/NN/pt.json
 ```
 
@@ -160,11 +167,14 @@ VOLUME_GATE_ENABLED=false .venv/bin/python main.py --paper --patterns-v2 --paper
   export alone. It is hash-pinned in `runs/.si_manifest` together with `si.sh`
   and the two agent prompts, so neither agent can rewrite the judge
   (`SI_REPIN=1` re-pins after a deliberate edit). A run is **invalid** below
-  `SI_MIN_CLOSED` closed trades (default 10; raise it for stricter evidence).
+  `SI_MIN_CLOSED` closed trades (default 4, which is what the 6-month window
+  yields; raise it for stricter evidence).
 - **Improvement rule** — vs the best accepted run: win rate `>=`, profit factor
   `>=`, at least one of the two strictly better, and trade count within ±25%.
   Win rate bought by trading less, or a no-op rerun, is rejected. Accepted
-  scores are copied to `runs/accepted/NN.json`.
+  scores are copied to `runs/accepted/NN.json`; scores produced on a different
+  replay window live in `runs/accepted/<window>/` and are never used as a
+  reference.
 - **Artifacts** — `runs/NN/{pt.json,score_before.json,pt_after.json,score_after.json,findings.md,change.md,run.md}`,
   a `runs/leaderboard.md` row per iteration, and `logs/si/NN.log`. All gitignored;
   only code/config is committed (no AI attribution, no run data).
@@ -176,9 +186,9 @@ VOLUME_GATE_ENABLED=false .venv/bin/python main.py --paper --patterns-v2 --paper
   waiting for a human. Don't run the web Paper desk or another replay against
   the US ledger while `si.sh` is running — it owns that ledger during an
   iteration.
-- **Tunables** — `SI_MAX_ITERATIONS`, `SI_MAX_STALE`, `SI_MIN_CLOSED`,
-  `SI_REPLAY_TIMEOUT`, `SI_AGENT_TIMEOUT`, `SI_AGENT_MODEL`, `SI_CMD_BIN`,
-  `SI_REPIN`.
+- **Tunables** — `SI_MAX_STALE` (`0` = never stop), `SI_MIN_CLOSED`,
+  `SI_STREAM_START`, `SI_RELAUNCH_BACKOFF`, `SI_REPLAY_TIMEOUT`,
+  `SI_AGENT_TIMEOUT`, `SI_AGENT_MODEL`, `SI_CMD_BIN`, `SI_REPIN`.
 
 ## Backtesting
 
