@@ -77,21 +77,35 @@ def load_daily_ohlcv_rows_bulk(
     except Exception:
         return None
     try:
-        sql = (
-            "SELECT symbol, ts, bar_date, open, high, low, close, volume FROM ("
-            "SELECT symbol, ts, bar_date, open, high, low, close, volume, "
-            "ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY ts DESC) AS rn "
-            "FROM daily_bars WHERE symbol = ANY(%s)"
-        )
-        params: list[Any] = [wanted]
-        if after_ts is not None:
-            sql += " AND ts > %s"
-            params.append(int(after_ts))
-        sql += ") q"
         if limit is not None:
-            sql += " WHERE rn <= %s"
+            # Per-symbol newest-N via LATERAL walks the (symbol, ts) index
+            # backwards and stops at the limit. The ROW_NUMBER form ranked the
+            # symbol's whole history first; on a 2,000-name preload that was
+            # ~2x the SQL time for the same rows.
+            sql = (
+                "SELECT b.symbol, b.ts, b.bar_date, b.open, b.high, b.low, "
+                "b.close, b.volume FROM unnest(%s::text[]) AS s(symbol) "
+                "CROSS JOIN LATERAL ("
+                "SELECT t.symbol, t.ts, t.bar_date, t.open, t.high, t.low, "
+                "t.close, t.volume FROM daily_bars t "
+                "WHERE t.symbol = s.symbol"
+            )
+            params: list[Any] = [wanted]
+            if after_ts is not None:
+                sql += " AND t.ts > %s"
+                params.append(int(after_ts))
+            sql += " ORDER BY t.ts DESC LIMIT %s) b ORDER BY b.symbol, b.ts"
             params.append(max(1, int(limit)))
-        sql += " ORDER BY symbol, ts"
+        else:
+            sql = (
+                "SELECT symbol, ts, bar_date, open, high, low, close, volume "
+                "FROM daily_bars WHERE symbol = ANY(%s)"
+            )
+            params = [wanted]
+            if after_ts is not None:
+                sql += " AND ts > %s"
+                params.append(int(after_ts))
+            sql += " ORDER BY symbol, ts"
         with conn.cursor() as cur:
             cur.execute(sql, params)
             fetched = cur.fetchall()
