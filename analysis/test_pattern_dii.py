@@ -28,8 +28,9 @@ def _state(bulls, bears):
 
 @pytest.mark.parametrize('action,value,accepted', [
     ('BUY', 16, True), ('BUY', 20, True), ('BUY', 30, True),
-    ('BUY', 40, True), ('BUY', 45, True),
-    ('BUY', 15.999, False), ('BUY', 45.001, False), ('BUY', 0, False),
+    ('BUY', 40, True),
+    ('BUY', 15.999, False), ('BUY', 40.001, False), ('BUY', 45, False),
+    ('BUY', 0, False),
     ('BUY', 50, False), ('BUY', 60, False), ('BUY', 100, False),
     ('BUY', np.nan, False),
     ('SELL', 16, True), ('SELL', 20, True), ('SELL', 30, True),
@@ -61,7 +62,7 @@ def test_inclusive_side_band(monkeypatch, action, value, accepted):
 
 
 def test_bands_do_not_overlap(monkeypatch):
-    """45/55 passes only BUY, 58/42 only SELL, and the 45–58 middle passes neither."""
+    """40/60 passes only BUY, 58/42 only SELL, and the 40–58 middle passes neither."""
 
     def reason_for(bulls, bears, action):
         monkeypatch.setattr(
@@ -69,7 +70,9 @@ def test_bands_do_not_overlap(monkeypatch):
             lambda self, *args: _state(bulls, bears))
         return describe_pattern_dii_rejection(frame(), action=action)
 
-    assert reason_for(45, 55, 'BUY') is None
+    assert reason_for(40, 60, 'BUY') is None
+    assert reason_for(40, 60, 'SELL') is not None
+    assert reason_for(45, 55, 'BUY') is not None
     assert reason_for(45, 55, 'SELL') is not None
     assert reason_for(58, 42, 'SELL') is None
     assert reason_for(58, 42, 'BUY') is not None
@@ -102,7 +105,7 @@ def test_actual_calculation_and_unavailable():
     contracting = frame()
     contracting['high'], contracting['low'] = 500 - np.arange(100.), np.arange(100.)
     assert describe_pattern_dii_rejection(contracting) == (
-        'DII bullish percentage 50.00% outside required 16%–45% for BUY (20, 40).')
+        'DII bullish percentage 50.00% outside required 16%–40% for BUY (20, 40).')
 
 
 def test_zero_event_window_is_balanced(monkeypatch):
@@ -112,6 +115,6 @@ def test_zero_event_window_is_balanced(monkeypatch):
         lambda self, *args: {'bulls': pd.Series([np.nan]), 'bears': pd.Series([np.nan]),
                              'up': zero, 'down': zero})
     assert describe_pattern_dii_rejection(frame(), action="BUY") == (
-        'DII bullish percentage 50.00% outside required 16%–45% for BUY (20, 40).')
+        'DII bullish percentage 50.00% outside required 16%–40% for BUY (20, 40).')
     assert describe_pattern_dii_rejection(frame(), action="SELL") == (
         'DII bearish percentage 50.00% outside required 16%–42% for SELL (20, 40).')

@@ -118,7 +118,7 @@ def test_multisymbol_scanner_and_replay_match_top_four_gates_and_equity(monkeypa
     from data.tv_client import OHLCVCandle
     import analysis.price_volume
     symbols = ['AAA','BBB','CCC','DDD','EEE','FFF']
-    # Flat bars read 50% DII: outside both live pattern bands (bullish 16–45 for
+    # Flat bars read 50% DII: outside both live pattern bands (bullish 16–40 for
     # BUY, bearish 16–42 for SELL), so the live gate would reject every BUY
     # signal here. Pin the BUY band open so both engines get the same gate
     # outcome — StreamReplay has no DII gate at all, so a rejecting fixture would
