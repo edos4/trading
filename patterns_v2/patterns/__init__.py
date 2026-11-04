@@ -66,6 +66,9 @@ _BULLISH_DETECTORS = (
     cup_handle.detect,
 )
 
+# These walk every pole's pause window, so they can take the latest-bar hint.
+_LATEST_AWARE = frozenset({bull_flag.detect, bull_pennant.detect})
+
 
 def detect(h, l, c, zz_mult=2.0, latest=None):
     """h, l, c: float numpy arrays for ONE symbol, sorted by date. Returns list of signal dicts.
@@ -85,7 +88,10 @@ def detect(h, l, c, zz_mult=2.0, latest=None):
             bullish_pivots = P
         found = []
         for fn in _BULLISH_DETECTORS:
-            found.extend(_safe(fn, hh, ll, cc, a, P))
+            if fn in _LATEST_AWARE:
+                found.extend(_safe(fn, hh, ll, cc, a, P, latest=latest))
+            else:
+                found.extend(_safe(fn, hh, ll, cc, a, P))
         # Bearish head-and-shoulders confirms on the joining neckline. The
         # up-sloping inverse keeps the horizontal at the right armpit.
         shoulder_name = "inv_head_shoulders" if d == 1 else "head_shoulders"

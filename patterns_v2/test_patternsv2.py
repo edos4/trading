@@ -326,22 +326,25 @@ def test_scanner_patterns_v2_uses_detector(monkeypatch):
 
     seen = {}
 
-    def fake(df, **kwargs):
+    def fake(high, low, close, **kwargs):
         seen.update(kwargs)
-        return [TradeSignal(
-            symbol="AAPL", action="BUY", pattern="double_bottom", timeframe="1d",
-            confidence=0.5, price=10.0, qty=0.0, provenance="patternsv2",
-        )]
+        seen["bars"] = len(close)
+        return [_raw(signal=len(close) - 1)]
 
-    monkeypatch.setattr("patterns_v2.signals.detect_trade_signals", fake)
+    monkeypatch.setattr("patterns_v2.signals.detect_raw", fake)
     scanner = MarketScanner.__new__(MarketScanner)
     scanner._patterns_v2 = True
     scanner._indicators_only = False
     scanner._patterns = []
 
     class Store:
-        def available(self, symbol, timeframe):
-            return MIN_BARS
+        def detect_arrays(self, symbol, timeframe, min_bars=2):
+            df = _frame()
+            return (
+                df["high"].to_numpy(float),
+                df["low"].to_numpy(float),
+                df["close"].to_numpy(float),
+            )
 
         def get_df(self, symbol, timeframe, min_bars=2):
             return _frame()
@@ -355,8 +358,9 @@ def test_scanner_patterns_v2_uses_detector(monkeypatch):
     n_eval, hits = scanner._analyze_local(snap)
     assert n_eval == 1
     assert hits[0].pattern == "double_bottom"
+    assert hits[0].symbol == "AAPL"
     assert seen["latest_bar_only"] is True
-    assert seen["symbol"] == "AAPL"
+    assert seen["bars"] == len(_frame())
 
 
 def test_patternsv2_paper_open_skips_pattern_catalog(monkeypatch):

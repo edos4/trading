@@ -60,6 +60,25 @@ def bar_sane(h, l, c, i):
     return lo - 1e-8 * scale <= cl <= hi + 1e-8 * scale
 
 
+def sane_mask(h, l, c):
+    """Vectorized ``bar_sane``: True where a bar traded and its prints are usable.
+
+    The ZigZag walk tests every bar, so it reads this boolean array instead of
+    calling the scalar validator (which repeated the same NumPy checks and
+    tolerance maths per bar).
+    """
+    h, l, c = (np.asarray(x, float) for x in (h, l, c))
+    scale = np.maximum(np.maximum(np.abs(h), np.abs(l)), np.maximum(np.abs(c), 1.0))
+    dust = 1e-8 * scale
+    return (
+        np.isfinite(h) & np.isfinite(l) & np.isfinite(c)
+        & (h >= l)
+        & ((h - l) > dust)
+        & (c >= l - dust)
+        & (c <= h + dust)
+    )
+
+
 def zigzag(h, l, c, a, mult=2.0):
     """Causal ZigZag. Returns (idx, price, is_high, conf) arrays.
 
@@ -68,15 +87,18 @@ def zigzag(h, l, c, a, mult=2.0):
     """
     n = len(h)
     piv, d = [], 0
+    sane = sane_mask(h, l, c)
+    a = np.asarray(a, float)
+    bad_atr = np.isnan(a)
     hi = lo = 0
     for i in range(n):
-        if bar_sane(h, l, c, i):
+        if sane[i]:
             hi = lo = i
             break
     for i in range(hi + 1, n):
-        if not bar_sane(h, l, c, i):
+        if not sane[i]:
             continue
-        if np.isnan(a[i]):
+        if bad_atr[i]:
             hi = lo = i
             continue
         thr = mult * a[i]
