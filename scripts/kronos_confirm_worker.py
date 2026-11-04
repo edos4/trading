@@ -32,17 +32,27 @@ from utils.logger import log
 MIN_BARS = 60
 
 
-def load_symbol_df(symbol: str) -> pd.DataFrame:
+def load_symbol_df(symbol: str, as_of: str | None = None) -> pd.DataFrame:
+    """Daily bars, optionally cut at ``as_of`` (a replay anchor date).
+
+    A historical replay must not let the model read bars that had not printed
+    yet; without the cutoff the worker sees the live series.
+    """
     from data.db import get_conn
 
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute(
+            sql = (
                 "SELECT bar_date, open, high, low, close, volume "
-                "FROM daily_bars WHERE symbol = %s ORDER BY ts",
-                (symbol.upper(),),
+                "FROM daily_bars WHERE symbol = %s"
             )
+            params: list = [symbol.upper()]
+            if as_of:
+                sql += " AND bar_date <= %s"
+                params.append(as_of)
+            sql += " ORDER BY ts"
+            cur.execute(sql, params)
             rows = cur.fetchall()
     finally:
         conn.close()
@@ -138,6 +148,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--samples", type=int, default=3)
     ap.add_argument("--model", choices=("base", "finetuned"), default="finetuned")
     ap.add_argument("--lookback", type=int, default=LOOKBACK)
+    ap.add_argument(
+        "--as-of", default=None,
+        help="ignore bars after this ISO date (historical replay anchor)",
+    )
     ap.add_argument("--out", required=True)
     args = ap.parse_args(argv)
 
@@ -154,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
     results = []
     for symbol in symbols:
         try:
-            df = load_symbol_df(symbol)
+            df = load_symbol_df(symbol, args.as_of)
             results.append(
                 forecast_returns(
                     predictor, symbol, df, samples, args.lookback,
