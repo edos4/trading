@@ -1,292 +1,273 @@
-# Paper trade post-mortem — `pt.json`
+# Paper-trade post-mortem — `pt.json` (exported 2026-11-03T19:18Z)
 
-> **Status update — the ledger moved while this was acted on.** `pt.json` is a
-> live paper-stream output. The committed file is now the **17-trade
-> `2026-11-03T02:18:56Z` export: -$2,326.09, 23.5% win rate, PF 0.667** — not
-> the 18-trade `05:59Z` snapshot below. The ledger **flipped sides**: shorts are
-> **+$1,047.12** (`double_top` 2/8, **+$1,233.48**) and longs are **-$3,373.21**,
-> dominated by one real **-40% overnight gap** (EFOR, -$4,041.28). Therefore the
-> "stop trading shorts" and "exclude `double_top`" conclusions **do not survive**
-> and were **not** shipped as defaults. The surviving, ledger-independent finding
-> is the trail/stop scale mismatch (still 0 trailing exits). See **Implementation
-> status** at the end. Keep validating on a frozen ledger; do not tune on a live
-> file.
+Scope: the **US book only**. The PH book is empty (`settings: {}`, `scan_stats: null`,
+`closed_count: 0`) — it was never run, so nothing in this file applies to PSE yet.
+All figures below are USD, from `books[0]` of the export.
 
-**Snapshot A (superseded, retained for the analysis).** Export:
-`2026-11-03T05:59:02Z` (`filter: all`). Only the **US book** had data:
-**18 closed, 0 open**. The PH book is empty (0 rows), so nothing below applies to
-PSE. All figures are USD.
+---
 
-## Headline
+## Verdict
 
-| Metric | Value |
-|---|---:|
-| Net P&L | **-$1,405.17** |
-| Win rate | **11.1%** (2/18) |
-| Profit factor | 0.64 |
-| Avg win / avg loss | $1,259.05 / -$245.20 |
-| Payoff ratio | 5.13 |
-| **Break-even win rate** | **16.3%** |
-| Expectancy | **-0.40R per trade** (sum -7.26R) |
-| Exits | 15 stop_loss, 2 take_profit, 1 kronos_exit |
-| Exited on the first bar | **13 / 18** (median hold = 1 bar) |
-| Fees | $362.58 |
-| Gross before fees | -$1,042.59 (fees are **26% of the loss**) |
+The book did not "lose". It made +$870 (+0.87%) over 259 simulated sessions on a
+$100,000 account, and that result is **inside the noise band of its own fill model**.
 
-The two winners are the entire result: RUM +$1,532.64 and SMHI +$985.46
-(+$2,518 combined); the other 16 trades lost -$3,923.27. Remove those two and
-the book is -15.8R. **This is not an edge with a bad exit — it is a sample of 18
-with no demonstrated edge, whose exit geometry also leaks money.**
+- 14 closed trades, 4W/10L, 28.6% win rate, PF 1.29, expectancy **+0.62% / +0.24R per trade**.
+- Remove one trade (`HOLO`, +$1,575) and the book is **−$705**.
+- Block bootstrap over the 14 trade P&Ls: **P(PF > 1) = 0.63**, 95% PF interval **[0.29, 3.23]**.
+- Assume stop-outs fill **1% worse** than modelled (still generous for $0.20–$4 names):
+  total becomes **−$129**, PF **0.97**. At 2% worse: −$1,128, PF 0.78.
 
-## The two mechanical bugs (highest confidence)
+So: there is no demonstrated edge to tune. What follows is therefore split into
+(a) mechanisms that are **wrong by construction** and should be fixed regardless of the
+sample, and (b) hypotheses that can only be settled by a paired re-run, not by more
+parameter fitting on 14 trades.
 
-### 1. The trailing stop is calibrated to a stop the engine did not use, so it never arms
+---
 
-The pattern sets the trail and its arming distance as **2R of the ATR stop**
-(`patterns_v2/signals.py:312-315`, where `stop_pct = clamp(1.5*ATR14, 3%, 8%)`):
+## Where the money actually went
 
-```
-trailing_stop_pct      = 2 * stop_pct     # 11%–16% in this ledger
-trailing_activation_pct = 2 * stop_pct    # 11%–16%
-```
+| Block | $ |
+|---|---|
+| Gross win, 4 winners | +3,917 |
+| — of which 3 exact target hits | +3,479 |
+| — of which 1 trailing stop (CDNS) | +438 |
+| Gross loss, 10 losers | −3,047 |
+| Fees (already netted in the above) | −282 = 24.5% of gross |
+| **Net** | **+870** |
 
-But `_apply_fixed_stop` (`core/scanner.py:1461-1480`) then overwrites the stop
-with a flat **3% of the signal close** and sets `stop_loss_pct_cap = 0.03`
-(`STOP_LOSS_PCT` in `config.py:74`). It does **not** recompute the trail. The
-executed stop is therefore ~3% (often less, because `_effective_stop` in
-`core/backtester.py` takes the tighter of the resolved stop and the cap), while
-the trail still waits for an **11%–16%** move.
+Every one of the 10 losses is between **−3.197% and −3.203%** of notional, i.e. exactly
+−1R. That is not a market outcome, it is a configuration: `stop_loss_pct = 0.03`
+(`config.py:74`) replaces each pattern's own stop with a bot-wide 3% band, and every
+entry is sized at a fixed $10,000 notional, so the loss per trade is a constant $300 + fees.
+
+**7 of 14 trades were stopped on the first session they were held.** This book did not
+lose to a trend or a regime; it lost at the stop, immediately, over and over.
+
+---
+
+## Findings
+
+### F1 — Critical — the fixed 3% stop destroys the pattern's invalidation level
+
+`MarketScanner._apply_fixed_stop` (`core/scanner.py:1461`) overwrites `signal.stop_loss`
+with `signal_close × (1 ∓ 0.03)` for every signal before it is logged, and the dual-stop
+resolver (`core/execution.py:43-54`, `core/backtester.py:175-184`) always takes the
+*nearest* of the structural stop and `entry × (1 ∓ cap)`. Consequence: the executed stop
+is **never wider than 3% from the fill**, and the pattern's own failure level is discarded.
 
 Evidence in the export:
 
-| Symbol | Effective risk | Export trail / activation |
-|---|---:|---:|
-| STKS | 0.99% | 15.58% |
-| OXM | 1.10% | 16.00% |
-| MYSE | 1.08% | 16.00% |
-| XP | 1.66% | 13.64% |
-| NBR | 2.98% | 15.30% |
-| FIGR | 0.03% | 16.00% |
+- All 14 `requested_rules.stop_loss` values are exactly `signal_close × 0.97` for BUYs and
+  `× 1.03` for SELLs (±0.0001). The pattern's real stop is **not recoverable from the
+  export at all** — the override happens before `requested_rules` is stamped.
+- `NEXA` is the clean example. The signal bar closed at 13.31; the entry filled at 12.60
+  (a 5.33% adverse gap) and the executed stop was 12.978 — **2.5% below the price the
+  pattern had just broken down from**, i.e. inside the range the signal bar itself
+  travelled. A plain retest of the breakdown level killed it on bar 1. Wherever the
+  pattern's own invalidation level was, the clamp put the stop strictly closer than it.
+- `patterns_v2/signals.py:242-243` states the design assumption outright: *"A confirmed
+  reversal closes beyond the neckline, so its full-depth risk necessarily exceeds its
+  measured height."* A `double_bottom` entered above the neckline therefore has a natural
+  **R:R ≤ 1:1**. The 3% stop is what turns that sub-1R geometry into the multi-R targets
+  in this export. Shrinking the stop does not shorten the distance price must travel — it
+  only guarantees the first pullback removes you, while the win still requires the
+  *entire* measured move.
 
-Consequence: **zero trailing exits in 18 trades**. Trades that ran +2R went
-back to the 3% stop and were counted as -1R. Measured on the frozen tapes:
+**Change (ship first):** stop conflating "cap the dollar risk" with "put the stop at 3%".
 
-- median favorable excursion **before** the stop was hit: **1.79R**
-- **10/18** reached ≥1R and **9/18** reached ≥2R before stopping
-- only **3/18** ever touched the measured-move target within 20 bars (RUM and
-  SMHI, the two winners, plus FLEX only *after* it had already been stopped)
+1. `STOP_LOSS_PCT=0` — let `_levels()` supply the structural stop.
+2. `ENGINE.risk_pct > 0` (e.g. `0.003`) so `_apply_risk_sizing` sizes to that stop. A 6%
+   stop simply gets half the shares; the dollar risk stays constant and the invalidation
+   level stays honest. This is the one change that fixes the loss pattern without touching
+   the winners.
+3. If a pattern-stop ceiling is still wanted, reject entries whose structural distance is
+   absurd (e.g. > 8%) rather than tightening the stop.
 
-So the book repeatedly gave back a real move because the only profit-protection
-rule was armed at 4–5× the actual risk.
+If the operator insists on keeping `STOP_LOSS_PCT=0.03`, then the target must be capped in
+the same units (`TARGET_MAX_R`, currently `0.0` = off, `config.py:86`), otherwise the trade
+is required to complete a 3–5R measured move while being fenced in at 1R of noise.
 
-### 2. The fixed stop is anchored to the signal close, but the fill is the next open
+### F2 — Critical — the trailing stop is arithmetically incapable of banking profit
 
-`_apply_fixed_stop` computes `stop = signal.price * (1 -/+ 0.03)` from the
-**signal-bar close**. Execution then fills at the **next observed open**
-(`entry_mode: next-observed-open`, `core/execution.py:65`). An adverse gap eats
-the risk budget before the trade starts. The existing gap guard
-(`core/execution.py:72-75`) only rejects an open that has already crossed the
-stop — it does not reject a gap that leaves almost no room.
+`STOP_LOSS_ARM_R = 2.0` and `STOP_LOSS_TRAIL_R = 2.0` (`config.py:79-80`). The trail arms
+at +2R and gives back 2R from the peak, so its **best possible** exit is ~0R; it can never
+lock in a gain. It is a breakeven stop wearing a trailing stop's name.
 
-| Symbol | Signal close | Fill | Adverse gap | Effective risk |
-|---|---:|---:|---:|---:|
-| FIGR | 29.33 | 30.20 | +2.97% | **0.03%** |
-| STKS | 2.46 | 2.41 | -2.03% | 0.99% |
-| OXM | 39.87 | 40.62 | +1.88% | 1.10% |
-| MYSE | 2.11 | 2.15 | +1.90% | 1.08% |
-| NEXA | 13.31 | 12.60 | -5.33% | 3.0% (resolved stop was 8.8% away, cap wins) |
+- `CDNS` peaked at **+3.35R** and exited at **+1.55R** — exactly `268.50 × 1.06 = 284.61`.
+  A 6% giveback on a 3% stop is a 2R giveback.
+- `CMPS` reached **+3.74%** (≈1.25R) and `ANIX` **+3.37%** (≈1.4R); neither armed the trail
+  (arm is 6%), both round-tripped to a full −1R.
 
-FIGR is the degenerate case: a 0.03% stop is not a risk level, it is a coin
-flip. The trade was stopped 0.23% later. One signal (HYMC) was correctly
-rejected for "opening gap crossed the structural stop", but the guard does not
-catch the near-zero-risk version.
+**Change:** arm at 1R with a 0.5R trail (`STOP_LOSS_ARM_R=1.0`, `STOP_LOSS_TRAIL_R=0.5`),
+and/or take a partial at +1R. This needs no sample to justify — the current pair is a
+one-way giveback by construction. Expect it to *reduce* average winner size; the point is
+to convert the two round-tripped 1R+ winners into small positives.
 
-## Root causes, ranked
+### F3 — High — "fill at the next open" systematically enters at a worse price
 
-1. **No demonstrated entry edge.** Win rate 11.1% vs the 16.3% break-even the
-   realized payoff requires. 15 of the 16 losers are -1R stops (NBR is -0.8R on
-   a Kronos exit); the two winners are both target hits. A driftless walk with a
-   3% stop and a 20% target stops first ~87% of the time, which is the observed
-   15/18. The entries are not
-   beating that null model after fees.
-2. **Trail/stop mismatch (bug 1).** It converts would-be scratches into -1R
-   losses. Fixable without touching signal generation.
-3. **The stop sits inside daily noise.** Median effective risk is **0.47×
-   ATR14**; **10/18** are below 0.5× ATR; 13/18 exit on the entry bar. But
-   *widening the stop alone is not the fix* (see counterfactual): the loss per
-   stop scales with the stop while the win rate barely changes.
-4. **Targets are too far.** Targets are 10%–34% measured moves (median ~21%).
-   Only RUM, FLEX and SMHI ever touched target. A 5–20% target with a 3% stop
-   mechanically needs a high win rate, which the entries do not supply.
-5. **The short side is broken in this sample.** `double_top` is **0/8,
-   -$1,844.36 (-8R)**; all shorts combined are **0/10, -$2,346.19**. The DII
-   gate requires *bearish 16–40* for a SELL, i.e. bulls 60–84 — it systematically
-   shorts names in strong uptrends. That is the worst place to short and the
-   data says so.
-6. **The DII gate is now the only filter.** It rejected **44 of 63 unique
-   signals (~70%)**; every other gate (min price, confidence, regime, cooldown,
-   risk) is a no-op stub in the 2026-09 refactor (`core/scanner.py:47-84`).
-   There is no A/B evidence the gate adds expectancy, and its two bands are
-   mirror images that leave the balanced 40–60 zone untraded
-   (`analysis/pattern_dii.py:14-17`).
-7. **Sub-$10 microcaps are back in the book** (6/18: STKS, EMPD, MYSE, RUM,
-   SMHI, ANIX). They have the tightest effective risks and the largest daily
-   ranges. The declared $20M ADV floor (`core/market.py:28`) is only applied at
-   universe fetch time; names can degrade into the replay, and no per-signal
-   price/liquidity floor is enforced.
-8. **Fees are material.** 0.2% round trip = ~$20/trade. Against ~$300 average
-   risk that is ~0.07R per trade; over 18 trades it is ~1.2R, or 26% of the
-   realized loss. At a 3% stop the signal has to clear costs before it is even
-   at break-even.
+Every fill is the next observed open (`resolved_rules.entry_mode = "next-observed-open"`),
+and the gap is adverse in 10 of 14 trades (2 flat, 2 favourable): median **+1.04%**, mean
+**+1.25%**, worst `NEXA` **+5.33%**. Against a 3% stop that is a third of the risk budget
+thrown away before the trade starts, and it moves the clamped stop *inside the range the
+signal bar just travelled*.
 
-## Counterfactual (exit-only, frozen tapes, repo's own `_check_exit`)
+- 5 of the 7 first-session stop-outs had an adverse entry gap ≥ 1.17%.
+- `stop_loss_min_risk_frac = 0.5` (`config.py:83`) only rejects fills that gap *through*
+  the stop (it caught `IE`, `FIGR`, `HYMC`). It does **not** reject a 5.33% adverse gap,
+  because it compares risk-after-gap to planned risk and both are ~3%.
 
-Entries and quantities held fixed, costs 0.1% each side. Baseline reproduces
-the export except NBR (the export closed it on Kronos, the replay uses the
-stop). Treat as directional, not proof.
+**Change:** rejection rule on adverse gap as a fraction of the planned stop distance, e.g.
+reject when the next open is worse than the signal close by more than 0.5 × `stop_pct`;
+or enter with a limit at/inside the signal close and let it go unfilled. Cheap, and
+directly targets the failure mode with the cleanest evidence in the book.
 
-| Scenario | Closed | P&L | Wins |
-|---|---:|---:|---:|
-| Export (trail 11–16%) | 18 | **-$1,465*** | 2 |
-| Trail = 2× effective risk (arms at 2R, gives back 2R) | 18 | -$1,148 | 4 |
-| Trail = 1× effective risk | 18 | -$82 | 5 |
-| Trail = 0.5× effective risk | 18 | +$411 | 5 |
-| ATR stop `clamp(1.5*ATR,3%,8%)` + 2R-of-ATR trail | 17 | **-$8,266** | 3 |
-| ATR stop, no trail | 17 | -$9,244 | 2 |
+### F4 — High — the entire result rests on sub-$10 names with no liquidity gate
 
-\* Replay baseline; the export itself is -$1,405.17 (NBR difference).
+`volume_gate: false`, `min_signal_price_usd: 0.0` (`config.py:90`), fixed $10k notional.
 
-Two things this shows:
+- 9 of 14 trades under $10, 2 under $2. `AUMN` is a short of **49,975 shares at $0.2001**;
+  its 3% stop is **0.6¢**, roughly one tick. `HOLO` (5,235 sh @ $1.91) and `ABCL`
+  (2,538 sh @ $3.94) are the two biggest winners — i.e. **all of the profit is booked in the
+  names where the fill model is least trustworthy**.
+- These are exactly the names where a stop fills worse than the stop price, which is the
+  assumption that turns PF 1.29 into 0.97 (see Verdict).
 
-- **Fixing the trail scale is worth ~$300 conservatively** (the 2R case, which is
-  what `signals.py` says it intends). Tighter trails look better on this sample,
-  but that is curve-fitting 18 trades.
-- **Widening the stop in isolation is much worse** (-$8.3k). With a wider stop
-  the losers lose 2–3× more and 14/17 still hit the stop. The binding problem is
-  the entry/target, not the stop width.
+**Change:** add a 20-day dollar-volume floor (e.g. ≥ $1–2M) and a price floor (≥ $1;
+`min_signal_price_usd` already exists) as *screening* gates, then re-run. If the edge
+disappears, it was an artifact of the fill model and this book was never viable.
 
-## Recommended changes (ship in this order)
+### F5 — High — 6 of 10 stop-loss rows are internally impossible in the ledger
 
-1. **Make the trail a multiple of the executed stop, not the ATR stop.**
-   Either recompute `trailing_stop_pct` / `trailing_activation_pct` inside
-   `_apply_fixed_stop` (e.g. `2 * 0.03`), or, better, express the trail in R at
-   fill time in `_effective_stop`. Ship 2R first (matches the documented intent
-   and is the conservative counterfactual); test 1R only on an independent
-   period.
-2. **Add a minimum-risk / gap guard at the fill.** In `opening_candidate`,
-   reject the entry when `|fill - stop| / fill` is below a floor (e.g.
-   `max(0.75%, 0.25*ATR14)`), or re-anchor the flat stop to the fill so the
-   trade always risks the configured 3%. This kills the FIGR/STKS/OXM/MYSE
-   class of instant-stop trades. Re-anchoring changes the level, so log it.
-3. **Cap/scale the target.** The measured move is 10–34% and is rarely reached.
-   Take partial profit at 1R–2R of the *effective* stop, or cap the target at
-   ~3R, and let the R-based trail handle the rest. Do not keep a 20% target
-   against a 3% stop.
-4. **Turn risk sizing on** (`risk_pct > 0`, currently 0 in
-   `core/engine_defaults.py:32`). Flat $10k notional means dollar risk ranges
-   from $3 (FIGR) to $300 (EMPD) on the same "3%" rule. Risk a fixed dollar
-   amount per trade.
-5. **Stop trading shorts, or isolate them.** 0/10 across all short patterns;
-   `double_top` 0/8. At minimum exclude `double_top` while the DII regime is
-   bullish, and paper short signals in a separate book until they show edge.
-6. **Shadow the DII gate.** Run it in log-only mode alongside an ungated book
-   for a fixed window and compare forward outcomes. It currently removes ~70%
-   of signals with no measured benefit, and its short band is actively harmful
-   in this sample.
-7. **Restore a price/liquidity floor for the paper universe.** Sub-$10 names
-   and low dollar volume are where a percentage stop is meaningless. Enforce it
-   per signal, not only at screener fetch.
-8. **Do not tune on these 18 trades.** Every number above has a bootstrap
-   interval that straddles zero. Re-run the whole pipeline on an independent
-   period (not 2025-11..2026-10) with ≥100 trades before changing a threshold
-   again. A parameter sweep on 18 trades will produce a good-looking, false
-   answer — which is how the 5% cap -> ATR stop -> fixed-3% override sequence
-   already happened.
+The exported `stop` is the requested stop (`signal_close ∓ 3%`); the trade actually exits at
+the *nearer* of that and `fill ∓ 3%`, which after a gap is a different price. The export
+shows both without explaining the difference:
 
-## What not to do
+| trade | shown stop | actual exit | impossible? |
+|---|---|---|---|
+| LEVI BUY | 21.6213 | 21.6698 | long exited **above** its stop |
+| XNET BUY | 7.4205 | 7.6339 | long exited **above** its stop |
+| NRXP BUY | 2.0176 | 2.0661 | long exited **above** its stop |
+| NVAX BUY | 9.0792 | 9.3799 | long exited **above** its stop |
+| URBN SELL | 73.6656 | 72.8004 | short exited **below** its stop |
+| NEXA SELL | 13.7093 | 12.978 | short exited **below** its stop |
 
-- Do not widen the stop in isolation (measured: -$8.3k).
-- Do not conclude `double_bottom` has an edge from +$941 on 2 winners.
-- Do not treat the two target hits as validation of the target distance.
-- Do not read the 11.1% win rate as "unlucky" — it is below the 16.3%
-  break-even the payoff requires, and fees widen that gap.
+Anyone auditing the ledger concludes the engine is broken. It is not — the dual-stop model
+is simply invisible. This also means the export cannot answer "was the clamp justified?"
+because `pattern_stop` is overwritten before it is saved.
 
-## Caveats
+**Change:** stamp `pattern_stop` (pre-override) into `requested_rules`/`rule_evidence`, and
+emit the *executed* stop into `closed_trades[].stop` and `daily_marks[].stop`. Reporting
+only; no behaviour change.
 
-- 18 trades, 2 wins. Every cohort is too small for inference; the pattern and
-  side splits are descriptive only.
-- The post-stop excursion analysis uses daily bars; intrabar ordering within the
-  bar that hit the stop is unknowable, so "MFE before the stop" is approximate.
-- The counterfactuals hold entries fixed (exit-only); changed exits would alter
-  cooldowns, capacity and later entries.
-- The frozen tapes are a local input, not a portable CI fixture.
-- PH has no trades — no conclusion about PSE.
+### F6 — Medium — the DII gate removes 67% of signals and preferentially kills the best-looking ones
 
-## Reproduce
+`analysis/pattern_dii.py` accepts BUY only when bulls ∈ [16, 40] and SELL only when
+bears ∈ [16, 40]. Since bulls + bears = 100, this demands a *counter-trend* tape and
+rejects the entire balanced 40–60 zone in both directions.
 
-```sh
-# the export and its aggregates
-.venv/bin/python - <<'PY'
-import json; b=json.load(open('pt.json'))['books'][0]
-print(b['metrics'])
-PY
-```
+- 35 of 52 unique signals died on this gate. 71% were "too extended" (>40%), 29% were
+  "too counter-trend" (<16%).
+- It rejected 6 of the 9 high-confidence (≥0.8) signals: `FGBI` 0.92, `SF` 1.00,
+  `ILMN` 1.00, `SCCO` 1.00, `TRIN` 1.00, and `IE` 0.85. The survivors are mostly
+  0.22–0.35-confidence `double_bottom/top` signals. The confidence scales are not
+  comparable across detectors (v2 reversals 0.22–0.59, v2 wedges/triangles 0.85–1.00), so
+  this is not a like-for-like comparison — but it is the gate's actual selection effect.
+- There is **no counterfactual in this export**: `dii_gate_shadow` is false and there are
+  zero `status="shadow"` rows.
 
-The per-trade excursion and counterfactual scripts used for this note were
-throwaway analyses over `data/barcache/stream_tapes/us` plus the repo's
-`core.backtester._check_exit`; they were not committed.
+**Change:** do not hand-tune the band on n=14. Set `DII_GATE_SHADOW=true`
+(`config.py:97`; the code path already exists at `core/scanner.py:1562`) and replay the same
+259 days to get the ungated book. If a change is wanted sooner, the defensible one is
+dropping the *lower* bound only (accept 0–40), because rejecting a 0%-bullish double-bottom
+breakout is arbitrary — it rejects the most washed-out setups.
 
-Note: `scripts/replay_pt_exits.py` is currently stale for this export — it
-requires exactly one frozen tape per symbol (symbols now have 2–10) and it
-hard-codes the old 5%/5% trail. It fails before replaying. Fix it before using
-it as the regression harness for any of the changes above.
+### F7 — Medium — the short side is 1W/4L and all four `double_top` shorts were dead on arrival
 
-## Implementation status (2026-11-03)
+| side | n | wins | $ |
+|---|---|---|---|
+| BUY | 9 | 3 | +1,621 |
+| SELL | 5 | 1 | −751 |
 
-Re-checked against the current committed ledger (`pt.json`,
-`2026-11-03T02:18:56Z`, 17 closed):
+All four `double_top` shorts (`URBN`, `NEXA`, `NXDT`, `AUMN`) had a first-bar close at or
+below −2.3%, i.e. they never traded in their favour at all. Do **not** disable shorts on
+this — 4 trades is nothing, and the `config.py:91-94` note cites an older ledger at 2/8
+(also weak). The honest read is "no evidence either way". Fix F3 (gap) first; if the
+instant-loss signature survives, then a short-specific entry rule (require the fill to
+remain below the neckline) is the next experiment, not a blanket ban.
 
-| Metric | Value |
-|---|---:|
-| Net P&L | **-$2,326.09** |
-| Win rate / profit factor | 23.5% / 0.667 |
-| Longs | -$3,373.21 (`double_bottom` 2/8) |
-| Shorts | **+$1,047.12** (`double_top` 2/8, +$1,233.48) |
-| Exits | 11 stop_loss, 4 kronos_exit, 2 take_profit |
-| Largest loss | EFOR -$4,041.28 (real -40% gap: 40.43 close → 24.30 open) |
-| Trail vs executed risk | 8–16% vs 0.7–3% → **0 trailing exits** |
+### F8 — Low — the export contradicts itself on entry semantics
 
-| # | Recommendation | Disposition |
+`signal_logs[].reason` says *"Filled signal-bar entry"* while `resolved_rules.entry_mode`
+says `next-observed-open` — and the fill really is the next open (`LEVI`: signal close
+22.29, fill 22.34). The Paper Logs tab is the operator's audit surface; it should say
+exactly one thing.
+
+Also `summary` prints `Avg hold: 0.0d` while `metrics.avg_hold_bars = 4.2` and one trade
+(`GOOD`) was held 28 bars, and `metrics.total_pnl_pct = 0.87015` is a percentage under a
+name that implies a fraction.
+
+### F9 — Low, but investigate — the funnel implies the replay is not seeing 2,000 names
+
+52 unique signals over 259 sessions with `n_symbols: 2000` is ~1 signal per 10,000
+symbol-days. That is implausibly selective for daily `double_bottom`/`double_top`
+detection; either the historical store covers far fewer names than the header claims, or
+`latest_bar_only` plus confirmation drops almost everything. Until that is measured, the
+14 trades may not be a sample of the stated universe. Add a counter of symbols evaluated
+and signals-by-pattern per session to `scan_stats` and check it on the next replay.
+
+---
+
+## The only defensible next step
+
+Do **not** tune any threshold on this sample. Run a **paired** replay — same 259 days,
+same symbols — one knob per book, and compare on R and PF *together with trade count* so a
+filter cannot "win" by collapsing to zero trades:
+
+| book | change | hypothesis |
 |---|---|---|
-| 1 | Trail in R of the executed stop | **Shipped.** `STOP_LOSS_TRAIL_R` / `STOP_LOSS_ARM_R` (2/2) set in `_apply_fixed_stop`, then re-derived from the effective fill risk in `opening_candidate`. Restores the documented invariant; P&L effect on this ledger is mixed because a 2R trail cuts target-bound winners. |
-| 2 | Gap / minimum-risk guard | **Shipped.** `STOP_LOSS_MIN_RISK_FRAC=0.5` rejects a fill left with <1.5% of the planned 3% risk. Removes OXM (-$129.84) and KOS (-$93.70) from the current ledger. |
-| 3 | Cap/scale the target | **Knob only, off.** `TARGET_MAX_R=0`. The current winners are 5.2R (RUM) and 12.4R (UPXI); a 3R cap would have cut them. |
-| 4 | Turn risk sizing on | **Env-gated, off.** `TRADING_RISK_PCT=0`. EFOR shows sizing to the stop does not cap an overnight-gap loss and can enlarge notional; decide after event-risk handling. |
-| 5 | Stop shorts / exclude double_top | **Withdrawn.** Shorts are the profitable side now; `SHORT_ENTRIES_ENABLED=true`. The kill-switch remains for a long-only paper book. |
-| 6 | Shadow the DII gate | **Shipped.** `DII_GATE_SHADOW=false`; when on, the rejection is logged with status `shadow` and the entry continues. |
-| 7 | Price/liquidity floor | **Knob only, off.** `MIN_SIGNAL_PRICE_USD=0`. The sub-$10 cohort is +$2,989 and holds UPXI and RUM; a $10 floor would remove the winners. |
-| 8 | Independent-period validation | **Still required.** The ledger flip is the proof: every side/pattern conclusion changed within one replay. Freeze the ledger before the next tuning pass. |
+| A | `STOP_LOSS_PCT=0` + `ENGINE.risk_pct=0.003` | structural stop restores the loss profile (F1) |
+| B | A + `STOP_LOSS_ARM_R=1.0`, `STOP_LOSS_TRAIL_R=0.5` | trail banks some of the 1R+ runners (F2) |
+| C | A + adverse-gap rejection at 0.5 × stop | instant stop-outs disappear (F3) |
+| D | C + ADV ≥ $1M and price ≥ $1 | edge survives realistic names (F4) |
+| E | A + `DII_GATE_SHADOW=true` | gate adds or subtracts (F6) |
+| F | stop-fill slippage 1% | is any of it real (Verdict) |
 
-### Gap risk is now the headline, not stop width
+A, B, C are justified by mechanism and need no sample. D, E, F are the actual questions.
 
-EFOR closed 40.43 and opened 24.30 the next session (10.0M shares vs ~0.55M);
-the 3% stop could only fill at the gap. That one trade is **174% of the book's
-net loss**. A percentage stop cannot protect against this, and widening or
-tightening it changes nothing. The relevant controls are event/earnings
-avoidance and a per-trade notional or gap cap — neither was in the original
-note.
+## What not to change
 
-### Kronos exit guard
+- Do not disable shorts on 0/4 (F7).
+- Do not retune the DII band by hand (F6).
+- Do not add patterns or loosen detectors hoping for more signals — the funnel is already
+  the binding constraint and 14 trades cannot distinguish any threshold.
+- Do not read the `by pattern` block in `summary` as an edge: `double_bottom n=7` and
+  `double_top n=4` are single-digit samples; `symmetrical_triangle n=1` is one trade.
 
-The NBR chart showed a `kronos_exit` at **87.65 (-2.57%, -0.8R)** on
-2026-08-12. The vote was 2/3 bearish with a mean **-2.5%** one-day forecast,
-but the price then rallied to ~97 before rolling back to the stop. The model was
-overriding a swing trade inside its normal daily range (the vote bar was only
-1.8% down against a 4.93% ATR).
+---
 
-`KRONOS_EXIT_MIN_ADVERSE_ATR=0.5` now defers an exit vote until the position is
-at least half an ATR underwater at the vote bar. NBR (entry 89.78, anchor
-88.17, ATR 4.93% → 1.8% < 2.5%) is deferred; the stop/trail owns deeper losses.
-The vote is still recorded in `kronos_exit_evidence`. This complements the
-R-based trail: the trade would have armed the 2R trail on the rally and exited
-near +1.6% instead of -2.57%.
+## Appendix — the 14 trades
+
+MFE/MAE are max favourable / adverse excursion from `daily_marks` (%). `exit − stop` is the
+discrepancy flagged in F5; `R` is gross of fees (fees = 0.94R total). `CDNS` is the one
+trailing exit, so its `exit − stop` is expected, not an inconsistency.
+
+| # | symbol | side | pattern | entry | exit | stop shown | exit−stop | R | bars | MFE% | MAE% | reason |
+|---|--------|------|---------|-------|------|-----------|-----------|---|------|------|------|--------|
+| 1 | LEVI | BUY | double_bottom | 22.34 | 21.67 | 21.62 | +0.0485 | −1.00 | 5 | +0.45 | −3.20 | stop_loss |
+| 2 | CMPS | BUY | descending_channel | 6.69 | 6.489 | 6.489 | 0 | −1.00 | 4 | +3.74 | −3.20 | stop_loss |
+| 3 | XNET | BUY | double_bottom | 7.87 | 7.634 | 7.42 | +0.2134 | −1.00 | 1 | −3.20 | −3.20 | stop_loss |
+| 4 | ABCL | BUY | double_bottom | 3.94 | 4.40 | 3.783 | +0.617 | +3.89 | 3 | +11.46 | +4.31 | take_profit |
+| 5 | URBN | SELL | double_top | 70.68 | 72.80 | 73.67 | −0.8652 | −1.00 | 1 | −3.20 | −3.20 | stop_loss |
+| 6 | CDNS | SELL | symmetrical_triangle | 298.46 | 284.61 | 311.75 | −27.14 | +1.55 | 6 | +10.04 | +0.70 | trailing_stop |
+| 7 | GOOD | BUY | descending_channel | 11.16 | 12.03 | 10.81 | +1.223 | +2.60 | 28 | +7.58 | +0.36 | take_profit |
+| 8 | NRXP | BUY | double_bottom | 2.13 | 2.066 | 2.018 | +0.0485 | −1.00 | 1 | −3.20 | −3.20 | stop_loss |
+| 9 | NVAX | BUY | double_bottom | 9.67 | 9.38 | 9.079 | +0.3007 | −1.00 | 1 | −3.20 | −3.20 | stop_loss |
+| 10 | NEXA | SELL | double_top | 12.60 | 12.98 | 13.71 | −0.7313 | −1.00 | 1 | −3.20 | −3.20 | stop_loss |
+| 11 | HOLO | BUY | double_bottom | 1.91 | 2.215 | 1.833 | +0.3817 | +5.32 | 3 | +15.75 | +4.19 | take_profit |
+| 12 | NXDT | SELL | double_top | 4.55 | 4.645 | 4.645 | 0 | −1.00 | 1 | −2.30 | −2.30 | stop_loss |
+| 13 | AUMN | SELL | double_top | 0.20 | 0.2061 | 0.2061 | 0 | −1.00 | 1 | −3.20 | −3.20 | stop_loss |
+| 14 | ANIX | BUY | double_bottom | 3.26 | 3.182 | 3.182 | 0 | −1.00 | 3 | +3.37 | −2.60 | stop_loss |
+
+R totals: 4 wins avg **+3.34R**, 10 losses **−1.00R** each, net **+3.36R** over 14 =
+**+0.24R/trade**. Breakeven win rate at a +3.34R average winner: **23.0%**; realised
+**28.6%**. Gross of fees, before any fill-realism haircut.
