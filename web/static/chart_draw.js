@@ -4,7 +4,7 @@ window.ChartDraw = (function () {
   const copy = value => JSON.parse(JSON.stringify(value));
 
   function attach({host, panes, times = [], shapes = [], onChange = () => {}, onCorrect,
-                   readOnly = false, leading = null,
+                   readOnly = false, leading = null, toolbarHost = null,
                    guidance = 'Blue: your corrections (point handles).'}) {
     let drawings = copy(shapes), draft = null, selected = null, tool = null, drag = null;
     const history = [], cleanup = [], painters = [];
@@ -66,8 +66,13 @@ window.ChartDraw = (function () {
       pane.series.attachPrimitive(primitive);
       cleanup.push(() => pane.series.detachPrimitive(primitive));
     }
+    /* Inline in the modal (own row above the chart) so the tools never cover
+     * the candles; elsewhere keep the compact overlay used by page charts. */
     const bar = document.createElement('div');
-    bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;align-items:center;position:absolute;top:3px;left:6px;z-index:5;max-width:95%;background:#131722';
+    bar.className = toolbarHost ? 'chart-draw-bar chart-draw-bar-inline' : 'chart-draw-bar';
+    bar.style.cssText = toolbarHost
+      ? ''
+      : 'position:absolute;top:3px;left:6px;z-index:5;max-width:95%';
     host.style.position = 'relative';
     if (leading) bar.appendChild(leading);
     const buttons = {};
@@ -142,7 +147,7 @@ window.ChartDraw = (function () {
         if (draft || drag) { status.textContent = 'Finish or cancel the current drawing first.'; return; }
         onCorrect();
       });
-      bar.appendChild(status); host.appendChild(bar);
+      bar.appendChild(status); (toolbarHost || host).appendChild(bar);
       function locate(event) {
         const pane = panes.find(p => {
           const b = p.el.getBoundingClientRect(); return event.clientY >= b.top && event.clientY <= b.bottom;

@@ -1048,6 +1048,7 @@ function initPaper() {
   const chartTitle = document.getElementById("paper-chart-title");
   const chartOhlc = document.getElementById("paper-chart-ohlc");
   const chartStatus = document.getElementById("paper-chart-status");
+  const chartTools = document.getElementById("paper-chart-tools");
   const chartHost = document.getElementById("paper-chart-host");
   let chartArgs = null;
   let chartTimeframe = "1d";
@@ -1108,6 +1109,7 @@ function initPaper() {
       }
       if (window.TVChart && chartHost) {
         window.TVChart.mount(chartHost, data, {
+          toolbarHost: chartTools,
           onCandle(bar) {
             if (!chartOhlc) return;
             if (!bar) {
@@ -1691,6 +1693,7 @@ function initReplay() {
   const chartTitle = document.getElementById("replay-chart-title");
   const chartOhlc = document.getElementById("replay-chart-ohlc");
   const chartStatus = document.getElementById("replay-chart-status");
+  const chartTools = document.getElementById("replay-chart-tools");
   const chartHost = document.getElementById("replay-chart-host");
 
   function fmtTvOhlc(data) {
@@ -1743,6 +1746,7 @@ function initReplay() {
     }
     if (window.TVChart && chartHost) {
       window.TVChart.mount(chartHost, data, {
+        toolbarHost: chartTools,
         onCandle(bar) {
           if (!chartOhlc) return;
           if (!bar) {

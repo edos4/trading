@@ -720,6 +720,7 @@ window.TVChart = (function () {
         panes,
         times: candles.map((row) => row.time),
         shapes: saved, readOnly: !!hooks?.readOnly, onCorrect: correct,
+        toolbarHost: hooks?.toolbarHost || null,
         guidance: (data.trendlines || []).some(line => line.data?.length >= 2)
           ? 'Blue rails: solid confirmed · dashed broken · dotted <3 touches. Corrections have point handles.'
           : undefined,
@@ -742,9 +743,15 @@ window.TVChart = (function () {
     }
 
     if (toggles && !tools) {
-      toggles.style.cssText += ";position:absolute;top:4px;left:6px;z-index:6;"
-        + "background:#131722;padding:2px;border:1px solid " + GRID + ";border-radius:4px";
-      el.appendChild(toggles);
+      if (hooks?.toolbarHost) {
+        toggles.style.cssText += ";background:#131722;padding:4px 6px";
+        hooks.toolbarHost.appendChild(toggles);
+        cleanup.push(() => toggles.remove());
+      } else {
+        toggles.style.cssText += ";position:absolute;top:4px;left:6px;z-index:6;"
+          + "background:#131722;padding:2px;border:1px solid " + GRID + ";border-radius:4px";
+        el.appendChild(toggles);
+      }
     }
 
     if (restoreRange) chart.timeScale().setVisibleLogicalRange(restoreRange);

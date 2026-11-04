@@ -141,15 +141,16 @@
       <button type="button" class="btn ghost" id="replay-chart-close">Close</button>
     </header>
     <p id="replay-chart-status" class="muted">Loading…</p>
+    <div id="replay-chart-tools" class="tv-chart-tools"></div>
     <div id="replay-chart-host" class="tv-chart-host"></div>
   </div>
 </div>
 {% endblock %}
 {% block scripts %}
 <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
-<script src="/static/tv_chart.js?v=22"></script>
+<script src="/static/tv_chart.js?v=23"></script>
 <script src="/static/pattern_notes.js?v=3"></script>
-<script src="/static/chart_draw.js?v=9"></script>
+<script src="/static/chart_draw.js?v=11"></script>
 <script>
   window.TB_PAGE = "replay";
   window.TB_MARKETS = {{ markets | tojson }};
