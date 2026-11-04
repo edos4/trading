@@ -54,12 +54,74 @@ mkdir -p "$RUNS" "$LOGS" "$STATE_DIR"
 ITER_LOG="$LOGS/startup.log"
 log() { printf '%s %s\n' "$(date -Is)" "$*" | tee -a "$ITER_LOG" >&2; }
 die() { log "FATAL: $*"; exit 1; }
+SELF_PID="${BASHPID:-$$}"   # $$ is the parent's pid when this runs in a pipeline
+is_descendant_of_self() { # $1 pid — this script's own forks inherit its cmdline
+  local pid="$1" ppid i
+  for (( i = 0; i < 8; i++ )); do
+    [[ -r "/proc/$pid/stat" ]] || return 1
+    read -r _ _ _ ppid _ <"/proc/$pid/stat" 2>/dev/null || return 1
+    [[ "$ppid" == "$SELF_PID" ]] && return 0
+    (( ppid > 1 )) || return 1
+    pid="$ppid"
+  done
+  return 1
+}
+kill_tree() { # $1 pid, $2 signal (default TERM)
+  local pid="$1" sig="${2:-TERM}" kid
+  for kid in $(pgrep -P "$pid" 2>/dev/null); do kill_tree "$kid" "$sig"; done
+  kill "-$sig" "$pid" 2>/dev/null || true
+}
+reap_lock_holders() { # $1 signal — take down every holder but this script's own processes
+  local p
+  for p in $(fuser "$LOCK" 2>/dev/null); do
+    [[ "$p" == "$SELF_PID" ]] && continue
+    is_descendant_of_self "$p" && continue
+    kill_tree "$p" "$1"
+  done
+}
+live_si_holder() { # echo the pid of a lock holder that is a live si.sh campaign
+  local p sid cmd
+  local -a argv
+  for p in $(fuser "$LOCK" 2>/dev/null); do
+    [[ "$p" == "$SELF_PID" ]] && continue
+    is_descendant_of_self "$p" && continue
+    [[ -r "/proc/$p/cmdline" && -r "/proc/$p/stat" ]] || continue
+    cmd="$(tr '\0' ' ' <"/proc/$p/cmdline" 2>/dev/null)" || continue
+    read -r -a argv <<<"$cmd"
+    [[ "${argv[1]:-}" == *si.sh ]] || continue
+    # A loop child of a dead run inherits this script's cmdline, so cmdline
+    # alone cannot tell it from a campaign. Its launching session is gone,
+    # though: a real campaign still has one.
+    read -r _ _ _ _ _ sid _ <"/proc/$p/stat" 2>/dev/null || continue
+    [[ -d "/proc/$sid" ]] || continue
+    printf '%s\n' "$p"; return 0
+  done
+  return 1
+}
 
-# ── lock (flock releases automatically if this process dies) ────────────────
-command -v flock >/dev/null || die "flock is required"
-exec 9>"$LOCK"
-flock -n 9 || die "another si.sh holds $LOCK"
-printf '%s %s\n' "$$" "$(date +%s)" >>"$LOCK"
+# ── lock ───────────────────────────────────────────────────────────────────
+# flock is released when the last process holding the descriptor exits, and an
+# interrupted run leaves its replay/agent children alive with the lock
+# inherited — so a stale holder is reaped instead of blocking every relaunch.
+command -v flock >/dev/null && command -v fuser >/dev/null \
+  || die "flock and fuser are required"
+LOCK_OWNER="$(awk 'NR==1{print $1}' "$LOCK" 2>/dev/null || true)"
+exec 9>>"$LOCK"   # append: never truncate a live owner's record while probing
+REAPED=0
+if ! flock -n 9; then
+  OTHER_SI="$(live_si_holder || true)"
+  [[ -n "$OTHER_SI" ]] && die "another si.sh (pid $OTHER_SI) holds $LOCK"
+  log "stale lock: owner pid ${LOCK_OWNER:-unknown} is gone — reaping its leftovers"
+  reap_lock_holders TERM
+  sleep 2
+  if ! flock -n 9; then
+    reap_lock_holders KILL
+    sleep 1
+    flock -n 9 || die "cannot acquire $LOCK even after reaping its holders"
+  fi
+  REAPED=1
+fi
+printf '%s %s\n' "$SELF_PID" "$(date +%s)" >"$LOCK"
 
 # ── pinned-file guard: the improver may not rewrite the judge ───────────────
 pin_guard() {
@@ -130,12 +192,7 @@ cleanup_stream() {
 }
 # Stop path: Ctrl-C reaches the whole process group, but a TERM sent to this PID
 # alone (systemd, a plain `kill`) has to take the loop and its stage children
-# down too — `timeout` does not forward signals, so walk the tree ourselves.
-kill_tree() { # $1 = pid
-  local pid="$1" kid
-  for kid in $(pgrep -P "$pid" 2>/dev/null); do kill_tree "$kid"; done
-  kill -TERM "$pid" 2>/dev/null || true
-}
+# down too — `timeout` does not forward signals, so kill_tree walks the tree.
 CHILD_PID=""
 STOP_REQUESTED=0
 on_stop() {
@@ -242,6 +299,13 @@ if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
   die "tracked working tree is dirty — commit or stash first (revert needs a clean baseline)"
 fi
 pin_guard
+if (( REAPED )); then
+  # The previous run died without restoring the ledger; what is on disk is its
+  # replay state, not the operator's. Put the pre-run backup back (or clear the
+  # replay files) before adopting a new backup.
+  log "cleaning up after the interrupted run"
+  restore_state
+fi
 backup_state
 
 FIRST_SHA="$(git rev-parse HEAD)"
