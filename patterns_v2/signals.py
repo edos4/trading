@@ -322,31 +322,37 @@ def _to_signal(df: pd.DataFrame, raw: dict, *, symbol: str, timeframe: str, late
     )
 
 
-def detect_trade_signals(
+def detect_raw(
+    high, low, close, *, latest_bar_only: bool = False, detect=None,
+) -> list[dict]:
+    """Run the detector on numeric columns only.
+
+    Kept separate from ``detect_trade_signals`` so a scan holds no DataFrame on
+    the rejection path: the store's arrays are reused, and a frame is built
+    only when something detected actually becomes a signal.
+    """
+    fn = detect or detect_fn()
+    latest = len(close) - 1
+    if latest_bar_only and getattr(fn, "supports_latest_only", False):
+        # One bar is wanted; let the bounded-pattern search skip the pivot pairs
+        # that can only break out on a bar this call drops. Same answer for the
+        # bar it keeps (verified against the full search), a fraction of the work.
+        return fn(high, low, close, latest=latest)
+    return fn(high, low, close)
+
+
+def signals_from_raw(
     df: pd.DataFrame,
+    found,
     *,
     symbol: str,
     timeframe: str,
     lookback: int | None = None,
     latest_bar_only: bool = False,
-    detect=None,
 ) -> list[TradeSignal]:
-    """Newest breakout per pattern. ``latest_bar_only`` keeps the current bar."""
-    if df is None or len(df) < MIN_BARS:
-        return []
-    fn = detect or detect_fn()
+    """Newest breakout per pattern, converted with ``df`` for sizing and charts."""
     n = len(df)
     latest = n - 1
-    high = df["high"].to_numpy(dtype=float)
-    low = df["low"].to_numpy(dtype=float)
-    close = df["close"].to_numpy(dtype=float)
-    if latest_bar_only and getattr(fn, "supports_latest_only", False):
-        # One bar is wanted; let the bounded-pattern search skip the pivot pairs
-        # that can only break out on a bar this call drops. Same answer for the
-        # bar it keeps (verified against the full search), a fraction of the work.
-        found = fn(high, low, close, latest=latest)
-    else:
-        found = fn(high, low, close)
     floor = 0 if lookback is None else max(0, n - int(lookback))
     best: dict[str, tuple[int, float, dict]] = {}
     for raw in found or ():
@@ -366,3 +372,27 @@ def detect_trade_signals(
         if signal is not None:
             out.append(signal)
     return out
+
+
+def detect_trade_signals(
+    df: pd.DataFrame,
+    *,
+    symbol: str,
+    timeframe: str,
+    lookback: int | None = None,
+    latest_bar_only: bool = False,
+    detect=None,
+) -> list[TradeSignal]:
+    """Newest breakout per pattern. ``latest_bar_only`` keeps the current bar."""
+    if df is None or len(df) < MIN_BARS:
+        return []
+    high = df["high"].to_numpy(dtype=float)
+    low = df["low"].to_numpy(dtype=float)
+    close = df["close"].to_numpy(dtype=float)
+    found = detect_raw(
+        high, low, close, latest_bar_only=latest_bar_only, detect=detect,
+    )
+    return signals_from_raw(
+        df, found, symbol=symbol, timeframe=timeframe,
+        lookback=lookback, latest_bar_only=latest_bar_only,
+    )

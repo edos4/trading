@@ -11,6 +11,7 @@ Key: (symbol, timeframe) → deque of OHLCVCandle, max length = WINDOW
 from __future__ import annotations
 from collections import deque
 
+import numpy as np
 import pandas as pd
 
 from data.tv_client import OHLCVCandle, MarketSnapshot
@@ -35,6 +36,8 @@ class OHLCVStore:
         # pattern's analyze()). Cache it per key, invalidated on any mutation.
         self._version: dict[tuple[str, str], int] = {}
         self._df_cache: dict[tuple[str, str], tuple[int, pd.DataFrame]] = {}
+        # Numeric columns for detector calls that never touch a DataFrame.
+        self._array_cache: dict[tuple[str, str], tuple[int, tuple[np.ndarray, ...]]] = {}
 
     def _bump(self, key: tuple[str, str]) -> None:
         self._version[key] = self._version.get(key, 0) + 1
@@ -149,6 +152,30 @@ class OHLCVStore:
         df = df[["open", "high", "low", "close", "volume"]]
         self._df_cache[key] = (version, df)
         return df
+
+    def detect_arrays(
+        self, symbol: str, timeframe: str, min_bars: int = 2
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+        """(high, low, close) as float arrays, cached per store version.
+
+        Patternsv2 detection reads only these three columns. Building a
+        DataFrame for every symbol on every bar was the recurring cost after
+        the detector itself got cheaper.
+        """
+        key = (symbol, timeframe)
+        candles = self._store.get(key)
+        if not candles or len(candles) < min_bars:
+            return None
+        version = self._version.get(key, 0)
+        cached = self._array_cache.get(key)
+        if cached is not None and cached[0] == version:
+            return cached[1]
+        h = np.fromiter((c.high for c in candles), float, len(candles))
+        l = np.fromiter((c.low for c in candles), float, len(candles))
+        c = np.fromiter((c.close for c in candles), float, len(candles))
+        arrays = (h, l, c)
+        self._array_cache[key] = (version, arrays)
+        return arrays
 
     def latest_close(self, symbol: str, timeframe: str) -> float | None:
         key = (symbol, timeframe)

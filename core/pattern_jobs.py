@@ -16,6 +16,8 @@ import multiprocessing
 import os
 from concurrent.futures import ProcessPoolExecutor
 
+import numpy as np
+
 from config import PATTERN_SCAN_HISTORY_BARS, settings
 from data.ohlcv_store import DEFAULT_WINDOW, OHLCVStore
 from data.tv_client import MarketSnapshot, OHLCVCandle
@@ -98,6 +100,44 @@ def make_analyze_pool(
 
 def _min_bars(pattern: BasePattern) -> int:
     return max(int(getattr(pattern, "MIN_BARS", 2) or 2), PATTERN_SCAN_HISTORY_BARS)
+
+
+def init_v2_worker() -> None:
+    """ProcessPoolExecutor initializer for the Patternsv2 detector.
+
+    There is no pinned version set to load: the detector is one shared pass.
+    Importing here keeps the module cache warm in every spawned worker.
+    """
+    from patterns_v2.loader import detect_fn
+
+    detect_fn()
+
+
+def make_v2_pool(workers: int) -> ProcessPoolExecutor | None:
+    """Persistent spawn pool for ``detect_v2_batch``; None runs inline."""
+    if workers <= 1:
+        return None
+    return ProcessPoolExecutor(
+        max_workers=workers,
+        mp_context=multiprocessing.get_context("spawn"),
+        initializer=init_v2_worker,
+    )
+
+
+def detect_v2_batch(
+    jobs: list[tuple[str, str, np.ndarray, np.ndarray, np.ndarray]],
+) -> list[list[dict]]:
+    """Picklable process-pool entry: raw latest-bar detections per symbol.
+
+    Only compact numeric arrays cross the process boundary. Signal conversion,
+    the paper ledger, gates, and replay advancement stay in the parent.
+    """
+    from patterns_v2.signals import detect_raw
+
+    return [
+        detect_raw(high, low, close, latest_bar_only=True)
+        for _symbol, _timeframe, high, low, close in jobs
+    ]
 
 
 def analyze_batch(

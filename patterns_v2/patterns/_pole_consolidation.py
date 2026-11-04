@@ -88,11 +88,21 @@ def _geometry(pattern_name, su, sl, up, lo, xs, move, ai, pole_slope):
 def detect(
     h, l, c, a, _P, pattern_name,
     pole_atr=8.0, max_pole=12, min_c=5, max_c=15, min_retr=0.12, max_retr=0.38, min_slope_atr=0.50,
-    thrust_atr=1.0,
+    thrust_atr=1.0, latest=None,
 ):
+    """``latest``: only a pole whose pause can end on that bar needs checking.
+
+    A pole topping at ``i1`` can only signal between ``i1 + min_c`` and
+    ``i1 + max_c``. A live scan consumes one bar, so poles whose interval does
+    not contain it are skipped. Retained poles still walk from ``i1 + min_c``,
+    so an earlier breakout or cancellation inside the pause still wins.
+    """
     n, out = len(c), []
     act = trade_mask(h, l, c)
     for i1 in range(max_pole, n - min_c):
+        last = min(i1 + max_c, n - 1)
+        if latest is not None and not (i1 + min_c <= latest <= last):
+            continue
         if h[i1] < h[i1 - 1] or h[i1] < h[i1 + 1]:
             continue
         if not bar_sane(h, l, c, i1):
@@ -132,7 +142,6 @@ def detect(
         ss_tot = float(((seg - seg.mean()) ** 2).sum())
         if ss_tot <= 0 or 1.0 - float(((seg - pred) ** 2).sum()) / ss_tot < 0.70:
             continue
-        last = min(i1 + max_c, n - 1)
         for j in range(i1 + min_c, last + 1):
             xs = np.arange(i1 + 1, j)
             if len(xs) < min_c - 1:

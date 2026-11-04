@@ -643,13 +643,24 @@ class MarketScanner:
         return True
 
     def _open_analyze_pool(self) -> None:
-        from core.pattern_jobs import analyze_worker_count, make_analyze_pool
+        from core.pattern_jobs import (
+            analyze_worker_count,
+            make_analyze_pool,
+            make_v2_pool,
+        )
 
         self._close_analyze_pool()
-        if self._indicators_only or getattr(self, "_patterns_v2", False):
-            # Indicators and Patternsv2 run in-process. They are not pinned versions.
+        if self._indicators_only:
+            # Indicators run in-process. They are not pinned versions.
             self._analyze_workers = 1
             self._analyze_pool = None
+            return
+        if getattr(self, "_patterns_v2", False):
+            n = analyze_worker_count()
+            self._analyze_workers = n
+            self._analyze_pool = make_v2_pool(n)
+            if self._analyze_pool is not None:
+                log.info(f"Scanner | patternsv2 analyze pool: {n} spawn workers")
             return
         n = analyze_worker_count()
         self._analyze_workers = n
@@ -1321,26 +1332,42 @@ class MarketScanner:
             ready = True
         return ready
 
+    def _v2_before_filter(self) -> bool:
+        return (
+            getattr(self, "_rule_filter", None) is not None
+            and getattr(self, "_rule_filter_mode", "off") == "filter"
+            and getattr(self, "_rule_filter_position", "after") == "before"
+        )
+
+    def _v2_target(self) -> str:
+        return getattr(self, "_rule_filter_pattern", "all") or "all"
+
+    def _v2_gate_before(self, symbol: str, timeframe: str) -> bool:
+        """False = a rule pinned to every pattern failed; skip this symbol."""
+        if not self._v2_before_filter() or self._v2_target() != "all":
+            return True
+        return self._rule_prefilter(symbol, timeframe)
+
+    def _v2_apply_before(self, snapshot: MarketSnapshot, hits: list[TradeSignal]) -> list[TradeSignal]:
+        """Patternsv2 detects every shape in one pass.
+
+        A rule pinned to one pattern is judged after detection, then only that
+        pattern's signals are dropped; the others were never gated by it.
+        """
+        if not self._v2_before_filter() or self._v2_target() == "all":
+            return hits
+        if self._rule_prefilter(snapshot.symbol, snapshot.timeframe):
+            return hits
+        target = self._v2_target()
+        return [h for h in hits if getattr(h, "pattern", "") != target]
+
     def _analyze_local(self, snapshot: MarketSnapshot) -> tuple[int, list[TradeSignal]]:
         """Inline analyze on this loop — tests, workers=1, or pool fallback."""
         if getattr(self, "_patterns_v2", False) and not getattr(self, "_indicators_only", False):
-            target = getattr(self, "_rule_filter_pattern", "all") or "all"
-            before = (
-                getattr(self, "_rule_filter", None) is not None
-                and getattr(self, "_rule_filter_mode", "off") == "filter"
-                and getattr(self, "_rule_filter_position", "after") == "before"
-            )
-            if before and target == "all":
-                if not self._rule_prefilter(snapshot.symbol, snapshot.timeframe):
-                    return 0, []
-                return self._analyze_patterns_v2(snapshot)
+            if not self._v2_gate_before(snapshot.symbol, snapshot.timeframe):
+                return 0, []
             n_eval, hits = self._analyze_patterns_v2(snapshot)
-            if before and target != "all":
-                # Patternsv2 detects every shape in one shared pass. Evaluate
-                # first, then drop only the attached pattern's signals.
-                if not self._rule_prefilter(snapshot.symbol, snapshot.timeframe):
-                    hits = [h for h in hits if getattr(h, "pattern", "") != target]
-            return n_eval, hits
+            return n_eval, self._v2_apply_before(snapshot, hits)
         symbol, timeframe = snapshot.symbol, snapshot.timeframe
         n_bars = self._store.available(symbol, timeframe)
         n_eval = 0
@@ -1420,6 +1447,9 @@ class MarketScanner:
         """Run pattern.analyze() off-loop when a spawn pool is open."""
         if not snapshots:
             return
+        if getattr(self, "_patterns_v2", False):
+            await self._run_analyzes_v2(snapshots)
+            return
         if self._analyze_pool is None:
             for snapshot in snapshots:
                 n_eval, hits = self._analyze_local(snapshot)
@@ -1455,6 +1485,73 @@ class MarketScanner:
         for snapshot, (n_eval, signals) in zip(snapshots, flat):
             self.stats["pattern_evaluations"] += n_eval
             await self._emit_signals(snapshot, signals)
+
+    async def _run_analyzes_v2(self, snapshots: list[MarketSnapshot]) -> None:
+        """Batch Patternsv2 detection across the spawn pool.
+
+        Numeric arrays go out, raw detections come back. Signal conversion,
+        rule gates, the ledger, and replay advancement stay on this loop.
+        """
+        from patterns_v2.signals import MIN_BARS, detect_raw
+
+        pending: list[tuple[MarketSnapshot, tuple]] = []
+        for snapshot in snapshots:
+            if not self._v2_gate_before(snapshot.symbol, snapshot.timeframe):
+                continue
+            arrays = self._store.detect_arrays(
+                snapshot.symbol, snapshot.timeframe, min_bars=MIN_BARS,
+            )
+            if arrays is not None:
+                pending.append((snapshot, arrays))
+        if not pending:
+            return
+
+        async def _emit(snapshot: MarketSnapshot, found: list[dict]) -> None:
+            n_eval, hits = self._v2_signals(snapshot, found)
+            self.stats["pattern_evaluations"] += n_eval
+            await self._emit_signals(snapshot, self._v2_apply_before(snapshot, hits))
+
+        if self._analyze_pool is None:
+            for snapshot, arrays in pending:
+                try:
+                    found = detect_raw(*arrays, latest_bar_only=True)
+                except Exception:
+                    log.exception(
+                        f"Scan | patternsv2 {snapshot.symbol} {snapshot.timeframe}"
+                    )
+                    self.stats["pattern_evaluations"] += 1
+                    continue
+                await _emit(snapshot, found)
+            return
+
+        from core.pattern_jobs import detect_v2_batch
+
+        jobs = [(s.symbol, s.timeframe, *arrays) for s, arrays in pending]
+        n = max(1, int(self._analyze_workers) or 1)
+        chunk_size = max(4, min(16, (len(jobs) + n - 1) // n))
+        chunks = [jobs[i:i + chunk_size] for i in range(0, len(jobs), chunk_size)]
+        loop = asyncio.get_running_loop()
+        try:
+            parts = await asyncio.gather(*[
+                loop.run_in_executor(self._analyze_pool, detect_v2_batch, chunk)
+                for chunk in chunks
+            ])
+        except Exception:
+            log.exception("Scan | patternsv2 pool failed — inline this batch")
+            for snapshot, arrays in pending:
+                try:
+                    found = detect_raw(*arrays, latest_bar_only=True)
+                except Exception:
+                    log.exception(
+                        f"Scan | patternsv2 {snapshot.symbol} {snapshot.timeframe}"
+                    )
+                    self.stats["pattern_evaluations"] += 1
+                    continue
+                await _emit(snapshot, found)
+            return
+        flat = [found for part in parts for found in part]
+        for (snapshot, _arrays), found in zip(pending, flat):
+            await _emit(snapshot, found)
 
 
     # ── Signal pipeline ────────────────────────────────────────────────────────
@@ -2089,22 +2186,34 @@ class MarketScanner:
 
     def _analyze_patterns_v2(self, snapshot: MarketSnapshot) -> tuple[int, list[TradeSignal]]:
         """Breakouts from technical-pattern-detector on the current bar only."""
-        from patterns_v2.signals import MIN_BARS, detect_trade_signals
+        from patterns_v2.signals import MIN_BARS, detect_raw
 
         symbol, timeframe = snapshot.symbol, snapshot.timeframe
-        if self._store.available(symbol, timeframe) < MIN_BARS:
-            return 0, []
-        df = self._store.get_df(symbol, timeframe, min_bars=MIN_BARS)
-        if df is None:
+        arrays = self._store.detect_arrays(symbol, timeframe, min_bars=MIN_BARS)
+        if arrays is None:
             return 0, []
         try:
-            hits = detect_trade_signals(
-                df, symbol=symbol, timeframe=timeframe, latest_bar_only=True,
-            )
+            found = detect_raw(*arrays, latest_bar_only=True)
         except Exception:
             log.exception(f"Scan | patternsv2 {symbol} {timeframe}")
             return 1, []
-        return 1, hits
+        return self._v2_signals(snapshot, found)
+
+    def _v2_signals(
+        self, snapshot: MarketSnapshot, found: list[dict],
+    ) -> tuple[int, list[TradeSignal]]:
+        """Turn raw detections into signals; build the frame only for a hit."""
+        if not found:
+            return 1, []
+        from patterns_v2.signals import MIN_BARS, signals_from_raw
+
+        symbol, timeframe = snapshot.symbol, snapshot.timeframe
+        df = self._store.get_df(symbol, timeframe, min_bars=MIN_BARS)
+        if df is None:
+            return 1, []
+        return 1, signals_from_raw(
+            df, found, symbol=symbol, timeframe=timeframe, latest_bar_only=True,
+        )
 
     def _bind_indicator(self, indicator, symbol: str) -> None:
         bind = getattr(indicator, "bind", None)
