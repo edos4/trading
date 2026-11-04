@@ -47,14 +47,19 @@ def top_symbols(n: int) -> list[str]:
     return [sym for sym, _exchange in rows][: int(n)]
 
 
-def forecast(symbols: list[str], days: int) -> dict:
+def forecast(symbols: list[str], days: int, as_of: str | None = None) -> dict:
     """Run base + fine-tuned forecasts for every symbol; return the JSON payload.
 
-    Raises KronosUnavailable / KronosBusy / KronosError.
+    ``as_of`` (YYYY-MM-DD) truncates history to that date so a past anchor can
+    be forecast without using later bars. Raises KronosUnavailable / KronosBusy
+    / KronosError.
     """
+    args = ["--symbols", *symbols, "--days", str(int(days))]
+    if as_of:
+        args += ["--as-of", str(as_of)]
     return run_worker(
         FORECAST_SCRIPT,
-        ["--symbols", *symbols, "--days", str(int(days))],
+        args,
         timeout_s=TIMEOUT_S,
         label="web",
     )

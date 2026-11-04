@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from datetime import date
 from typing import Any
 
 from fastapi import Depends, Request
@@ -145,7 +146,8 @@ def register_kronos_history_routes(app, templates, ctx) -> None:
         return {**payload, "saved": saved}
 
     @app.post("/api/kronos/experiment2/run")
-    async def api_kronos_experiment2_run(user: str = Depends(require_login)):
+    async def api_kronos_experiment2_run(request: Request,
+                                         user: str = Depends(require_login)):
         from web import kronos
 
         symbols, error = _tracked_symbols()
@@ -153,8 +155,32 @@ def register_kronos_history_routes(app, templates, ctx) -> None:
             return error
 
         try:
-            payload = await asyncio.to_thread(
-                kronos.forecast, symbols, EXPERIMENT_DAYS)
+            body = await request.json()
+        except Exception:
+            body = {}
+        if body is None:
+            body = {}
+        if not isinstance(body, dict):
+            return JSONResponse({"detail": "JSON body must be an object"},
+                                status_code=400)
+        raw_as_of = body.get("as_of")
+        as_of = None
+        if raw_as_of:
+            try:
+                as_of = date.fromisoformat(str(raw_as_of)).isoformat()
+            except ValueError:
+                return JSONResponse(
+                    {"detail": "as_of must be a YYYY-MM-DD date."},
+                    status_code=400,
+                )
+
+        try:
+            if as_of:
+                payload = await asyncio.to_thread(
+                    kronos.forecast, symbols, EXPERIMENT_DAYS, as_of)
+            else:
+                payload = await asyncio.to_thread(
+                    kronos.forecast, symbols, EXPERIMENT_DAYS)
         except kronos.KronosBusy:
             return JSONResponse(
                 {"detail": "A Kronos forecast is already running — wait for it to finish."},

@@ -79,10 +79,11 @@
   </div>
   <p class="muted small">
     <strong>Fully automated — no button click is required.</strong> A weekday cron
-    entry (<code>scripts/kronos_experiment2_daily.sh</code>) runs at 17:00
-    America/New_York: it grades settled rows first, then forecasts the tracked symbols
-    for <strong>5 trading days</strong> and stores the <strong>+1D</strong> and
-    <strong>+5D</strong> rows. After the one-week save window it keeps grading daily
+    entry (<code>scripts/kronos_experiment2_daily.sh</code>) captures at 23:00
+    America/New_York (late enough that the session's daily bars have been
+    written) and grades hourly from 17:00: it grades settled rows first, then
+    forecasts the tracked symbols for <strong>5 trading days</strong> and stores
+    the <strong>+1D</strong> and <strong>+5D</strong> rows. After the one-week save window it keeps grading daily
     for ten more days so the final D5 rows settle, then removes itself. Accuracy is
     <code>100 − |predicted − actual| / actual × 100</code>. Settled rows are listed
     first; a row stays <strong>pending</strong> until its predicted date's US close

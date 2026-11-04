@@ -118,11 +118,14 @@ def _parse_symbols(raw: list[str]) -> list[str]:
     return seen
 
 
-def _prepare(symbols: list[str], days: int, lookback: int, history: int) -> tuple[dict, dict]:
+def _prepare(symbols: list[str], days: int, lookback: int, history: int,
+             as_of: pd.Timestamp | None = None) -> tuple[dict, dict]:
     """Load bars per symbol; returns ({symbol: df}, {symbol: result entry}).
 
-    A symbol with no (or too few) bars gets an ``errors['data']`` entry and is
-    left out of the model loop.
+    ``as_of`` truncates each symbol's history to bars on or before that date so
+    a historical anchor can be forecast without leaking later bars. A symbol
+    with no (or too few) bars gets an ``errors['data']`` entry and is left out
+    of the model loop.
     """
     frames: dict[str, pd.DataFrame] = {}
     results: dict[str, dict] = {}
@@ -140,6 +143,8 @@ def _prepare(symbols: list[str], days: int, lookback: int, history: int) -> tupl
         results[sym] = entry
         try:
             df = load_symbol_df(sym)
+            if as_of is not None:
+                df = df[df.index <= as_of]
             if len(df) < lookback:
                 raise ValueError(
                     f"only {len(df)} bars; need {lookback} for a Kronos context"
@@ -169,17 +174,27 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--history", type=int, default=120,
                     help="recent actual bars to include for the chart")
     ap.add_argument("--sample-count", type=int, default=1)
+    ap.add_argument("--as-of", default=None,
+                    help="only use bars on or before this YYYY-MM-DD date")
     ap.add_argument("--out", required=True)
     args = ap.parse_args(argv)
 
     if args.days < 1:
         raise SystemExit("--days must be >= 1")
 
+    as_of = None
+    if args.as_of:
+        try:
+            as_of = pd.Timestamp(args.as_of).normalize()
+        except (TypeError, ValueError):
+            raise SystemExit(f"--as-of is not a valid date: {args.as_of}")
+
     symbols = _parse_symbols(args.symbols)
     if not symbols:
         raise SystemExit("no symbols given")
 
-    frames, results = _prepare(symbols, args.days, args.lookback, args.history)
+    frames, results = _prepare(
+        symbols, args.days, args.lookback, args.history, as_of)
 
     # Load each model once, then forecast every symbol from it.
     sys.path.insert(0, str(Path.home() / "Kronos"))

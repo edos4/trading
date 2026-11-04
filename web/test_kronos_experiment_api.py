@@ -138,6 +138,23 @@ class WebKronosExperimentApiTests(unittest.TestCase):
             r.json()["summary"]["horizons"]["5"]["finetuned"]["avg_accuracy_pct"],
             99.73)
 
+    def test_run_passes_as_of_for_a_historical_anchor(self) -> None:
+        self._login()
+        with patch("web.kronos.forecast", return_value=PAYLOAD) as forecast, \
+                patch("web.kronos_history._experiment_store", return_value=self.store):
+            r = self.client.post(
+                "/api/kronos/experiment2/run", json={"as_of": "2026-10-23"})
+        self.assertEqual(r.status_code, 200)
+        forecast.assert_called_once_with(["AAPL", "NVDA"], 5, "2026-10-23")
+
+    def test_run_rejects_bad_as_of(self) -> None:
+        self._login()
+        with patch("web.kronos.forecast") as forecast:
+            r = self.client.post(
+                "/api/kronos/experiment2/run", json={"as_of": "not-a-date"})
+        self.assertEqual(r.status_code, 400)
+        forecast.assert_not_called()
+
     def test_run_requires_tracked_symbols(self) -> None:
         self._login()
         self.history_settings.kronos_symbols = []

@@ -8,6 +8,7 @@ model loads on a 16 GB card must never overlap.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import subprocess
@@ -21,6 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 VENV_PYTHON = ROOT / ".venv-kronos" / "bin" / "python"
 
 GPU_LOCK = threading.Lock()
+GPU_LOCK_FILE = Path(tempfile.gettempdir()) / "kronos_gpu.lock"
 
 
 class KronosUnavailable(RuntimeError):
@@ -61,6 +63,17 @@ def run_worker(
             f"Kronos is unavailable on this host: expected {VENV_PYTHON} and {script}."
         )
     if not GPU_LOCK.acquire(blocking=False):
+        raise KronosBusy("A Kronos forecast is already running.")
+    # The in-process lock does not cover a separate script (e.g. the Experiment 2
+    # backfill) running at the same time, so also take an OS-level lock.
+    lock_fh = None
+    try:
+        lock_fh = open(GPU_LOCK_FILE, "w")
+        fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        if lock_fh is not None:
+            lock_fh.close()
+        GPU_LOCK.release()
         raise KronosBusy("A Kronos forecast is already running.")
 
     # Settings are read from .env by this process only; the worker is a plain
@@ -103,6 +116,12 @@ def run_worker(
     except json.JSONDecodeError as exc:
         raise KronosError(f"Kronos {label} produced unreadable output.") from exc
     finally:
+        if lock_fh is not None:
+            try:
+                fcntl.flock(lock_fh, fcntl.LOCK_UN)
+                lock_fh.close()
+            except OSError:
+                pass
         GPU_LOCK.release()
         try:
             tmp_path.unlink()

@@ -63,12 +63,13 @@ if [[ "$today" > "$grade_end" && "$mode" != "--check" ]]; then
 fi
 
 # The crontab invokes this hourly (Debian cron evaluates schedules in host
-# time). Keep only the invocation in the 17:00 America/New_York hour on a
-# weekday; this is independent of the host timezone and handles EDT/EST.
+# time). Act only in the 17:00–23:59 America/New_York window on a weekday; this
+# is independent of the host timezone and handles EDT/EST. Grading may retry
+# every hour in that window so a session whose bars land late still settles.
 if [[ "$mode" != "--check" && "$mode" != "--force" ]]; then
   et_hour="$(TZ=America/New_York date +%H)"
   et_dow="$(TZ=America/New_York date +%u)"
-  if [[ "$et_hour" != "17" || "$et_dow" -gt 5 ]]; then
+  if (( 10#$et_hour < 17 || 10#$et_hour > 23 )) || [[ "$et_dow" -gt 5 ]]; then
     exit 0
   fi
 fi
@@ -129,6 +130,13 @@ PY
 # After the save window, only grade: the final D5 rows need several more sessions.
 if [[ "$today" > "$end_date" ]]; then
   post /api/kronos/experiment2/refresh
+  exit 0
+fi
+
+# Capture once, late enough that the post-close bar update has finished writing
+# the session (the 17:00 run used to race it and anchor stale symbols).
+if [[ "$(TZ=America/New_York date +%H)" != "23" ]]; then
+  post /api/kronos/experiment2/refresh || true
   exit 0
 fi
 

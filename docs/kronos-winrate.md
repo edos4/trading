@@ -284,8 +284,11 @@ anchor (positional, not the calendar forecast date).
 `scripts/kronos_experiment2_daily.sh` POSTs the endpoints with the repo's
 `WEB_UI_USERNAME` / `WEB_UI_PASSWORD`. Debian cron evaluates schedules in host
 time, so the installed block invokes the script hourly and the script proceeds
-only during the 17:00 `America/New_York` hour on weekdays (no host-timezone or
-DST assumption). It needs no manual button press:
+only in the 17:00–23:59 `America/New_York` window on weekdays (no host-timezone
+or DST assumption). It captures once at 23:00 ET, after the post-close bar
+update has finished writing the session; grading retries every hour in the
+window so rows whose bars land late still settle. It needs no manual button
+press:
 
 1. **Grade first** — `POST /api/kronos/experiment2/refresh`, so settled rows are
    scored even if the forecast step later fails.

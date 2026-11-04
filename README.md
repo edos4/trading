@@ -367,10 +367,14 @@ anchor × horizon, base and fine-tuned closes side by side). Once the matching
 session prints, **Refresh actuals** fills the actual close and grades each model
 with `100 − |predicted − actual| / actual × 100`; the table and the average line
 match the experiment spreadsheet. The section is fully automated by
-`scripts/kronos_experiment2_daily.sh`: a weekday cron entry at 17:00
-`America/New_York` grades settled rows first, then captures a new anchor for one
-week; after that it keeps grading daily for ten more days so the final D5 rows
-settle, and then removes its own cron block. No button click is required.
+`scripts/kronos_experiment2_daily.sh`: a weekday cron entry captures at 23:00
+`America/New_York` (late enough that the session's daily bars have been written)
+and grades hourly from 17:00, so it grades settled rows before capturing a new
+anchor for one week; after that it keeps grading daily for ten more days so the
+final D5 rows settle, and then removes its own cron block. No button click is
+required. If an anchor was captured before some symbols' bars landed,
+`scripts/kronos_experiment2_backfill.py` re-forecasts just the missing symbols
+as-of that anchor without touching existing (possibly graded) rows.
 Manual endpoints: `POST /api/kronos/experiment2/run`,
 `POST /api/kronos/experiment2/refresh`, and
 `GET /api/kronos/experiment2?limit=2000`.
