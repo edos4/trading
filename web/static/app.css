@@ -414,6 +414,11 @@ progress::-moz-progress-bar { background: var(--accent); border-radius: 999px; }
   font-size: 0.95rem;
   letter-spacing: 0.02em;
 }
+.tv-chart-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
 .tv-ohlc {
   margin: 0.2rem 0 0;
   font-family: "Trebuchet MS", "IBM Plex Mono", monospace;
