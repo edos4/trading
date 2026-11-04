@@ -1049,6 +1049,8 @@ function initPaper() {
   const chartOhlc = document.getElementById("paper-chart-ohlc");
   const chartStatus = document.getElementById("paper-chart-status");
   const chartHost = document.getElementById("paper-chart-host");
+  let chartArgs = null;
+  let chartTimeframe = "1d";
 
   function fmtTvOhlc(data) {
     const o = data && data.ohlc;
@@ -1070,8 +1072,12 @@ function initPaper() {
     if (chartOhlc) chartOhlc.textContent = "";
   }
 
-  async function openTradeChart(side, market, symbol, index, logTime, tradeId) {
+  async function openTradeChart(side, market, symbol, index, logTime, tradeId, timeframe) {
     if (!chartModal) return;
+    chartArgs = { side, market, symbol, index, logTime, tradeId };
+    chartTimeframe = timeframe === "1W" ? "1W" : "1d";
+    const weeklyBtn = document.getElementById("paper-chart-weekly");
+    if (weeklyBtn) weeklyBtn.textContent = chartTimeframe === "1W" ? "Daily view" : "Weekly view";
     chartModal.hidden = false;
     if (chartTitle) chartTitle.textContent = `${(market || "").toUpperCase()} ${symbol || "Chart"}`;
     if (chartOhlc) chartOhlc.textContent = "";
@@ -1085,8 +1091,15 @@ function initPaper() {
     if (index != null) params.set("index", String(index));
     if (logTime) params.set("log_time", logTime);
     if (tradeId) params.set("trade_id", tradeId);
+    if (chartTimeframe !== "1d") params.set("timeframe", chartTimeframe);
     try {
       const data = await api(`/api/paper/chart?${params.toString()}`);
+      if (data.timeframe) {
+        chartTimeframe = data.timeframe === "1W" ? "1W" : "1d";
+        if (weeklyBtn) {
+          weeklyBtn.textContent = chartTimeframe === "1W" ? "Daily view" : "Weekly view";
+        }
+      }
       if (chartTitle) chartTitle.textContent = data.title || symbol || "Chart";
       if (chartOhlc) {
         chartOhlc.textContent = fmtTvOhlc(data);
@@ -1134,6 +1147,14 @@ function initPaper() {
   }
 
   document.getElementById("paper-chart-close")?.addEventListener("click", closeTradeChart);
+  document.getElementById("paper-chart-weekly")?.addEventListener("click", () => {
+    if (!chartArgs) return;
+    const next = chartTimeframe === "1W" ? "1d" : "1W";
+    openTradeChart(
+      chartArgs.side, chartArgs.market, chartArgs.symbol,
+      chartArgs.index, chartArgs.logTime, chartArgs.tradeId, next,
+    );
+  });
   document.getElementById("paper-chart-backdrop")?.addEventListener("click", closeTradeChart);
   document.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape") closeTradeChart();
