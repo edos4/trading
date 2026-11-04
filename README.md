@@ -181,11 +181,14 @@ VOLUME_GATE_ENABLED=false .venv/bin/python main.py --paper --patterns-v2 --paper
 - **Safety** — requires a clean tracked tree (revert restores `HEAD` exactly);
   backs up the operator's `data/cache/paper_account.json` and
   `logs/paper_signals_us.jsonl` and restores them afterwards; stops the stream
-  server it started; `flock` lock at `runs/.si.lock`; bounded replay/agent
-  timeouts with retries; failures are recorded and the loop continues instead of
-  waiting for a human. Don't run the web Paper desk or another replay against
-  the US ledger while `si.sh` is running — it owns that ledger during an
-  iteration.
+  server it started; `flock` lock at `runs/.si.lock`, and a lock left behind by
+  an interrupted run is reaped automatically — its orphaned replay/agent
+  children are killed, its replay state is discarded, and the campaign starts
+  again (it never reaps a live campaign, even if the lock record was lost);
+  bounded replay/agent timeouts with retries; failures are recorded and the loop
+  continues instead of waiting for a human. Don't run the web Paper desk or
+  another replay against the US ledger while `si.sh` is running — it owns that
+  ledger during an iteration.
 - **Tunables** — `SI_MAX_STALE` (`0` = never stop), `SI_MIN_CLOSED`,
   `SI_STREAM_START`, `SI_RELAUNCH_BACKOFF`, `SI_REPLAY_TIMEOUT`,
   `SI_AGENT_TIMEOUT`, `SI_AGENT_MODEL`, `SI_CMD_BIN`, `SI_REPIN`.
