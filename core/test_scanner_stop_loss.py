@@ -109,7 +109,7 @@ def test_dii_shadow_records_without_blocking(monkeypatch):
     monkeypatch.setattr(settings, "dii_gate_shadow", True)
     monkeypatch.setattr(
         "analysis.pattern_dii.describe_pattern_dii_rejection",
-        lambda df, action=None: "DII bullish percentage 90.00% outside required 16%–40%.",
+        lambda df, action=None: "DII bullish percentage 90.00% outside required 17%–40%.",
     )
     scanner = _pattern_scanner()
     scanner._store.get_df = Mock(return_value=None)
