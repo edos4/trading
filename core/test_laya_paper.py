@@ -27,7 +27,7 @@ def _pin_dii_to_a_passing_read(monkeypatch):
     """These tests are about Laya shadow/filter behaviour, not breadth geometry.
 
     The feed below is flat, which reads 50% DII — outside both live pattern
-    bands (bullish 16–40 for BUY, bearish 16–40 for SELL), so the live gate would
+    bands (bullish 16–45 for BUY, bearish 16–45 for SELL), so the live gate would
     reject the BUY these fixtures emit. Pin the BUY band open so the gate keeps
     passing and the assertions stay about Laya. `analysis/test_pattern_dii.py`
     owns the band values.

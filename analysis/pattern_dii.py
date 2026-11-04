@@ -1,4 +1,4 @@
-"""Mandatory DII context gate for pattern scanning (BUY bulls 16–40, SELL bears 16–40)."""
+"""Mandatory DII context gate for pattern scanning (BUY bulls 16–45, SELL bears 16–45)."""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ LENGTH = 20
 PERIOD = 40
 MIN_BARS = LENGTH + PERIOD
 LONG_MIN_BULLS = 16.0
-LONG_MAX_BULLS = 40.0
+LONG_MAX_BULLS = 45.0
 SHORT_MIN_BEARS = 16.0
-SHORT_MAX_BEARS = 40.0
+SHORT_MAX_BEARS = 45.0
 BALANCED = 50.0
 
 
@@ -35,10 +35,11 @@ def dii_consideration(state) -> tuple[float, float]:
 def describe_pattern_dii_rejection(df, *, action: str = "BUY") -> str | None:
     """Accept the DII consideration band for the signal's side.
 
-    BUY (long) accepts 16 <= bulls <= 40; SELL (short) accepts 16 <= bears <= 40.
+    BUY (long) accepts 16 <= bulls <= 45; SELL (short) accepts 16 <= bears <= 45.
     Because bulls + bears == 100, those bands are mirror images and do not
     overlap: a bullish-majority tape only passes SELL, a bearish-majority tape
-    only passes BUY, and the balanced 40–60 zone passes neither.
+    only passes BUY, and the 45–55 middle (e.g. a balanced 50/50 tape) passes
+    neither.
     A short warmup window (e.g. the first PATTERN_SCAN_HISTORY_BARS bars after
     a process start, while bulk history is still preloading) carries no
     rejection — the gate engages once enough candles are stored. A zero-event

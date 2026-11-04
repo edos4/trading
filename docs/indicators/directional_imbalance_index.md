@@ -159,13 +159,13 @@ supersedes the earlier optional-only pattern-filter scope.
 
 Verification: **passed** across the band gate, both pattern scanners, the
 Explorer prefix/action cases, and the support/resistance strategy tests.
-Boundary checks include 16 and 40 (accepted) and just outside either boundary for
-each side's own metric, both actions, the non-overlapping 40/60 split, short
+Boundary checks include 16 and 45 (accepted) and just outside either boundary for
+each side's own metric, both actions, the non-overlapping 45/55 split, short
 warmup, invalid values, zero-event balance, and causal Explorer evaluation.
 
 **How to use it**
 
-Start with a daily context rule such as `bulls > bears` (equivalently `bulls > 50` when the total is positive). The mandatory pattern gate instead requires 16%–40% bullish for BUY or 16%–40% bearish for SELL, leaving the balanced middle untraded. These are evaluation examples, not thresholds supplied by BigBeluga or established profitable settings. A balanced flat series produces 50/50 because ties count, so strict dominance excludes that case. Strong relative dominance can still arise from very few events; it is not independently a measure of trend strength or liquidity.
+Start with a daily context rule such as `bulls > bears` (equivalently `bulls > 50` when the total is positive). The mandatory pattern gate instead requires 16%–45% bullish for BUY or 16%–45% bearish for SELL, leaving the 45%–55% middle untraded. These are evaluation examples, not thresholds supplied by BigBeluga or established profitable settings. A balanced flat series produces 50/50 because ties count, so strict dominance excludes that case. Strong relative dominance can still arise from very few events; it is not independently a measure of trend strength or liquidity.
 
 For a pattern filter, evaluate the persistent state with `gt`/`gte`, not a one-bar crossing. Existing scanner integration provides:
 

@@ -408,7 +408,7 @@ def _rail(kind, level, start_index=0, confirmed=True, broken=False):
 
 
 @pytest.mark.parametrize("action,kind,bulls", [
-    ("BUY", "support", 30.0),        # inside the BUY band (bullish 16–40)
+    ("BUY", "support", 30.0),        # inside the BUY band (bullish 16–45)
     ("SELL", "resistance", 70.0),    # inside the SELL band (bearish 30 → bulls 70)
 ])
 def test_support_resistance_bounce_inside_dii_band(monkeypatch, action, kind, bulls):
