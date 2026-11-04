@@ -12,14 +12,17 @@
 #      otherwise revert the agent's edits
 #
 # Runs unattended: bounded retries/timeouts, a lock, per-iteration logs, and no
-# human gate. Tunables (env):
-#   SI_MAX_ITERATIONS     iterations to attempt              (default 5)
-#   SI_MAX_STALE          consecutive non-improvements to stop (default 2)
-#   SI_MIN_CLOSED         min closed trades for a valid run    (default 10)
+# human gate. There is no iteration cap: run numbers keep counting up (runs/NN)
+# and a supervisor relaunches the loop after any unexpected exit.
+# Tunables (env):
+#   SI_MAX_STALE          consecutive non-improvements to stop (default 2, 0 = never)
+#   SI_MIN_CLOSED         min closed trades for a valid run    (default 4)
+#   SI_STREAM_START       replay window start, YYYY-MM-DD      (default 6 months back)
 #   SI_REPLAY_TIMEOUT     seconds per replay                   (default 14400)
 #   SI_AGENT_TIMEOUT      seconds per commandcode call         (default 3600)
 #   SI_AGENT_MODEL        optional --model for commandcode
 #   SI_CMD_BIN            commandcode binary                   (default commandcode)
+#   SI_RELAUNCH_BACKOFF   seconds to wait before a relaunch    (default 60)
 #   SI_REPIN              set 1 after deliberately editing a pinned file
 set -uo pipefail
 
@@ -36,9 +39,10 @@ LEADERBOARD="$RUNS/leaderboard.md"
 LEDGER="$ROOT/data/cache/paper_account.json"
 SIGNALS="$ROOT/logs/paper_signals_us.jsonl"
 
-MAX_ITER="${SI_MAX_ITERATIONS:-5}"
 MAX_STALE="${SI_MAX_STALE:-2}"
-MIN_CLOSED="${SI_MIN_CLOSED:-10}"
+MIN_CLOSED="${SI_MIN_CLOSED:-4}"
+STREAM_START="${SI_STREAM_START:-$(date -d '6 months ago' +%F)}"
+RELAUNCH_BACKOFF="${SI_RELAUNCH_BACKOFF:-60}"
 REPLAY_TIMEOUT="${SI_REPLAY_TIMEOUT:-14400}"
 AGENT_TIMEOUT="${SI_AGENT_TIMEOUT:-3600}"
 CMD_BIN="${SI_CMD_BIN:-commandcode}"
@@ -124,13 +128,29 @@ cleanup_stream() {
     log "stopped the paper stream server we started (port ${STREAM_PORT})"
   fi
 }
+# Stop path: Ctrl-C reaches the whole process group, but a TERM sent to this PID
+# alone (systemd, a plain `kill`) has to take the loop and its stage children
+# down too — `timeout` does not forward signals, so walk the tree ourselves.
+kill_tree() { # $1 = pid
+  local pid="$1" kid
+  for kid in $(pgrep -P "$pid" 2>/dev/null); do kill_tree "$kid"; done
+  kill -TERM "$pid" 2>/dev/null || true
+}
+CHILD_PID=""
+STOP_REQUESTED=0
+on_stop() {
+  STOP_REQUESTED=1
+  log "stop requested — terminating the current stage"
+  [[ -n "$CHILD_PID" ]] && kill_tree "$CHILD_PID"
+}
+trap on_stop INT TERM
 trap 'restore_state; cleanup_stream' EXIT
 
 # ── helpers ────────────────────────────────────────────────────────────────
 next_nn() {
   local max=0 d n
-  for d in "$RUNS"/[0-9][0-9]; do
-    [[ -d "$d" ]] || continue
+  for d in "$RUNS"/[0-9]*; do
+    [[ -d "$d" && ${d##*/} =~ ^[0-9]+$ ]] || continue
     n=$((10#${d##*/}))
     (( n > max )) && max=$n
   done
@@ -158,7 +178,7 @@ replay() { # $1 = export path; returns non-zero when no usable export appears
     log "replay attempt $attempt -> $out"
     VOLUME_GATE_ENABLED=false timeout -k 30 "${REPLAY_TIMEOUT}s" \
       "$VENV" main.py --paper --patterns-v2 --paper-reset \
-        --market us --symbols=2000 --stream=2025-11-03 \
+        --market us --symbols=2000 --stream="$STREAM_START" \
         --kronos-gate-mode off --export-trades-log="$out" >>"$ITER_LOG" 2>&1
     if [[ -s "$out" ]]; then
       return 0
@@ -189,7 +209,7 @@ run_agent() { # $1 prompt template, $2 run id, $3 label
 write_run_md() { # $1 dir, $2 status, $3 before json, $4 after json, $5 sha, $6 note
   local dir="$1" status="$2" before="${3:-}" after="${4:-}" sha="${5:-}" note="$6"
   local -a lines=("# Run $(basename "$dir")" "" "- status: **$status**"
-                  "- started: $STARTED" "- replay: fixed US stream from 2025-11-03"
+                  "- started: $STARTED" "- replay: fixed US stream from $STREAM_START"
                   "- finished: $(date -Is)")
   if [[ -n "$before" && -f "$before" ]]; then
     lines+=("- baseline: $(score_field "$before" win_rate_pct)% win, $(score_field "$before" trades) trades, PF $(score_field "$before" profit_factor), expR $(score_field "$before" expectancy_r), window $(score_field "$before" sim_window)")
@@ -225,12 +245,16 @@ pin_guard
 backup_state
 
 FIRST_SHA="$(git rev-parse HEAD)"
-log "si.sh starting: max_iter=$MAX_ITER max_stale=$MAX_STALE min_closed=$MIN_CLOSED head=${FIRST_SHA:0:10}"
+log "si.sh starting: max_stale=$MAX_STALE min_closed=$MIN_CLOSED stream=$STREAM_START head=${FIRST_SHA:0:10}"
 
-STALE=0
-ATTEMPTED=0
-while (( ATTEMPTED < MAX_ITER )); do
-  ATTEMPTED=$((ATTEMPTED + 1))
+# ── the loop ───────────────────────────────────────────────────────────────
+# One iteration per run dir. No iteration cap: NN keeps counting up. Stops on
+# the no-progress brake (SI_MAX_STALE consecutive non-improvements, 0 = never)
+# or on SIGINT/SIGTERM; anything else is a crash the supervisor retries.
+iteration_loop() {
+  local NN RUN_DIR STARTED CHANGE_STAT
+  local STALE=0
+  while :; do
   NN="$(next_nn)"
   RUN_DIR="$RUNS/$NN"
   STARTED="$(date -Is)"
@@ -238,7 +262,7 @@ while (( ATTEMPTED < MAX_ITER )); do
   mkdir -p "$RUN_DIR"
   ITER_LOG="$LOGS/$NN.log"
   : >"$ITER_LOG"
-  log "=== iteration $NN (attempt $ATTEMPTED/$MAX_ITER, stale=$STALE/$MAX_STALE) ==="
+  log "=== iteration $NN (stale=$STALE/$MAX_STALE, stream from $STREAM_START) ==="
   restore_state
   pin_guard
 
@@ -348,11 +372,57 @@ EOF
   fi
 
   restore_state
-  if (( STALE >= MAX_STALE )); then
-    log "stopping: $STALE consecutive non-improving iterations"
+  (( STOP_REQUESTED )) && return 3
+  if (( MAX_STALE > 0 && STALE >= MAX_STALE )); then
+    log "no-progress brake: $STALE consecutive non-improving iterations"
+    return 0
+  fi
+  done
+}
+
+# ── supervisor ─────────────────────────────────────────────────────────────
+# The loop runs in a subshell so a fatal stage cannot take the supervisor down.
+# A clean return means the no-progress brake fired; anything else is a crash and
+# is retried after SI_RELAUNCH_BACKOFF. Three failures inside two minutes abort,
+# so a broken environment cannot spin. The lock, state backup and pinned-file
+# manifest live in this parent, so they survive every relaunch.
+CRASHES=0
+while :; do
+  if (( STOP_REQUESTED )); then
+    log "supervisor: stopped by request — not relaunching"
     break
   fi
+  LOOP_STARTED="$(date +%s)"
+  ( iteration_loop ) &
+  CHILD_PID=$!
+  wait "$CHILD_PID"
+  RC=$?
+  if (( STOP_REQUESTED )) && kill -0 "$CHILD_PID" 2>/dev/null; then
+    kill_tree "$CHILD_PID"
+    wait "$CHILD_PID" 2>/dev/null
+    RC=143
+  fi
+  CHILD_PID=""
+  restore_state
+  (( STOP_REQUESTED )) && { log "supervisor: stopped by request — not relaunching"; break; }
+  if (( RC == 0 )); then
+    log "supervisor: no-progress brake reached — not relaunching"
+    break
+  fi
+  ELAPSED=$(( $(date +%s) - LOOP_STARTED ))
+  if (( ELAPSED < 120 )); then
+    CRASHES=$((CRASHES + 1))
+  else
+    CRASHES=0
+  fi
+  log "supervisor: loop exited $RC after ${ELAPSED}s (fast failures $CRASHES/3)"
+  if (( CRASHES >= 3 )); then
+    log "supervisor: giving up after 3 fast failures"
+    break
+  fi
+  log "supervisor: relaunching in ${RELAUNCH_BACKOFF}s"
+  sleep "$RELAUNCH_BACKOFF"
 done
 
-log "si.sh done: $ATTEMPTED iteration(s), best accepted: $("$VENV" "$ROOT/scripts/si_score.py" best --runs-dir "$RUNS" 2>/dev/null || echo none)"
+log "si.sh done: best accepted: $("$VENV" "$ROOT/scripts/si_score.py" best --runs-dir "$RUNS" 2>/dev/null || echo none)"
 log "leaderboard: $LEADERBOARD"
