@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     # Give back one R, not two: a 2R/2R ladder parked the trail at breakeven, so
     # every armed trade returned its whole gain unless it hit target first.
     stop_loss_trail_r: float = 1.0
-    stop_loss_arm_r: float = 2.0
+    stop_loss_arm_r: float = 1.75
     # Cancel a next-open fill when an adverse gap leaves less than this
     # fraction of the planned stop distance. 0 disables the guard.
     stop_loss_min_risk_frac: float = 0.5
