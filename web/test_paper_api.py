@@ -269,7 +269,9 @@ class WebPaperApiTests(unittest.TestCase):
         with patch("web.app.paper_books.chart", return_value={"title": "TSLA"}) as chart:
             r = self.client.get("/api/paper/chart?side=log&market=us&symbol=TSLA")
             self.assertEqual(r.status_code, 200)
-            chart.assert_called_once_with("us", side="log", symbol="TSLA", index=None, log_time=None)
+            chart.assert_called_once_with(
+                "us", side="log", symbol="TSLA", index=None, log_time=None, timeframe=None,
+            )
 
     def test_chart_passes_selected_log_time(self) -> None:
         self._login()
@@ -303,6 +305,40 @@ class WebPaperApiTests(unittest.TestCase):
                     self.assertEqual(response.status_code, 200, response.text)
                     self.assertEqual(response.json()["dii"]["bulls"][-1]["value"], 50)
 
+    def test_chart_weekly_view_resamples_bars(self) -> None:
+        self._login()
+        import pandas as pd
+        from core.paper_books import PaperBook
+        from core.test_paper_books import _open_trade
+        history = pd.DataFrame(
+            dict(open=100., high=101., low=99., close=100., volume=1000),
+            index=pd.bdate_range("2025-01-01", periods=300),
+        )
+        with patch("core.paper_books.PaperAccount.save"), \
+             patch("data.history.owns_local_stocks_history", return_value=False), \
+             patch("data.history.load_daily_ohlcv_df", return_value=history):
+            book = PaperBook("us")
+            trade = _open_trade("TEST", 100.)
+            book.account.positions["TEST"] = [trade]
+            def chart(market, **kwargs):
+                return book.render_trade_chart(**kwargs)
+            with patch("web.app.paper_books.chart", side_effect=chart):
+                daily = self.client.get("/api/paper/chart", params={
+                    "market": "us", "side": "open", "symbol": "TEST"})
+                weekly = self.client.get("/api/paper/chart", params={
+                    "market": "us", "side": "open", "symbol": "TEST", "timeframe": "1W"})
+        self.assertEqual(daily.status_code, 200, daily.text)
+        self.assertEqual(weekly.status_code, 200, weekly.text)
+        self.assertIn("1W", weekly.json()["title"])
+        self.assertLess(len(weekly.json()["candles"]), len(daily.json()["candles"]))
+        self.assertGreater(len(weekly.json()["trendlines"]), -1)
+
+    def test_chart_rejects_unknown_timeframe(self) -> None:
+        self._login()
+        r = self.client.get("/api/paper/chart?side=open&market=us&symbol=TEST&timeframe=4h")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("timeframe", str(r.json().get("detail", "")).lower())
+
     def test_replay_chart_bad_market(self) -> None:
         self._login()
         r = self.client.post(
@@ -311,7 +347,6 @@ class WebPaperApiTests(unittest.TestCase):
         )
         self.assertEqual(r.status_code, 400)
         self.assertIn("market", str(r.json().get("detail", "")).lower())
-
     def test_replay_chart_builds_payload(self) -> None:
         self._login()
         import pandas as pd

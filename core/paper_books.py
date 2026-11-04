@@ -507,6 +507,7 @@ class PaperBook:
         index: int | None = None,
         log_time: str | None = None,
         trade_id: str | None = None,
+        timeframe: str | None = None,
     ) -> dict[str, Any]:
         from analysis.chart_renderer import build_trade_viewer_payload
 
@@ -541,7 +542,9 @@ class PaperBook:
             if not symbol:
                 return {"error": "symbol is required for log charts"}
             if log_time:
-                return self._chart_from_log_symbol(account, scanner, symbol, log_time=log_time)
+                return self._chart_from_log_symbol(
+                    account, scanner, symbol, log_time=log_time, timeframe=timeframe,
+                )
             trade = account.latest_position(symbol)
             if trade is not None:
                 current = account.last_price(trade.symbol, trade.entry_price)
@@ -554,11 +557,13 @@ class PaperBook:
                         view_side = "closed"
                         break
                 if trade is None:
-                    return self._chart_from_log_symbol(account, scanner, symbol)
+                    return self._chart_from_log_symbol(
+                        account, scanner, symbol, timeframe=timeframe,
+                    )
         else:
             return {"error": "side must be open, closed, or log"}
 
-        timeframe = trade.timeframe or "1d"
+        timeframe = timeframe or trade.timeframe or "1d"
         session_tz = get_market(account.market).session_tz
         df = _chart_history_frame(
             scanner, trade.symbol, timeframe, market=account.market,
@@ -602,6 +607,7 @@ class PaperBook:
         scanner: Optional[MarketScanner],
         symbol: str,
         log_time: str | None = None,
+        timeframe: str | None = None,
     ) -> dict[str, Any]:
         from analysis.chart_renderer import build_trade_viewer_payload
 
@@ -614,7 +620,7 @@ class PaperBook:
         if log_time and not log_row:
             return {"error": "This signal is no longer in the log. Refresh the table."}
         ticker = str(log_row.get("symbol") or symbol)
-        timeframe = str(log_row.get("timeframe") or "1d")
+        timeframe = timeframe or str(log_row.get("timeframe") or "1d")
         session_tz = get_market(account.market).session_tz
         df = _chart_history_frame(
             scanner, ticker, timeframe, market=account.market,
@@ -1332,9 +1338,11 @@ class PaperBookManager:
         index: int | None = None,
         log_time: str | None = None,
         trade_id: str | None = None,
+        timeframe: str | None = None,
     ) -> dict[str, Any]:
         return self._book(market).render_trade_chart(
-            side=side, symbol=symbol, index=index, log_time=log_time, trade_id=trade_id,
+            side=side, symbol=symbol, index=index, log_time=log_time,
+            trade_id=trade_id, timeframe=timeframe,
         )
 
     def export_trades(self, market: str | None = None) -> dict[str, Any]:
