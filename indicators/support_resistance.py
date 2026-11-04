@@ -2,7 +2,7 @@
 
 The rails are the same pivot-anchored trend lines drawn on trade charts. The
 The strategy only considers a rail bounce while the DII side percentage sits
-in the pattern scan gate band (16%–45% bullish for BUY, 16%–42% bearish for SELL).
+in the pattern scan gate band (16%–40% bullish for BUY, 16%–42% bearish for SELL).
 A BUY needs a touch/hold of confirmed, unbroken support; a SELL needs a
 rejection at confirmed, unbroken resistance.
 """

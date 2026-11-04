@@ -134,9 +134,9 @@ balanced/invalid/short history, and existing indicator scan regressions.
 
 Patterns and Patternsv2 entry candidates now require a **per-side** band, with
 the same default DII calculation (20, 40) and the candidate's timeframe: a BUY
-needs **16 <= bulls <= 45**, a SELL needs **16 <= bears <= 42** (equivalently
+needs **16 <= bulls <= 40**, a SELL needs **16 <= bears <= 42** (equivalently
 `58 <= bulls <= 84`). Because `bulls + bears == 100`, the bands do not overlap —
-the 45–58 zone passes neither side. They cover
+the 40–58 zone passes neither side. They cover
 every support/resistance-based pattern entry, so a level is only traded in the
 band matching its direction. Missing history (fewer than 60
 candles, e.g. the short window held while bulk history is still preloading at
@@ -159,14 +159,14 @@ supersedes the earlier optional-only pattern-filter scope.
 
 Verification: **passed** across the band gate, both pattern scanners, the
 Explorer prefix/action cases, and the support/resistance strategy tests.
-Boundary checks include 16 and 45 for BUY and 16 and 42 for SELL (accepted) and
+Boundary checks include 16 and 40 for BUY and 16 and 42 for SELL (accepted) and
 just outside either boundary for each side's own metric, both actions, the
-non-overlapping 45/55 and 58/42 splits, short
+non-overlapping 40/60 and 58/42 splits, short
 warmup, invalid values, zero-event balance, and causal Explorer evaluation.
 
 **How to use it**
 
-Start with a daily context rule such as `bulls > bears` (equivalently `bulls > 50` when the total is positive). The mandatory pattern gate instead requires 16%–45% bullish for BUY or 16%–42% bearish for SELL, leaving the 45%–58% middle untraded. These are evaluation examples, not thresholds supplied by BigBeluga or established profitable settings. A balanced flat series produces 50/50 because ties count, so strict dominance excludes that case. Strong relative dominance can still arise from very few events; it is not independently a measure of trend strength or liquidity.
+Start with a daily context rule such as `bulls > bears` (equivalently `bulls > 50` when the total is positive). The mandatory pattern gate instead requires 16%–40% bullish for BUY or 16%–42% bearish for SELL, leaving the 40%–58% middle untraded. These are evaluation examples, not thresholds supplied by BigBeluga or established profitable settings. A balanced flat series produces 50/50 because ties count, so strict dominance excludes that case. Strong relative dominance can still arise from very few events; it is not independently a measure of trend strength or liquidity.
 
 For a pattern filter, evaluate the persistent state with `gt`/`gte`, not a one-bar crossing. Existing scanner integration provides:
 
