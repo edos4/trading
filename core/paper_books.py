@@ -563,13 +563,22 @@ class PaperBook:
         else:
             return {"error": "side must be open, closed, or log"}
 
-        timeframe = timeframe or trade.timeframe or "1d"
+        native_timeframe = trade.timeframe or "1d"
+        timeframe = timeframe or native_timeframe
         session_tz = get_market(account.market).session_tz
         df = _chart_history_frame(
             scanner, trade.symbol, timeframe, market=account.market,
         )
         if df is None or len(df) < 2:
             return {"error": f"no OHLCV for {trade.symbol} {timeframe}"}
+
+        # Keep the rails detected on the trade's own timeframe when the row is
+        # viewed at another one (e.g. weekly), so switching views preserves them.
+        trendline_source = None
+        if timeframe != native_timeframe:
+            trendline_source = _chart_history_frame(
+                scanner, trade.symbol, native_timeframe, market=account.market,
+            )
 
         try:
             payload = build_trade_viewer_payload(
@@ -594,6 +603,8 @@ class PaperBook:
                     else (trade.sim_exit_date or trade.exit_date)
                 ),
                 trendlines=True,
+                trendline_source=trendline_source,
+                trendline_timeframe=native_timeframe if trendline_source is not None else None,
             )
             payload["trade_id"] = trade.trade_id
             return payload
@@ -620,13 +631,19 @@ class PaperBook:
         if log_time and not log_row:
             return {"error": "This signal is no longer in the log. Refresh the table."}
         ticker = str(log_row.get("symbol") or symbol)
-        timeframe = timeframe or str(log_row.get("timeframe") or "1d")
+        native_timeframe = str(log_row.get("timeframe") or "1d")
+        timeframe = timeframe or native_timeframe
         session_tz = get_market(account.market).session_tz
         df = _chart_history_frame(
             scanner, ticker, timeframe, market=account.market,
         )
         if df is None or len(df) < 2:
             return {"error": f"no OHLCV for {ticker} {timeframe}"}
+        trendline_source = None
+        if timeframe != native_timeframe:
+            trendline_source = _chart_history_frame(
+                scanner, ticker, native_timeframe, market=account.market,
+            )
         price = log_row.get("price")
         try:
             entry = float(price) if price is not None else None
@@ -646,6 +663,8 @@ class PaperBook:
                 entry=entry,
                 entry_time=log_row.get("sim_bar") or log_row.get("ts"),
                 trendlines=True,
+                trendline_source=trendline_source,
+                trendline_timeframe=native_timeframe if trendline_source is not None else None,
             )
             if log_row.get("ts"):
                 payload["trade_id"] = f"log:{log_row['ts']}:{ticker}"

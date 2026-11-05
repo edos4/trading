@@ -872,6 +872,100 @@ def _pattern_note(segments: list[dict], started: tuple[str, float] | None, patte
     return ""
 
 
+def _annotation_anchor_dates(annotations: list[dict], entry_time) -> list:
+    dates = [a.get(k) for a in annotations for k in ("date", "start_date", "end_date") if a.get(k)]
+    dates.extend(p["date"] for a in annotations for p in a.get("points", []) if p.get("date"))
+    if entry_time:
+        dates.append(entry_time)
+    return dates
+
+
+def _viewer_window(df: pd.DataFrame, timeframe: str, anchor_dates: list, exit_time):
+    """Slice a frame to the bars a viewer chart shows for this timeframe."""
+    if not anchor_dates:
+        return ChartRenderer._trim_to_visible(df, timeframe)
+    dates = pd.DatetimeIndex(
+        [pd.Timestamp(value).tz_localize(None).normalize() for value in anchor_dates]
+    ).normalize()
+    idx = pd.to_datetime(df.index, utc=True).tz_convert(None).normalize()
+    start = max(0, min(len(df) - VISIBLE_BARS.get(timeframe, 252), int(idx.searchsorted(min(dates))) - 20))
+    end = len(df)
+    if exit_time:
+        end = min(end, int(idx.searchsorted(pd.Timestamp(exit_time).tz_localize(None).normalize(), side="right")) + 20)
+        end = min(len(df), max(end, int(idx.searchsorted(max(dates), side="right")) + 5))
+    return df.iloc[start:end]
+
+
+def _trendline_segment(line: dict, start_time: str, start_price: float,
+                       end_time: str, end_price: float) -> dict:
+    broken = bool(line.get("broken"))
+    confirmed = bool(line.get("confirmed", True))
+    style = "--" if broken else (":" if not confirmed else "-")
+    width = 1 if line.get("close_pair") else 2
+    return {
+        "data": [
+            {"time": start_time, "value": start_price},
+            {"time": end_time, "value": end_price},
+        ],
+        "color": TRENDLINE_COLOR,
+        "style": style,
+        "width": width,
+        "label": line["kind"].title(),
+        "kind": line["kind"],
+        "broken": broken,
+        "confirmed": confirmed,
+        "channel": line.get("channel", "single"),
+        "close_pair": bool(line.get("close_pair")),
+        "stale_bars": int(line.get("stale_bars", 0)),
+        "cut_through_pct": round(
+            float(line.get("body_penetration", 0.0)) * 100, 1,
+        ),
+        "pivots": int(line.get("pivots", 0)),
+        "violations": int(line.get("violations", 0)),
+    }
+
+
+def _project_trendline_segment(line: dict, source_index: pd.Index, display_index: pd.Index,
+                               valid_positions: list[int], candles: list[dict]) -> dict | None:
+    """Draw a rail fitted on the native frame onto the displayed candles.
+
+    The endpoint prices are re-evaluated on the source line at the first and
+    last displayed bars it spans, so switching timeframe keeps the same trend
+    instead of fitting a second, unrelated rail.
+    """
+    try:
+        start = pd.Timestamp(source_index[line["start_index"]]).tz_localize(None).normalize()
+        end = pd.Timestamp(source_index[line["end_index"]]).tz_localize(None).normalize()
+    except (IndexError, TypeError, ValueError):
+        return None
+    if end <= start:
+        return None
+    span = end - start
+    picked: list[tuple[int, pd.Timestamp]] = []
+    for slot, position in enumerate(valid_positions):
+        try:
+            day = pd.Timestamp(display_index[position]).tz_localize(None).normalize()
+        except (TypeError, ValueError):
+            continue
+        if start <= day <= end:
+            picked.append((slot, day))
+    if len(picked) < 2:
+        return None
+    first_slot, first_day = picked[0]
+    last_slot, last_day = picked[-1]
+    if candles[first_slot]["time"] == candles[last_slot]["time"]:
+        return None
+
+    def price_at(day: pd.Timestamp) -> float:
+        return line["start_price"] + (line["end_price"] - line["start_price"]) * float((day - start) / span)
+
+    return _trendline_segment(
+        line,
+        candles[first_slot]["time"], price_at(first_day),
+        candles[last_slot]["time"], price_at(last_day),
+    )
+
+
 def build_trade_viewer_payload(
     ohlcv_df: pd.DataFrame,
     *,
@@ -892,6 +986,8 @@ def build_trade_viewer_payload(
     exit_time=None,
     annotations: list[dict] | None = None,
     trendlines: bool = False,
+    trendline_source: pd.DataFrame | None = None,
+    trendline_timeframe: str | None = None,
 ) -> dict:
     """OHLCV + levels for an interactive TradingView-style viewer (no PNG)."""
     renderer = ChartRenderer(save_to_disk=False, session_tz=session_tz)
@@ -902,25 +998,12 @@ def build_trade_viewer_payload(
     dii_values = {key: pd.Series(value.to_numpy(), index=calculation_frame.index)
                   for key, value in dii_values.items()}
     df = renderer._prepare_df(ohlcv_df, timeframe)
-    annotations = _align_weekly_annotations(annotations or [], df.index, timeframe, session_tz)
+    raw_annotations = annotations or []
+    annotations = _align_weekly_annotations(raw_annotations, df.index, timeframe, session_tz)
     # Recover old ledger geometry only at the entry event, never from a newer setup.
-    annotations = (pattern_annotations(annotations or [], df, pattern)
+    annotations = (pattern_annotations(annotations, df, pattern)
                    if annotations or not pattern_version_id else [])
-    anchor_dates = [a.get(k) for a in annotations for k in ("date", "start_date", "end_date") if a.get(k)]
-    anchor_dates.extend(p["date"] for a in annotations for p in a.get("points", []) if p.get("date"))
-    if entry_time:
-        anchor_dates.append(entry_time)
-    if anchor_dates:
-        dates = pd.DatetimeIndex([pd.Timestamp(value).tz_localize(None).normalize() for value in anchor_dates]).normalize()
-        idx = pd.to_datetime(df.index, utc=True).tz_convert(None).normalize()
-        start = max(0, min(len(df) - VISIBLE_BARS.get(timeframe, 252), int(idx.searchsorted(min(dates))) - 20))
-        end = len(df)
-        if exit_time:
-            end = min(end, int(idx.searchsorted(pd.Timestamp(exit_time).tz_localize(None).normalize(), side="right")) + 20)
-            end = min(len(df), max(end, int(idx.searchsorted(max(dates), side="right")) + 5))
-        df = df.iloc[start:end]
-    else:
-        df = renderer._trim_to_visible(df, timeframe)
+    df = _viewer_window(df, timeframe, _annotation_anchor_dates(annotations, entry_time), exit_time)
 
     candles = []
     volume = []
@@ -1076,39 +1159,35 @@ def build_trade_viewer_payload(
     markers.sort(key=lambda marker: marker["time"])
     trendline_segments = []
     if trendlines:
-        # Lightweight Charts spaces only the emitted candles. Fit in that
-        # same coordinate system so hidden invalid bars cannot anchor a rail
-        # or change its slope and penetration checks.
-        for line in detect_trendlines(df.iloc[valid_positions]):
-            start = candles[line["start_index"]]["time"]
-            end = candles[line["end_index"]]["time"]
-            if start == end:
-                continue
-            broken = bool(line.get("broken"))
-            confirmed = bool(line.get("confirmed", True))
-            style = "--" if broken else (":" if not confirmed else "-")
-            width = 1 if line.get("close_pair") else 2
-            trendline_segments.append({
-                "data": [
-                    {"time": start, "value": line["start_price"]},
-                    {"time": end, "value": line["end_price"]},
-                ],
-                "color": TRENDLINE_COLOR,
-                "style": style,
-                "width": width,
-                "label": line["kind"].title(),
-                "kind": line["kind"],
-                "broken": broken,
-                "confirmed": confirmed,
-                "channel": line.get("channel", "single"),
-                "close_pair": bool(line.get("close_pair")),
-                "stale_bars": int(line.get("stale_bars", 0)),
-                "cut_through_pct": round(
-                    float(line.get("body_penetration", 0.0)) * 100, 1,
-                ),
-                "pivots": int(line.get("pivots", 0)),
-                "violations": int(line.get("violations", 0)),
-            })
+        if trendline_source is not None:
+            # Keep the rails detected on the trade's native timeframe and draw
+            # those same lines on this view, instead of fitting unrelated rails.
+            source_tf = trendline_timeframe or timeframe
+            source_frame = renderer._prepare_df(trendline_source, source_tf)
+            source_annotations = (pattern_annotations(raw_annotations, source_frame, pattern)
+                                  if raw_annotations or not pattern_version_id else [])
+            source_frame = _viewer_window(
+                source_frame, source_tf,
+                _annotation_anchor_dates(source_annotations, entry_time), exit_time,
+            )
+            for line in detect_trendlines(source_frame):
+                segment = _project_trendline_segment(
+                    line, source_frame.index, df.index, valid_positions, candles,
+                )
+                if segment is not None:
+                    trendline_segments.append(segment)
+        else:
+            # Lightweight Charts spaces only the emitted candles. Fit in that
+            # same coordinate system so hidden invalid bars cannot anchor a rail
+            # or change its slope and penetration checks.
+            for line in detect_trendlines(df.iloc[valid_positions]):
+                start = candles[line["start_index"]]["time"]
+                end = candles[line["end_index"]]["time"]
+                if start == end:
+                    continue
+                trendline_segments.append(
+                    _trendline_segment(line, start, line["start_price"], end, line["end_price"]),
+                )
     trendline_note = _trendline_note(trendline_segments) if trendlines else ""
     title = f"{symbol} {renderer._tv_timeframe_label(timeframe)}"
     if pattern:
