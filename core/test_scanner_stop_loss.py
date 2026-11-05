@@ -27,7 +27,7 @@ def _signal(action="BUY", price=100.0, stop_loss=90.0) -> TradeSignal:
     return TradeSignal(
         symbol="TEST", action=action, pattern="test", timeframe="1d",
         confidence=0.8, price=price, qty=10, stop_loss=stop_loss,
-        take_profit=130.0,
+        take_profit=70.0 if action == "SELL" else 130.0,
     )
 
 

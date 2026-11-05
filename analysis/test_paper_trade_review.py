@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from analysis.paper_trade_review import replay_trade, review_export, summarize
+from analysis.paper_trade_review import replay_trade, review_export, signal_funnel, summarize
 from core.backtester import _open_trade
 from core.test_patternsv2_exits import candle, signal
 
@@ -159,3 +159,15 @@ def test_empty_and_zero_pnl_samples_are_not_reported_as_winners():
     summary = summarize([{"pnl": 0, "net_r": 0, "exit_reason": "time_exit"}])
     assert summary["wins"] == summary["losses"] == 0
     assert summary["profit_factor"] is None
+
+
+def test_signal_funnel_deduplicates_queue_outcomes_and_identifies_disabled_shorts():
+    buy = dict(symbol="TEST", timeframe="1d", pattern="double_bottom", action="BUY",
+               sim_bar="2026-01-05T00:00:00+00:00", status="queued", reason="Queued")
+    sell = {**buy, "action": "SELL", "pattern": "double_top", "status": "rejected",
+            "reason": "Short entries are disabled (SHORT_ENTRIES_ENABLED=false)."}
+    result = signal_funnel([sell, {**buy, "status": "filled"}, buy])
+    assert result["BUY"] == {"observed_decisions": 1, "outcomes": {"filled": 1}}
+    assert result["SELL"] == {"observed_decisions": 1, "outcomes": {"shorts_disabled": 1}}
+    result = signal_funnel([buy, {**buy, "status": "rejected", "reason": "Opening gap crossed the target"}])
+    assert result["BUY"]["outcomes"] == {"opening_gap": 1}

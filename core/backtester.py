@@ -50,6 +50,8 @@ _CACHE_TTL_SECONDS = 6 * 3600
 # The pre-audit engine uses the identical exit ladder. Recheck this allowance
 # whenever exit helpers change; new entries still require the current runtime.
 _COMPATIBLE_EXIT_ENGINE_HASHES = frozenset({
+    # Entry-only corrections; saved legacy exits are also unchanged.
+    "6c9e5cb88fc36896f885a55b18a80617a1cc46ddeb4712dff23bfbcbade04d7e",
     "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
     "87b3f4d03c1825250fe848ba8291ee48eb0ad94f26c4dfac38e44bc06036c4bc",
     # 2026-10-15: BacktestTrade gained the additive laya_assessment evidence
@@ -57,6 +59,19 @@ _COMPATIBLE_EXIT_ENGINE_HASHES = frozenset({
     # keep the identical ladder, so they stay manageable.
     "367dfba2afae440b1f4a2dc3783f4c40ff7cc022d456d2b9fcc06fb46c6db104",
 })
+
+# Only entry validation/trail resolution changed from this audited causal
+# engine. Its existing positions must retain their saved ladder and exits.
+_COMPATIBLE_CAUSAL_EXIT_ENGINE_HASHES = frozenset({
+    "6c9e5cb88fc36896f885a55b18a80617a1cc46ddeb4712dff23bfbcbade04d7e",
+})
+
+
+def causal_exit_runtime_compatible(saved_engine: str | None) -> bool:
+    """Allow explicitly audited identical exit logic, never arbitrary drift."""
+    from core.pattern_provenance import engine_hash
+
+    return saved_engine == engine_hash() or saved_engine in _COMPATIBLE_CAUSAL_EXIT_ENGINE_HASHES
 
 
 # ── Trade record ─────────────────────────────────────────────────────────────
@@ -626,8 +641,7 @@ def _check_exit(candle: OHLCVCandle, position: BacktestTrade, bar_idx: int):
         return _check_exit_legacy(candle, position, bar_idx)
     if position.execution_model != "causal-v1":
         raise ValueError("Unknown position execution model")
-    from core.pattern_provenance import engine_hash
-    if position.resolved_rules and position.resolved_rules.get("engine_sha256") != engine_hash():
+    if position.resolved_rules and not causal_exit_runtime_compatible(position.resolved_rules.get("engine_sha256")):
         raise RuntimeError("Position exit runtime changed; restore its compatible engine before management")
     if position.pending_exit_reason:
         position.exit_bar_idx = bar_idx

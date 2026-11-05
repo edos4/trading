@@ -66,7 +66,9 @@ def test_both_pattern_scanners_gate_before_other_entry_checks(
     scanner._pattern_only = True
     monkeypatch.setattr('core.scanner.regime_filter_required', lambda *a: False)
     monkeypatch.setattr('core.scanner.describe_risk_gate_rejection', lambda *a, **kw: None)
-    signal = TradeSignal(symbol='TEST', action=action, pattern='double_bottom' if patterns_v2 else 'pattern_003_double_bottom', timeframe='1d', confidence=1, price=100, qty=1, stop_loss=95, take_profit=110)
+    signal = TradeSignal(symbol='TEST', action=action, pattern='double_bottom' if patterns_v2 else 'pattern_003_double_bottom', timeframe='1d', confidence=1, price=100, qty=1,
+                         stop_loss=105 if action == 'SELL' else 95,
+                         take_profit=90 if action == 'SELL' else 110)
     asyncio.run(scanner._process_signal(signal))
     if accepted:
         scanner._finish_signal.assert_awaited_once()

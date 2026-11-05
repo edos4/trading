@@ -21,8 +21,8 @@ def account() -> PaperAccount:
     return result
 
 
-def test_pattern_shorts_require_explicit_opt_in():
-    assert Settings.model_fields["short_entries_enabled"].default is False
+def test_us_pattern_shorts_are_enabled_by_default():
+    assert Settings.model_fields["short_entries_enabled"].default is True
 
 
 @pytest.mark.parametrize("entry_path", ["queue_position", "open_position"])

@@ -505,7 +505,15 @@ class MarketScanner:
 
         if status == "rejected":
             reason_lower = reason.lower()
-            if "kronos" in reason_lower:
+            if reason_lower.startswith("short entries are disabled"):
+                gate = "short_disabled"
+            elif reason_lower.startswith("dii "):
+                gate = "dii"
+            elif reason_lower.startswith("opening gap"):
+                gate = "opening_gap"
+            elif reason_lower.startswith(("entry price", "stop and target", "stop cap")):
+                gate = "entry_geometry"
+            elif "kronos" in reason_lower:
                 gate = "kronos"
             elif reason_lower.startswith("execution r:r rejection"):
                 gate = "execution_rr"
@@ -1556,7 +1564,9 @@ class MarketScanner:
 
     # ── Signal pipeline ────────────────────────────────────────────────────────
     def _apply_fixed_stop(self, signal: TradeSignal, candle) -> None:
-        """Replace the pattern's structural stop with the configured fixed %."""
+        """Apply the legacy override; V2 owns its structural/ATR risk ladder."""
+        if signal.provenance == "patternsv2":
+            return
         pct = float(settings.stop_loss_pct or 0.0)
         if pct <= 0 or signal.action not in ("BUY", "SELL"):
             return
@@ -1606,9 +1616,14 @@ class MarketScanner:
             )
             signal.signal_bar_timestamp = candle.timestamp
 
-        # Bot-wide fixed stop: every entry carries the same 3% risk distance
-        # instead of its pattern's structural level.
+        # V2 already supplies a causal volatility cap and its own trail.
         self._apply_fixed_stop(signal, candle)
+        if signal.action in ("BUY", "SELL") and not signal.requested_rules:
+            from core.pattern_provenance import rules
+
+            # Save the decision even if a gate rejects it. The previous export
+            # lost every short's risk geometry before the short/DII gates.
+            signal.requested_rules = rules(signal, entry_mode="decision-close")
 
         from core.entry_policy import describe_short_entry_rejection
 
@@ -1621,6 +1636,17 @@ class MarketScanner:
             self.stats["short_rejected"] = self.stats.get("short_rejected", 0) + 1
             self._append_signal_log(signal, status="rejected", reason=reason)
             return
+
+        if signal.action in ("BUY", "SELL"):
+            from core.execution import validate_entry_geometry
+
+            try:
+                validate_entry_geometry(signal, signal.price)
+            except ValueError as exc:
+                self.stats["signals_rejected"] += 1
+                self.stats["geometry_rejected"] = self.stats.get("geometry_rejected", 0) + 1
+                self._append_signal_log(signal, status="rejected", reason=str(exc))
+                return
 
         # Optional US price floor. Off by default: the sub-$10 cohort in the
         # 2026-11 export was +$1,691 and held both winners.

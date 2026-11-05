@@ -19,7 +19,7 @@ from statistics import mean, median
 
 from core.backtester import (
     _check_exit, _close_trade, _effective_stop, _open_trade, _trailing_stop_price,
-    _update_neckline_state, _update_prev_hl, trade_risk_dollars,
+    _update_neckline_state, _update_prev_hl, causal_exit_runtime_compatible, trade_risk_dollars,
 )
 from core.pattern_provenance import RULE_FIELDS, engine_hash
 from data.tv_client import OHLCVCandle
@@ -89,7 +89,7 @@ def _verify_orders(actual: dict, saved: dict) -> None:
 def replay_trade(trade: dict, *, target_max_r: float | None = None) -> dict:
     """Reproduce saved fills, inferring each trade's actual fee/slippage rates."""
     rules = trade.get("resolved_rules") or {}
-    if rules.get("engine_sha256") != engine_hash():
+    if not causal_exit_runtime_compatible(rules.get("engine_sha256")):
         raise ValueError("Saved exit runtime differs; restore the compatible engine")
     if trade.get("execution_model") != "causal-v1":
         raise ValueError("This review requires causal-v1 execution")
@@ -241,6 +241,38 @@ def _path_metrics(trades: list[dict], rows: list[dict]) -> dict:
             "last_marked_pnl": sum(state.values())}
 
 
+def signal_funnel(logs: list[dict]) -> dict:
+    """Count observed decisions once, retaining queued-to-fill/rejection outcomes.
+
+    Logs are bounded evidence, not necessarily the full run. Sim-bar identity
+    is the fallback for exports that predate durable signal IDs.
+    """
+    groups = defaultdict(list)
+    for row in logs:
+        key = (row.get("signal_id") or (
+            row.get("symbol"), row.get("timeframe"), row.get("pattern"),
+            row.get("action"), row.get("sim_bar")))
+        groups[key].append(row)
+    result = {}
+    for side in ("BUY", "SELL"):
+        decisions = [rows for rows in groups.values() if rows[0].get("action") == side]
+        outcomes = Counter()
+        for rows in decisions:
+            if any(r["status"] == "filled" for r in rows):
+                outcome = "filled"
+            elif any(r["status"] == "rejected" for r in rows):
+                reasons = [r.get("reason", "") for r in rows if r["status"] == "rejected"]
+                outcome = ("shorts_disabled" if any(r.startswith("Short entries are disabled") for r in reasons)
+                           else "DII" if any(r.startswith("DII") for r in reasons)
+                           else "opening_gap" if any(r.startswith("Opening gap") for r in reasons)
+                           else "other_rejection")
+            else:
+                outcome = "queued_or_unresolved"
+            outcomes[outcome] += 1
+        result[side] = {"observed_decisions": len(decisions), "outcomes": dict(outcomes)}
+    return result
+
+
 def review_export(path: Path) -> dict:
     """Publish comparisons only after verifying every baseline trade in a book."""
     raw = path.read_bytes()
@@ -292,8 +324,10 @@ def review_export(path: Path) -> dict:
             "median_entry_range_r": median(r["entry_range_r"] for r in rows) if rows else None,
             "without_best_trade": summarize(ranked[1:]), "without_best_three": summarize(ranked[3:]),
             "signal_log_status_counts": dict(Counter(r["status"] for r in book.get("signal_logs", []))),
+            "signal_funnel": signal_funnel(book.get("signal_logs", [])),
             "logged_rejections": dict(Counter(
                 "DII" if r["reason"].startswith("DII") else
+                "shorts_disabled" if r["reason"].startswith("Short entries are disabled") else
                 "opening_gap" if r["reason"].startswith("Opening gap") else "other"
                 for r in book.get("signal_logs", []) if r["status"] == "rejected")),
             "last_kronos_exit_decisions": dict(Counter(

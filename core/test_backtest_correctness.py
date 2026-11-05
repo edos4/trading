@@ -419,8 +419,12 @@ def test_opening_candidate_rescales_the_trail_to_the_fill(monkeypatch):
     monkeypatch.setattr(settings, "stop_loss_min_risk_frac", 0.0)
     monkeypatch.setattr(settings, "stop_loss_trail_r", 2.0)
     monkeypatch.setattr(settings, "stop_loss_arm_r", 2.0)
+    signal = _execution_signal()
+    signal.trailing_stop_pct = .06
+    signal.trailing_activation_pct = .06
+    signal.trailing_stop_mode = "highest_close"
     fill = opening_candidate(
-        _execution_signal(), _execution_bar(100.0), 10_000, "us")
+        signal, _execution_bar(100.0), 10_000, "us")
     assert fill.trailing_stop_pct == pytest.approx(0.06)
     assert fill.trailing_activation_pct == pytest.approx(0.06)
     assert fill.trailing_stop_mode == "highest_close"

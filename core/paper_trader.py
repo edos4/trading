@@ -580,6 +580,7 @@ class PaperAccount:
                 "indicators_only": self.indicators_only,
                 "short_entries_enabled": settings.short_entries_enabled,
                 "stop_loss_pct": settings.stop_loss_pct,
+                "stop_loss_pct_scope": "legacy/indicator entries; patternsv2 uses its structural stop and ATR cap",
                 "stop_loss_trail_r": settings.stop_loss_trail_r,
                 "stop_loss_arm_r": settings.stop_loss_arm_r,
                 "stop_loss_min_risk_frac": settings.stop_loss_min_risk_frac,
@@ -674,13 +675,19 @@ class PaperAccount:
     def queue_position(self, signal: TradeSignal, candle: OHLCVCandle, store: OHLCVStore):
         from copy import deepcopy
         from core.entry_policy import describe_short_entry_rejection
-        from core.execution import stable_anchors
+        from core.execution import stable_anchors, validate_entry_geometry
         with self._lock:
             if signal.action not in ("BUY", "SELL"):
                 return False, "Trade entries require BUY or SELL."
             reason = describe_short_entry_rejection(signal.action, indicators_only=self.indicators_only)
             if reason is not None:
                 return False, reason
+            if get_market(self.market).long_only and signal.action == "SELL":
+                return False, "Short entries are disabled in this market"
+            try:
+                validate_entry_geometry(signal, signal.price)
+            except ValueError as exc:
+                return False, str(exc)
             if candle.timestamp is None or candle.timestamp.tzinfo is None:
                 return False, "Pending entry requires an aware signal timestamp."
             candidate = deepcopy(signal)
@@ -817,7 +824,13 @@ class PaperAccount:
                     f"use the account (${ENGINE.position_notional:,.0f} each)."
                 )
 
-        signal.price = candle.close * (1 + self.slippage_pct if signal.action == "BUY" else 1 - self.slippage_pct)
+        entry_price = candle.close * (1 + self.slippage_pct if signal.action == "BUY" else 1 - self.slippage_pct)
+        from core.execution import validate_entry_geometry
+        try:
+            validate_entry_geometry(signal, entry_price)
+        except ValueError as exc:
+            return False, str(exc)
+        signal.price = entry_price
         if ENGINE.risk_pct > 0:
             _apply_risk_sizing(
                 signal, self.equity() * ENGINE.risk_pct,

@@ -64,7 +64,8 @@ class Settings(BaseSettings):
     # Skip leftover crumbs after risk/exposure caps (e.g. BUY 1 share).
     min_position_notional: float = 1000.0
 
-    # Fixed stop-loss override for every scanner entry. 0.03 = stop exactly 3%
+    # Fixed stop-loss override for legacy/indicator scanner entries. Patternsv2
+    # keeps its structural stop and causal ATR cap. 0.03 = stop exactly 3%
     # from the signal price (BUY below, SELL above). 0 disables the override
     # and leaves each pattern's own structural stop in place.
     stop_loss_pct: float = 0.03
@@ -88,11 +89,10 @@ class Settings(BaseSettings):
     # the current ledger's sub-$10 cohort is +$2,989 and holds the two biggest
     # winners (UPXI, RUM).
     min_signal_price_usd: float = 0.0
-    # Pattern shorts are opt-in pending independent validation: the 2026-11-05
-    # 13:27Z export has 2/22 winners and -$5,020 from shorts, losing in every
-    # observed quarter. True allows explicit short-side research; this switch
-    # never closes an existing position or blocks its protective exits.
-    short_entries_enabled: bool = False
+    # Enable US paper short research through the same causal entry/exit path.
+    # PH remains long-only. False blocks new pattern shorts, never protection
+    # of an existing position. Paper fills do not establish borrow availability.
+    short_entries_enabled: bool = True
     # Record DII rejections but let the entry through, so the gate can be A/B'd
     # against an ungated book without changing production behaviour.
     dii_gate_shadow: bool = False

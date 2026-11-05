@@ -1,4 +1,6 @@
 """Shared decisions for causal paper and historical-stream execution."""
+from __future__ import annotations
+
 from dataclasses import replace
 from datetime import timedelta
 import math
@@ -64,6 +66,26 @@ def _planned_risk_frac(signal):
     return abs(signal.price - stop) / signal.price
 
 
+def validate_entry_geometry(signal, price: float, *, opening: bool = False) -> None:
+    """Reject inverted protection instead of silently opening an unprotected bet."""
+    if signal.action not in ("BUY", "SELL"):
+        raise ValueError("Trade entries require BUY or SELL")
+    if price is None or not math.isfinite(price) or price <= 0:
+        raise ValueError("Entry price must be finite and positive")
+    for value in (signal.stop_loss, signal.take_profit):
+        if value is not None and (not math.isfinite(value) or value <= 0):
+            raise ValueError("Stop and target must be finite and positive")
+    cap = signal.stop_loss_pct_cap
+    if cap is not None and (not math.isfinite(cap) or not 0 < cap < 1):
+        raise ValueError("Stop cap must be finite and between zero and one")
+    short = signal.action == "SELL"
+    prefix = "Opening gap" if opening else "Entry price"
+    if signal.stop_loss is not None and (price >= signal.stop_loss if short else price <= signal.stop_loss):
+        raise ValueError(f"{prefix} crossed the structural stop")
+    if signal.take_profit is not None and (price <= signal.take_profit if short else price >= signal.take_profit):
+        raise ValueError(f"{prefix} crossed the target")
+
+
 def opening_candidate(signal, candle, notional, market, slippage=0):
     """Fixed structural levels; cancel gaps beyond them rather than erase risk."""
     from core.backtester import _apply_notional_sizing
@@ -87,16 +109,8 @@ def opening_candidate(signal, candle, notional, market, slippage=0):
     if saved_engine is not None and saved_engine != engine_hash():
         raise ValueError("Pending entry runtime changed; candidate rejected")
     price = candle.open * (1 - slippage if signal.action == "SELL" else 1 + slippage)
-    if not math.isfinite(price) or price <= 0:
-        raise ValueError('Execution open must be finite and positive')
-    for value in (signal.stop_loss, signal.take_profit):
-        if value is not None and (not math.isfinite(value) or value <= 0):
-            raise ValueError('Stop and target must be finite and positive')
+    validate_entry_geometry(signal, price, opening=True)
     short = signal.action == 'SELL'
-    if signal.stop_loss is not None and (price >= signal.stop_loss if short else price <= signal.stop_loss):
-        raise ValueError('Opening gap crossed the structural stop')
-    if signal.take_profit is not None and (price <= signal.take_profit if short else price >= signal.take_profit):
-        raise ValueError('Opening gap crossed the target')
     from config import settings
 
     effective_stop = _effective_stop_for(signal, price)
@@ -122,16 +136,16 @@ def opening_candidate(signal, candle, notional, market, slippage=0):
         )
     fill = replace(signal, price=price)
     if risk is not None and risk > 0:
-        # Express the trail in R of the risk this fill actually took, not the
-        # pattern's ATR stop that the scanner replaced.
-        trail_r = float(settings.stop_loss_trail_r or 0.0)
-        if trail_r > 0:
-            fill.trailing_stop_pct = round(trail_r * risk, 6)
-            fill.trailing_activation_pct = round(
-                float(settings.stop_loss_arm_r or 0.0) * risk, 6)
-            if fill.trailing_stop_mode is None:
-                fill.trailing_stop_mode = (
-                    "highest_close" if fill.action == "BUY" else "lowest_close")
+        # Preserve the signal's ladder rather than re-reading today's global
+        # legacy settings. V2 expresses its arm/giveback in units of the ATR
+        # cap; a nearer structural stop or opening gap changes the actual R.
+        basis = (signal.stop_loss_pct_cap if signal.provenance == "patternsv2"
+                 else planned_risk)
+        if basis is not None and basis > 0:
+            for field in ("trailing_stop_pct", "trailing_activation_pct"):
+                value = getattr(signal, field)
+                if value is not None:
+                    setattr(fill, field, round(value * risk / basis, 6))
         max_r = float(settings.target_max_r or 0.0)
         if max_r > 0 and fill.take_profit is not None:
             cap_dist = max_r * risk * price
