@@ -106,16 +106,34 @@ def test_shallow_loss_defers_a_kronos_exit(monkeypatch):
     assert position.pending_exit_reason == ""
 
 
-def test_profitable_position_is_not_exited_on_noise(monkeypatch):
+@pytest.mark.parametrize('action,entry,close', [
+    ('BUY', 100, 101), ('SELL', 100, 99),
+])
+def test_small_profit_is_inside_the_noise_band(monkeypatch, action, entry, close):
     monkeypatch.setattr(settings, "kronos_exit_min_adverse_atr", 0.5)
-    position = _position("BUY")
-    position.entry_price = 95.0
+    position = _position(action)
+    position.entry_price = entry
     scanner = _scanner("exit", None, [position])
     scanner._handle_kronos_exit(position, _oppose(), {
-        "anchor_close": 97.0, "atr_pct": 4.0, "decision": "oppose",
+        "anchor_close": close, "atr_pct": 4.0, "decision": "oppose",
     })
     assert scanner._paper.requests == []
     assert scanner.stats["kronos_exit_deferred"] == 1
+    assert position.kronos_exit_evidence['exit_action'] == 'deferred_noise_band'
+
+
+@pytest.mark.parametrize('action,close', [('BUY', 106), ('SELL', 94)])
+def test_oppose_can_close_a_profitable_position_outside_noise_band(monkeypatch, action, close):
+    monkeypatch.setattr(settings, 'kronos_exit_min_adverse_atr', .5)
+    position = _position(action)
+    position.entry_price = 100
+    scanner = _scanner('exit', None, [position])
+    scanner._handle_kronos_exit(position, _oppose(), {
+        'anchor_close': close, 'atr_pct': 4, 'decision': 'oppose',
+    })
+    assert scanner._paper.requests == [(position, 'kronos_exit')]
+    assert position.kronos_exit_evidence['exit_action'] == 'queued_next_open'
+    assert position.kronos_exit_evidence['entry_displacement_pct'] == pytest.approx(6)
 
 
 def test_deep_loss_still_honours_the_exit(monkeypatch):

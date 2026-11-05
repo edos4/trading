@@ -1592,6 +1592,7 @@ class MarketScanner:
         trail_r = float(settings.stop_loss_trail_r or 0.0)
         if trail_r > 0:
             signal.trailing_stop_pct = round(trail_r * pct, 6)
+            signal.trailing_stop_basis = "entry"
             signal.trailing_activation_pct = round(
                 float(settings.stop_loss_arm_r or 0.0) * pct, 6)
             if signal.trailing_stop_mode is None:
@@ -2067,8 +2068,9 @@ class MarketScanner:
         if verdict.decision != "oppose":
             return
         # A one-day forecast is noisy relative to a swing trade's daily range.
-        # Defer while the position is still inside its normal noise band; the
-        # stop/trail owns losses beyond it.
+        # Defer inside a noise band around entry on either side. Measuring
+        # only losses used to defer every profitable position, even one far
+        # outside the band, until its gain had become a loss.
         min_atr = float(settings.kronos_exit_min_adverse_atr or 0.0)
         anchor = float((evidence or {}).get("anchor_close") or 0.0)
         atr_pct = float((evidence or {}).get("atr_pct") or 0.0)
@@ -2078,21 +2080,27 @@ class MarketScanner:
                 (anchor - entry) if position.action == "SELL" else (entry - anchor)
             ) / entry
             floor = min_atr * atr_pct / 100.0
-            if adverse < floor:
+            displacement = abs(adverse)
+            evidence["entry_displacement_pct"] = displacement * 100
+            evidence["noise_band_pct"] = floor * 100
+            if displacement < floor:
+                evidence["exit_action"] = "deferred_noise_band"
                 self.stats["kronos_exit_deferred"] = (
                     self.stats.get("kronos_exit_deferred", 0) + 1
                 )
                 log.info(
                     f"Kronos EXIT deferred | {position.symbol} {position.pattern} | "
-                    f"{adverse:.2%} move < {floor:.2%} ({min_atr:g} ATR) threshold"
+                    f"{displacement:.2%} move < {floor:.2%} ({min_atr:g} ATR) threshold"
                 )
                 return
         if self._paper is None or not self._paper.request_exit(position, "kronos_exit"):
+            evidence["exit_action"] = "position_not_open"
             log.warning(
                 f"Kronos EXIT skipped | {position.symbol} {position.pattern} "
                 f"(position no longer open)"
             )
             return
+        evidence["exit_action"] = "queued_next_open"
         self.stats["kronos_exits"] = self.stats.get("kronos_exits", 0) + 1
         log.info(
             f"Kronos EXIT | {position.symbol} {position.pattern} | "

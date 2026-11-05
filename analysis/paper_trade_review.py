@@ -86,7 +86,9 @@ def _verify_orders(actual: dict, saved: dict) -> None:
             raise ValueError(f"Saved prior orders do not reproduce: {key}")
 
 
-def replay_trade(trade: dict, *, target_max_r: float | None = None) -> dict:
+def replay_trade(trade: dict, *, target_max_r: float | None = None,
+                 trailing_stop_basis: str | None = None,
+                 allow_inconsistent_ohlc: bool = False) -> dict:
     """Reproduce saved fills, inferring each trade's actual fee/slippage rates."""
     rules = trade.get("resolved_rules") or {}
     if not causal_exit_runtime_compatible(rules.get("engine_sha256")):
@@ -96,7 +98,7 @@ def replay_trade(trade: dict, *, target_max_r: float | None = None) -> dict:
     marks = trade.get("daily_marks") or []
     if not marks or any(not m.get("exit_check") for m in marks):
         raise ValueError("Saved OHLC exit evidence is required; never infer it from fills")
-    bars = []
+    bars, anomalies = [], []
     for mark in marks:
         stamp = datetime.fromisoformat(mark["sim_bar"])
         raw = mark["exit_check"]["ohlc"]
@@ -104,7 +106,9 @@ def replay_trade(trade: dict, *, target_max_r: float | None = None) -> dict:
                                      for k in ("open", "high", "low", "close")):
             raise ValueError("Invalid saved OHLC evidence")
         if raw["high"] < max(raw.values()) or raw["low"] > min(raw.values()):
-            raise ValueError("Inconsistent saved OHLC range")
+            if not allow_inconsistent_ohlc:
+                raise ValueError("Inconsistent saved OHLC range")
+            anomalies.append({"sim_bar": mark["sim_bar"], "ohlc": dict(raw)})
         bars.append(OHLCVCandle(timestamp=stamp, volume=0, **raw))
     if bars[0].timestamp.isoformat() != trade["sim_opened"] or any(
             a.timestamp >= b.timestamp for a, b in zip(bars, bars[1:])):
@@ -132,16 +136,21 @@ def replay_trade(trade: dict, *, target_max_r: float | None = None) -> dict:
     point = replace(bars[0], open=entry, high=entry, low=entry, close=entry)
     position = _open_trade(signal, point, 0, execution_model="causal-v1")
     risk = trade_risk_dollars(position)
+    counterfactual = target_max_r is not None or trailing_stop_basis is not None
+    if trailing_stop_basis is not None:
+        if trailing_stop_basis not in ("reference", "entry"):
+            raise ValueError("Unknown trailing stop basis")
+        position.trailing_stop_basis = trailing_stop_basis
     if target_max_r is not None:
         if not math.isfinite(target_max_r) or target_max_r <= 0 or not risk:
             raise ValueError("Target cap requires positive finite R and initial risk")
         target = entry + sign * target_max_r * risk / qty
         if position.take_profit is not None and sign*(position.take_profit-target) > 0:
             position.take_profit = round(target, 4)
-    armed, ambiguous, gap_fill = False, [], False
+    armed, ambiguous, gap_fill, best_close_r = False, [], False, 0.0
     for index, (bar, mark) in enumerate(zip(bars, marks), 1):
         orders = _orders(position)
-        if target_max_r is None:
+        if not counterfactual:
             _verify_orders(orders, mark["exit_check"]["orders_before_bar"])
         stops = [orders[k] for k, flag in (("hard_stop", "hard_stop_on_close"),
                                          ("trailing_stop", "trailing_stop_on_close"))
@@ -157,7 +166,7 @@ def replay_trade(trade: dict, *, target_max_r: float | None = None) -> dict:
             ambiguous.append(bar.timestamp.isoformat())
         _update_neckline_state(position, bar, index)
         price, reason = _check_exit(bar, position, index)
-        if target_max_r is None:
+        if not counterfactual:
             check = mark["exit_check"]
             if (reason or None) != check["reason"] or (price is None) != (check["raw_fill"] is None):
                 raise ValueError(f"Saved exit decision does not reproduce for {trade['symbol']}")
@@ -170,13 +179,15 @@ def replay_trade(trade: dict, *, target_max_r: float | None = None) -> dict:
                         and not math.isclose(price, trigger, abs_tol=.000001))
             _close_trade(position, price * (1 - sign*slip), reason, bar, fee)
             break
+        if risk:
+            best_close_r = max(best_close_r, sign*(bar.close-entry)*qty/risk)
         _update_prev_hl(position, bar)
     closed = bool(position.exit_reason)
     marked = sign*(bars[-1].close-entry)*qty - trade["entry_fee_paid"]
     liquidation = bars[-1].close * (1-sign*slip)
     net = position.pnl_usd if closed else (
         sign*(liquidation-entry) - (entry+liquidation)*fee) * qty
-    if target_max_r is None:
+    if not counterfactual:
         if bool(trade.get("exit_reason")) != closed:
             raise ValueError("Saved open/closed state does not reproduce")
         if closed:
@@ -189,7 +200,7 @@ def replay_trade(trade: dict, *, target_max_r: float | None = None) -> dict:
                    marks[-1]["exit_check"]["fees"], "fees")
         else:
             _equal(marked, trade["mtm"], "open marked P&L")
-    elif trade.get("exit_reason") and not closed:
+    elif trade.get("exit_reason") and not closed and trailing_stop_basis is None:
         raise ValueError("Counterfactual exceeds saved coverage; obtain later bars")
     return {
         "trade_id": trade["trade_id"], "symbol": trade["symbol"],
@@ -209,6 +220,10 @@ def replay_trade(trade: dict, *, target_max_r: float | None = None) -> dict:
         "marked_open_pnl": marked if not closed else 0,
         "open_liquidation_pnl": net if not closed else 0,
         "trailing_armed": armed, "bars": index, "gap_exit": gap_fill,
+        "trailing_stop_basis": position.trailing_stop_basis,
+        "best_surviving_close_r": best_close_r,
+        "ohlc_anomalies": anomalies,
+        "coverage_exhausted": bool(counterfactual and trade.get("exit_reason") and not closed),
         "same_session_exit": closed and bar.timestamp == bars[0].timestamp,
         "entry_range_r": (bars[0].high-bars[0].low)*qty/risk if risk else None,
         "ambiguous_bars": ambiguous,
@@ -273,7 +288,7 @@ def signal_funnel(logs: list[dict]) -> dict:
     return result
 
 
-def review_export(path: Path) -> dict:
+def review_export(path: Path, *, allow_inconsistent_ohlc: bool = False) -> dict:
     """Publish comparisons only after verifying every baseline trade in a book."""
     raw = path.read_bytes()
     export = json.loads(raw)
@@ -285,7 +300,8 @@ def review_export(path: Path) -> dict:
         trades = book["closed_trades"] + book["open_positions"]
         if len({t["trade_id"] for t in trades}) != len(trades):
             raise ValueError("Duplicate trade identities in book")
-        rows = [replay_trade(t) for t in trades]
+        replay_options = {"allow_inconsistent_ohlc": allow_inconsistent_ohlc}
+        rows = [replay_trade(t, **replay_options) for t in trades]
         if any(datetime.fromisoformat(r["last_observed"]) > datetime.fromisoformat(export["exported_at"])
                for r in rows):
             raise ValueError("Saved evidence extends beyond export time")
@@ -296,12 +312,17 @@ def review_export(path: Path) -> dict:
             _equal(sum(r["pnl"] for r in closed), metrics["realized_pnl_dollars"], "realized total", .02)
             _equal(sum(r["marked_open_pnl"] for r in opened), metrics["unrealized_pnl_dollars"], "open total", .02)
             _equal(sum(r["fees_paid"] for r in rows), metrics["fees"], "total fees", .02)
-        cap = [replay_trade(t, target_max_r=2) for t in trades]
+        cap = [replay_trade(t, target_max_r=2, **replay_options) for t in trades]
+        fixed = [replay_trade(t, trailing_stop_basis="entry", **replay_options) for t in trades]
+        anomalies = [{"trade_id": r["trade_id"], "symbol": r["symbol"], **anomaly}
+                     for r in rows for anomaly in r["ohlc_anomalies"]]
         ranked = sorted(closed, key=lambda r: r["pnl"], reverse=True)
         def quarter(r):
             return r["entry_date"][:4] + "Q" + str((int(r["entry_date"][5:7])-1)//3+1)
         result["books"].append({
-            "market": book["market"], "currency": book["currency"], "baseline_verified": True,
+            "market": book["market"], "currency": book["currency"],
+            "baseline_reproduced": True, "baseline_verified": not anomalies,
+            "ohlc_anomalies": anomalies,
             "summary": summarize(closed),
             "closed_fees_paid": sum(r["fees_paid"] for r in closed),
             "closed_gross_pnl": sum(r["pnl"]+r["fees_paid"] for r in closed),
@@ -334,11 +355,24 @@ def review_export(path: Path) -> dict:
                 (t.get("kronos_exit_evidence") or {}).get("decision", "missing") for t in trades)),
             "open_marked_pnl": sum(r["marked_open_pnl"] for r in opened),
             "open_liquidation_pnl": sum(r["pnl"] for r in opened),
+            "total_liquidation_pnl": sum(r["pnl"] for r in rows),
+            "open_positions": opened,
+            "targets_inside_trail_activation": [r["symbol"] for r in rows
+                if r["target_r"] is not None and r["activation_r"] is not None
+                and r["target_r"] <= r["activation_r"]],
             "comparisons": {
                 "target_cap_2r_closed": summarize([r for r in cap if r["exit_reason"] != "open"]),
                 "target_cap_2r_total_liquidation_pnl": sum(r["pnl"] for r in cap),
                 "long_only_closed": summarize([r for r in closed if r["action"] == "BUY"]),
                 "long_only_total_liquidation_pnl": sum(r["pnl"] for r in rows if r["action"] == "BUY"),
+                "entry_basis_trail": {
+                    "closed": summarize([r for r in fixed if r["exit_reason"] != "open"]),
+                    "coverage_exhausted": [r["symbol"] for r in fixed if r["coverage_exhausted"]],
+                    # A looser exit can outlast the baseline's evidence. Do
+                    # not present its earlier last close as the export cutoff.
+                    "total_liquidation_pnl": None if any(r["coverage_exhausted"] for r in fixed)
+                    else sum(r["pnl"] for r in fixed),
+                },
             },
             # Accounting stress only: hold fills, orders and quantity fixed.
             # This estimates extra friction, not a slippage-aware order replay.
@@ -346,7 +380,7 @@ def review_export(path: Path) -> dict:
                 str(rate): sum(r["pnl"] - (r["entry"]+r["exit"])*r["qty"]*rate for r in closed)
                 for rate in (.0005, .001, .002)
             },
-            "baseline": rows, "target_cap_2r": cap,
+            "baseline": rows, "target_cap_2r": cap, "entry_basis_trail": fixed,
         })
     return result
 
@@ -357,9 +391,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("export", type=Path)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--allow-inconsistent-ohlc", action="store_true",
+                        help="Reproduce raw saved ranges, flag anomalies; never repair or certify them")
     args = parser.parse_args()
     set_console_level("ERROR")
-    output = json.dumps(review_export(args.export), indent=2, allow_nan=False) + "\n"
+    output = json.dumps(review_export(args.export, allow_inconsistent_ohlc=args.allow_inconsistent_ohlc),
+                        indent=2, allow_nan=False) + "\n"
     if args.output:
         args.output.write_text(output)
     else:

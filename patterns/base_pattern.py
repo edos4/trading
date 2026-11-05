@@ -86,6 +86,10 @@ class TradeSignal:
     stop_loss_on_close: bool = False
     take_profit: float | None = None
     trailing_stop_pct: float | None = None
+    # Reference percentages compound with the best price. Entry percentages
+    # keep the dollar giveback fixed (e.g. 2R of the executed initial risk).
+    # Default preserves saved signals and legacy pattern behavior.
+    trailing_stop_basis: Literal["reference", "entry"] = "reference"
     trailing_stop_mode: Literal[
         "highest_close", "lowest_close", "highest_high", "lowest_low",
         "highest_low", "lowest_high"

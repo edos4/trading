@@ -161,6 +161,42 @@ def test_empty_and_zero_pnl_samples_are_not_reported_as_winners():
     assert summary["profit_factor"] is None
 
 
+def test_inconsistent_ranges_require_explicit_opt_in_and_are_never_repaired(tmp_path):
+    trade = saved_trade()
+    trade['daily_marks'][0]['exit_check']['ohlc']['open'] = 98
+    with pytest.raises(ValueError, match='Inconsistent saved OHLC'):
+        replay_trade(trade)
+    # A different malformed bar leaves the saved fills unchanged. The opt-in
+    # path must still verify those fills and fees against the raw evidence.
+    trade = saved_trade()
+    trade['daily_marks'][1]['exit_check']['ohlc']['high'] = 104
+    original = deepcopy(trade)
+    row = replay_trade(trade, allow_inconsistent_ohlc=True)
+    assert row['pnl'] == pytest.approx(trade['pnl'])
+    assert len(row['ohlc_anomalies']) == 1
+    assert trade == original
+    data = {'exported_at': '2026-01-07T00:00:00+00:00', 'books': [{
+        'market': 'us', 'currency': 'USD', 'closed_trades': [trade], 'open_positions': [],
+        'metrics': {'realized_pnl_dollars': trade['pnl'], 'unrealized_pnl_dollars': 0,
+                    'fees': row['fees_paid']},
+    }]}
+    path = tmp_path/'export.json'
+    path.write_text(json.dumps(data))
+    result = review_export(path, allow_inconsistent_ohlc=True)['books'][0]
+    assert result['baseline_reproduced'] and not result['baseline_verified']
+    assert result['ohlc_anomalies'][0]['ohlc']['high'] == 104
+
+
+def test_looser_trail_is_censored_instead_of_inventing_later_prices():
+    trade = saved_trade(True)
+    # The old reference trail at 96.82 exits on this bar. A fixed $3
+    # giveback trails the prior 94 close at 97 and is not touched.
+    trade['daily_marks'][1]['exit_check']['ohlc']['high'] = 96.9
+    trade['daily_marks'][1]['exit_check']['ohlc']['close'] = 96
+    row = replay_trade(trade, trailing_stop_basis='entry')
+    assert row['coverage_exhausted'] and row['exit_reason'] == 'open'
+
+
 def test_signal_funnel_deduplicates_queue_outcomes_and_identifies_disabled_shorts():
     buy = dict(symbol="TEST", timeframe="1d", pattern="double_bottom", action="BUY",
                sim_bar="2026-01-05T00:00:00+00:00", status="queued", reason="Queued")

@@ -50,6 +50,8 @@ _CACHE_TTL_SECONDS = 6 * 3600
 # The pre-audit engine uses the identical exit ladder. Recheck this allowance
 # whenever exit helpers change; new entries still require the current runtime.
 _COMPATIBLE_EXIT_ENGINE_HASHES = frozenset({
+    # Additive trail basis; missing basis retains reference-percentage exits.
+    "83461f8baa2449746a5269e32c197edc024544fdf5bd611f66820450c74d934e",
     # Entry-only corrections; saved legacy exits are also unchanged.
     "6c9e5cb88fc36896f885a55b18a80617a1cc46ddeb4712dff23bfbcbade04d7e",
     "f7826eea5c0be44afd549d892ddd4ca4d54860ce1dd1ae91935ddaa526d9c83b",
@@ -60,9 +62,12 @@ _COMPATIBLE_EXIT_ENGINE_HASHES = frozenset({
     "367dfba2afae440b1f4a2dc3783f4c40ff7cc022d456d2b9fcc06fb46c6db104",
 })
 
-# Only entry validation/trail resolution changed from this audited causal
-# engine. Its existing positions must retain their saved ladder and exits.
+# Entry corrections and an opt-in trail basis preserve these audited engines'
+# existing ladders. Missing basis always means the old reference percentage.
 _COMPATIBLE_CAUSAL_EXIT_ENGINE_HASHES = frozenset({
+    # The new entry-based trail is opt-in per signal. Old positions keep
+    # their reference-based ladder, including after a ledger reload.
+    "83461f8baa2449746a5269e32c197edc024544fdf5bd611f66820450c74d934e",
     "6c9e5cb88fc36896f885a55b18a80617a1cc46ddeb4712dff23bfbcbade04d7e",
 })
 
@@ -98,6 +103,7 @@ class BacktestTrade:
     exit_bars_after_neckline_break: int | None = None
     exit_bars_after_entry: int | None = None
     trailing_stop_pct: float | None = None
+    trailing_stop_basis: Literal["reference", "entry"] = "reference"
     trailing_stop_mode: Literal[
         "highest_close", "lowest_close", "highest_high", "lowest_low",
         "highest_low", "lowest_high",
@@ -565,6 +571,9 @@ def _trailing_stop_price(position: BacktestTrade, is_short: bool) -> float | Non
     ref = _trailing_reference(position)
     if ref is None:
         return None
+    if position.trailing_stop_basis == "entry":
+        distance = position.entry_price * pct
+        return ref + distance if is_short else ref - distance
     return ref * (1 + pct) if is_short else ref * (1 - pct)
 
 
@@ -880,6 +889,10 @@ def _open_trade(
     entry_price = candle.close
     if signal.action not in ("BUY", "SELL"):
         raise ValueError("Trade entries require BUY or SELL")
+    # Older rule snapshots hydrate newly added optional fields as None.
+    trail_basis = getattr(signal, "trailing_stop_basis", None) or "reference"
+    if trail_basis not in ("reference", "entry"):
+        raise ValueError("Unknown trailing stop basis")
     if not all(math.isfinite(value) and value > 0 for value in (entry_price, signal.qty)):
         raise ValueError("Trade entry price and quantity must be finite and positive")
     if any(value is not None and (not math.isfinite(value) or value <= 0)
@@ -933,6 +946,7 @@ def _open_trade(
         exit_bars_after_neckline_break=signal.exit_bars_after_neckline_break,
         exit_bars_after_entry=signal.exit_bars_after_entry,
         trailing_stop_pct=signal.trailing_stop_pct,
+        trailing_stop_basis=trail_basis,
         trailing_stop_mode=signal.trailing_stop_mode,
         trailing_stop_on_close=signal.trailing_stop_on_close,
         trailing_activation_pct=signal.trailing_activation_pct,

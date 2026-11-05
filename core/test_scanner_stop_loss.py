@@ -78,6 +78,7 @@ def test_fixed_stop_puts_the_trail_in_r(monkeypatch):
     signal = _signal(action="BUY")
     scanner._apply_fixed_stop(signal, None)
     assert signal.trailing_stop_pct == pytest.approx(0.06)
+    assert signal.trailing_stop_basis == "entry"
     assert signal.trailing_activation_pct == pytest.approx(0.06)
     assert signal.trailing_stop_mode == "highest_close"
 

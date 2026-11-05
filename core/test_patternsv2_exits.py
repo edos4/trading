@@ -127,10 +127,11 @@ def test_new_signals_protect_profit_after_activation_without_same_bar_lookahead(
     p = _trade_from_dict(_trade_to_dict(p))
     account.positions['TEST'] = [p]
     assert p.resolved_rules['trailing_stop_pct'] == .025
+    assert p.resolved_rules['trailing_stop_basis'] == 'entry'
     retrace = candle(95, 99, 94, 98, 2) if short else candle(106, 107, 101, 102, 2)
     closed = account.on_bar('TEST', retrace, '1d')
     assert len(closed) == 1
     assert closed[0].exit_reason == 'trailing_stop'
-    assert closed[0].exit_price == pytest.approx(97.375 if short else 103.35)
+    assert closed[0].exit_price == pytest.approx(97.5 if short else 103.5)
     assert closed[0].pnl_pct > 2
     assert account.cash == pytest.approx(account.initial_capital + closed[0].pnl_usd)

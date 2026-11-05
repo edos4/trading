@@ -1,7 +1,7 @@
 """Turn detector breakouts into this bot's TradeSignal.
 
-``detect()`` reports the breakout bar. This bot fills on that bar's close, the
-same signal-bar entry the scanner uses for the built-in patterns. Stop is the
+``detect()`` reports the completed breakout bar. Causal paper/stream execution
+fills at the next observed open. Stop is the
 price that cancels the pattern: the failure pivots for reversals, or the
 unbroken rail on the breakout bar for flags, pennants, triangles, wedges,
 channels, and rectangles. Target uses the full measured move (pole, bowl, or
@@ -15,13 +15,16 @@ was inside half an average daily range for most of the US universe (median
 0.52x ATR14 over 2025-11..2026-10): 11 of 13 closed paper trades stopped out at
 exactly -3.0% while 85% of them later showed >= 2R of favourable excursion.
 
-The 2R/2R pair is measured, not stylistic. Swept over 1,696 US names and 225
+The historical reference-percentage 2R/2R pair was swept over 1,696 US names and 225
 patternsv2 signals (2022-01..2026-10, flat $10k, the real causal-v1 exit
 engine): the previous 1R arm / 1.5R give-back returned PF 0.89 and -$10.4k,
 tightening the give-back to 1.0R or 0.75R was worse (-$25.7k / -$26.7k), while
 2R/2R returned PF 1.15 with the win rate unchanged (32.4% vs 32.0%) and only 12
 trailing exits in 185 trades. A trail closer than 2R cuts target-bound trades
 inside one bar's noise. Treat it as a disaster brake, not an exit strategy.
+Those results predate the entry-based distance correction and do not validate
+the corrected ladder. New signals fix giveback in entry-price dollars;
+existing positions retain their saved reference-percentage trail.
 Structural levels remain available for charting.
 """
 
@@ -54,7 +57,7 @@ MIN_BARS = 60
 # `TRAIL_ARM_R * stop_pct` in favour. Expressing the trail as a multiple of the
 # stop keeps the give-back in R constant when the stop distance changes, which
 # the old 2.5%-price/5%-activation pair did not (it gave back a fixed 0.83R).
-# Arm 2R / give back 2R leaves the trail at breakeven for an armed trade and as
+# Arm 2R / give back 2R leaves the trail at gross breakeven when first armed and as
 # a disaster brake only; 1R/1.5R put its floor at -0.5R and cut winners early
 # (see the module docstring for the measured sweep).
 STOP_ATR_MULT = 1.5
@@ -311,6 +314,7 @@ def _to_signal(df: pd.DataFrame, raw: dict, *, symbol: str, timeframe: str, late
         take_profit=None if target is None else round(target, 4),
         stop_loss_pct_cap=round(stop_pct, 5),
         trailing_stop_pct=round(TRAIL_GIVEBACK_R * stop_pct, 5),
+        trailing_stop_basis="entry",
         trailing_stop_mode="highest_close" if direction > 0 else "lowest_close",
         trailing_activation_pct=round(TRAIL_ARM_R * stop_pct, 5),
         trailing_ref_after_check=True,
