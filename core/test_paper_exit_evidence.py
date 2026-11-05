@@ -35,11 +35,13 @@ def test_saved_evidence_uses_prior_orders_and_retains_raw_bar_and_costs(short):
     p.entry_fee_paid = p.entry_price * p.qty * account.txn_cost_pct
     account.positions[p.symbol] = [p]
     account.cash += (1 if short else -1) * p.entry_price * p.qty - p.entry_fee_paid
-    activation = candle(100, 104, 88, 90, 1) if short else candle(100, 112, 96, 110, 1)
+    activation = candle(100, 102, 88, 90, 1) if short else candle(100, 112, 98, 110, 1)
     assert account.on_bar('TEST', activation, '1d') == []
     first = p.position_marks[-1]
     assert first['exit_check']['orders_before_bar']['trailing_stop'] is None
     assert first['exit_state']['trailing_stop'] == pytest.approx(94.5 if short else 104.5)
+    paper_stop = first['exit_state']['paper_protective_stop']
+    assert paper_stop < 94.5 if short else paper_stop > 104.5
     p = _trade_from_dict(_trade_to_dict(p))
     account.positions[p.symbol] = [p]
     gap = candle(97, 100, 95, 96, 2) if short else candle(102, 105, 100, 101, 2)

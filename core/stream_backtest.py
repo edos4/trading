@@ -300,6 +300,9 @@ class StreamReplay:
                 point = replace(candle, open=price, high=price, low=price, close=price)
                 position = _open_trade(fill, point, series.pushed - 1, execution_model="causal-v1")
                 position.entry_fee_paid = price * position.qty * self.txn_cost
+                from core.position_protection import ensure_paper_protection
+                ensure_paper_protection(position, self.txn_cost, self.slippage, candle.timestamp,
+                                        at_entry=True, entry_market_price=candle.open)
                 series.open_positions.append(position)
                 status, reason = "filled", "next-observed-open"
             except Exception as exc:
@@ -568,6 +571,7 @@ class StreamReplay:
                     "current_price": series.last_close,
                     "position_value": (series.last_close or 0.0) * position.qty,
                     "stop_loss": position.stop_loss, "take_profit": position.take_profit,
+                    "paper_protection": dict(position.paper_protection) if position.paper_protection else None,
                     "unrealized_pct": self._unrealized_pct(series, position),
                     "unrealized_usd": round(usd, 6),
                 })
@@ -587,6 +591,7 @@ class StreamReplay:
         trades = {
             "meta": {"mode": "historical-stream", "evaluation": "causal-research-replay",
                      "account_model": "independent-fixed-notional", "execution_model": "causal-v1",
+                     "paper_protection": "net-loss-trail-v1",
                      "entry_policy": "next-observed-open", "history_window": self._history_window(), "sessions": len(calendar),
                      "total_signals": self.total_signals, "trades": len(closed),
                      "open_positions": len(open_positions),

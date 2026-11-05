@@ -235,13 +235,12 @@ def test_entry_day_protection_and_two_leg_costs(short, monkeypatch):
     assert account.equity() == pytest.approx(account.initial_capital-10)
     closed=account.on_bar('TEST',bar,'1d')
     assert len(closed)==1
-    expected_fill=105 if short else 95
-    assert closed[0].exit_price == expected_fill
-    assert account.cash == pytest.approx(account.initial_capital-500-(100+expected_fill)*.001*100)
+    assert closed[0].pnl_usd == pytest.approx(-300)  # 3% NET, both legs included.
+    assert account.cash == pytest.approx(account.initial_capital-300)
     assert closed[0].position_marks[-1]['mtm'] == pytest.approx(closed[0].pnl_usd)
 
 
-def test_old_book_keeps_deferred_fees_and_legacy_rules(tmp_path):
+def test_old_book_keeps_deferred_fees_and_adopts_gap_aware_protection(tmp_path):
     import json
     from core.paper_trader import PaperAccount, _trade_to_dict
     original=signal()
@@ -258,7 +257,8 @@ def test_old_book_keeps_deferred_fees_and_legacy_rules(tmp_path):
     assert account.equity()==100000
     assert account.execution_model=='causal-v1'
     closed=account.on_bar('TEST',candle(90,92,85,88,1),'1d')
-    assert closed[0].exit_price==95  # The original legacy contract is retained.
+    assert closed[0].exit_price==90  # Adopted safety orders use the observed gap open.
+    assert closed[0].paper_protection['initial_stop'] is None
     assert account.cash==pytest.approx(account.initial_capital+closed[0].pnl_usd)
     account.save(path)
     assert PaperAccount.load(path,market='us').cash == account.cash

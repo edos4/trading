@@ -13,6 +13,53 @@ from core.backtester import _open_trade
 from core.test_patternsv2_exits import candle, signal
 
 
+@pytest.mark.parametrize("short", [False, True])
+@pytest.mark.parametrize("slip", [0, .002])
+def test_new_protected_exports_replay_without_mutating_saved_evidence(short, slip):
+    from core.paper_trader import PaperAccount
+    from data.ohlcv_store import OHLCVStore
+    from utils.trade_export import build_paper_account_export
+
+    book = PaperAccount(market="us", txn_cost_pct=.001, slippage_pct=slip)
+    book.assume_session_open = True
+    store = OHLCVStore()
+    assert book.queue_position(signal(short), candle(100, 100, 100, 100), store)[0]
+    first = candle(100, 101, 99, 100, 1)
+    book.fill_pending("TEST", "1d", first, store)
+    assert book.on_bar("TEST", first, "1d") == []
+    assert book.on_bar("TEST", candle(100, 110, 90, 100, 2), "1d")
+    trade = build_paper_account_export(book)["books"][0]["closed_trades"][0]
+    original = deepcopy(trade)
+    row = replay_trade(trade)
+    assert row["pnl"] == pytest.approx(-.03 * trade["resolved_rules"]["price"] * trade["qty"])
+    assert row["net_r"] == pytest.approx(trade["pnl"] / row["initial_risk"], abs=.00001)
+    assert trade == original
+    trade["paper_protection"]["giveback_pct"] = .08
+    with pytest.raises(ValueError, match="prior orders"):
+        replay_trade(trade)
+
+
+@pytest.mark.parametrize("short", [False, True])
+def test_bounded_protection_comparison_keeps_inputs_and_saved_external_exit(short):
+    trade = saved_trade(short)
+    original = deepcopy(trade)
+    row = replay_trade(trade, paper_loss_protection=True)
+    assert row["exit_reason"] == "trailing_stop"
+    assert row["pnl"] >= trade["pnl"] - .000001  # A nearer pattern trail can still win.
+    assert not row["coverage_exhausted"]
+    assert trade == original
+    trade = saved_trade(short, opened=True)
+    # Preserve an observed next-open external exit without re-running Kronos.
+    last = deepcopy(trade["daily_marks"][0])
+    last["sim_bar"] = candle(100, 101, 99, 100, 1).timestamp.isoformat()
+    last["exit_check"]["orders_before_bar"]["pending_exit_reason"] = "kronos_exit"
+    last["exit_check"]["ohlc"] = dict(open=94 if short else 106, high=110, low=90, close=100)
+    trade["daily_marks"].append(last)
+    row = replay_trade(trade, paper_loss_protection=True)
+    assert row["exit_reason"] == "kronos_exit"
+    assert row["exit"] == (94 if short else 106)
+
+
 def saved_trade(short=False, *, opened=False, slip=0):
     s = signal(short)
     s.stop_loss = 103 if short else 97
@@ -205,5 +252,7 @@ def test_signal_funnel_deduplicates_queue_outcomes_and_identifies_disabled_short
     result = signal_funnel([sell, {**buy, "status": "filled"}, buy])
     assert result["BUY"] == {"observed_decisions": 1, "outcomes": {"filled": 1}}
     assert result["SELL"] == {"observed_decisions": 1, "outcomes": {"shorts_disabled": 1}}
+    # Buy-to-cover exit events retain SELL action but are not new entries.
+    assert signal_funnel([sell, {**sell, "status": "exited", "sim_bar": "later"}]) == signal_funnel([sell])
     result = signal_funnel([buy, {**buy, "status": "rejected", "reason": "Opening gap crossed the target"}])
     assert result["BUY"]["outcomes"] == {"opening_gap": 1}

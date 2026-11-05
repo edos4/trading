@@ -436,7 +436,10 @@ def build_paper_trade_export(
             " their own requested_rules/resolved_rules; missing context in older"
             " snapshots is unknown, not today's defaults.",
             "stop is the saved pattern/override level; exit_state.hard_stop"
-            " includes the entry cap. Trailing stops are separate orders.",
+            " includes the entry cap. Trailing stops are separate orders."
+            " paper_protection saves the independent cost-aware 3% net loss"
+            " budget and entry-notional giveback; exit_state.paper_protective_stop"
+            " is its current resting trigger. Gaps can exceed the budget.",
             "r is gross price movement / initial risk; net_r includes both"
             " transaction fees and executed slippage for closed trades.",
             "daily_marks[].close is the exit fill on the final row. New marks"

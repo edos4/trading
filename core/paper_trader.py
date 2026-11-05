@@ -177,7 +177,7 @@ def bars_held(position: BacktestTrade, current_bar_idx: int | None = None) -> in
 
 def position_status(position: BacktestTrade) -> str:
     """Coarse open-position state for a dashboard status column."""
-    if position._trailing_activated:
+    if position._trailing_activated or (position.paper_protection or {}).get("peak_net_pct", 0) > 0:
         return "TRAILING"
     return "OPEN"
 
@@ -192,7 +192,7 @@ def exit_state(position: BacktestTrade) -> dict[str, Any]:
     from core.backtester import _effective_stop, _trailing_stop_price
 
     preview = replace(position)
-    return {
+    state = {
         "hard_stop": _effective_stop(preview),
         "hard_stop_on_close": position.stop_loss_on_close or position.exit_fill_at_close,
         "trailing_stop": _trailing_stop_price(preview, position.action == "SELL"),
@@ -202,6 +202,11 @@ def exit_state(position: BacktestTrade) -> dict[str, Any]:
         "target_on_close": position.exit_fill_at_close,
         "pending_exit_reason": position.pending_exit_reason or None,
     }
+    if position.paper_protection is not None:
+        state["paper_protective_stop"] = position.paper_protection["stop"]
+        state["paper_loss_limit_pct"] = position.paper_protection["loss_limit_pct"]
+        state["paper_peak_net_pct"] = position.paper_protection["peak_net_pct"]
+    return state
 
 
 def _trade_to_dict(t: BacktestTrade) -> dict:
@@ -581,6 +586,7 @@ class PaperAccount:
                 "short_entries_enabled": settings.short_entries_enabled,
                 "stop_loss_pct": settings.stop_loss_pct,
                 "stop_loss_pct_scope": "legacy/indicator entries; patternsv2 uses its structural stop and ATR cap",
+                "paper_protection": "net-loss-trail-v1: 3% net loss budget and 3% of entry notional giveback; all paper entries and adopted open positions",
                 "stop_loss_trail_r": settings.stop_loss_trail_r,
                 "stop_loss_arm_r": settings.stop_loss_arm_r,
                 "stop_loss_min_risk_frac": settings.stop_loss_min_risk_frac,
@@ -885,6 +891,15 @@ class PaperAccount:
         position.entry_date = datetime.now(timezone.utc)
         position.exit_date = position.entry_date
         position.entry_fee_paid = position.entry_price * position.qty * self.txn_cost_pct
+        from core.position_protection import ensure_paper_protection
+        try:
+            ensure_paper_protection(
+                position, self.txn_cost_pct, self.slippage_pct,
+                position.sim_entry_date or position.entry_date, at_entry=True,
+                entry_market_price=candle.close,
+            )
+        except ValueError as exc:
+            return False, str(exc)
         self.cash -= position.entry_fee_paid
         notional = position.entry_price * position.qty
         if signal.action == "BUY":
@@ -1068,6 +1083,8 @@ class PaperAccount:
         self, symbol: str, position: BacktestTrade, candle: OHLCVCandle, now: datetime,
     ) -> BacktestTrade | None:
         bar_idx = self.bar_count(symbol, position.timeframe)
+        from core.position_protection import ensure_paper_protection
+        ensure_paper_protection(position, self.txn_cost_pct, self.slippage_pct, now)
 
         # bar_idx is per real new bar (see _bar_count), not per scan cycle, so
         # the exit ladder's bar counting matches the backtester's walk index.

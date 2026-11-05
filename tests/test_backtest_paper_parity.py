@@ -1,11 +1,11 @@
-"""Backtest and paper share `_open_trade` / `_check_exit` / `_close_trade`; this
-checks legacy helper/fill equivalence, not causal scanner signal parity.
+"""Legacy research and paper share entry geometry; paper adds a safety order.
 The paper side deliberately supplies full history and historical-walk state.
 
 The backtester's walk over a fixture symbol yields the golden trade; the same
 bars are then streamed one-by-one through a `PaperAccount` (open on the bar the
 pattern fires, `on_bar` every bar after) and the closed trade must match on
-entry / exit / reason / pnl.
+entry and quantity. Paper protection may close it earlier; causal stream/paper
+exit parity is covered by core.test_trading_regressions.
 """
 
 from __future__ import annotations
@@ -92,7 +92,7 @@ def _paper_trade(pattern, symbol, candles):
 
 
 @pytest.mark.parametrize("pattern_name, symbol", CASES)
-def test_backtest_and_paper_fill_identically(pattern_name, symbol, monkeypatch):
+def test_legacy_entries_share_sizing_and_paper_adds_protection(pattern_name, symbol, monkeypatch):
     from config import settings
     monkeypatch.setattr(settings, "short_entries_enabled", True)
     pattern = _pattern(pattern_name)
@@ -103,7 +103,10 @@ def test_backtest_and_paper_fill_identically(pattern_name, symbol, monkeypatch):
     pp = _paper_trade(pattern, symbol, candles)
 
     assert pp.entry_price == pytest.approx(bt.entry_price, abs=1e-6)
-    assert pp.exit_price == pytest.approx(bt.exit_price, abs=1e-6)
-    assert pp.exit_reason == bt.exit_reason
-    assert pp.pnl_pct == pytest.approx(bt.pnl_pct, abs=1e-6)
     assert pp.qty == pytest.approx(bt.qty, abs=1e-6)
+    assert pp.paper_protection is not None
+    assert pp.sim_exit_date <= bt.exit_date
+    if pp.pnl_pct < -3.000001:
+        # The loss budget cannot guarantee a fill through an opening gap.
+        bar = next(c for c in candles if c.timestamp == pp.sim_exit_date)
+        assert pp.exit_price == pytest.approx(bar.open)

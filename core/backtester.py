@@ -12,11 +12,12 @@ walks that trade forward through a fixed per-pattern exit ladder:
 Every trade is a flat ``ENGINE.position_notional`` (default $10,000), independent,
 no compounding, no portfolio caps — matching the locked ``.cjs`` pattern-backtest
 scripts at C:\\Users\\dell\\tradingview-mcp. There is no ML gate, confidence gate,
-regime filter, cooldown, risk-based sizing, or engine-level exit overlay: the
-signal's own stop / target / trailing / neckline values are the whole story.
+regime filter, cooldown, risk-based sizing, or automatic exit overlay in this
+legacy research walk. PaperAccount additionally attaches a persisted net-loss
+safety stop to new entries and existing open positions.
 
 The same ``_open_trade`` / ``_check_exit`` / ``_close_trade`` functions drive
-``core.paper_trader.PaperAccount`` so paper and backtest stay byte-identical.
+``core.paper_trader.PaperAccount``; saved safety orders use that shared ladder.
 """
 
 from __future__ import annotations
@@ -50,6 +51,8 @@ _CACHE_TTL_SECONDS = 6 * 3600
 # The pre-audit engine uses the identical exit ladder. Recheck this allowance
 # whenever exit helpers change; new entries still require the current runtime.
 _COMPATIBLE_EXIT_ENGINE_HASHES = frozenset({
+    # Additive paper safety order; absent policy retains the saved ladder.
+    "a63bde2d2a4cc481f5c74ee40c355aec2a3946a5c369da9b0ab7c0edeff7753c",
     # Additive trail basis; missing basis retains reference-percentage exits.
     "83461f8baa2449746a5269e32c197edc024544fdf5bd611f66820450c74d934e",
     # Entry-only corrections; saved legacy exits are also unchanged.
@@ -65,6 +68,7 @@ _COMPATIBLE_EXIT_ENGINE_HASHES = frozenset({
 # Entry corrections and an opt-in trail basis preserve these audited engines'
 # existing ladders. Missing basis always means the old reference percentage.
 _COMPATIBLE_CAUSAL_EXIT_ENGINE_HASHES = frozenset({
+    "a63bde2d2a4cc481f5c74ee40c355aec2a3946a5c369da9b0ab7c0edeff7753c",
     # The new entry-based trail is opt-in per signal. Old positions keep
     # their reference-based ladder, including after a ledger reload.
     "83461f8baa2449746a5269e32c197edc024544fdf5bd611f66820450c74d934e",
@@ -171,6 +175,9 @@ class BacktestTrade:
     pending_exit_reason: str = ""
     entry_fee_paid: float = 0.0
     decision_date: datetime | None = None
+    # Independent, persisted safety order. None preserves historical research
+    # ladders; PaperAccount installs it at entry or adopts an old open trade.
+    paper_protection: dict | None = None
 
     _trailing_activated: bool = False
     _best_pnl_pct: float | None = None
@@ -197,12 +204,12 @@ def _initial_stop(trade: BacktestTrade) -> float | None:
     saved = trade.resolved_rules or {}
     stop = saved.get("stop_loss", trade.stop_loss)
     cap_pct = saved.get("stop_loss_pct_cap", trade.stop_loss_pct_cap)
-    if cap_pct is None:
-        return stop
-    cap = trade.entry_price * (1 + cap_pct if trade.action == "SELL" else 1 - cap_pct)
-    if stop is None:
-        return cap
-    return min(stop, cap) if trade.action == "SELL" else max(stop, cap)
+    levels = [stop]
+    if cap_pct is not None:
+        levels.append(trade.entry_price * (1 + cap_pct if trade.action == "SELL" else 1 - cap_pct))
+    levels.append((trade.paper_protection or {}).get("initial_stop"))
+    levels = [level for level in levels if level is not None]
+    return (min(levels) if trade.action == "SELL" else max(levels)) if levels else None
 
 
 def trade_r_multiple(trade: BacktestTrade, price: float) -> float | None:
@@ -646,8 +653,40 @@ def _time_exit_allowed(position: BacktestTrade, candle: OHLCVCandle) -> bool:
 
 
 def _check_exit(candle: OHLCVCandle, position: BacktestTrade, bar_idx: int):
+    from core.position_protection import paper_protective_order, ratchet_paper_protection
+
     if position.execution_model == "legacy":
-        return _check_exit_legacy(candle, position, bar_idx)
+        # A migrated legacy paper trade gains a resting safety stop while its
+        # pattern ladder retains its historical semantics. Opening orders act
+        # before intrabar touches, including an already queued market exit.
+        protective = paper_protective_order(position)
+        if protective is not None and not position.pending_exit_reason:
+            _validate_legacy_exit_runtime(position)
+            short = position.action == "SELL"
+            resting = [protective]
+            if not (position.stop_loss_on_close or position.exit_fill_at_close):
+                stop = _effective_stop(position)
+                if stop is not None:
+                    resting.append((stop, False, "stop_loss"))
+            if not (position.trailing_stop_on_close or position.exit_fill_at_close):
+                trail = _trailing_stop_price(position, short)
+                if trail is not None:
+                    resting.append((trail, False, "trailing_stop"))
+            resting.sort(key=lambda order: order[0], reverse=not short)
+            if position.take_profit is not None and not position.exit_fill_at_close:
+                resting.append((position.take_profit, True, "take_profit"))
+            for opening_only in (True, False):
+                for trigger, favorable, reason in resting:
+                    price = _gap_aware_trigger_fill(candle, trigger, is_short=short, favorable=favorable)
+                    gapped = (candle.open <= trigger if short else candle.open >= trigger) if favorable else (
+                        candle.open >= trigger if short else candle.open <= trigger)
+                    if price is not None and (not opening_only or gapped):
+                        position.exit_bar_idx = bar_idx
+                        return price, reason
+        result = _check_exit_legacy(candle, position, bar_idx)
+        if result[0] is None:
+            ratchet_paper_protection(position, candle.close)
+        return result
     if position.execution_model != "causal-v1":
         raise ValueError("Unknown position execution model")
     if position.resolved_rules and not causal_exit_runtime_compatible(position.resolved_rules.get("engine_sha256")):
@@ -659,6 +698,9 @@ def _check_exit(candle: OHLCVCandle, position: BacktestTrade, bar_idx: int):
     stop = _effective_stop(position)
     trail = _trailing_stop_price(position, short)
     resting = []
+    protective = paper_protective_order(position)
+    if protective is not None:
+        resting.append(protective)
     if not (position.stop_loss_on_close or position.exit_fill_at_close):
         if stop is not None:
             resting.append((stop, False, "stop_loss"))
@@ -706,18 +748,23 @@ def _check_exit(candle: OHLCVCandle, position: BacktestTrade, bar_idx: int):
     position.pending_exit_reason = reason
     _update_trailing_reference(position, candle)
     _trailing_stop_price(position, short)
+    ratchet_paper_protection(position, candle.close)
     return None, ""
+
+
+def _validate_legacy_exit_runtime(position: BacktestTrade) -> None:
+    from core.pattern_provenance import engine_hash
+    if position.pattern_version_id and position.resolved_rules:
+        saved_engine = position.resolved_rules.get("engine_sha256")
+        if saved_engine != engine_hash() and saved_engine not in _COMPATIBLE_EXIT_ENGINE_HASHES:
+            raise RuntimeError("Position exit runtime changed; restore its compatible engine before management")
 
 
 def _check_exit_legacy(
     candle: OHLCVCandle, position: BacktestTrade, bar_idx: int
 ) -> tuple[float | None, str]:
     """Fixed per-pattern exit ladder — see module docstring. No engine overlays."""
-    from core.pattern_provenance import engine_hash
-    if position.pattern_version_id and position.resolved_rules:
-        saved_engine = position.resolved_rules.get("engine_sha256")
-        if saved_engine != engine_hash() and saved_engine not in _COMPATIBLE_EXIT_ENGINE_HASHES:
-            raise RuntimeError("Position exit runtime changed; restore its compatible engine before management")
+    _validate_legacy_exit_runtime(position)
     if position.pending_exit_reason:
         position.exit_bar_idx = bar_idx
         return candle.open, position.pending_exit_reason

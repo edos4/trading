@@ -69,6 +69,32 @@ def replay(pattern, *, end=34, start=30, slippage=0.0, market="us", rows=None):
                         session_tz="America/New_York")
 
 
+@pytest.mark.parametrize("action", ["BUY", "SELL"])
+@pytest.mark.parametrize("slip", [0, .002])
+def test_stream_and_paper_protection_have_identical_entry_session_fills(action, slip):
+    from data.ohlcv_store import OHLCVStore
+
+    bars = [candle(index=i) for i in range(40)]
+    bars[31].high, bars[31].low = 110, 90
+    rows = [[b.timestamp.isoformat(), b.open, b.high, b.low, b.close, b.volume] for b in bars]
+    stream = replay(AnchorPattern(cap=1, action=action), rows=rows, slippage=slip)
+    stream.run()
+    assert len(stream.series["TEST"].closed) == 1
+    expected = stream.series["TEST"].closed[0]
+    book = PaperAccount(market="us", txn_cost_pct=.001, slippage_pct=slip)
+    book.assume_session_open = True
+    store = OHLCVStore()
+    assert book.queue_position(signal(action), bars[30], store)[0]
+    book.fill_pending("TEST", "1d", bars[31], store)
+    assert len(book.on_bar("TEST", bars[31], "1d")) == 1
+    actual = book.closed[0]
+    assert actual.entry_price == expected.entry_price
+    assert actual.exit_price == expected.exit_price
+    assert actual.qty == expected.qty
+    assert actual.pnl_pct == pytest.approx(-3)
+    assert actual.pnl_usd == pytest.approx(expected.pnl_usd)
+
+
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf"), 0.0, -1.0])
 def test_invalid_prices_cannot_create_or_poison_paper_positions(value):
     account = PaperAccount(market="us")
@@ -125,10 +151,11 @@ def test_slippage_marks_and_indicator_exit_accounting_survive_restart(tmp_path, 
     assert account.slippage_pct == 0.01
     account.indicators_only = True
     position = account.open_for("TEST")[0]
-    account.on_bar("TEST", candle(110.0, 1), "1d")
-    assert account.exit_indicator("TEST", position, candle(110.0, 1)) is None
+    price = 90.0 if action == "SELL" else 110.0
+    account.on_bar("TEST", candle(price, 1), "1d")
+    assert account.exit_indicator("TEST", position, candle(price, 1)) is None
     assert account.open_count() == 1
-    assert account.on_bar("TEST", candle(110.0, 2), "1d") == [position]
+    assert account.on_bar("TEST", candle(price, 2), "1d") == [position]
     assert position.exit_bar_idx == account.bar_count("TEST", "1d")
     assert account.cash == pytest.approx(account.initial_capital + position.pnl_usd)
     assert account.equity() == pytest.approx(account.cash)

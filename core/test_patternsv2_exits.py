@@ -64,11 +64,12 @@ def test_paper_uses_same_trail_and_accounting():
     account.assume_session_open = True
     ok, message = account.open_position(signal(), candle(100, 100, 100, 100), OHLCVStore())
     assert ok, message
-    assert account.on_bar('TEST', candle(100, 112, 96, 110, 1), '1d') == []
+    assert account.on_bar('TEST', candle(100, 112, 98, 110, 1), '1d') == []
     closed = account.on_bar('TEST', candle(110, 111, 90, 92, 2), '1d')
     assert len(closed) == 1
     assert closed[0].exit_reason == 'trailing_stop'
-    assert closed[0].exit_price == pytest.approx(104.5)
+    # The independent paper trail limits giveback to 3% of entry notional.
+    assert closed[0].exit_price == pytest.approx(107)
     assert account.cash == pytest.approx(account.initial_capital + closed[0].pnl_usd)
 
 

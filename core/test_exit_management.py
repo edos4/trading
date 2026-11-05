@@ -80,7 +80,7 @@ def test_profitable_saved_position_queues_then_settles_next_open_with_costs(monk
     account.cash += (1 if short else -1)*100*p.qty - p.entry_fee_paid
     account.positions[p.symbol] = [p]
     anchor = 94 if short else 106
-    activation = candle(100, 104, 94, anchor, 1) if short else candle(100, 106, 96, anchor, 1)
+    activation = candle(100, 102, 94, anchor, 1) if short else candle(100, 106, 98, anchor, 1)
     assert account.on_bar(p.symbol, activation, "1d") == []
     scanner = MarketScanner(symbols=[p.symbol], market="us", paper_account=account,
                             kronos_gate_mode="off", kronos_exit_mode="exit")
