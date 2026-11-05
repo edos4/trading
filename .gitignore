@@ -16,6 +16,8 @@ logs/update-db.lock
 logs/paper_signals_*.jsonl
 logs/stocks_history_updated.txt
 logs/stocks_history_updated.txt.tmp
+logs/stocks_history_updated_ph.txt
+logs/stocks_history_updated_ph.txt.tmp
 logs/hourly-bars.lock
 logs/hourly_bars_updated.txt
 logs/hourly_bars_updated.txt.tmp
