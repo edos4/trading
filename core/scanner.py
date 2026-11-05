@@ -1610,18 +1610,12 @@ class MarketScanner:
         # instead of its pattern's structural level.
         self._apply_fixed_stop(signal, candle)
 
-        # Operator kill-switch: set SHORT_ENTRIES_ENABLED=false to paper a
-        # long-only book. It defaults on — the current ledger has shorts
-        # profitable, so a blanket short block is not supported by the data.
-        if (
-            not self._indicators_only
-            and signal.action == "SELL"
-            and not settings.short_entries_enabled
-        ):
-            reason = (
-                "Short entries are disabled (SHORT_ENTRIES_ENABLED=false). "
-                "Set it true to re-enable SELL/short pattern entries."
-            )
+        from core.entry_policy import describe_short_entry_rejection
+
+        reason = describe_short_entry_rejection(
+            signal.action, indicators_only=self._indicators_only,
+        )
+        if reason is not None:
             log.info(f"Signal REJECTED by short gate — {signal.symbol} {signal.pattern}")
             self.stats["signals_rejected"] += 1
             self.stats["short_rejected"] = self.stats.get("short_rejected", 0) + 1

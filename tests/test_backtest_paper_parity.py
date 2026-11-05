@@ -92,7 +92,9 @@ def _paper_trade(pattern, symbol, candles):
 
 
 @pytest.mark.parametrize("pattern_name, symbol", CASES)
-def test_backtest_and_paper_fill_identically(pattern_name, symbol):
+def test_backtest_and_paper_fill_identically(pattern_name, symbol, monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "short_entries_enabled", True)
     pattern = _pattern(pattern_name)
     candles = _load_barcache("us", symbol, root=FIXTURE)
     assert candles

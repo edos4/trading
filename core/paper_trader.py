@@ -182,6 +182,28 @@ def position_status(position: BacktestTrade) -> str:
     return "OPEN"
 
 
+def exit_state(position: BacktestTrade) -> dict[str, Any]:
+    """Read the saved exit ladder without arming or ratcheting the position.
+
+    ``stop_loss`` is the pattern/override level, which can be wider than the
+    execution cap. Keep both it and the separately activated trail visible.
+    Close-confirmed orders are decisions for the next open in causal-v1.
+    """
+    from core.backtester import _effective_stop, _trailing_stop_price
+
+    preview = replace(position)
+    return {
+        "hard_stop": _effective_stop(preview),
+        "hard_stop_on_close": position.stop_loss_on_close or position.exit_fill_at_close,
+        "trailing_stop": _trailing_stop_price(preview, position.action == "SELL"),
+        "trailing_stop_on_close": position.trailing_stop_on_close or position.exit_fill_at_close,
+        "trailing_activated": preview._trailing_activated,
+        "target": position.take_profit,
+        "target_on_close": position.exit_fill_at_close,
+        "pending_exit_reason": position.pending_exit_reason or None,
+    }
+
+
 def _trade_to_dict(t: BacktestTrade) -> dict:
     d = asdict(t)
     d["entry_date"] = t.entry_date.isoformat()
@@ -251,6 +273,7 @@ def _position_mark_row(
         "bars": bars_held(position, bar_idx),
         "stop": position.stop_loss,
         "target": position.take_profit,
+        "exit_state": exit_state(position),
     }
 
 
@@ -545,6 +568,23 @@ class PaperAccount:
             positions = [(sym, p) for sym, p in self._all_open()]
             last_price = dict(self._last_price)
             closed = list(self.closed)
+            execution_context = {
+                "scope": "current settings at snapshot; historical rules are saved per trade",
+                "sim_as_of": self._sim_now.isoformat() if self._sim_now else None,
+                "execution_model": self.execution_model,
+                "initial_capital": initial_capital,
+                "txn_cost_pct_per_side": self.txn_cost_pct,
+                "slippage_pct_per_side": self.slippage_pct,
+                "position_notional": ENGINE.position_notional,
+                "risk_pct": ENGINE.risk_pct,
+                "indicators_only": self.indicators_only,
+                "short_entries_enabled": settings.short_entries_enabled,
+                "stop_loss_pct": settings.stop_loss_pct,
+                "stop_loss_trail_r": settings.stop_loss_trail_r,
+                "stop_loss_arm_r": settings.stop_loss_arm_r,
+                "stop_loss_min_risk_frac": settings.stop_loss_min_risk_frac,
+                "target_max_r": settings.target_max_r,
+            }
 
         long_value = 0.0
         short_value = 0.0
@@ -584,6 +624,7 @@ class PaperAccount:
 
         return {
             "cash": cash,
+            "execution_context": execution_context,
             "initial_capital": initial_capital,
             "equity": equity,
             "exposure": exposure,
@@ -632,10 +673,14 @@ class PaperAccount:
     # ── Signal → simulated fill ──────────────────────────────────────────
     def queue_position(self, signal: TradeSignal, candle: OHLCVCandle, store: OHLCVStore):
         from copy import deepcopy
+        from core.entry_policy import describe_short_entry_rejection
         from core.execution import stable_anchors
         with self._lock:
             if signal.action not in ("BUY", "SELL"):
                 return False, "Trade entries require BUY or SELL."
+            reason = describe_short_entry_rejection(signal.action, indicators_only=self.indicators_only)
+            if reason is not None:
+                return False, reason
             if candle.timestamp is None or candle.timestamp.tzinfo is None:
                 return False, "Pending entry requires an aware signal timestamp."
             candidate = deepcopy(signal)
@@ -699,8 +744,15 @@ class PaperAccount:
     def _open_position_locked(
         self, signal: TradeSignal, candle: OHLCVCandle, store: OHLCVStore,
     ) -> tuple[bool, str]:
+        from core.entry_policy import describe_short_entry_rejection
+
         if signal.action not in ("BUY", "SELL"):
             return False, "Trade entries require BUY or SELL."
+        # Recheck here as well: direct paper entries and saved pending orders
+        # must obey the switch even if they bypassed today's scanner gate.
+        reason = describe_short_entry_rejection(signal.action, indicators_only=self.indicators_only)
+        if reason is not None:
+            return False, reason
         if not all(math.isfinite(value) and value > 0
                    for value in (candle.open, candle.high, candle.low, candle.close)):
             return False, "Trade candle prices must be finite and positive."
@@ -842,7 +894,7 @@ class PaperAccount:
             f"@ {position.entry_price:.2f} (pattern={signal.pattern})"
         )
         return True, (
-            f"Filled signal-bar entry: {signal.action} {signal.qty:g} {signal.symbol} "
+            f"Filled paper entry: {signal.action} {signal.qty:g} {signal.symbol} "
             f"@ {format_money(position.entry_price, self.market)} (pattern={signal.pattern})."
         )
 
@@ -885,6 +937,13 @@ class PaperAccount:
                 return None
             now = candle.timestamp or datetime.now(timezone.utc)
             bar_idx = self.bar_count(symbol, position.timeframe)
+            exit_check = {
+                "orders_before_bar": exit_state(position),
+                "ohlc": {key: getattr(candle, key) for key in ("open", "high", "low", "close")},
+                "execution_model": position.execution_model,
+                "raw_fill": candle.close,
+                "reason": reason,
+            }
             exit_price = candle.close
             if self.slippage_pct:
                 exit_price = (
@@ -896,6 +955,13 @@ class PaperAccount:
                 symbol, position, exit_price, now, bar_idx, status=reason,
             )
             _close_trade(position, exit_price, reason, candle, self.txn_cost_pct)
+            risk = risk_dollars(position)
+            exit_check.update(
+                fill=exit_price,
+                fees=(position.entry_price + exit_price) * self.txn_cost_pct * position.qty,
+                net_r=position.pnl_usd / risk if risk else None,
+            )
+            position.position_marks[-1]["exit_check"] = exit_check
             position.exit_bar_idx = bar_idx
             position.sim_exit_date = position.exit_date
             position.exit_date = datetime.now(timezone.utc)
@@ -993,8 +1059,18 @@ class PaperAccount:
         # bar_idx is per real new bar (see _bar_count), not per scan cycle, so
         # the exit ladder's bar counting matches the backtester's walk index.
         from core.backtester import _update_neckline_state, _update_prev_hl
+        # Capture orders BEFORE this close can arm/ratchet tomorrow's trail.
+        # Keeping the raw bar also distinguishes real closes from exit fills
+        # in position_marks[-1]["close"]. Old marks remain readable as-is.
+        exit_check = {
+            "orders_before_bar": exit_state(position),
+            "ohlc": {key: getattr(candle, key) for key in ("open", "high", "low", "close")},
+            "execution_model": position.execution_model,
+        }
         _update_neckline_state(position, candle, bar_idx)
         exit_price, reason = _check_exit(candle, position, bar_idx)
+        exit_check["raw_fill"] = exit_price
+        exit_check["reason"] = reason or None
         if exit_price is None:
             _update_prev_hl(position, candle)
         if reason == "time_exit":
@@ -1030,10 +1106,17 @@ class PaperAccount:
             symbol, position, mark_price, now, bar_idx,
             status=reason if exit_price is not None else None,
         )
+        position.position_marks[-1]["exit_check"] = exit_check
         if exit_price is None:
             return None
 
         _close_trade(position, exit_price, reason, candle, self.txn_cost_pct)
+        risk = risk_dollars(position)
+        exit_check.update(
+            fill=exit_price,
+            fees=(position.entry_price + exit_price) * self.txn_cost_pct * position.qty,
+            net_r=position.pnl_usd / risk if risk else None,
+        )
         position.sim_exit_date = position.exit_date  # bar timestamp, for days_held()
         position.exit_date = datetime.now(timezone.utc)  # real fill time, not bar date
         notional_out = exit_price * position.qty
@@ -1110,7 +1193,11 @@ class PaperAccount:
         with self._lock:
             open_n = sum(len(lst) for lst in self.positions.values())
             return BacktestResult(
-                trades=list(self.closed),
+                # Reports use simulated market time. The ledger retains the
+                # real fill timestamps used by the operator desk.
+                trades=[replace(t, entry_date=t.sim_entry_date or t.entry_date,
+                                exit_date=t.sim_exit_date or t.exit_date)
+                        for t in self.closed],
                 total_signals=len(self.closed) + open_n,
                 position_notional=ENGINE.position_notional,
                 version=f"paper/{self.market}",

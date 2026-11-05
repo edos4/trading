@@ -92,7 +92,9 @@ def test_structural_stop_tighter_than_cap_is_preserved():
 
 
 @pytest.mark.parametrize('short', [False, True])
-def test_new_signals_protect_profit_after_activation_without_same_bar_lookahead(short):
+def test_new_signals_protect_profit_after_activation_without_same_bar_lookahead(short, monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "short_entries_enabled", True)
     import pandas as pd
     from patterns_v2.signals import _to_signal
 

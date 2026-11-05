@@ -49,6 +49,7 @@ def _open_row(row: dict[str, Any]) -> dict[str, Any]:
         "entry": _round(row.get("entry")),
         "current": _round(row.get("current")),
         "stop": _round(row.get("stop")),
+        "exit_state": deepcopy(row.get("exit_state")),
         "target": _round(row.get("target")),
         "unrealized_pct": _round(row.get("unrl_pct")),
         "mtm": _round(row.get("mtm")),
@@ -83,6 +84,8 @@ def _daily_mark(row: dict[str, Any]) -> dict[str, Any]:
         "bars": row.get("bars"),
         "stop": _round(row.get("stop")),
         "target": _round(row.get("target")),
+        "exit_state": deepcopy(row.get("exit_state")),
+        "exit_check": deepcopy(row.get("exit_check")),
     }
 
 
@@ -99,10 +102,12 @@ def _closed_row(row: dict[str, Any]) -> dict[str, Any]:
         "entry": _round(row.get("entry")),
         "exit": _round(row.get("exit")),
         "stop": _round(row.get("stop")),
+        "exit_state": deepcopy(row.get("exit_state")),
         "target": _round(row.get("target")),
         "pnl": _round(row.get("pnl")),
         "pnl_pct": _round(row.get("pnl_pct")),
         "r": _round(row.get("r")),
+        "net_r": _round(row.get("net_r")),
         "hold_days": _round(row.get("days")),
         "hold_bars": row.get("bars"),
         "exit_reason": row.get("reason"),
@@ -178,6 +183,7 @@ def _book_export(snap: dict[str, Any]) -> dict[str, Any]:
         # so a review knows which gates produced these trades.
         "status": snap.get("status"),
         "settings": dict(snap.get("settings") or {}),
+        "execution_context": deepcopy(snap.get("execution_context")),
         "use_stream": snap.get("use_stream"),
         "duration_days": snap.get("duration_days"),
         "laya": snap.get("laya"),
@@ -210,6 +216,7 @@ def snapshot_from_paper_account(
     from core.paper_trader import (
         bars_held,
         days_held,
+        exit_state,
         position_status,
         r_multiple,
         risk_dollars,
@@ -250,6 +257,7 @@ def snapshot_from_paper_account(
                 "port_pct": (value / equity * 100) if equity > 0 else 0.0,
                 "risk": risk_dollars(p),
                 "stop": p.stop_loss,
+                "exit_state": exit_state(p),
                 "target": p.take_profit,
                 "opened": p.entry_date.isoformat() if p.entry_date else "",
                 "sim_opened": p.sim_entry_date.isoformat() if p.sim_entry_date else None,
@@ -284,6 +292,7 @@ def snapshot_from_paper_account(
                 "pnl_pct": t.pnl_pct,
                 "pnl": t.pnl * t.qty,
                 "r": r_multiple(t, exit_px),
+                "net_r": t.pnl_usd / risk_dollars(t) if risk_dollars(t) else None,
                 "days": days_held(t),
                 "bars": bars_held(t),
                 "time_exit_bars_elapsed": t.time_exit_bars_elapsed,
@@ -291,6 +300,7 @@ def snapshot_from_paper_account(
                 "reason": t.exit_reason,
                 "kronos_exit": t.exit_reason == "kronos_exit",
                 "stop": t.stop_loss,
+                "exit_state": exit_state(t),
                 "target": t.take_profit,
                 "opened": t.entry_date.isoformat() if t.entry_date else "",
                 "closed": t.exit_date.isoformat() if t.exit_date else "",
@@ -321,6 +331,7 @@ def snapshot_from_paper_account(
         "running": False,
         "status": status,
         "settings": dict(settings or {}),
+        "execution_context": snap["execution_context"],
         "use_stream": bool((settings or {}).get("use_stream")),
         "duration_days": (settings or {}).get("duration_days"),
         "laya": {
@@ -415,10 +426,23 @@ def build_paper_trade_export(
             "signal_logs holds every detected signal with its accept/fill/reject"
             " outcome and reason, plus status='exited' rows for Kronos closes,"
             " newest first, as shown in the Paper Logs tab.",
-            "closed_trades[].kronos_exit is true when Kronos opposed the open"
-            " position; its vote is in kronos_exit_evidence.",
+            "closed_trades[].kronos_exit is true only for an executed"
+            " kronos_exit. An opposing vote in kronos_exit_evidence can be"
+            " deferred by the adverse-move guard without closing the trade.",
             "Each book is a separate ledger. Do not mix $ and ₱.",
             "Identity is (market, symbol), not ticker alone.",
+            "execution_context records current account costs, slippage, simulated"
+            " clock and entry settings at snapshot time. Historical trades use"
+            " their own requested_rules/resolved_rules; missing context in older"
+            " snapshots is unknown, not today's defaults.",
+            "stop is the saved pattern/override level; exit_state.hard_stop"
+            " includes the entry cap. Trailing stops are separate orders.",
+            "r is gross price movement / initial risk; net_r includes both"
+            " transaction fees and executed slippage for closed trades.",
+            "daily_marks[].close is the exit fill on the final row. New marks"
+            " include exit_check.ohlc and orders_before_bar, distinct from"
+            " exit_state (the state after checking this bar). Older marks"
+            " have no reconstructed exit evidence.",
         ],
         "books": books,
     })

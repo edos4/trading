@@ -795,13 +795,19 @@ def test_run_settings_indicators_only_wins_over_pattern_flags():
     assert cfg["duration_days"] == 12
 
 
-def test_snapshot_reports_the_persisted_scan_clock_without_a_scanner():
+def test_snapshot_reports_the_persisted_scan_clock_without_a_scanner(tmp_path):
     """A stopped/restarted desk still shows the book's total scan time."""
-    with patch("core.paper_books.PaperAccount.save"):
+    from core.paper_trader import PaperAccount
+
+    account = PaperAccount(market='us')
+    account.record_scan(7.5)
+    account.record_scan(2.5)
+    account.save(tmp_path / 'us.json')
+    load = PaperAccount.load
+    with patch('core.paper_books.PaperAccount.load',
+               side_effect=lambda *, market: load(tmp_path / f'{market}.json', market=market)):
         mgr = PaperBookManager()
         book = mgr.books["us"]
-        book.account.record_scan(7.5)
-        book.account.record_scan(2.5)
         assert book.scanner is None
         timing = mgr.snapshot("us")["scan_timing"]
         assert timing["scan_total_s"] == 10.0

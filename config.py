@@ -79,18 +79,20 @@ class Settings(BaseSettings):
     # Cancel a next-open fill when an adverse gap leaves less than this
     # fraction of the planned stop distance. 0 disables the guard.
     stop_loss_min_risk_frac: float = 0.5
-    # Cap a measured-move target at N R of the executed stop. 2.0 banks an
-    # armed winner once it has earned 2R instead of handing ~1R back to the
-    # trail; 0 keeps the pattern's own target.
-    target_max_r: float = 2.0
+    # Optional cap on a pattern's measured target, in executed initial R.
+    # Disabled by default: a saved-entry replay of the 2026-11-05 13:27Z export
+    # with a 2R cap preempted every trail and turned +$1,683 into -$1,038.
+    # Preserve the measured target; a positive value explicitly requests a cap.
+    target_max_r: float = 0.0
     # Reject US pattern entries below this price (0 disables). Off by default:
     # the current ledger's sub-$10 cohort is +$2,989 and holds the two biggest
     # winners (UPXI, RUM).
     min_signal_price_usd: float = 0.0
-    # US SELL/short pattern entries. On: the committed 2026-11-03 02:18Z ledger
-    # has shorts +$1,047 (double_top 2/8, +$1,233), so a blanket short block is
-    # not supported. Set false to paper a long-only book.
-    short_entries_enabled: bool = True
+    # Pattern shorts are opt-in pending independent validation: the 2026-11-05
+    # 13:27Z export has 2/22 winners and -$5,020 from shorts, losing in every
+    # observed quarter. True allows explicit short-side research; this switch
+    # never closes an existing position or blocks its protective exits.
+    short_entries_enabled: bool = False
     # Record DII rejections but let the entry through, so the gate can be A/B'd
     # against an ungated book without changing production behaviour.
     dii_gate_shadow: bool = False

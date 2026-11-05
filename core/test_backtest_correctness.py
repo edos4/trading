@@ -221,7 +221,9 @@ def test_replay_window_is_part_of_frozen_effective_identity():
 
 
 @pytest.mark.parametrize('short', [False, True])
-def test_entry_day_protection_and_two_leg_costs(short):
+def test_entry_day_protection_and_two_leg_costs(short, monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "short_entries_enabled", True)
     from core.paper_trader import PaperAccount
     from data.ohlcv_store import OHLCVStore
     account=PaperAccount(market='us',txn_cost_pct=.001,slippage_pct=0)
@@ -432,3 +434,16 @@ def test_target_can_be_capped_in_r(monkeypatch):
     fill = opening_candidate(
         _execution_signal(target=130.0), _execution_bar(100.0), 10_000, "us")
     assert fill.take_profit == pytest.approx(109.0)
+
+
+@pytest.mark.parametrize('action,target', [('BUY', 130.0), ('SELL', 70.0)])
+def test_default_execution_preserves_measured_target(monkeypatch, action, target):
+    from config import Settings, settings
+    from core.execution import opening_candidate
+
+    default = Settings.model_fields['target_max_r'].default
+    assert default == 0.0
+    monkeypatch.setattr(settings, 'target_max_r', default)
+    fill = opening_candidate(
+        _execution_signal(action=action, target=target), _execution_bar(100.0), 10_000, 'us')
+    assert fill.take_profit == target
