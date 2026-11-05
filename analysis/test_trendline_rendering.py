@@ -293,3 +293,86 @@ def test_png_paints_blue_rails_at_the_fitted_candle_coordinates(monkeypatch, bro
 
     monkeypatch.setattr(ChartRenderer, "_save_figure", inspect_figure)
     ChartRenderer().render("TEST", "1d", df, trendlines=True)
+
+
+@pytest.mark.parametrize("weekly_day", ["2024-01-01", "2024-01-05"])
+def test_project_daily_rail_keeps_week_buckets_and_trading_bar_prices(weekly_day):
+    from analysis.chart_renderer import _project_trendline_segment
+
+    # A missing holiday changes trading-bar distance, not the fitted slope.
+    source = pd.bdate_range("2024-01-03", "2024-01-23").difference(
+        pd.DatetimeIndex(["2024-01-15"]))
+    display = pd.date_range(weekly_day, periods=4, freq="7D")
+    line = dict(kind="support", start_index=0, end_index=len(source) - 1,
+                start_price=100., end_price=100. + len(source) - 1, confirmed=True)
+    candles = [{"time": day.strftime("%Y-%m-%d")} for day in display]
+    rail = _project_trendline_segment(line, source, display, list(range(4)), candles,
+                                      "1d", "1W")
+    assert rail is not None
+    assert [p["time"] for p in rail["data"]] == [p["time"] for p in candles]
+    assert [p["value"] for p in rail["data"]] == [100., 107., 111., 113.]
+
+
+def test_project_same_frame_uses_bar_distance_not_calendar_distance():
+    from analysis.chart_renderer import _project_trendline_segment
+
+    source = pd.to_datetime(["2024-01-04", "2024-01-05", "2024-01-09", "2024-01-10"])
+    line = dict(kind="resistance", start_index=0, end_index=3,
+                start_price=100., end_price=106.)
+    candles = [{"time": day.strftime("%Y-%m-%d")} for day in source]
+    rail = _project_trendline_segment(line, source, source, list(range(4)), candles)
+    assert [p["value"] for p in rail["data"]] == [100., 102., 104., 106.]
+
+
+def test_weekly_source_anchors_survive_holiday_and_partial_daily_weeks():
+    from analysis.chart_renderer import _project_trendline_segment
+
+    source = pd.to_datetime(["2024-03-29", "2024-04-05", "2024-04-12"])
+    display = pd.bdate_range("2024-03-25", "2024-04-10").difference(
+        pd.DatetimeIndex(["2024-03-29"]))
+    candles = [{"time": day.strftime("%Y-%m-%d")} for day in display]
+    line = dict(kind="support", start_index=0, end_index=2,
+                start_price=100., end_price=120.)
+    rail = _project_trendline_segment(line, source, display, list(range(len(display))),
+                                      candles, "1W", "1d")
+    assert rail["data"][0] == {"time": "2024-03-28", "value": 100.}
+    assert rail["data"][-1] == {"time": "2024-04-10", "value": 120.}
+    assert all(100 <= p["value"] <= 120 for p in rail["data"])
+    values = {p["time"]: p["value"] for p in rail["data"]}
+    assert values["2024-04-05"] == 110.
+    assert values["2024-04-08"] == 116.
+
+
+def test_projection_clips_to_visible_candles_without_resetting_anchor_price():
+    from analysis.chart_renderer import _project_trendline_segment
+
+    source = pd.bdate_range("2024-01-01", periods=10)
+    display = source[3:7]
+    candles = [{"time": day.strftime("%Y-%m-%d")} for day in display]
+    line = dict(kind="support", start_index=0, end_index=9,
+                start_price=100., end_price=109., broken=True, confirmed=False)
+    rail = _project_trendline_segment(line, source, display, list(range(4)), candles)
+    assert [p["value"] for p in rail["data"]] == [103., 104., 105., 106.]
+    assert rail["broken"] and not rail["confirmed"]
+    assert rail["style"] == "--"
+
+
+def test_payload_daily_weekly_daily_preserves_native_rails():
+    from analysis.test_trendlines import _uptrend_frame
+
+    daily = _uptrend_frame()
+    weekly = daily.resample("W-FRI").agg({
+        "open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum",
+    })
+    native = build_trade_viewer_payload(daily, symbol="TEST", trendlines=True)
+    projected = build_trade_viewer_payload(weekly, symbol="TEST", timeframe="1W",
+                                           trendlines=True, trendline_source=daily,
+                                           trendline_timeframe="1d")
+    restored = build_trade_viewer_payload(daily, symbol="TEST", trendlines=True)
+    assert restored["trendlines"] == native["trendlines"]
+    assert {rail["kind"] for rail in projected["trendlines"]} == {"support", "resistance"}
+    for original, rail in zip(native["trendlines"], projected["trendlines"]):
+        assert {key: value for key, value in rail.items() if key != "data"} == {
+            key: value for key, value in original.items() if key != "data"}
+        assert rail["data"][0]["value"] == pytest.approx(original["data"][0]["value"])
+        assert rail["data"][-1]["value"] == pytest.approx(original["data"][-1]["value"])

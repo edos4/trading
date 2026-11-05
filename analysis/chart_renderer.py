@@ -926,44 +926,75 @@ def _trendline_segment(line: dict, start_time: str, start_price: float,
 
 
 def _project_trendline_segment(line: dict, source_index: pd.Index, display_index: pd.Index,
-                               valid_positions: list[int], candles: list[dict]) -> dict | None:
-    """Draw a rail fitted on the native frame onto the displayed candles.
+                               valid_positions: list[int], candles: list[dict],
+                               source_timeframe: str = "1d", timeframe: str = "1d") -> dict | None:
+    """Project native bar geometry, retaining anchors in their weekly buckets.
 
-    The endpoint prices are re-evaluated on the source line at the first and
-    last displayed bars it spans, so switching timeframe keeps the same trend
-    instead of fitting a second, unrelated rail.
+    Sample every displayed candle: holidays mean a straight source-bar line
+    need not be straight in another timeframe. Weekly labels denote buckets.
     """
-    try:
-        start = pd.Timestamp(source_index[line["start_index"]]).tz_localize(None).normalize()
-        end = pd.Timestamp(source_index[line["end_index"]]).tz_localize(None).normalize()
-    except (IndexError, TypeError, ValueError):
+    source = pd.DatetimeIndex(source_index).tz_localize(None).normalize()
+    display = pd.DatetimeIndex(display_index[valid_positions]).tz_localize(None).normalize()
+    start, end = line["start_index"], line["end_index"]
+    if not 0 <= start < end < len(source) or len(display) < 2:
         return None
-    if end <= start:
+    weekly = {"1W", "W", "1WK", "WEEKLY"}
+    source_weekly = source_timeframe.upper() in weekly
+    display_weekly = timeframe.upper() in weekly
+    source_weeks = source.to_period("W-FRI")
+    display_weeks = display.to_period("W-FRI")
+
+    def anchor_slot(index: int) -> float:
+        if source_weekly or display_weekly:
+            matches = np.flatnonzero(display_weeks == source_weeks[index])
+            if len(matches):
+                # Weekly source bars map to the last daily session, including
+                # holiday-shortened and unfinished weeks.
+                return float(matches[-1])
+        return float(np.interp(source[index].value, display.as_unit("ns").asi8,
+                               np.arange(len(display)), left=-1, right=len(display)))
+
+    # Weekly labels may be Monday or Friday. Place their values at the last
+    # displayed session of each represented week before interpolating daily bars.
+    source_dates = source.as_unit("ns").asi8.copy()
+    if source_weekly and not display_weekly:
+        for index, week in enumerate(source_weeks):
+            matches = np.flatnonzero(display_weeks == week)
+            if len(matches):
+                source_dates[index] = display[matches[-1]].value
+
+    first, last = anchor_slot(start), anchor_slot(end)
+    if last <= first:
+        # Two anchors within one aggregate candle have no visible horizontal span.
         return None
-    span = end - start
-    picked: list[tuple[int, pd.Timestamp]] = []
-    for slot, position in enumerate(valid_positions):
-        try:
-            day = pd.Timestamp(display_index[position]).tz_localize(None).normalize()
-        except (TypeError, ValueError):
+    slope = (line["end_price"] - line["start_price"]) / (end - start)
+    points = []
+    for slot, day in enumerate(display):
+        if not first <= slot <= last:
             continue
-        if start <= day <= end:
-            picked.append((slot, day))
-    if len(picked) < 2:
+        if display_weekly:
+            members = np.flatnonzero(source_weeks == display_weeks[slot])
+            if not len(members):
+                continue
+            source_position = float(members[-1])
+        else:
+            source_position = float(np.interp(day.value, source_dates,
+                                              np.arange(len(source))))
+        # Preserve anchor prices even when a weekly label is after the latest
+        # source session. Never extrapolate beyond the detector's validated span.
+        if slot == first:
+            source_position = start
+        elif slot == last:
+            source_position = end
+        source_position = min(end, max(start, source_position))
+        points.append({"time": candles[slot]["time"],
+                       "value": line["start_price"] + slope * (source_position - start)})
+    if len(points) < 2:
         return None
-    first_slot, first_day = picked[0]
-    last_slot, last_day = picked[-1]
-    if candles[first_slot]["time"] == candles[last_slot]["time"]:
-        return None
-
-    def price_at(day: pd.Timestamp) -> float:
-        return line["start_price"] + (line["end_price"] - line["start_price"]) * float((day - start) / span)
-
-    return _trendline_segment(
-        line,
-        candles[first_slot]["time"], price_at(first_day),
-        candles[last_slot]["time"], price_at(last_day),
-    )
+    segment = _trendline_segment(line, points[0]["time"], points[0]["value"],
+                                points[-1]["time"], points[-1]["value"])
+    segment["data"] = points
+    return segment
 
 
 def build_trade_viewer_payload(
@@ -1164,7 +1195,10 @@ def build_trade_viewer_payload(
             # those same lines on this view, instead of fitting unrelated rails.
             source_tf = trendline_timeframe or timeframe
             source_frame = renderer._prepare_df(trendline_source, source_tf)
-            source_annotations = (pattern_annotations(raw_annotations, source_frame, pattern)
+            source_annotations = _align_weekly_annotations(
+                raw_annotations, source_frame.index, source_tf, session_tz,
+            )
+            source_annotations = (pattern_annotations(source_annotations, source_frame, pattern)
                                   if raw_annotations or not pattern_version_id else [])
             source_frame = _viewer_window(
                 source_frame, source_tf,
@@ -1172,7 +1206,7 @@ def build_trade_viewer_payload(
             )
             for line in detect_trendlines(source_frame):
                 segment = _project_trendline_segment(
-                    line, source_frame.index, df.index, valid_positions, candles,
+                    line, source_frame.index, df.index, valid_positions, candles, source_tf, timeframe,
                 )
                 if segment is not None:
                     trendline_segments.append(segment)

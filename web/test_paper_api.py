@@ -307,13 +307,10 @@ class WebPaperApiTests(unittest.TestCase):
 
     def test_chart_weekly_view_resamples_bars(self) -> None:
         self._login()
-        import pandas as pd
         from core.paper_books import PaperBook
         from core.test_paper_books import _open_trade
-        history = pd.DataFrame(
-            dict(open=100., high=101., low=99., close=100., volume=1000),
-            index=pd.bdate_range("2025-01-01", periods=300),
-        )
+        from analysis.test_trendlines import _uptrend_frame
+        history = _uptrend_frame()
         with patch("core.paper_books.PaperAccount.save"), \
              patch("data.history.owns_local_stocks_history", return_value=False), \
              patch("data.history.load_daily_ohlcv_df", return_value=history):
@@ -331,7 +328,16 @@ class WebPaperApiTests(unittest.TestCase):
         self.assertEqual(weekly.status_code, 200, weekly.text)
         self.assertIn("1W", weekly.json()["title"])
         self.assertLess(len(weekly.json()["candles"]), len(daily.json()["candles"]))
-        self.assertGreater(len(weekly.json()["trendlines"]), -1)
+        daily_rails = daily.json()["trendlines"]
+        weekly_rails = weekly.json()["trendlines"]
+        self.assertEqual({rail["kind"] for rail in daily_rails}, {"support", "resistance"})
+        self.assertEqual(len(weekly_rails), len(daily_rails))
+        candle_times = {bar["time"] for bar in weekly.json()["candles"]}
+        for native, projected in zip(daily_rails, weekly_rails):
+            self.assertEqual(projected["kind"], native["kind"])
+            self.assertAlmostEqual(projected["data"][0]["value"], native["data"][0]["value"])
+            self.assertAlmostEqual(projected["data"][-1]["value"], native["data"][-1]["value"])
+            self.assertTrue(all(point["time"] in candle_times for point in projected["data"]))
 
     def test_chart_rejects_unknown_timeframe(self) -> None:
         self._login()
