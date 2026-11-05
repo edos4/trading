@@ -17,7 +17,7 @@ draggable condition blocks, saves it to PostgreSQL, and uses it two ways:
 
 | Concern | Reality | Consequence |
 |---|---|---|
-| Web stack | **FastAPI + Jinja2**, single `create_app()` in `web/app.py`, no routers/blueprints. Feature routes live in `web/<feature>.py` as `register_<feature>_routes(app, templates, ctx)` (`web/tasks.py:83`, `web/laya.py:142`, `web/kronos_history.py:98`). | Follow the register-module pattern; one nav link in `base.html:13-24`. |
+| Web stack | **FastAPI + Jinja2**, single `create_app()` in `web/app.py`, no routers/blueprints. Feature routes live in `web/<feature>.py` as `register_<feature>_routes(app, templates, ctx)` (`web/tasks.py:83`, `web/laya.py:142`, `web/rules.py`). | Follow the register-module pattern; one nav link in `base.html:13-24`. |
 | Frontend | Vanilla JS, no build step, no framework. SortableJS **already vendored** (`web/static/vendor/sortable.min.js`, used by the Kanban board, `web/static/tasks.js:472-490`). | Drag/drop needs **no new dependency**. |
 | Indicator math | `analysis/indicator_engine.py` (pandas in/out): sma, wma, rsi, rsi_wilder, macd, stoch, atr, bollinger, obv, vwap. **No EMA, no ADX, no RVOL.** | Add a thin catalog layer; implement EMA/ADX/RVOL there. |
 | Detector contract | `BaseIndicator` (`indicators/_signal.py:20`) + `emit()` (`:82`). `TvStackIndicator` (`data/tv_stacks.py:379-471`) is the existing precedent for a **JSON-configured** detector plugged into the live scanner. | A rule detector can be a `BaseIndicator` subclass injected exactly like a TV stack. |
@@ -158,7 +158,7 @@ CREATE UNIQUE INDEX indicator_rules_name ON indicator_rules (lower(name));
 CREATE INDEX indicator_rules_updated ON indicator_rules (updated_at DESC);
 ```
 
-Copy the quartet from `migrations/kronos/` + `core/kronos_db.py` + `scripts/setup_kronos_db.py`:
+Copy the quartet from `migrations/rules/` + `core/rules_db.py` + `scripts/setup_rules_db.py`:
 `core/rules_db.py` (`schema_name` regex `rules(?:_[a-z0-9_]+)?`, `configured_dsn`, `connection`,
 `migration_files`, `verify_migrations`, `migrate`), `core/rules_store.py`
 (`list_rules`/`get_rule`/`save_rule`/`delete_rule`/`ping`, `Jsonb(...)`, `FOR UPDATE` +

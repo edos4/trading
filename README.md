@@ -345,40 +345,6 @@ symbols — comma-separated (`AAPL, NVDA, MSFT`, spaces ignored) — or for the
 **top X NASDAQ stocks** by dollar volume (enter X), and draws one chart per
 symbol.
 
-The **Forecast history / win rate** panel below the charts saves the current
-forecasts for the configured tracked symbols (`KRONOS_TRACKED_SYMBOLS`, falling
-back to the first 100 `WATCHLIST` names) into PostgreSQL with **Save today's
-forecasts**. Rows live
-in `kronos.kronos_predictions` (one per symbol × model × day ahead); saving the
-same anchor date again upserts rather than duplicating. **Refresh win rate**
-grades settled predictions and graphs the directional hit rate per day ahead for
-Kronos-base and the fine-tuned model — a win means the predicted and actual move
-from the anchor close agree in sign at the same trading-bar offset. The panel
-also lists the raw saved rows (anchor, forecast, actual close, win/loss/pending)
-so the stored data can be verified directly. Empty
-`KRONOS_DATABASE_URL` reuses `DATABASE_URL` / `db_*`. The panel degrades with a
-setup hint when the schema is missing; see `docs/kronos-winrate.md` for the
-schema, endpoints, and grading rules.
-
-The **Experiment 2** section below it tracks close accuracy instead of direction.
-**Run now** forecasts the tracked symbols five trading days ahead and stores the
-**+1D** and **+5D** rows in `kronos.kronos_experiment2` (one row per symbol ×
-anchor × horizon, base and fine-tuned closes side by side). Once the matching
-session prints, **Refresh actuals** fills the actual close and grades each model
-with `100 − |predicted − actual| / actual × 100`; the table and the average line
-match the experiment spreadsheet. The section is fully automated by
-`scripts/kronos_experiment2_daily.sh`: a weekday cron entry captures at 23:00
-`America/New_York` (late enough that the session's daily bars have been written)
-and grades hourly from 17:00, so it grades settled rows before capturing a new
-anchor for one week; after that it keeps grading daily for ten more days so the
-final D5 rows settle, and then removes its own cron block. No button click is
-required. If an anchor was captured before some symbols' bars landed,
-`scripts/kronos_experiment2_backfill.py` re-forecasts just the missing symbols
-as-of that anchor without touching existing (possibly graded) rows.
-Manual endpoints: `POST /api/kronos/experiment2/run`,
-`POST /api/kronos/experiment2/refresh`, and
-`GET /api/kronos/experiment2?limit=2000`.
-
 ```bash
 # Required in .env — server refuses to start if WEB_UI_PASSWORD is empty
 WEB_UI_USERNAME=admin
@@ -386,12 +352,6 @@ WEB_UI_PASSWORD=change-me-to-a-long-random-secret
 # WEB_UI_SECRET_KEY=...   # recommended in production
 # WEB_UI_HTTPS=true       # set when behind TLS so the session cookie is Secure
 # TASKS_ENABLED=true      # Trello-style Tasks tab (PostgreSQL-backed)
-# KRONOS_TRACKED_SYMBOLS=AAPL,MSFT,NVDA   # daily set (empty ⇒ first 100 WATCHLIST)
-# KRONOS_SCHEMA=kronos
-# KRONOS_SAVE_DAYS=5
-
-# One-time / per-deploy: create the Kronos forecast-history schema
-python scripts/setup_kronos_db.py
 
 pip install -r requirements.txt
 python main.py --web

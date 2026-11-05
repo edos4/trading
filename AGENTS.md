@@ -12,7 +12,7 @@ stdio MCP server for AI agents.
 
 ## Folder map
 - `core/` — engines: backtester, paper trader, scanner, rules,
-  Kronos/Laya stores. `test_*.py` live here, not in `tests/`.
+  Laya store. `test_*.py` live here, not in `tests/`.
 - `web/` — FastAPI app, templates/static, tests.
 - `mcp_server/` — MCP tools (tools_*.py).
 - `patterns/`, `patterns_v2/` — detectors

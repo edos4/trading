@@ -33,7 +33,6 @@ Kronos already has three horizons in this repo, and each answers a different que
 | Path | Horizon | Question it answers |
 |---|---|---|
 | `scripts/kronos_web_forecast.py` (`--days`) | 1–60 days | "What does the path look like?" |
-| `core/kronos_experiment.py` (`HORIZONS = (1, 5)`) | 1 and 5 days | "How close is the predicted close?" |
 | `core/kronos_eval.py` (`GATE_HORIZON_BARS = 3`) | 3 days | "Is the regime rule's 3-day call right?" |
 | **this gate** | **1 day** | **"Does the next session confirm the setup before entry?"** |
 

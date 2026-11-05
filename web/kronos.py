@@ -23,7 +23,6 @@ from core.kronos_process import (
 FORECAST_SCRIPT = ROOT / "scripts" / "kronos_web_forecast.py"
 
 MAX_DAYS = 60
-# Keep in sync with config.KRONOS_MAX_TRACKED_SYMBOLS (tracked-save fallback).
 MAX_SYMBOLS = 100
 TIMEOUT_S = 900
 

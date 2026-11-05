@@ -1,6 +1,6 @@
 """PostgreSQL connection and explicit migration support for visual rules.
 
-Mirrors ``core/kronos_db.py``: one connection per operation, a schema-qualified
+Mirrors ``core/task_db.py``: one connection per operation, a schema-qualified
 ``search_path``, checksum-verified migrations under an advisory lock, and
 bounded waits. Never creates databases or files.
 """
