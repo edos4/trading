@@ -130,6 +130,12 @@ retain labelled research semantics. No broker margin/borrow certification is
 implied. Validation: **104 passed**, including cash/collateral, daily reset,
 restart and reversed-feed-order examples plus existing paper integration.
 
+**Fixture follow-up:** Laya behaviour, independent-engine parity and the
+legacy indicator-only seat comparison now select independent research
+explicitly. Their old unconstrained assumptions no longer accidentally test
+the funded default. The funded-specific adversarial cases remain enabled.
+**70 integration/indicator/funding checks passed.**
+
 
 **Confirmed research-account behavior; dangerous if interpreted as a funded
 portfolio.** `_open_position_locked` explicitly removes portfolio, gross

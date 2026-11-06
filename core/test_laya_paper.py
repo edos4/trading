@@ -123,7 +123,7 @@ class TestLayaPaper:
     def test_shadow_failing_worker_preserves_fills(self) -> None:
         """Shadow on/off produces identical entries with a failing worker."""
         feed = _Feed()
-        account = PaperAccount(market="us")
+        account = PaperAccount(market="us", account_model="independent-fixed-notional")
         scanner = _scanner(
             feed, account, laya_mode="shadow",
             laya_assess=lambda _snap: (_ for _ in ()).throw(RuntimeError("worker down")))
@@ -133,7 +133,7 @@ class TestLayaPaper:
 
     def test_filter_veto_blocks_entry(self) -> None:
         feed = _Feed()
-        account = PaperAccount(market="us")
+        account = PaperAccount(market="us", account_model="independent-fixed-notional")
         scanner = _scanner(
             feed, account, laya_mode="filter", laya_policy_id="pol-1",
             laya_assess=lambda _snap: {"outcome": "veto", "reasons": ["test veto"]})
@@ -142,7 +142,7 @@ class TestLayaPaper:
 
     def test_filter_abstain_blocks_entry(self) -> None:
         feed = _Feed()
-        account = PaperAccount(market="us")
+        account = PaperAccount(market="us", account_model="independent-fixed-notional")
         scanner = _scanner(
             feed, account, laya_mode="filter", laya_policy_id="pol-1",
             laya_assess=lambda _snap: {"outcome": "abstain", "reasons": ["no model"]})
@@ -151,7 +151,7 @@ class TestLayaPaper:
 
     def test_filter_allow_opens(self) -> None:
         feed = _Feed()
-        account = PaperAccount(market="us")
+        account = PaperAccount(market="us", account_model="independent-fixed-notional")
         scanner = _scanner(
             feed, account, laya_mode="filter", laya_policy_id="pol-1",
             laya_assess=lambda _snap: {"outcome": "allow", "reasons": ["ok"],
@@ -166,7 +166,7 @@ class TestLayaPaper:
 
     def test_off_baseline_unchanged(self) -> None:
         feed = _Feed()
-        account = PaperAccount(market="us")
+        account = PaperAccount(market="us", account_model="independent-fixed-notional")
         scanner = _scanner(feed, account)
         _run(scanner)
         assert len(account.positions_snapshot()) == 1

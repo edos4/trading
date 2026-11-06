@@ -149,7 +149,8 @@ def test_multisymbol_scanner_and_replay_match_top_four_gates_and_equity(monkeypa
                         lambda s, store, **kwargs: SimpleNamespace(passed=s.symbol!='AAA', reason='fixture'))
     import core.scanner as scanner_module
     monkeypatch.setattr(scanner_module, 'volume_confirm_gate', analysis.price_volume.volume_confirm_gate)
-    account = PaperAccount(market='us', txn_cost_pct=.001, slippage_pct=.001)
+    account = PaperAccount(market='us', txn_cost_pct=.001, slippage_pct=.001,
+                           account_model='independent-fixed-notional')
     account.assume_session_open = True
     scanner = MarketScanner(symbols=symbols, paper_account=account, market='us',
                             volume_gate=True, collect_first=True, collect_first_top_n=4, pattern_only=True)
