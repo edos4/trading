@@ -185,6 +185,7 @@ class MarketScanner:
         kronos_gate_samples: int | None = None,
         kronos_exit_mode: str | None = None,
         kronos_exit_min_agree: int | None = None,
+        stream_end: str | None = None,
     ):
         self._symbols = symbols or settings.symbols
         self._disabled_patterns = set(disabled_patterns or [])
@@ -230,6 +231,8 @@ class MarketScanner:
         self._duration_days = (
             None if duration_days is None else max(1, int(duration_days))
         )
+        self._stream_end=stream_end
+        self._cutoff_reached=False
         self._tv = data_feed or TVClient(
             profile.tv_screener,
             profile.tv_exchange,
@@ -1065,6 +1068,12 @@ class MarketScanner:
                 self.stats["snapshot_errors"] += 1
                 self._note_missing_execution(symbol, 'snapshot unavailable')
                 return None
+            if self._stream_end:
+                from data.chart_dates import chart_session_day
+                day=chart_session_day(result.candle.timestamp,get_market(self._market).session_tz)
+                if day is not None and day.date().isoformat()>self._stream_end:
+                    self._cutoff_reached=True
+                    return None
             if funded:
                 funded_snapshots.append((symbol,timeframe,result))
                 return None
@@ -1200,7 +1209,7 @@ class MarketScanner:
         # replay. PaperAccount deduplicates marks to one point per market
         # session, so Sharpe is a daily/session statistic rather than a
         # function of the scanner's 60-second polling interval.
-        if self._paper is not None:
+        if self._paper is not None and (self._paper.sim_now() is not None or not self._cutoff_reached):
             self._paper.mark_to_market(self._paper.sim_now())
 
         # Historical stream replay is advanced only after every symbol has
@@ -1209,7 +1218,10 @@ class MarketScanner:
         # simulated dates within the same scan.
         advance_replay = getattr(self._tv, "advance_replay", None)
         self.stats["scan_complete"] = self.stats["snapshot_errors"] == snapshot_errors_before
-        if advance_replay is not None and not self.stats["scan_complete"]:
+        if self._cutoff_reached:
+            self.stats['termination_reason']='stream_end_reached'
+            self._running=False
+        elif advance_replay is not None and not self.stats["scan_complete"]:
             log.warning("Scanner | retrying replay date after incomplete snapshots")
         elif advance_replay is not None:
             control_session = feed_sessions[0] if feed_sessions else None

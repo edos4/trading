@@ -51,7 +51,7 @@ issue is committed separately; find its commit with `git log --grep=Fxx`.
 | F11 | Pending | Deterministic model scheduling and identical model context |
 | F12 | Pending | Active controls and execution liquidity |
 | F13 | **Done** | Full journal, source/run identities, causal contexts, totals and atomic export; 67 tests passed |
-| F14 | Pending | Corporate actions and terminal net liquidation evidence |
+| F14 | **Partial** | Inclusive cutoff and net liquidation accounting (34 tests); corporate-action data unavailable |
 | F15 | **Done** | Cross-process ledger/cursor leases, safe port refusal and export backup; 48 tests passed |
 
 ## What the command actually does
@@ -581,7 +581,19 @@ Sources: [discarded counters](/home/engine-33ai/codes/trading/utils/trade_export
 [engine hash scope](/home/engine-33ai/codes/trading/core/pattern_provenance.py:14),
 [overwrite](/home/engine-33ai/codes/trading/main.py:140).
 
-### F14 — P2: corporate actions and terminal outcomes are not certified
+### F14 — P2: corporate actions and terminal outcomes are not certified — PARTIAL
+
+**Shipped correction:** `--stream-end=YYYY-MM-DD` supplies an inclusive
+session cutoff checked before fills, management or detection. Exports retain
+that cutoff and the terminal stop reason. Open books report a hypothetical
+net liquidation value after configured exit fees/slippage, explicitly an
+accounting stress with no invented fills. Corporate-action/adjustment and
+terminal-event verification remain explicitly false. **Remaining:** the
+operator confirmed that verified corporate-action/adjustment metadata is
+not available; no split/dividend events or terminal prices were fabricated.
+Independent source verification is required before certification. Validation:
+**34 passed** across cutoff, net liquidation, funded accounting, CLI and exports.
+
 
 **Execution-model limitation; no specific bad split fill is alleged here.**
 The path consumes OHLC/volume without a split/dividend event ledger or

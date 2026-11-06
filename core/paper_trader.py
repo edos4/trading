@@ -638,6 +638,11 @@ class PaperAccount:
                                   'stock loan fees','recalls','margin financing','dividend cash flows'],
                     'executable_profitability_certified':False,
                 },
+                "corporate_action_verification": {
+                    'verified':False, 'adjustment_basis':'unverified source OHLCV',
+                    'events_applied':False,
+                    'limitation':'split/dividend/terminal events require independently verified metadata',
+                },
                 "position_notional": ENGINE.position_notional,
                 "risk_pct": ENGINE.risk_pct,
                 "indicators_only": self.indicators_only,
@@ -682,6 +687,16 @@ class PaperAccount:
 
         open_value = long_value - short_value
         equity = cash + open_value
+        liquidation_friction=sum(
+            current*p.qty*self.slippage_pct
+            + current*(1+self.slippage_pct if p.action=='SELL' else 1-self.slippage_pct)*p.qty*self.txn_cost_pct
+            for _,p,current,_ in rows)
+        execution_context['hypothetical_liquidation']={
+            'equity_after_exit_costs':equity-liquidation_friction,
+            'additional_exit_costs':liquidation_friction,
+            'scope':'immediate liquidation accounting stress at saved marks; no orders or certified fills',
+            'prices_have_unresolved_intervals':bool(self.execution_gaps),
+        }
         realized = sum(t.pnl * t.qty for t in closed)
         total_pnl = equity - initial_capital
 

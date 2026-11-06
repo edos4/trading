@@ -223,11 +223,14 @@ async def run_paper(
     kronos_gate_mode: str | None = None,
     kronos_gate_samples: int | None = None,
     paper_universe: str | None = None,
+    stream_end: str | None = None,
 ) -> None:
     os.makedirs("logs", exist_ok=True)
     os.makedirs("charts", exist_ok=True)
 
     profile = get_market(market)
+    if stream_end and (not use_stream or not stream_start or stream_end < stream_start):
+        raise ValueError('--stream-end requires an explicit stream start no later than the end')
     frozen_rows=None
     universe_evidence={'selection':'present_day_screener','point_in_time':False,
                        'profitability_validation':'survivorship/liquidity selection bias remains'}
@@ -378,8 +381,10 @@ async def run_paper(
             duration_days=duration_days,
             kronos_gate_mode=kronos_gate_mode,
             kronos_gate_samples=kronos_gate_samples,
+            stream_end=stream_end,
         )
         account.run_manifest['universe']={**universe_evidence,'requested':n_symbols,'returned':len(symbols)}
+        account.run_manifest['stream_end']=stream_end
         await scanner.run()
     finally:
         account.save()
@@ -654,6 +659,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument('--paper-universe', default=None, metavar='PATH',
                         help='With --paper --stream=DATE, load a dated JSON universe instead of current ranks.')
+    parser.add_argument('--stream-end',type=parse_stream_date,default=None,metavar='DATE',
+                        help='Inclusive final session for a dated paper replay; no forced liquidation.')
     parser.add_argument(
         "--duration-days",
         type=int,
@@ -924,6 +931,7 @@ async def main(args: argparse.Namespace | None = None) -> None:
             kronos_gate_mode=args.kronos_gate_mode,
             kronos_gate_samples=args.kronos_gate_samples,
             paper_universe=args.paper_universe,
+            stream_end=args.stream_end,
         )
     elif args.backtest is not None:
         await run_backtest(
