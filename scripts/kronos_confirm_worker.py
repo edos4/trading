@@ -186,6 +186,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--out", required=True)
     ap.add_argument('--require-provenance',action='store_true')
+    ap.add_argument('--contexts',default=None,help='Content-addressed daily snapshots supplied by the scanner')
     args = ap.parse_args(argv)
 
     symbols = _parse_symbols(args.symbols)
@@ -204,14 +205,19 @@ def main(argv: list[str] | None = None) -> int:
     predictor, device = load_confirmation_predictor(args.model)
     log.info(f"Kronos-confirm | device={device}")
     results = []
+    contexts=json.loads(Path(args.contexts).read_text()) if args.contexts else None
     for symbol in symbols:
         try:
-            df = load_symbol_df(symbol, args.as_of, args.market)
-            results.append(
-                forecast_returns(
-                    predictor, symbol, df, samples, args.lookback,
-                )
-            )
+            if contexts is not None:
+                from core.kronos_context import context_frame
+                if symbol not in contexts or not args.as_of:
+                    raise ValueError('Missing dated scanner model context')
+                df=context_frame(contexts[symbol],args.as_of)
+            else:
+                df=load_symbol_df(symbol,args.as_of,args.market)
+            row=forecast_returns(predictor,symbol,df,samples,args.lookback)
+            row['context_sha256']=contexts[symbol]['sha256'] if contexts is not None else None
+            results.append(row)
         except Exception as exc:
             log.exception(f"Kronos-confirm | {symbol} failed")
             results.append({

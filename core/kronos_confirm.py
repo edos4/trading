@@ -60,6 +60,7 @@ class Forecast:
     atr_pct: float
     error: str | None = None
     provenance: dict | None = None
+    context_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,7 @@ class PendingConfirm:
     atr_pct: float
     band_pct: float
     model_provenance: dict | None = None
+    context: dict | None = None
 
     @property
     def symbol(self) -> str:
@@ -88,6 +90,7 @@ class PendingExit:
     atr_pct: float
     band_pct: float
     model_provenance: dict | None = None
+    context: dict | None = None
 
 
 def _finite(value) -> bool:
@@ -285,6 +288,7 @@ class KronosConfirmGate:
             anchor_close=anchor_close,
             atr_pct=atr_pct,
             band_pct=band,
+            context=__import__('core.kronos_context',fromlist=['frame_context']).frame_context(df,anchor_date,signal.timeframe),
         )
         self.pending.append(pending)
         return pending
@@ -328,6 +332,7 @@ class KronosConfirmGate:
                 min_pct=self.sideways_min_pct,
                 max_pct=self.sideways_max_pct,
             ),
+            context=__import__('core.kronos_context',fromlist=['frame_context']).frame_context(df,anchor_date,timeframe),
         )
         self.pending_exits.append(pending)
         return pending
@@ -339,7 +344,7 @@ class KronosConfirmGate:
     # ── cache ────────────────────────────────────────────────────────────
     def _cache_key(self, pending: PendingConfirm | PendingExit) -> tuple:
         return (self.market, pending.symbol, pending.anchor_date, pending.anchor_close,
-                self.model, self.samples)
+                self.model, self.samples, (pending.context or {}).get('sha256'))
 
     def _cache_get(self, key: tuple) -> Forecast | None:
         if self.cache_minutes <= 0:
@@ -360,7 +365,7 @@ class KronosConfirmGate:
 
     # ── worker ───────────────────────────────────────────────────────────
     def _fetch(
-        self, symbols: list[str], as_of: str | None = None,
+        self, symbols: list[str], as_of: str | None = None, contexts: dict | None = None,
     ) -> dict[str, Forecast | Sequence[float]]:
         if self._fetch_fn is not None:
             return self._fetch_fn(symbols)
@@ -377,12 +382,19 @@ class KronosConfirmGate:
         from config import settings
         if settings.kronos_require_provenance:
             args += ['--require-provenance']
-        payload = run_worker(
-            self.worker_script,
-            args,
-            timeout_s=self.timeout_s,
-            label="confirm",
-        )
+        import json
+        import tempfile
+        context_path=None
+        try:
+            if contexts:
+                with tempfile.NamedTemporaryFile(mode='w',suffix='.json',prefix='kronos-input-',delete=False) as f:
+                    json.dump(contexts,f,allow_nan=False)
+                    context_path=Path(f.name)
+                args += ['--contexts',str(context_path)]
+            payload = run_worker(self.worker_script,args,timeout_s=self.timeout_s,label='confirm')
+        finally:
+            if context_path is not None:
+                context_path.unlink(missing_ok=True)
         device = payload.get("device")
         if isinstance(device, str) and device:
             self.last_device = device
@@ -402,6 +414,9 @@ class KronosConfirmGate:
             if row.get("error"):
                 out[symbol] = Forecast((), "", 0, 0, error=str(row["error"]))
                 continue
+            if contexts and symbol in contexts and row.get('context_sha256')!=contexts[symbol]['sha256']:
+                out[symbol]=Forecast((),'',0,0,error='Kronos context identity differs from scanner snapshot')
+                continue
             raw = row.get("returns") or []
             if not isinstance(raw, (tuple, list)) or any(not _finite(value) for value in raw):
                 continue
@@ -410,6 +425,7 @@ class KronosConfirmGate:
                 float(row["anchor_close"]) if _finite(row.get("anchor_close")) else 0,
                 float(row["atr_pct"]) if _finite(row.get("atr_pct")) else float("nan"),
                 provenance=payload.get('model_provenance'),
+                context_sha256=row.get('context_sha256'),
             )
         return out
 
@@ -434,7 +450,8 @@ class KronosConfirmGate:
             return [], []
 
         # Existing positions get the limited inference budget before new risk.
-        all_items: list[PendingConfirm | PendingExit] = [*exits, *entries]
+        order=lambda item:(item.anchor_date,item.symbol,getattr(item,'timeframe',getattr(getattr(item,'signal',None),'timeframe','')),item.anchor_close)
+        all_items: list[PendingConfirm | PendingExit] = [*sorted(exits,key=order), *sorted(entries,key=order)]
         resolved: dict[tuple, tuple[Forecast, bool]] = {}
         missing: dict[tuple, PendingConfirm | PendingExit] = {}
         failures: dict[tuple, str] = {}
@@ -462,7 +479,8 @@ class KronosConfirmGate:
             for as_of, group in groups.items():
                 symbols = list(dict.fromkeys(missing[key].symbol for key in group))
                 try:
-                    result = self._fetch(symbols, as_of=as_of)
+                    contexts={missing[key].symbol:missing[key].context for key in group if missing[key].context is not None}
+                    result = self._fetch(symbols, as_of=as_of, contexts=contexts)
                     if not isinstance(result, dict):
                         for key in group:
                             failures[key] = "Kronos worker returned no payload"
@@ -618,6 +636,11 @@ def _evidence(
         "scope": scope,
         "model": gate.model,
         "model_provenance": item.model_provenance or {'identity_verified':False,'out_of_sample_eligible':False},
+        "context_sha256": (item.context or {}).get('sha256'),
+        "context_source": 'scanner_snapshot' if item.context else 'provider_history',
+        "failure_kind": ('capacity' if verdict.reason=='Kronos check cap reached' else
+                         'infrastructure_or_context' if any(x in verdict.reason.lower() for x in ('worker','unavailable','busy','differs','no forecast')) else
+                         'model_vote'),
         "device": gate.last_device,
         "samples": gate.samples,
         "cached": bool(cached),

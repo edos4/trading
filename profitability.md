@@ -48,7 +48,7 @@ issue is committed separately; find its commit with `git log --grep=Fxx`.
 | F08 | **Done** | Persist separate decision completion; retry failures without replaying exits; 152 tests passed |
 | F09 | **Done** | Persist uncertified intervals; retain held names and stop after bounded retries; 65 tests passed |
 | F10 | **Done** | Advance over all loaded tapes; 30 replay tests passed |
-| F11 | Pending | Deterministic model scheduling and identical model context |
+| F11 | **Partial** | Exact causal scanner context and deterministic budget (92 tests); capacity/deferred-work policy remains |
 | F12 | Pending | Active controls and execution liquidity |
 | F13 | **Done** | Full journal, source/run identities, causal contexts, totals and atomic export; 67 tests passed |
 | F14 | **Partial** | Inclusive cutoff and net liquidation accounting (34 tests); corporate-action data unavailable |
@@ -483,7 +483,21 @@ symbols happened to print on the preceding date.
 
 Source: [advance algorithm](/home/engine-33ai/codes/trading/data/stream_server.py:539).
 
-### F11 — P2: Kronos capacity, contention and data sources select the trades
+### F11 — P2: Kronos capacity, contention and data sources select the trades — PARTIAL
+
+**Shipped correction:** daily model calls now receive the scanner's exact
+causal, last-400-bar context through a temporary content-addressed payload.
+The worker verifies its hash/cutoff and returns that identity; changed contexts
+cannot reuse cached votes. Daily replay no longer substitutes a different
+local PostgreSQL history. Exit and entry scheduling is deterministic within
+its priority classes; evidence distinguishes capacity/context/infrastructure
+failures from model votes. Temporary inputs are removed after the worker.
+Validation: **92 passed** across context, worker, gate and scanner integration.
+**Remaining:** the explicit per-flush capacity ceiling still rejects overflow;
+a benchmarked deferred-work policy and live GPU timeout/load evaluation remain.
+The cap was not silently removed or increased. Non-daily legacy contexts are
+explicitly tagged provider history and require separate daily-source support.
+
 
 **Confirmed selection mechanism; realized impact not measured here.** The
 budget is the first **100 uncached contexts**, with open-position exits before
