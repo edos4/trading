@@ -42,7 +42,7 @@ issue is committed separately; find its commit with `git log --grep=Fxx`.
 | F02 | **Done** | Reject malformed execution observations; 67 focused tests passed |
 | F03 | **Done** | Cost-aware target and opening forecast checks; 86 focused tests passed |
 | F04 | Pending | Expose combined stop policy and validate on independent data |
-| F05 | Pending | Effective slippage and execution-cost limitations |
+| F05 | **Partial** | Configured slippage fixed (85 tests); borrow/financing/partial-fill modelling remains |
 | F06 | Pending | Point-in-time universe and liquidity evidence |
 | F07 | Pending | Model-selection boundary and checkpoint provenance |
 | F08 | **Done** | Persist separate decision completion; retry failures without replaying exits; 152 tests passed |
@@ -249,7 +249,18 @@ Sources: [V2 ladder](/home/engine-33ai/codes/trading/patterns_v2/signals.py:59),
 [ratchet](/home/engine-33ai/codes/trading/core/position_protection.py:88),
 [order precedence](/home/engine-33ai/codes/trading/core/backtester.py:701).
 
-### F05 — P1: cost realism is weaker than the configuration suggests
+### F05 — P1: cost realism is weaker than the configuration suggests — PARTIAL
+
+**Shipped correction:** new paper books honour `paper_slippage_pct`; an
+explicit zero still supports parity research, and saved/legacy ledger costs
+retain their historical values. Long/short tests verify exactly one entry
+and exit slippage charge and net cash reconciliation. Exports identify actual
+fees/slippage and explicitly list unmodelled costs; no executable-profitability
+certification is inferred. Validation: **85 passed**. **Remaining:** borrow
+availability/fees/recalls, financing, dividend cash flows and realistic
+participation/partial fills require broker/security data and further modelling.
+This section is deliberately not marked done.
+
 
 **Confirmed configuration disconnect and simulation omissions.** A reset
 account defaults to zero slippage even though `PAPER_SLIPPAGE_PCT=0.0005`

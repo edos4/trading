@@ -315,9 +315,9 @@ class PaperAccount:
         self.txn_cost_pct = (
             profile.txn_cost_pct if txn_cost_pct is None else txn_cost_pct
         )
-        # Slippage defaults OFF (backtest/paper parity, `.cjs` methodology).
-        # Set > 0 explicitly to model fill slippage on the paper book.
-        self.slippage_pct = slippage_pct if slippage_pct is not None else 0.0
+        # A fresh book honours the configured cost. Explicit zero remains
+        # available for historical methodology/parity comparisons.
+        self.slippage_pct = slippage_pct if slippage_pct is not None else settings.paper_slippage_pct
         if not math.isfinite(self.txn_cost_pct) or self.txn_cost_pct < 0:
             raise ValueError("Transaction cost must be finite and nonnegative")
         if not math.isfinite(self.slippage_pct) or not 0 <= self.slippage_pct < 1:
@@ -603,6 +603,13 @@ class PaperAccount:
                 "initial_capital": initial_capital,
                 "txn_cost_pct_per_side": self.txn_cost_pct,
                 "slippage_pct_per_side": self.slippage_pct,
+                "execution_cost_assumptions": {
+                    'fees':'fixed percentage per side',
+                    'slippage':'fixed adverse percentage per side',
+                    'unmodelled':['spread dynamics','partial fills','stock borrow availability',
+                                  'stock loan fees','recalls','margin financing','dividend cash flows'],
+                    'executable_profitability_certified':False,
+                },
                 "position_notional": ENGINE.position_notional,
                 "risk_pct": ENGINE.risk_pct,
                 "indicators_only": self.indicators_only,
@@ -1425,7 +1432,7 @@ class PaperAccount:
             market=profile.id,
             initial_capital=data.get("initial_capital", acct.initial_capital),
             txn_cost_pct=data.get("txn_cost_pct", acct.txn_cost_pct),
-            slippage_pct=data.get("slippage_pct", acct.slippage_pct),
+            slippage_pct=data.get("slippage_pct", 0.0),
         )
         model = data.get("execution_model", "legacy")
         if model not in ("legacy", "causal-v1"):

@@ -125,7 +125,7 @@ def test_adoption_uses_completed_history_but_never_backdates_a_fill(short):
     p = _open_trade(signal(short), candle(100, 100, 100, 100), 0, execution_model="causal-v1")
     prior = candle(100, 111, 89, 90 if short else 110, 1)
     p.position_marks = [{"sim_bar": prior.timestamp.isoformat(), "close": prior.close}]
-    book = PaperAccount(market="us", txn_cost_pct=0)
+    book = PaperAccount(market="us", txn_cost_pct=0, slippage_pct=0)
     book.positions["TEST"] = [p]
     book.cash += (1 if short else -1) * 10000
     current = candle(96, 99, 95, 98, 2) if short else candle(104, 105, 101, 102, 2)
