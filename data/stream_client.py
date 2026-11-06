@@ -89,6 +89,10 @@ class StreamClient:
             raise FetchSkip(code, message)
 
         candle = _candle_from_row(reply["candle"])
+        from core.candle_validation import candle_error
+        invalid = candle_error(candle)
+        if invalid:
+            raise FetchSkip('invalid_candle', f'invalid snapshot for {symbol}: {invalid}')
         if store is not None:
             history_rows = reply.get("history") or []
             if history_rows:

@@ -1166,17 +1166,18 @@ class MarketScanner:
     def _apply_bar(self, symbol: str, timeframe: str, snapshot) -> tuple[bool, MarketSnapshot | None]:
         """Ledger + bar identity on the scan loop. Snapshot if patterns should run."""
         candle = snapshot.candle
-        if not all(math.isfinite(price) and price > 0
-                   for price in (candle.open, candle.high, candle.low, candle.close)):
+        from core.candle_validation import candle_error
+        invalid = candle_error(candle)
+        if invalid:
             stamp = candle.timestamp
-            day = stamp.date().isoformat() if stamp is not None else ""
+            day = stamp.date().isoformat() if isinstance(stamp, datetime) else ""
             key = (symbol, timeframe, day)
             tries = self._invalid_bar_tries.get(key, 0) + 1
             self._invalid_bar_tries[key] = tries
             if tries == 1:
                 self.stats["snapshot_errors"] += 1
                 log.warning(
-                    f"Scan | invalid candle prices for {symbol} {timeframe}; retrying"
+                    f"Scan | invalid candle for {symbol} {timeframe}: {invalid}; retrying"
                 )
             elif tries == 2:
                 log.warning(

@@ -683,6 +683,10 @@ class PaperAccount:
         from core.entry_policy import describe_short_entry_rejection
         from core.execution import stable_anchors, validate_entry_geometry
         with self._lock:
+            from core.candle_validation import candle_error
+            invalid = candle_error(candle)
+            if invalid:
+                return False, f"Invalid decision candle: {invalid}."
             if signal.action not in ("BUY", "SELL"):
                 return False, "Trade entries require BUY or SELL."
             reason = describe_short_entry_rejection(signal.action, indicators_only=self.indicators_only)
@@ -712,6 +716,9 @@ class PaperAccount:
 
     def fill_pending(self, symbol, timeframe, candle, store, recheck=None, entry_check=None):
         from core.execution import opening_candidate, opening_observation
+        from core.candle_validation import candle_error
+        if candle_error(candle):
+            return []  # Retry the observation; do not consume a valid pending order.
         outcomes = []
         with self._lock:
             for signal in list(self.pending_entries):
@@ -768,9 +775,10 @@ class PaperAccount:
         reason = describe_short_entry_rejection(signal.action, indicators_only=self.indicators_only)
         if reason is not None:
             return False, reason
-        if not all(math.isfinite(value) and value > 0
-                   for value in (candle.open, candle.high, candle.low, candle.close)):
-            return False, "Trade candle prices must be finite and positive."
+        from core.candle_validation import candle_error
+        invalid = candle_error(candle, require_timestamp=self.assume_session_open)
+        if invalid:
+            return False, f"Invalid trade candle: {invalid}."
         if any(value is not None and (not math.isfinite(value) or value <= 0)
                for value in (signal.stop_loss, signal.take_profit)):
             return False, "Trade stop and target must be finite and positive."
@@ -1112,9 +1120,10 @@ class PaperAccount:
     def _on_bar_locked(
         self, symbol: str, candle: OHLCVCandle, timeframe: str | None, is_new_bar: bool,
     ) -> list[BacktestTrade]:
-        if not all(math.isfinite(value) and value > 0
-                   for value in (candle.open, candle.high, candle.low, candle.close)):
-            log.warning(f"Paper | ignoring invalid candle prices for {symbol}")
+        from core.candle_validation import candle_error
+        invalid = candle_error(candle)
+        if invalid:
+            log.warning(f"Paper | ignoring invalid candle for {symbol}: {invalid}")
             return []
         self._last_price[symbol] = candle.close
         if candle.timestamp is not None:
