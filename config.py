@@ -4,6 +4,7 @@ Import `settings` everywhere; nothing reads os.environ directly.
 """
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
@@ -96,6 +97,11 @@ class Settings(BaseSettings):
     # Record DII rejections but let the entry through, so the gate can be A/B'd
     # against an ungated book without changing production behaviour.
     dii_gate_shadow: bool = False
+    # The narrow DII bands rejected 49/62 decisions in the Nov 6 export,
+    # without outcome evidence for those candidates. Paper research records
+    # their votes by default; explicit filter mode restores the veto.
+    # Live/non-paper scanners retain the existing mandatory gate.
+    paper_dii_gate_mode: Literal["shadow", "filter"] = "shadow"
 
     # ── Collect-first ─────────────────────────────────────────────────────
     # When enabled, a scan pass collects chart-pattern signals without opening

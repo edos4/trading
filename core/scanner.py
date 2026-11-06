@@ -1226,9 +1226,14 @@ class MarketScanner:
                     key = "trades_opened" if opened else "signals_rejected"
                     self.stats[key] += 1
                     self._append_signal_log(signal, status="filled" if opened else "rejected", reason=reason)
-            for closed in self._paper.on_bar(
+            closed_positions = self._paper.on_bar(
                 symbol, snapshot.candle, timeframe, is_new_bar,
-            ):
+            )
+            if not closed_bar and not self._paper.assume_session_open:
+                closed_positions += self._paper.on_quote(
+                    symbol, snapshot.candle, timeframe, observed_at=snapshot.timestamp,
+                )
+            for closed in closed_positions:
                 bar_idx = self._paper.bar_count(
                     closed.symbol, closed.timeframe,
                 )
@@ -1672,14 +1677,17 @@ class MarketScanner:
             self._append_signal_log(signal, status="rejected", reason=reason)
             return
 
-        # Mandatory for both pattern scanners, including worker-produced detections.
+        # Paper records the DII vote by default so unvalidated narrow bands
+        # cannot starve both sides. Explicit filter mode retains the veto.
         if not self._indicators_only and signal.action in ("BUY", "SELL"):
             from analysis.pattern_dii import MIN_BARS, describe_pattern_dii_rejection
 
             df = self._store.get_df(signal.symbol, signal.timeframe, min_bars=MIN_BARS)
             dii_reason = describe_pattern_dii_rejection(df, action=signal.action)
             if dii_reason is not None:
-                if settings.dii_gate_shadow:
+                if settings.dii_gate_shadow or (
+                    self._paper is not None and settings.paper_dii_gate_mode == "shadow"
+                ):
                     # A/B mode: record what the gate would have done but let
                     # the entry continue, so both books can be compared.
                     log.info(

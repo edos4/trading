@@ -159,6 +159,7 @@ def paper_run_settings(
         "scan_interval_seconds": int(interval_seconds or 0),
         "stream_start": stream_start if use_stream else None,
         "volume_gate": bool(volume_gate),
+        "dii_gate_mode": "shadow" if settings.dii_gate_shadow else settings.paper_dii_gate_mode,
         "pattern_only": bool(pattern_only and not indicators_only),
         "indicators_only": bool(indicators_only),
         "patterns_v2": bool(patterns_v2 and not indicators_only),
@@ -212,6 +213,7 @@ def paper_run_status(cfg: dict[str, Any]) -> str:
         f"Running — {cfg['label']}, {int(cfg['n_symbols'])} symbols, {cfg['pace']}"
         f"{stream_note}"
         f", Volume gate={'ON' if cfg.get('volume_gate') else 'OFF'}"
+        f", DII={str(cfg.get('dii_gate_mode') or 'filter').upper()}"
         f", Pattern-only={'ON' if cfg.get('pattern_only') else 'OFF'}"
         f", Indicators-only={'ON' if cfg.get('indicators_only') else 'OFF'}"
         f"{', TradingView=' + str(cfg['tv_stack_name']) if cfg.get('tv_stack_name') else ''}"

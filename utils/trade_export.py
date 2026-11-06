@@ -446,6 +446,10 @@ def build_paper_trade_export(
             " include exit_check.ohlc and orders_before_bar, distinct from"
             " exit_state (the state after checking this bar). Older marks"
             " have no reconstructed exit evidence.",
+            "exit_check.observation_kind='live_quote' records a forming-bar exit"
+            " at the observed last price; ohlc is a point observation, not a"
+            " completed candle. source_bar identifies the forming candle."
+            " A daily-bar replay cannot certify these intraday fills.",
         ],
         "books": books,
     })

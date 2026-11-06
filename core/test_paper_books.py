@@ -761,7 +761,7 @@ def test_run_settings_header_lists_every_paper_filter():
     )
     assert paper_run_status(cfg) == (
         "Running — US (NASDAQ/NYSE), 2000 symbols, scan-paced replay, "
-        "stream from 2025-11-03, Volume gate=OFF, Pattern-only=OFF, "
+        "stream from 2025-11-03, Volume gate=OFF, DII=SHADOW, Pattern-only=OFF, "
         "Indicators-only=OFF, Patternsv2=ON, Collect-first=OFF, Laya=OFF, "
         "Kronos=OFF/3, Kronos exits=OFF, "
         f"session={session_label('us')}"

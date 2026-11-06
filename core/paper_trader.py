@@ -1017,6 +1017,75 @@ class PaperAccount:
             return position
 
     # ── Per-bar update / exit check ──────────────────────────────────────
+    def on_quote(
+        self, symbol: str, candle: OHLCVCandle, timeframe: str,
+        *, observed_at: datetime | None = None,
+    ) -> list[BacktestTrade]:
+        """Protect live positions at a forming bar's observed last price.
+
+        Daily highs/lows may predate entry or the current stop. Never use
+        them to invent an intraday fill, ratchet a close-based trail, or
+        advance the completed-bar clock. Gaps between polls fill at the
+        observed price and can exceed the loss budget.
+        """
+        price = candle.close
+        if not math.isfinite(price) or price <= 0:
+            return []
+        now = observed_at or datetime.now(timezone.utc)
+        with self._lock:
+            self._last_price[symbol] = price
+            closed = []
+            for position in list(self.positions.get(symbol, [])):
+                if position.timeframe != timeframe or now < position.entry_date:
+                    continue
+                from core.position_protection import ensure_paper_protection, paper_protective_order
+                ensure_paper_protection(
+                    position, self.txn_cost_pct, self.slippage_pct,
+                    candle.timestamp or now,
+                )
+                state = exit_state(position)
+                short = position.action == "SELL"
+                reason = ""
+                # A completed-close market decision becomes executable at
+                # the first observed price of the next bar, not its close.
+                last_mark = next((m.get("sim_bar") for m in reversed(position.position_marks)
+                                  if m.get("sim_bar")), None)
+                if (position.pending_exit_reason and candle.timestamp and last_mark
+                        and candle.timestamp > datetime.fromisoformat(last_mark)):
+                    reason = position.pending_exit_reason
+                resting = [paper_protective_order(position)]
+                resting += [(state[key], False, label) for key, label in (
+                    ("hard_stop", "stop_loss"), ("trailing_stop", "trailing_stop"))
+                    if state[key] is not None and not state[key + "_on_close"]]
+                stops = sorted((order for order in resting if order is not None),
+                               key=lambda order: order[0], reverse=not short)
+                for trigger, _, label in stops:
+                    if not reason and (price >= trigger if short else price <= trigger):
+                        reason = label
+                target = state["target"]
+                if (not reason and target is not None and not state["target_on_close"]
+                        and (price <= target if short else price >= target)):
+                    reason = "take_profit"
+                if not reason:
+                    continue
+                fill = price * (1 + self.slippage_pct if short else 1 - self.slippage_pct)
+                # A point observation, not a reconstructed full-bar path.
+                point = OHLCVCandle(open=price, high=price, low=price, close=price,
+                                    volume=0, timestamp=now)
+                check = {"orders_before_bar": state,
+                         "ohlc": {key: price for key in ("open", "high", "low", "close")},
+                         "execution_model": position.execution_model,
+                         "observation_kind": "live_quote",
+                         "source_bar": candle.timestamp.isoformat() if candle.timestamp else None,
+                         "raw_fill": price, "reason": reason}
+                bar_idx = self.bar_count(symbol, timeframe)
+                position.exit_bar_idx = bar_idx
+                self._reset_daily_if_needed(now)
+                self._record_position_mark(symbol, position, fill, now, bar_idx, status=reason)
+                position.position_marks[-1]["exit_check"] = check
+                closed.append(self._finish_position_exit(symbol, position, point, fill, reason, now, check))
+            return closed
+
     def request_exit(self, position: BacktestTrade, reason: str = "kronos_exit") -> bool:
         """Queue a next-open exit for an open position (Kronos protection)."""
         with self._lock:
@@ -1142,6 +1211,13 @@ class PaperAccount:
         if exit_price is None:
             return None
 
+        return self._finish_position_exit(symbol, position, candle, exit_price, reason, now, exit_check)
+
+    def _finish_position_exit(
+        self, symbol: str, position: BacktestTrade, candle: OHLCVCandle,
+        exit_price: float, reason: str, now: datetime, exit_check: dict[str, Any],
+    ) -> BacktestTrade:
+        """Settle a bar or observed-price exit through the same accounting."""
         _close_trade(position, exit_price, reason, candle, self.txn_cost_pct)
         risk = risk_dollars(position)
         exit_check.update(

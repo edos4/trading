@@ -92,6 +92,8 @@ def replay_trade(trade: dict, *, target_max_r: float | None = None,
     marks = trade.get("daily_marks") or []
     if not marks or any(not m.get("exit_check") for m in marks):
         raise ValueError("Saved OHLC exit evidence is required; never infer it from fills")
+    if any(m["exit_check"].get("observation_kind") == "live_quote" for m in marks):
+        raise ValueError("Live quote exits require tick evidence; a completed-bar replay cannot verify them")
     bars, anomalies = [], []
     for mark in marks:
         stamp = datetime.fromisoformat(mark["sim_bar"])
@@ -149,7 +151,7 @@ def replay_trade(trade: dict, *, target_max_r: float | None = None,
         target = entry + sign * target_max_r * risk / qty
         if position.take_profit is not None and sign*(position.take_profit-target) > 0:
             position.take_profit = round(target, 4)
-    armed, ambiguous, gap_fill, best_close_r = False, [], False, 0.0
+    armed, paper_armed, ambiguous, gap_fill, best_close_r = False, False, [], False, 0.0
     for index, (bar, mark) in enumerate(zip(bars, marks), 1):
         if saved_policy and not paper_loss_protection and bar.timestamp >= datetime.fromisoformat(saved_policy["adopted_at"]):
             ensure_paper_protection(position, saved_policy["txn_cost_pct"], saved_policy["slippage_pct"],
@@ -186,6 +188,7 @@ def replay_trade(trade: dict, *, target_max_r: float | None = None,
             if price is not None:
                 _equal(price, check["raw_fill"], "raw exit fill", .00000001)
         armed = armed or position._trailing_activated
+        paper_armed = paper_armed or (position.paper_protection or {}).get("peak_net_pct", 0) > 0
         if price is not None:
             trigger = target if reason == "take_profit" else stop
             gap_fill = (trigger is not None and not orders["pending_exit_reason"]
@@ -235,7 +238,9 @@ def replay_trade(trade: dict, *, target_max_r: float | None = None,
         "fees_paid": (entry+position.exit_price)*qty*fee if closed else entry*qty*fee,
         "marked_open_pnl": marked if not closed else 0,
         "open_liquidation_pnl": net if not closed else 0,
-        "trailing_armed": armed, "bars": index, "gap_exit": gap_fill,
+        "trailing_armed": armed or paper_armed,
+        "pattern_trailing_armed": armed, "paper_trailing_armed": paper_armed,
+        "bars": index, "gap_exit": gap_fill,
         "trailing_stop_basis": position.trailing_stop_basis,
         "paper_protection": position.paper_protection,
         "best_surviving_close_r": best_close_r,
@@ -298,6 +303,12 @@ def signal_funnel(logs: list[dict]) -> dict:
                 reasons = [r.get("reason", "") for r in rows if r["status"] == "rejected"]
                 outcome = ("shorts_disabled" if any(r.startswith("Short entries are disabled") for r in reasons)
                            else "DII" if any(r.startswith("DII") for r in reasons)
+                           else "Kronos_oppose" if any(r.startswith("Kronos oppose:") for r in reasons)
+                           else "Kronos_context_error" if any("Kronos forecast date differs" in r
+                                or "Kronos forecast price differs" in r for r in reasons)
+                           else "Kronos_worker_error" if any("Kronos worker error" in r
+                                or "Kronos unavailable" in r or "Kronos busy" in r for r in reasons)
+                           else "Kronos_no_opinion" if any(r.startswith("Kronos no_opinion:") for r in reasons)
                            else "opening_gap" if any(r.startswith("Opening gap") for r in reasons)
                            else "other_rejection")
             else:

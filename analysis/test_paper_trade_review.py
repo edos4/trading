@@ -32,6 +32,7 @@ def test_new_protected_exports_replay_without_mutating_saved_evidence(short, sli
     original = deepcopy(trade)
     row = replay_trade(trade)
     assert row["pnl"] == pytest.approx(-.03 * trade["resolved_rules"]["price"] * trade["qty"])
+    assert not row['paper_trailing_armed']
     assert row["net_r"] == pytest.approx(trade["pnl"] / row["initial_risk"], abs=.00001)
     assert trade == original
     trade["paper_protection"]["giveback_pct"] = .08
@@ -256,3 +257,41 @@ def test_signal_funnel_deduplicates_queue_outcomes_and_identifies_disabled_short
     assert signal_funnel([sell, {**sell, "status": "exited", "sim_bar": "later"}]) == signal_funnel([sell])
     result = signal_funnel([buy, {**buy, "status": "rejected", "reason": "Opening gap crossed the target"}])
     assert result["BUY"]["outcomes"] == {"opening_gap": 1}
+
+
+def test_funnel_separates_model_opposition_abstention_and_data_errors():
+    reasons = ['Kronos oppose: 2/3 forecasts against the BUY',
+               'Kronos no_opinion: no majority of 2 in either direction',
+               'Kronos no_opinion: Kronos forecast date differs from the decision bar',
+               'Kronos no_opinion: Kronos worker error for TEST: Invalid OHLC context']
+    rows = [dict(symbol=str(i), action='BUY', status='rejected', reason=reason)
+            for i, reason in enumerate(reasons)]
+    assert signal_funnel(rows)['BUY']['outcomes'] == dict(
+        Kronos_oppose=1, Kronos_no_opinion=1, Kronos_context_error=1, Kronos_worker_error=1)
+
+
+def test_quote_exit_cannot_be_certified_by_completed_bar_replay():
+    trade = saved_trade()
+    trade['daily_marks'][-1]['exit_check']['observation_kind'] = 'live_quote'
+    with pytest.raises(ValueError, match='Live quote exits require tick evidence'):
+        replay_trade(trade)
+
+
+@pytest.mark.parametrize('short', [False, True])
+def test_review_counts_the_paper_trail_even_when_the_pattern_trail_never_arms(short):
+    from core.paper_trader import PaperAccount
+    from data.ohlcv_store import OHLCVStore
+    from utils.trade_export import build_paper_account_export
+
+    book = PaperAccount(market='us', txn_cost_pct=.001)
+    book.assume_session_open = True
+    store = OHLCVStore()
+    assert book.queue_position(signal(short), candle(100, 100, 100, 100), store)[0]
+    first = candle(100, 101, 99, 99 if short else 101, 1)
+    book.fill_pending('TEST', '1d', first, store)
+    assert book.on_bar('TEST', first, '1d') == []
+    assert book.on_bar('TEST', candle(100, 110, 90, 100, 2), '1d')
+    trade = build_paper_account_export(book)['books'][0]['closed_trades'][0]
+    row = replay_trade(trade)
+    assert row['trailing_armed'] and row['paper_trailing_armed']
+    assert not row['pattern_trailing_armed']

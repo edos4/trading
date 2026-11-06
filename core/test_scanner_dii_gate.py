@@ -8,6 +8,7 @@ import pytest
 from config import settings
 from core.scanner import MarketScanner
 from patterns.base_pattern import TradeSignal
+from core.paper_trader import PaperAccount
 
 
 def _frame_at(bulls: float, n: int = 100) -> pd.DataFrame:
@@ -88,3 +89,31 @@ def test_indicators_only_bypasses_pattern_gate(monkeypatch):
     asyncio.run(scanner._process_signal(signal))
     assert scanner._append_signal_log.call_args.kwargs['reason'] == 'later gate'
     assert not scanner.stats.get('dii_rejected')
+
+
+@pytest.mark.parametrize('action', ['BUY', 'SELL'])
+@pytest.mark.parametrize('paper,mode,passes', [
+    (True, 'shadow', True), (True, 'filter', False), (False, 'shadow', False),
+])
+def test_paper_advisory_dii_does_not_change_explicit_filter_or_nonpaper_gates(
+        monkeypatch, action, paper, mode, passes):
+    monkeypatch.setattr(settings, 'short_entries_enabled', True)
+    monkeypatch.setattr(settings, 'dii_gate_shadow', False)
+    monkeypatch.setattr(settings, 'paper_dii_gate_mode', mode)
+    monkeypatch.setattr('analysis.pattern_dii.describe_pattern_dii_rejection',
+                        lambda *a, **kw: 'DII outside required band')
+    monkeypatch.setattr('core.scanner.regime_filter_required', lambda *a: False)
+    monkeypatch.setattr('core.scanner.describe_risk_gate_rejection', lambda *a, **kw: None)
+    scanner = MarketScanner(symbols=['TEST'], market='us', volume_gate=False,
+                            paper_account=PaperAccount(market='us') if paper else None)
+    scanner._store.get_df = Mock(return_value=None)
+    scanner._append_signal_log = Mock()
+    scanner._finish_signal = AsyncMock()
+    scanner._pattern_only = True
+    s = TradeSignal(symbol='TEST', action=action, pattern='double_top' if action == 'SELL' else 'double_bottom',
+                    provenance='patternsv2', timeframe='1d', confidence=1, price=100, qty=1,
+                    stop_loss=110 if action == 'SELL' else 90, take_profit=80 if action == 'SELL' else 120)
+    asyncio.run(scanner._process_signal(s))
+    assert scanner._finish_signal.await_count == int(passes)
+    assert scanner._append_signal_log.call_args.kwargs['status'] == ('shadow' if passes else 'rejected')
+    assert scanner.stats['signals_rejected'] == int(not passes)

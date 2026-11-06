@@ -58,6 +58,7 @@ class Forecast:
     anchor_date: str
     anchor_close: float
     atr_pct: float
+    error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -392,6 +393,9 @@ class KronosConfirmGate:
             symbol = str(row.get("symbol") or "").upper()
             if not symbol:
                 continue
+            if row.get("error"):
+                out[symbol] = Forecast((), "", 0, 0, error=str(row["error"]))
+                continue
             raw = row.get("returns") or []
             if not isinstance(raw, (tuple, list)) or any(not _finite(value) for value in raw):
                 continue
@@ -466,8 +470,13 @@ class KronosConfirmGate:
                                 tuple(float(v) for v in value if _finite(v)), item.anchor_date,
                                 item.anchor_close, item.atr_pct,
                             )
-                            if forecast.anchor_date != item.anchor_date:
-                                failures[key] = "Kronos forecast date differs from the decision bar"
+                            if forecast.error:
+                                failures[key] = f"Kronos worker error for {item.symbol}: {forecast.error}"
+                            elif forecast.anchor_date != item.anchor_date:
+                                failures[key] = (
+                                    "Kronos forecast date differs from the decision bar: "
+                                    f"expected {item.anchor_date}, received {forecast.anchor_date or 'missing'}"
+                                )
                             elif not math.isclose(forecast.anchor_close, item.anchor_close, rel_tol=0, abs_tol=.000051):
                                 failures[key] = "Kronos forecast price differs from the decision bar"
                             elif len(forecast.returns) > self.samples:

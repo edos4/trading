@@ -120,6 +120,26 @@ def test_wrong_worker_configuration_is_not_used(monkeypatch, field, value):
     assert "settings differ" in row[3]["reason"]
 
 
+def test_per_symbol_worker_failure_is_not_misreported_as_a_date_mismatch(monkeypatch):
+    def worker(script, args, **kwargs):
+        result = worker_payload(args)
+        result['results'][0] = dict(symbol='BAD', returns=[], error='ValueError: invalid OHLC context')
+        return result
+
+    monkeypatch.setattr('core.kronos_confirm.run_worker', worker)
+    gate = KronosConfirmGate(mode='confirm', exit_mode='exit')
+    gate.queue(_signal(symbol='BAD'), _candle(), None)
+    gate.queue(_signal(symbol='GOOD'), _candle(), None)
+    p = SimpleNamespace(symbol='BAD', timeframe='1d', action='SELL')
+    gate.prepare_exit([p], _candle(), None)
+    entries, exits = gate.flush_with_exits()
+    assert entries[0][2].decision == exits[0][1].decision == 'no_opinion'
+    assert 'invalid OHLC context' in entries[0][3]['reason']
+    assert 'date differs' not in entries[0][3]['reason']
+    assert entries[1][2].decision == 'confirm'
+    assert len(gate._cache) == 1
+
+
 def test_daily_worker_atr_is_used_for_weekly_signal_band(monkeypatch):
     monkeypatch.setattr("core.kronos_confirm.run_worker", lambda script, args, **kw: worker_payload(args))
     s = _signal()

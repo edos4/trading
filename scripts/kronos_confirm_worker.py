@@ -108,7 +108,9 @@ def forecast_returns(
 ) -> dict:
     prepared = _prep_1d_frame(df, lookback)
     if prepared is None:
-        raise ValueError(f"only {len(df)} usable bars; need {MIN_BARS}")
+        if df is None or len(df) < MIN_BARS:
+            raise ValueError(f"only {0 if df is None else len(df)} bars; need {MIN_BARS}")
+        raise ValueError("Invalid OHLC context: require finite positive prices, valid ranges and nonnegative volume")
     x_df, x_timestamp, y_timestamp, anchor_close, anchor_ts = prepared
     anchor_date = anchor_ts.date().isoformat()
     use_seed = callable(getattr(predictor, "set_seed", None))

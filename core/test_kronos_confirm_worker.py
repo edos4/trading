@@ -35,6 +35,15 @@ def test_an_old_bad_bar_outside_model_context_does_not_poison_current_input():
     assert worker.forecast_returns(predictor, "TEST", data, 3)["atr_pct"] == pytest.approx(2)
 
 
+def test_invalid_ranges_are_reported_as_data_errors_without_model_inference():
+    data = frame()
+    data.iloc[-3, data.columns.get_loc('low')] = 101
+    predictor = SimpleNamespace(predict=Mock())
+    with pytest.raises(ValueError, match='Invalid OHLC context'):
+        worker.forecast_returns(predictor, 'TEST', data, 3)
+    predictor.predict.assert_not_called()
+
+
 def test_one_day_samples_have_distinct_reproducible_seeds_and_daily_atr():
     seeds = []
     predictor = SimpleNamespace(set_seed=seeds.append)
