@@ -248,6 +248,8 @@ class MarketScanner:
         if self._paper is not None:
             self._paper.pattern_only = self._pattern_only
             self._paper.indicators_only = self._indicators_only
+            from core.run_manifest import build_run_manifest
+            self._paper.run_manifest = build_run_manifest(patterns_v2=self._patterns_v2, market=self._market)
         self._patterns: list[BasePattern] = []
         self._pattern_files: dict[str, str] = {}
         self._analyze_pool = None
@@ -483,6 +485,11 @@ class MarketScanner:
         status: str,
         reason: str,
     ) -> None:
+        if not signal.signal_id:
+            import hashlib
+            key = repr((self._market,signal.symbol,signal.timeframe,signal.pattern,
+                        signal.action,signal.signal_bar_timestamp))
+            signal.signal_id = hashlib.sha256(key.encode()).hexdigest()
         entry = {
             "ts": datetime.now(timezone.utc).isoformat(),
             "market": self._market,
@@ -502,13 +509,25 @@ class MarketScanner:
             "chart_annotations": deepcopy(signal.chart_annotations),
             "kronos_evidence": deepcopy(getattr(signal, "kronos_evidence", None)),
             **__import__("core.pattern_provenance", fromlist=["payload"]).payload(signal),
+            'run_id': (getattr(self, '_paper', None).run_manifest.get('run_id')
+                       if getattr(self, '_paper', None) is not None else None),
         }
+        if signal.signal_bar_timestamp is not None:
+            bars = [c for c in self._store.copy_candles(signal.symbol, signal.timeframe)
+                    if c.timestamp is not None and c.timestamp.tzinfo is not None
+                    and c.timestamp <= signal.signal_bar_timestamp][-60:]
+            entry['decision_context'] = [
+                {**{k:getattr(c,k) for k in ('open','high','low','close','volume')},
+                 'timestamp':c.timestamp.isoformat()} for c in bars]
         with self._signal_log_lock:
             self._signal_log.append(entry)
         try:
             append_signal_log(self._market, entry)
         except OSError:
             log.exception(f"Signal log | failed to persist {self._market} row")
+            self._failed_decisions.add(f'{signal.symbol}|{signal.timeframe}')
+            self.stats['snapshot_errors'] += 1
+            raise
 
         if status == "rejected":
             reason_lower = reason.lower()
@@ -622,6 +641,7 @@ class MarketScanner:
     def stop(self) -> None:
         from core.pattern_editor_db import DatabaseUnavailable
         self._running = False
+        self.stats.setdefault('termination_reason', 'stopped')
         self._close_analyze_pool()
         for p in self._patterns:
             p.on_stop()
@@ -655,6 +675,7 @@ class MarketScanner:
             f"(sim_days={self._sim_days}) — stopping"
         )
         self._running = False
+        self.stats['termination_reason'] = 'duration_reached'
         return True
 
     def _open_analyze_pool(self) -> None:
@@ -1170,6 +1191,7 @@ class MarketScanner:
                     f"after {self._sim_days} session(s)"
                 )
                 self._running = False
+                self.stats['termination_reason'] = 'end_of_tape'
 
 
         self.stats["symbols_with_snapshot"] = len(self._scan_snapshot_symbols)
@@ -1192,6 +1214,12 @@ class MarketScanner:
         self.stats["scan_finished_at"] = self.stats["last_scan_at"]
         self.stats["scan_in_progress"] = False
         self.stats["scans_completed"] = int(self.stats.get("scans_completed") or 0) + 1
+        totals = self.stats.setdefault('run_totals', {})
+        for name in ('patterns_found','signals_rejected','trades_opened'):
+            totals[name] = totals.get(name,0) + self.stats[name]
+        by_gate = totals.setdefault('rejection_by_gate', {})
+        for gate, count in self.stats['rejection_by_gate'].items():
+            by_gate[gate] = by_gate.get(gate,0) + count
         self.stats["scan_total_s"] = round(
             float(self.stats.get("scan_total_s") or 0.0) + duration, 2
         )

@@ -138,7 +138,7 @@ def _signal_row(row: dict[str, Any]) -> dict[str, Any]:
     out.update(
         __import__("core.pattern_provenance", fromlist=["row_payload"]).row_payload(row))
     # Only present on Kronos-tagged rows, so legacy log exports stay unchanged.
-    for key in ("kronos_evidence", "kronos_exit_evidence", "exit_reason"):
+    for key in ("kronos_evidence", "kronos_exit_evidence", "exit_reason", "decision_context", "run_id"):
         value = row.get(key)
         if value is not None:
             out[key] = value
@@ -148,24 +148,18 @@ def _signal_row(row: dict[str, Any]) -> dict[str, Any]:
 def _scan_stats(raw: Any) -> Optional[dict[str, Any]]:
     if not isinstance(raw, dict) or not raw:
         return None
-    keep = (
-        "last_scan_at",
-        "patterns_found",
-        "trades_opened",
-        "signals_rejected",
-        "scan_duration_s",
-        "sim_days",
-        "rejection_by_gate",
-        # Per-run scan state. Cumulative time/count live in scan_timing, which
-        # is persisted on the account and covers every run of the book.
-        "scan_started_at",
-        "scan_finished_at",
-        "scan_in_progress",
-        "run_started_at",
-        "run_finished_at",
-    )
-    out = {k: raw[k] for k in keep if k in raw}
-    return out or None
+    keep = set('''last_scan_at patterns_found trades_opened signals_rejected
+        scan_duration_s sim_days rejection_by_gate scan_started_at scan_finished_at
+        scan_in_progress run_started_at run_finished_at scan_total_s scans_completed
+        run_totals termination_reason scan_complete symbols_total symbols_with_snapshot
+        snapshot_errors timeframe_requests timeframe_snapshots_ok new_bars pattern_evaluations
+        daily_date_skew daily_dates_seen asof_skipped dead_symbols held_coverage_errors
+        analysis_errors volume_gate_rejected dii_rejected dii_shadow kronos_rejected
+        kronos_exit_shadow kronos_exits kronos_exit_deferred collect_first_ranked
+        collect_first_selected rule_filter_shadow rule_filter_rejected rule_filter_prefiltered
+        short_rejected geometry_rejected price_floor_rejected orders_queued
+        laya_shadow laya_filtered'''.split())
+    return deepcopy({k:v for k,v in raw.items() if k in keep})
 
 
 def _book_export(snap: dict[str, Any]) -> dict[str, Any]:
@@ -352,7 +346,7 @@ def snapshot_from_paper_account(
         "scan_timing": account.scan_clock(),
         "signal_logs": [
             {**row, "market": row.get("market") or profile.id}
-            for row in reversed(load_signal_log(profile.id))
+            for row in reversed(load_signal_log(profile.id, limit=0))
         ],
         "positions": positions,
         "closed": closed,

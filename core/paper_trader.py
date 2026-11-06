@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import math
 import threading
+from copy import deepcopy
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -333,6 +334,7 @@ class PaperAccount:
         self._last_price: dict[str, float] = {}
         self._last_price_at: dict[str, str] = {}
         self.execution_gaps: dict[str, dict] = {}
+        self.run_manifest: dict = {}
         self._tick = 0
         # Cumulative scan clock: every completed scan adds its duration here so
         # the desk can show the book's total scanning time (across start/stop
@@ -597,6 +599,7 @@ class PaperAccount:
                 "scope": "current settings at snapshot; historical rules are saved per trade",
                 "sim_as_of": self._sim_now.isoformat() if self._sim_now else None,
                 "execution_model": self.execution_model,
+                "run_manifest": deepcopy(self.run_manifest),
                 "initial_capital": initial_capital,
                 "txn_cost_pct_per_side": self.txn_cost_pct,
                 "slippage_pct_per_side": self.slippage_pct,
@@ -1385,6 +1388,7 @@ class PaperAccount:
                 "last_price": dict(self._last_price),
                 "last_price_at": dict(self._last_price_at),
                 "execution_gaps": dict(self.execution_gaps),
+                "run_manifest": self.run_manifest,
                 "positions": {
                     sym: [_trade_to_dict(t) for t in lst]
                     for sym, lst in self.positions.items()
@@ -1467,6 +1471,7 @@ class PaperAccount:
         acct._daily_pnl = data.get("daily_pnl", 0.0)
         acct._last_price_at = dict(data.get('last_price_at') or {})
         acct.execution_gaps = dict(data.get('execution_gaps') or {})
+        acct.run_manifest = dict(data.get('run_manifest') or {})
         acct._processed_bar_ids = {
             str(k): str(v) for k, v in (data.get("processed_bar_ids") or {}).items()
         }

@@ -73,7 +73,8 @@ def append_signal_log(market: str, entry: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fh:
             fh.write(line)
-        _compact_unlocked(path)
+        # The UI limits its reads. The durable audit journal must retain the
+        # complete run, including rejected decisions; Reset remains explicit.
 
 
 def reset_signal_log(market: str) -> None:

@@ -135,7 +135,8 @@ def _write_trades_log(
     )
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    json.dump(payload, out.open("w", encoding="utf-8"), indent=2)
+    from core.pattern_edit_store import atomic_write
+    atomic_write(out, json.dumps(payload, indent=2).encode('utf-8'))
     log.info(f"Paper | trades log written to {out}")
 
 
@@ -378,7 +379,9 @@ async def run_paper(
             try:
                 _write_trades_log(
                     export_trades_log, account, stats,
-                    run_settings=run_settings, status=run_status,
+                    run_settings=run_settings, status=(
+                        'Stopped: ' + str(stats.get('termination_reason') or 'interrupted')
+                        if stats else 'Stopped: startup did not complete'),
                 )
             except OSError:
                 log.exception(

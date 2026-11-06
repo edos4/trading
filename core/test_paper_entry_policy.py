@@ -89,8 +89,8 @@ def test_cli_and_ui_export_actual_execution_context(monkeypatch):
     from core.paper_books import PaperBook
 
     monkeypatch.setattr(settings, "short_entries_enabled", False)
-    monkeypatch.setattr("core.signal_log_store.load_signal_log", lambda *args: [])
-    monkeypatch.setattr("core.paper_books.load_signal_log", lambda *args: [])
+    monkeypatch.setattr("core.signal_log_store.load_signal_log", lambda *args, **kwargs: [])
+    monkeypatch.setattr("core.paper_books.load_signal_log", lambda *args, **kwargs: [])
     book = account()
     book.slippage_pct = .002
     book.on_bar("TEST", candle(100, 100, 100, 100), "1d")

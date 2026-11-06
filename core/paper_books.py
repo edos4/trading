@@ -1375,7 +1375,10 @@ class PaperBookManager:
 
     def export_trades(self, market: str | None = None) -> dict[str, Any]:
         from utils.trade_export import build_paper_trade_export
-        return build_paper_trade_export(self.snapshot_all(), market=market)
+        envelope = self.snapshot_all()
+        for mid, book in envelope.get('books', {}).items():
+            book['signal_logs'] = list(reversed(load_signal_log(mid, limit=0)))
+        return build_paper_trade_export(envelope, market=market)
 
 
 paper_books = PaperBookManager()

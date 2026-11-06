@@ -50,7 +50,7 @@ issue is committed separately; find its commit with `git log --grep=Fxx`.
 | F10 | **Done** | Advance over all loaded tapes; 30 replay tests passed |
 | F11 | Pending | Deterministic model scheduling and identical model context |
 | F12 | Pending | Active controls and execution liquidity |
-| F13 | Pending | Complete events, health, run identity and atomic export |
+| F13 | **Done** | Full journal, source/run identities, causal contexts, totals and atomic export; 67 tests passed |
 | F14 | Pending | Corporate actions and terminal net liquidation evidence |
 | F15 | Pending | Exclusive ledger and replay ownership |
 
@@ -484,7 +484,21 @@ Sources: [no-op gates](/home/engine-33ai/codes/trading/core/scanner.py:56),
 [V2 tradability](/home/engine-33ai/codes/trading/patterns_v2/patterns/common.py:256),
 [floor fallback](/home/engine-33ai/codes/trading/data/tv_client.py:459).
 
-### F13 — P2: the export loses evidence needed to audit profitability
+### F13 — P2: the export loses evidence needed to audit profitability — DONE
+
+**Resolution:** the durable journal no longer compacts away old decisions;
+UI reads remain bounded while CLI and web exports read every retained event.
+Exports include health/coverage counters and cumulative scan activity totals.
+Signals have stable decision identities, causal context through their decision
+bar (never execution-session future closes), and a run ID linked to source
+hashes including V2 code. The manifest survives ledger saves. Persistence
+failure prevents decision completion. CLI export is atomic and its status
+records actual stop reason rather than the startup Running label. Old
+truncated events cannot be recovered. Checkpoint/data certification and
+future rejected-candidate outcome studies remain F06/F07/F14 requirements.
+Validation: **67 passed** across journal, export, CLI, restart, coverage and
+paper-book integration tests.
+
 
 **Confirmed reporting limitations.** `_scan_stats` drops snapshot errors,
 as-of skips, dead symbols, coverage and skew, even though these determine
