@@ -1,8 +1,8 @@
 # Kronos 3-prediction, 1-day entry confirmation
 
-Status: implemented. Last revised 2026-11-02.
+Status: implemented. Last revised 2026-11-06.
 
-Every trade entry is preceded by **3 independent one-day Kronos forecasts**. The trade
+With entry mode `confirm`, every scanner entry is preceded by **3 independent one-day Kronos forecasts**. The trade
 opens only when a majority of those forecasts point the signal's way: Kronos is a
 confirmation step made before the entry, not a post-hoc filter and not a pivot-only
 tie-breaker.
@@ -110,8 +110,12 @@ default 3 samples, BUY shown; SELL mirrors it):
 | `up, flat, flat` | `no_opinion` | **block** |
 | `flat, flat, flat` | `no_opinion` | **block** |
 
-- `confirm` iff votes for the signal's direction ≥ `min_agree`.
-- `oppose` iff votes against it ≥ `min_agree`.
+- `confirm` iff votes for the signal's direction reach the required majority.
+- `oppose` iff votes against it reach the required majority.
+- The required count is at least `N // 2 + 1`, and can be raised by `min_agree`
+  (up to N). Missing/invalid simulations never lower the configured majority.
+  With five samples, two `up` and three `down` oppose a BUY, even when
+  `min_agree=2`. One requested sample requires its one vote.
 - Everything else is `no_opinion`.
 - In `confirm` mode both `oppose` and `no_opinion` block. They are counted separately so the
   report can distinguish "the model disagreed" from "the model had nothing to say".
@@ -169,11 +173,13 @@ Cost controls, in order:
 2. **One batched worker call per flush.** The model load dominates the per-call cost
    (seconds on the GPU host, tens of seconds on CPU), not the N predictions or the number of
    symbols in the batch.
-3. **TTL cache** keyed on `(symbol, anchor_date, model, samples)`, default 30 minutes. Several
+3. **TTL cache** keyed on `(market, symbol, anchor_date, anchor_close, model, samples)`, default 30 minutes. Several
    patterns firing on the same symbol bar share one run.
-4. **`kronos_gate_max_checks_per_scan`** (default 100 unique symbols) — a hard circuit breaker
+4. **`kronos_gate_max_checks_per_scan`** (default 100 unique forecast contexts) — a hard circuit breaker
    so a signal-heavy replay cannot stall the scan loop. Symbols over the cap get
-   `no_opinion` and therefore block in `confirm` mode.
+   `no_opinion` and therefore block in `confirm` mode. Existing open positions
+   have priority over new entries. Different dates of the same symbol are
+   fetched separately and never populate each other's cache entries.
 
 Sample independence: `predict()` returns a single aggregated DataFrame even when
 `sample_count > 1`, so N votes require N calls. Each call is seeded from
@@ -340,17 +346,17 @@ GPU worker, on the GPU host:
     --symbols AAPL MSFT --samples 3 --model finetuned --out /tmp/confirm.json
 ```
 
-The three values in each symbol's `predicted` must differ. If they are identical, the
-predictor is deterministic at `sample_count=1` and the seeding has to change before the gate
-means anything.
+The calls use distinct, reproducible seeds. Sampled prices can coincide; distinct
+seeds do not guarantee distinct prices or independent information about returns.
 
 ## 10. Limitations and next steps
 
 - **N = 3 is a small sample.** Raising to 5 costs ~1.7× predict time and no extra model load.
   Do not read a 2–1 split as an edge; read it as a weak confirmation.
-- **One batch per scan.** A signal confirmed at the flush is confirmed on the frame available
-  at request time; no extra bars are fetched. If a scan produces signals over several minutes,
-  they are confirmed together at the end, not one by one.
+- **One flush per scan.** The worker reloads daily history with a hard decision-date
+  cutoff. The returned last date and close must match the scanner's decision bar;
+  stale or mismatched history gives `no_opinion`. Different anchor dates require
+  separate worker calls. Several patterns at the same anchor share the forecast.
 - **Batching adds a scan-end phase.** If the flush is slow, entries queue later but still fill
   at the next open. Keep the worker timeout below the scan's cadence.
 - **Cache is in-process.** A restart mid-session re-runs the gate for signals seen before it.
@@ -358,8 +364,9 @@ means anything.
 - **A broken worker stops entries in `confirm` mode.** Monitor `kronos` rejections; keep a
   health check (`available()`) or run `shadow` if the GPU host is shared with the web
   forecast and cron jobs.
-- **Not wired into the web Scanner form defaults.** The API accepts the mode, but the form
-  keeps `off` until shadow results justify exposing it.
+- **Paper controls inherit settings.** The Paper UI exposes Confirm/Shadow/Off;
+  omitted API/MCP options inherit `KRONOS_GATE_MODE` (default `confirm`). Explicit
+  `off` stays off. Entry and exit modes are separate and both appear in run exports.
 
 ## 11. Open-position protection
 
@@ -369,7 +376,7 @@ Open positions are predicted by the same one-day vote on every new bar:
 1. After a symbol's new bar is applied and its exits checked, `_queue_kronos_exits` adds the
    symbol's open positions to the same pending batch as any entry signals.
 2. The flush is shared: one worker call and one TTL cache entry cover both a new entry and an
-   open position on the same `(symbol, anchor_date)`.
+   open position on the same `(market, symbol, anchor_date, anchor_close)`.
 3. A `BUY` position is opposed when a majority predicts `down`; a `SELL` position is opposed
    when a majority predicts `up`. `confirm` and `no_opinion` hold.
 4. In `exit` mode an opposed position gets `pending_exit_reason = "kronos_exit"`, so the next
@@ -380,3 +387,55 @@ Open positions are predicted by the same one-day vote on every new bar:
 The exit vote uses `KRONOS_EXIT_MIN_AGREE` (default 2) and the same samples, model, sideways
 band, cache, timeout, and GPU lock as the entry gate. `confirm`/`no_opinion` never force an
 exit; only an active disagreement does.
+
+An opposing vote is deferred inside the configured entry-displacement noise band
+(`KRONOS_EXIT_MIN_ADVERSE_ATR`, default 0.5 ATR). Outside it, profitable and losing
+positions can both queue an exit. The name is retained for compatibility.
+Already queued exits retain their reason. Stops, trailing stops and targets execute
+before the new Kronos batch and never need model permission; missing forecasts
+cannot disable the independent 3% paper protection.
+
+## 12. November 6 integration corrections
+
+The reviewed `pt.json` used entry mode `off`, so its entries did not have Kronos
+confirmation even though application settings specified `confirm`. Its GLXY and
+SPCE closes were actual Kronos exits; an opposing vote deferred on an open position
+was not itself a close. The Paper/API defaults had been overriding the setting.
+
+The corrected Paper path inherits the configured mode and exposes it explicitly.
+MCP sends `kronos_gate_mode`/`kronos_gate_samples`; the old boolean maps to
+Confirm/Off for compatibility. Removed rank/batch flags produce an error when
+requested, instead of silently doing nothing. Sample counts in run settings are
+the actual normalized odd count used by the gate.
+
+The worker queries the requested market and daily history through the decision
+date, validates its model input, and returns date/close/daily ATR. The gate verifies
+market, selected model, sample count and anchor before using or caching a result.
+The band and exit noise threshold use daily ATR even for a weekly signal, matching
+the one-day forecast horizon. A missing fine-tuned checkpoint fails confirmation;
+it cannot silently load base weights under a fine-tuned label.
+
+Each entry's persisted evidence now identifies its symbol, side, market,
+timeframe, anchor date and model. On a next-open fill, Confirm mode checks that
+saved evidence again, including the majority. It does **not** forecast from that
+session's completed bar. Old queues without sufficient evidence are explicitly
+rejected under Confirm mode; position protection still runs on that bar.
+
+Regression coverage: mixed dates for the same symbol, cache revisions, true
+majorities with 1/3/5 samples, inference-budget priority, stale/mismatched worker
+results, unavailable models, queued fills after reload, both long/short directions,
+Paper/MCP defaults and protective exits while Kronos is unavailable. These are
+integration checks, not a claim that the model improves trading expectancy.
+
+The ATR noise threshold now converts ATR% at the forecast anchor into dollars
+before comparing it with entry-normalized displacement. This avoids a different
+effective ATR threshold merely because price moved away from entry.
+
+Validation: **2,377 passed, 154 skipped, 10 deselected**, plus five subtests,
+in an isolated checkout of the proposed commit with synthetic configuration,
+excluding unrelated detector edits and untracked audits. The final focused
+worker/scanner/Paper/MCP run passed **123 tests** and five subtests. Local socket
+access was required for async/HTTP tests. Forecasts were injected in tests; this
+does not measure live GPU prediction quality. The configured worker and selected
+fine-tuned checkpoint directories were checked for availability without starting
+or changing a running paper book.

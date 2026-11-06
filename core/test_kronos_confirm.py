@@ -206,7 +206,7 @@ def test_entry_and_exit_share_one_worker_call():
     gate.queue(_signal(symbol="AAA"), _candle(), None)
     gate.prepare_exit([_position(symbol="BBB")], _candle(), None)
     entries, exits = gate.flush_with_exits()
-    assert calls == [["AAA", "BBB"]]
+    assert calls == [["BBB", "AAA"]]  # Existing positions have inference priority.
     assert len(entries) == 1 and len(exits) == 1
 
 
@@ -217,8 +217,10 @@ def test_worker_calls_are_cut_at_each_replay_anchor(monkeypatch):
         calls.append(list(args))
         symbols = args[args.index("--symbols") + 1:args.index("--samples")]
         return {
+            "model": "finetuned", "samples": 3, "market": "us",
             "results": [
-                {"symbol": symbol, "returns": [0.01, 0.02, -0.01]}
+                {"symbol": symbol, "returns": [0.01, 0.02, -0.01], "anchor_close": 100,
+                 "anchor_date": args[args.index("--as-of") + 1], "atr_pct": 2}
                 for symbol in symbols
             ],
         }

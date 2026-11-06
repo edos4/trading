@@ -134,7 +134,7 @@ def paper_run_settings(
     laya_mode: str = "off",
     laya_policy_id: str = "",
     duration_days: int | None = None,
-    kronos_gate_mode: str = "off",
+    kronos_gate_mode: str | None = None,
     kronos_gate_samples: int | None = None,
 ) -> dict[str, Any]:
     """The filters one paper run was started with, as exportable JSON.
@@ -144,6 +144,7 @@ def paper_run_settings(
     which gates were on.
     """
     profile = get_market(market)
+    from core.kronos_confirm import _normalize_samples
     pace = (
         "scan-paced replay"
         if use_stream and int(interval_seconds) <= 0
@@ -172,9 +173,10 @@ def paper_run_settings(
         "rule_filter_position": rule_filter_position or "after",
         "laya_mode": laya_mode or "off",
         "laya_policy_id": laya_policy_id or "",
-        "kronos_gate_mode": (kronos_gate_mode or "off").strip().lower(),
+        "kronos_gate_mode": (settings.kronos_gate_mode if kronos_gate_mode is None else kronos_gate_mode).strip().lower(),
+        "kronos_exit_mode": settings.kronos_exit_mode,
         "kronos_gate_samples": (
-            int(kronos_gate_samples) if kronos_gate_samples else None
+            _normalize_samples(kronos_gate_samples or settings.kronos_gate_samples)
         ),
         "duration_days": int(duration_days) if duration_days else None,
         "session": session_label(profile.id),
@@ -204,8 +206,8 @@ def paper_run_status(cfg: dict[str, Any]) -> str:
         f", Kronos={kronos_mode.upper()}"
         + (f"/{int(cfg['kronos_gate_samples'])}"
            if cfg.get("kronos_gate_samples") else "")
-        if kronos_mode != "off" else ""
     )
+    kronos_note += f", Kronos exits={str(cfg.get('kronos_exit_mode') or 'off').upper()}"
     return (
         f"Running — {cfg['label']}, {int(cfg['n_symbols'])} symbols, {cfg['pace']}"
         f"{stream_note}"
@@ -699,7 +701,7 @@ class PaperBook:
         rule_filter_id: str = "",
         rule_filter_mode: str = "off",
         rule_filter_position: str = "after",
-        kronos_gate_mode: str = "off",
+        kronos_gate_mode: str | None = None,
         kronos_gate_samples: int | None = None,
     ) -> str | None:
         stack_name = ""
@@ -783,7 +785,7 @@ class PaperBook:
             self.rule_filter_position = rule_filter_position
             self.laya_mode = laya_mode
             self.laya_policy_id = (laya_policy_id or "").strip()
-            self.kronos_gate_mode = (kronos_gate_mode or "off").strip().lower()
+            self.kronos_gate_mode = (settings.kronos_gate_mode if kronos_gate_mode is None else kronos_gate_mode).strip().lower()
             self.kronos_gate_samples = kronos_gate_samples
             self.duration_days = duration_days
             self.status = "Fetching symbols..."
@@ -1016,7 +1018,7 @@ class PaperBook:
         rule_filter_id: str = "",
         rule_filter_mode: str = "off",
         rule_filter_position: str = "after",
-        kronos_gate_mode: str = "off",
+        kronos_gate_mode: str | None = None,
         kronos_gate_samples: int | None = None,
     ) -> None:
         data_feed = None
@@ -1264,7 +1266,7 @@ class PaperBookManager:
         rule_filter_id: str = "",
         rule_filter_mode: str = "off",
         rule_filter_position: str = "after",
-        kronos_gate_mode: str = "off",
+        kronos_gate_mode: str | None = None,
         kronos_gate_samples: int | None = None,
     ) -> str | None:
         with self._start_lock:
@@ -1326,7 +1328,7 @@ class PaperBookManager:
                 rule_filter_id=str(payload.get("rule_filter_id") or ""),
                 rule_filter_mode=str(payload.get("rule_filter_mode") or "off"),
                 rule_filter_position=str(payload.get("rule_filter_position") or "after"),
-                kronos_gate_mode=str(payload.get("kronos_gate_mode") or "off"),
+                kronos_gate_mode=payload.get("kronos_gate_mode"),
                 kronos_gate_samples=payload.get("kronos_gate_samples"),
             )
             if err:

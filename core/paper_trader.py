@@ -710,7 +710,7 @@ class PaperAccount:
             self.consumed_anchors.add(key)
             return True, "Queued for the next observed bar open (historical simulation)."
 
-    def fill_pending(self, symbol, timeframe, candle, store, recheck=None):
+    def fill_pending(self, symbol, timeframe, candle, store, recheck=None, entry_check=None):
         from core.execution import opening_candidate, opening_observation
         outcomes = []
         with self._lock:
@@ -723,6 +723,8 @@ class PaperAccount:
                     candidate = opening_candidate(signal, candle, ENGINE.position_notional, self.market, self.slippage_pct)
                     if candidate is None:
                         continue
+                    if entry_check is not None:
+                        entry_check(signal)
                     assessment = signal.laya_assessment or {}
                     if assessment.get("mode") == "filter":
                         if recheck is None:

@@ -614,6 +614,7 @@ function initPaper() {
       extra_symbols: (document.getElementById(`${id}-extra`) || {}).value || "",
       use_stream: !!(document.getElementById(`${id}-stream`) || {}).checked,
       volume_gate: !!(document.getElementById(`${id}-volume`) || {}).checked,
+      kronos_gate_mode: (document.getElementById(`${id}-kronos-mode`) || {}).value || null,
       indicators_only: !!(document.getElementById(`${id}-indicators-only`) || {}).checked,
       rule_id: ((document.getElementById(`${id}-rule`) || {}).value || "").trim(),
       rule_filter_id: ((document.getElementById(`${id}-rule-filter`) || {}).value || "").trim(),

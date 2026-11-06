@@ -155,6 +155,26 @@ def test_paper_start_body(install_client):
     assert seen["body"]["n_symbols"] == 10
     assert seen["body"]["volume_gate"] is True
     assert seen["body"]["use_stream"] is True
+    assert seen["body"]["kronos_gate_mode"] is None
+    assert "kronos_gate" not in seen["body"]
+
+
+@pytest.mark.parametrize("kwargs,mode", [({"kronos_gate": True}, "confirm"),
+                                        ({"kronos_gate": False}, "off"),
+                                        ({"kronos_gate_mode": "shadow"}, "shadow")])
+def test_paper_kronos_mode_reaches_supported_api_field(install_client, kwargs, mode):
+    bodies = []
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"ok": True})
+    install_client(handler)
+    tools_paper.paper_start("us", **kwargs)
+    assert bodies[0]["kronos_gate_mode"] == mode
+
+
+def test_obsolete_kronos_rank_request_is_rejected():
+    with pytest.raises(ValueError, match="unsupported"):
+        tools_paper.paper_start("us", kronos_rank=True)
 
 
 def test_paper_status_params(install_client):

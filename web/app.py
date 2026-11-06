@@ -21,7 +21,7 @@ from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 from starlette.middleware.gzip import GZipMiddleware
 
 from config import settings
@@ -82,6 +82,22 @@ class SymbolRequest(BaseModel):
 
 
 class PaperStartRequest(BaseModel):
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_kronos_options(cls, raw):
+        if not isinstance(raw, dict):
+            return raw
+        if raw.get("kronos_rank") or raw.get("kronos_batch"):
+            raise ValueError("Legacy Kronos rank/batch flags are unsupported; use kronos_gate_mode")
+        if raw.get("kronos_gate") is not None:
+            if not isinstance(raw["kronos_gate"], bool):
+                raise ValueError("kronos_gate must be a boolean")
+            mode = "confirm" if raw["kronos_gate"] else "off"
+            if raw.get("kronos_gate_mode") not in (None, mode):
+                raise ValueError("Conflicting Kronos entry modes")
+            raw = {**raw, "kronos_gate_mode": mode}
+        return raw
+
     # Ceiling covers the full quoted US (~7.9k) and PH (~244) universes.
     n_symbols: int = Field(50, ge=5, le=20000)
     extra_symbols: str = ""
@@ -105,7 +121,7 @@ class PaperStartRequest(BaseModel):
     rule_filter_position: Literal["before", "after"] = "after"
     laya_mode: Literal["off", "research", "shadow", "filter"] = "off"
     laya_policy_id: str = ""
-    kronos_gate_mode: Literal["off", "shadow", "confirm"] = "off"
+    kronos_gate_mode: Optional[Literal["off", "shadow", "confirm"]] = None
     kronos_gate_samples: Optional[int] = Field(None, ge=1, le=9)
 
 
@@ -350,6 +366,8 @@ def create_app() -> FastAPI:
             us=us,
             ph=ph,
             book_cards=[us, ph],
+            kronos_gate_mode=settings.kronos_gate_mode,
+            kronos_exit_mode=settings.kronos_exit_mode,
             stream_start_default=_stream_start_default(),
         )
 

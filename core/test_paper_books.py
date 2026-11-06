@@ -763,6 +763,7 @@ def test_run_settings_header_lists_every_paper_filter():
         "Running — US (NASDAQ/NYSE), 2000 symbols, scan-paced replay, "
         "stream from 2025-11-03, Volume gate=OFF, Pattern-only=OFF, "
         "Indicators-only=OFF, Patternsv2=ON, Collect-first=OFF, Laya=OFF, "
+        "Kronos=OFF/3, Kronos exits=OFF, "
         f"session={session_label('us')}"
     )
     assert cfg["market"] == "us"
@@ -793,6 +794,22 @@ def test_run_settings_indicators_only_wins_over_pattern_flags():
     assert cfg["collect_first_top_n"] == 6
     assert cfg["stream_start"] is None
     assert cfg["duration_days"] == 12
+
+
+def test_paper_run_inherits_actual_kronos_settings_and_preserves_explicit_off(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "kronos_gate_mode", "confirm")
+    monkeypatch.setattr(settings, "kronos_exit_mode", "exit")
+    cfg = paper_run_settings(market="us", n_symbols=10, use_stream=True, interval_seconds=0,
+                             kronos_gate_samples=4)
+    assert cfg["kronos_gate_mode"] == "confirm"
+    assert cfg["kronos_exit_mode"] == "exit"
+    assert cfg["kronos_gate_samples"] == 3
+    assert "Kronos=CONFIRM/3" in paper_run_status(cfg)
+    assert "Kronos exits=EXIT" in paper_run_status(cfg)
+    off = paper_run_settings(market="us", n_symbols=10, use_stream=True, interval_seconds=0,
+                             kronos_gate_mode="off")
+    assert off["kronos_gate_mode"] == "off" and off["kronos_exit_mode"] == "exit"
 
 
 def test_snapshot_reports_the_persisted_scan_clock_without_a_scanner(tmp_path):

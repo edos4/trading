@@ -148,6 +148,35 @@ def test_deep_loss_still_honours_the_exit(monkeypatch):
     assert scanner.stats["kronos_exits"] == 1
 
 
+@pytest.mark.parametrize("action", ["BUY", "SELL"])
+@pytest.mark.parametrize("anchor,queues", [(104, False), (96, True)])
+def test_noise_band_uses_atr_dollars_at_the_forecast_anchor(monkeypatch, action, anchor, queues):
+    monkeypatch.setattr(settings, "kronos_exit_min_adverse_atr", .5)
+    position = _position(action)
+    position.entry_price = 100
+    scanner = _scanner("exit", None, [position])
+    scanner._handle_kronos_exit(position, _oppose(), {
+        "anchor_close": anchor, "atr_pct": 8, "decision": "oppose",
+    })
+    assert bool(scanner._paper.requests) is queues
+    assert position.kronos_exit_evidence["noise_band_pct"] == pytest.approx(anchor * .04)
+
+
+def test_exit_disabled_and_already_pending_exit_cannot_be_overridden():
+    position = _position()
+    scanner = _scanner("off", None, [position])
+    # Even an unexpected/stale callback cannot turn an off mode into an exit.
+    scanner._kronos_gate = SimpleNamespace(exit_mode="off")
+    scanner._handle_kronos_exit(position, _oppose(), {})
+    assert not scanner._paper.requests
+    scanner._kronos_gate.exit_mode = "exit"
+    position.pending_exit_reason = "stop_loss"
+    scanner._handle_kronos_exit(position, _oppose(), {})
+    assert not scanner._paper.requests
+    assert position.pending_exit_reason == "stop_loss"
+    assert scanner.stats["kronos_exits"] == 0
+
+
 def test_shadow_records_without_exiting():
     position = _position("BUY")
     scanner = _scanner("shadow", _vote(-0.01, -0.02, 0.01), [position])

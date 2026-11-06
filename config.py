@@ -210,11 +210,12 @@ class Settings(BaseSettings):
     kronos_gate_sideways_max_pct: float = 3.0
     # Votes needed to confirm or oppose the signal's direction.
     kronos_gate_min_agree: int = 2
-    # TTL of the per-(symbol, anchor date, model, samples) vote cache.
+    # TTL of the per-(market, symbol, anchor date/close, model, samples) vote cache.
     kronos_gate_cache_minutes: int = 30
     # Subprocess deadline for one batched worker call.
     kronos_gate_timeout_s: float = 180.0
-    # Hard per-flush cap on unique symbols; over-cap symbols vote no_opinion.
+    # Hard per-flush cap on forecast contexts; open positions have priority.
+    # Over-cap requests vote no_opinion without disabling resting stops.
     kronos_gate_max_checks_per_scan: int = 100
     # Open-position protection. off = no check; shadow = record the vote only;
     # exit = queue a next-open exit when a majority forecasts against the

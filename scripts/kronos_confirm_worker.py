@@ -25,6 +25,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
+import numpy as np
 
 from core.kronos_eval import LOOKBACK, MAX_CONTEXT, load_predictor, with_amount
 from utils.logger import log
@@ -32,7 +33,7 @@ from utils.logger import log
 MIN_BARS = 60
 
 
-def load_symbol_df(symbol: str, as_of: str | None = None) -> pd.DataFrame:
+def load_symbol_df(symbol: str, as_of: str | None = None, market: str = "us") -> pd.DataFrame:
     """Daily bars, optionally cut at ``as_of`` (a replay anchor date).
 
     A historical replay must not let the model read bars that had not printed
@@ -44,14 +45,15 @@ def load_symbol_df(symbol: str, as_of: str | None = None) -> pd.DataFrame:
     try:
         with conn.cursor() as cur:
             sql = (
-                "SELECT bar_date, open, high, low, close, volume "
-                "FROM daily_bars WHERE symbol = %s"
+                "SELECT b.bar_date, b.open, b.high, b.low, b.close, b.volume "
+                "FROM daily_bars b JOIN symbols s ON s.symbol = b.symbol "
+                "WHERE b.symbol = %s AND s.market = %s"
             )
-            params: list = [symbol.upper()]
+            params: list = [symbol.upper(), market]
             if as_of:
-                sql += " AND bar_date <= %s"
+                sql += " AND b.bar_date <= %s"
                 params.append(as_of)
-            sql += " ORDER BY ts"
+            sql += " ORDER BY b.ts"
             cur.execute(sql, params)
             rows = cur.fetchall()
     finally:
@@ -67,16 +69,26 @@ def load_symbol_df(symbol: str, as_of: str | None = None) -> pd.DataFrame:
 def _prep_1d_frame(df: pd.DataFrame, lookback: int):
     if df is None or len(df) < MIN_BARS:
         return None
-    work = df.dropna(subset=["open", "high", "low", "close"]).copy()
-    if len(work) < MIN_BARS:
-        return None
-    work["volume"] = pd.to_numeric(work["volume"], errors="coerce").fillna(0.0)
+    work = df.copy().sort_index()
+    work = work[~work.index.duplicated(keep="last")]
     use = min(int(lookback), len(work), MAX_CONTEXT)
     if use < MIN_BARS:
         return None
-    x_df = with_amount(work.iloc[-use:])
+    work = work.iloc[-use:].copy()
+    columns = ["open", "high", "low", "close", "volume"]
+    if any(col not in work for col in columns) or not isinstance(work.index, pd.DatetimeIndex):
+        return None
+    work[columns] = work[columns].apply(pd.to_numeric, errors="coerce")
+    work["volume"] = work["volume"].fillna(0.0)
+    if (len(work) < MIN_BARS or work.index.isna().any()
+            or not np.isfinite(work[columns].to_numpy()).all()
+            or (work[columns[:4]] <= 0).any().any() or (work["volume"] < 0).any()
+            or (work["high"] < work[columns[:4]].max(axis=1)).any()
+            or (work["low"] > work[columns[:4]].min(axis=1)).any()):
+        return None
+    x_df = with_amount(work)
     last_close = float(x_df["close"].iloc[-1])
-    if last_close <= 0:
+    if not np.isfinite(x_df.to_numpy()).all() or last_close <= 0:
         return None
     x_timestamp = pd.Series(pd.DatetimeIndex(x_df.index))
     last = pd.Timestamp(x_df.index[-1])
@@ -121,12 +133,16 @@ def forecast_returns(
             verbose=False,
         )
         predicted_close = float(pred["close"].iloc[0])
+        if not np.isfinite(predicted_close) or predicted_close <= 0:
+            raise ValueError("Kronos returned a nonpositive or nonfinite predicted close")
         predicted.append(round(predicted_close, 4))
         returns.append(predicted_close / anchor_close - 1.0)
+    from core.kronos_confirm import atr_pct_from_frame
     return {
         "symbol": symbol.upper(),
         "anchor_close": round(anchor_close, 4),
         "anchor_date": anchor_date,
+        "atr_pct": atr_pct_from_frame(x_df, anchor_close),
         "predicted": predicted,
         "returns": [round(value, 6) for value in returns],
     }
@@ -142,11 +158,25 @@ def _parse_symbols(raw: list[str]) -> list[str]:
     return seen
 
 
+def load_confirmation_predictor(model: str):
+    """Confirmation must never silently substitute base for selected weights."""
+    if model == "finetuned":
+        from core.kronos_finetune import PREDICTOR_OUT, TOKENIZER_OUT
+        if not (PREDICTOR_OUT.exists() and TOKENIZER_OUT.exists()):
+            raise ValueError("Selected fine-tuned Kronos checkpoints are missing; confirmation unavailable")
+    predictor, device = load_predictor(use_finetuned=model == "finetuned")
+    for component in (getattr(predictor, "model", None), getattr(predictor, "tokenizer", None)):
+        if callable(getattr(component, "eval", None)):
+            component.eval()
+    return predictor, device
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--symbols", required=True, nargs="+")
     ap.add_argument("--samples", type=int, default=3)
     ap.add_argument("--model", choices=("base", "finetuned"), default="finetuned")
+    ap.add_argument("--market", choices=("us", "ph"), default="us")
     ap.add_argument("--lookback", type=int, default=LOOKBACK)
     ap.add_argument(
         "--as-of", default=None,
@@ -161,14 +191,12 @@ def main(argv: list[str] | None = None) -> int:
     samples = max(1, min(int(args.samples), 9))
     samples = samples if samples % 2 else max(1, samples - 1)
 
-    predictor, device = load_predictor(
-        use_finetuned=args.model == "finetuned",
-    )
+    predictor, device = load_confirmation_predictor(args.model)
     log.info(f"Kronos-confirm | device={device}")
     results = []
     for symbol in symbols:
         try:
-            df = load_symbol_df(symbol, args.as_of)
+            df = load_symbol_df(symbol, args.as_of, args.market)
             results.append(
                 forecast_returns(
                     predictor, symbol, df, samples, args.lookback,
@@ -183,6 +211,7 @@ def main(argv: list[str] | None = None) -> int:
             })
 
     payload = {
+        "market": args.market,
         "model": args.model,
         "samples": samples,
         "device": device,

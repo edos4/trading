@@ -39,6 +39,9 @@ class WebPaperApiTests(unittest.TestCase):
                 s.web_ui_https = False
                 s.web_ui_session_hours = 12
                 s.volume_gate_enabled = False
+                s.kronos_gate_mode = "confirm"
+                s.kronos_exit_mode = "exit"
+                s.papertrade_stream_start_date = ""
 
             from web.app import create_app
 
@@ -128,6 +131,26 @@ class WebPaperApiTests(unittest.TestCase):
             )
         self.assertEqual(r.status_code, 200)
         self.assertEqual(start.call_args.args[1], 8000)
+
+    def test_paper_controls_show_entry_and_exit_policy(self) -> None:
+        self._login()
+        page = self.client.get("/paper")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('id="us-kronos-mode"', page.text)
+        self.assertIn('value="confirm" selected', page.text)
+        self.assertIn('Kronos exits: EXIT', page.text)
+
+    def test_kronos_modes_are_forwarded_without_silently_forcing_off(self) -> None:
+        self._login()
+        for fields, expected in [({}, None), ({"kronos_gate_mode": "confirm"}, "confirm"),
+                                 ({"kronos_gate_mode": "off"}, "off"),
+                                 ({"kronos_gate": True}, "confirm"), ({"kronos_gate": False}, "off")]:
+            with self.subTest(fields=fields), patch("web.app.paper_books.start", return_value=None) as start:
+                response = self.client.post("/api/paper/start", json={"market": "us", **fields})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(start.call_args.kwargs["kronos_gate_mode"], expected)
+        response = self.client.post("/api/paper/start", json={"market": "us", "kronos_rank": True})
+        self.assertEqual(response.status_code, 400)
 
     def test_indicators_only_replaces_pattern_only(self) -> None:
         self._login()

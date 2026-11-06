@@ -36,16 +36,27 @@ def paper_start(
     indicators_only: bool = False,
     collect_first: bool = False,
     collect_first_top_n: int = 4,
-    kronos_gate: bool = True,
+    kronos_gate: Optional[bool] = None,
     kronos_rank: bool = False,
     kronos_batch: bool = False,
     volume_gate: bool = True,
+    kronos_gate_mode: Optional[str] = None,
+    kronos_gate_samples: Optional[int] = None,
 ) -> dict:
     """Start the paper trading scanner for one market ("us" or "ph").
 
-    Returns 409 if that market's book is already running. Kronos gates are
-    forced off by the server unless ENABLE_KRONOS=true.
+    Returns 409 if that market's book is already running. Omitted Kronos mode
+    inherits server settings; confirm requires an agreeing one-day forecast.
+    The legacy kronos_gate boolean maps to confirm/off. Ranking/batch flags
+    are obsolete; forecasts are already batched by the confirmation gate.
     """
+    if kronos_rank or kronos_batch:
+        raise ValueError("Legacy Kronos rank/batch flags are unsupported; use kronos_gate_mode")
+    if kronos_gate is not None:
+        legacy_mode = "confirm" if kronos_gate else "off"
+        if kronos_gate_mode is not None and kronos_gate_mode != legacy_mode:
+            raise ValueError("Conflicting Kronos entry modes")
+        kronos_gate_mode = legacy_mode
     body = {
         "market": market,
         "n_symbols": n_symbols,
@@ -56,9 +67,8 @@ def paper_start(
         "indicators_only": indicators_only,
         "collect_first": collect_first,
         "collect_first_top_n": collect_first_top_n,
-        "kronos_gate": kronos_gate,
-        "kronos_rank": kronos_rank,
-        "kronos_batch": kronos_batch,
+        "kronos_gate_mode": kronos_gate_mode,
+        "kronos_gate_samples": kronos_gate_samples,
         "volume_gate": volume_gate,
     }
     return get_client().post("/api/paper/start", json=body)

@@ -378,6 +378,7 @@ class MarketScanner:
 
             self._kronos_gate = KronosConfirmGate(
                 mode=self._kronos_mode,
+                market=self._market,
                 samples=(
                     settings.kronos_gate_samples
                     if kronos_gate_samples is None else int(kronos_gate_samples)
@@ -1220,7 +1221,8 @@ class MarketScanner:
         if self._paper is not None:
             if is_new_bar and self._paper.assume_session_open:
                 for signal, opened, reason in self._paper.fill_pending(
-                        symbol, timeframe, snapshot.candle, self._store, recheck=self._laya_check):
+                        symbol, timeframe, snapshot.candle, self._store, recheck=self._laya_check,
+                        entry_check=self._check_kronos_entry):
                     key = "trades_opened" if opened else "signals_rejected"
                     self.stats[key] += 1
                     self._append_signal_log(signal, status="filled" if opened else "rejected", reason=reason)
@@ -1972,7 +1974,6 @@ class MarketScanner:
             self._kronos_gate is not None
             and self._kronos_mode != "off"
             and signal.action in ("BUY", "SELL")
-            and candle is not None
         ):
             df = self._store.get_df(signal.symbol, signal.timeframe, min_bars=2)
             self._kronos_gate.queue(signal, candle, df)
@@ -2027,6 +2028,43 @@ class MarketScanner:
         # elif signal.action == "CLOSE":
         #     self._orders.close_position(signal.symbol, signal.qty, signal.pattern)
 
+    def _check_kronos_entry(self, signal: TradeSignal) -> None:
+        """Honor this run's confirm mode at fill, using the saved decision only.
+
+        Forecasting from the fill session's completed candle would look ahead.
+        A queue left by an off/shadow run cannot silently bypass confirmation.
+        """
+        if self._kronos_mode != "confirm":
+            return
+        from core.kronos_confirm import _anchor_date, evaluate, summarize
+        evidence = signal.kronos_evidence or {}
+        gate = self._kronos_gate
+        if not (
+            gate is not None
+            and evidence.get("schema_version") == 1
+            and evidence.get("decision") == "confirm" and evidence.get("mode") == "confirm"
+            and evidence.get("symbol") == signal.symbol
+            and evidence.get("action") == signal.action
+            and evidence.get("timeframe") == signal.timeframe
+            and evidence.get("market") == self._market
+            and evidence.get("anchor_date") == _anchor_date(None, signal, self._market)
+            and evidence.get("model") == gate.model and evidence.get("samples") == gate.samples
+            and evidence.get("forecast_horizon") == "1d"
+        ):
+            raise ValueError("Kronos confirmation missing or mismatched for this queued entry")
+        try:
+            returns = evidence["returns"]
+            valid = (isinstance(returns, (list, tuple)) and len(returns) <= gate.samples
+                     and all(math.isfinite(float(v)) for v in returns)
+                     and math.isfinite(float(evidence["anchor_close"])) and evidence["anchor_close"] > 0
+                     and math.isfinite(float(evidence["band_pct"])) and evidence["band_pct"] > 0)
+            verdict = evaluate(summarize(evidence["anchor_close"], evidence["band_pct"], returns),
+                               signal.action, min_agree=gate.min_agree)
+        except (KeyError, TypeError, ValueError):
+            valid, verdict = False, None
+        if not valid or verdict.decision != "confirm":
+            raise ValueError("Kronos saved forecasts do not confirm this queued entry")
+
     async def _flush_kronos_confirm(self) -> None:
         """Resolve pending entry and open-position votes in one worker call."""
         gate = self._kronos_gate
@@ -2065,7 +2103,10 @@ class MarketScanner:
                 f"{verdict.decision}: {verdict.reason}"
             )
             return
-        if verdict.decision != "oppose":
+        if gate.exit_mode != "exit" or verdict.decision != "oppose":
+            return
+        if getattr(position, "pending_exit_reason", ""):
+            evidence["exit_action"] = "exit_already_pending"
             return
         # A one-day forecast is noisy relative to a swing trade's daily range.
         # Defer inside a noise band around entry on either side. Measuring
@@ -2079,7 +2120,9 @@ class MarketScanner:
             adverse = (
                 (anchor - entry) if position.action == "SELL" else (entry - anchor)
             ) / entry
-            floor = min_atr * atr_pct / 100.0
+            # ATR% is measured at the forecast anchor; express that dollar
+            # range as a fraction of ENTRY before comparing displacement.
+            floor = min_atr * (atr_pct / 100.0) * anchor / entry
             displacement = abs(adverse)
             evidence["entry_displacement_pct"] = displacement * 100
             evidence["noise_band_pct"] = floor * 100
