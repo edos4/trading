@@ -595,6 +595,10 @@ future rejected-candidate outcome studies remain F06/F07/F14 requirements.
 Validation: **67 passed** across journal, export, CLI, restart, coverage and
 paper-book integration tests.
 
+**Compatibility follow-up:** shutdown of a partially constructed scanner
+(no stats object yet) remains safe during startup/database failure.
+**12 additional checks passed** across startup/outage and audit export.
+
 
 **Confirmed reporting limitations.** `_scan_stats` drops snapshot errors,
 as-of skips, dead symbols, coverage and skew, even though these determine

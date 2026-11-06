@@ -656,7 +656,7 @@ class MarketScanner:
     def stop(self) -> None:
         from core.pattern_editor_db import DatabaseUnavailable
         self._running = False
-        self.stats.setdefault('termination_reason', 'stopped')
+        getattr(self,'stats',{}).setdefault('termination_reason', 'stopped')
         self._close_analyze_pool()
         for p in self._patterns:
             p.on_stop()
