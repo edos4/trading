@@ -52,7 +52,7 @@ issue is committed separately; find its commit with `git log --grep=Fxx`.
 | F12 | Pending | Active controls and execution liquidity |
 | F13 | **Done** | Full journal, source/run identities, causal contexts, totals and atomic export; 67 tests passed |
 | F14 | Pending | Corporate actions and terminal net liquidation evidence |
-| F15 | Pending | Exclusive ledger and replay ownership |
+| F15 | **Done** | Cross-process ledger/cursor leases, safe port refusal and export backup; 48 tests passed |
 
 ## What the command actually does
 
@@ -593,7 +593,19 @@ Sources: [jump heuristic](/home/engine-33ai/codes/trading/patterns_v2/patterns/c
 [open marking](/home/engine-33ai/codes/trading/core/paper_trader.py:1288),
 [closed result](/home/engine-33ai/codes/trading/core/paper_trader.py:1300).
 
-### F15 — P2: reset and replay control are shared with other paper sessions
+### F15 — P2: reset and replay control are shared with other paper sessions — DONE
+
+**Resolution:** CLI runs acquire OS leases for the ledger and shared replay
+cursor before reset/load, retaining ownership through final save/export. UI
+threads and reset use the same protocol, including same-process competitors.
+An occupied incompatible/unverified stream port is refused, never killed.
+Reset runs preserve an existing requested export to a unique `.bak` first.
+A conflicting controller receives an explicit ownership error without mutating
+the book. Different books can still run independently when they do not share
+a cursor. Validation: **48 passed** across lease, port safety, CLI and book
+flows. Standalone custom stream clients must cooperate with this ownership
+protocol; this is not authentication for arbitrary localhost software.
+
 
 **Confirmed operational hazard.** Reset deletes
 `data/cache/paper_account.json` and truncates `logs/paper_signals_us.jsonl`.

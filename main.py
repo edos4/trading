@@ -50,6 +50,7 @@ from config import settings, DISABLED_PATTERNS
 from core.scanner import MarketScanner
 from core.backtester import Backtester
 from core.engine_defaults import ENGINE
+from core.paper_ownership import exclusive_paper_run
 from core.market import format_money, get_market
 from core.paper_trader import (
     PaperAccount,
@@ -204,6 +205,7 @@ async def run_scanner(
     await scanner.run()
 
 
+@exclusive_paper_run
 async def run_paper(
     n_symbols: int = 50,
     reset: bool = False,
@@ -225,6 +227,13 @@ async def run_paper(
     os.makedirs("charts", exist_ok=True)
 
     profile = get_market(market)
+    if reset and export_trades_log and Path(export_trades_log).exists():
+        import shutil
+        from uuid import uuid4
+        previous=Path(export_trades_log)
+        backup=previous.with_name(previous.name+'.'+uuid4().hex+'.bak')
+        shutil.copy2(previous,backup)
+        log.info(f'Paper | preserved previous export at {backup}')
     if reset and profile.paper_account_path.exists():
         profile.paper_account_path.unlink()
         log.info(f"Paper | {profile.id} account reset")

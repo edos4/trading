@@ -48,6 +48,7 @@ from core.paper_trader import (
 )
 from core.scanner import MarketScanner
 from core.signal_log_store import load_signal_log, reset_signal_log
+from core.paper_ownership import exclusive_paper_book
 from data.edgar_client import set_skip_edgar
 from data.stream_client import StreamClient
 from utils.json_values import json_safe
@@ -847,6 +848,7 @@ class PaperBook:
                 if not loop.is_closed():
                     raise
 
+    @exclusive_paper_book
     def reset(self) -> str | None:
         with self.lock:
             if self.running:
@@ -967,8 +969,8 @@ class PaperBook:
                         f"Reusing paper trade stream ({loaded} tapes, asof {asof})..."
                     )
                 return None
-        self._kill_whatever_is_on(port)
-        time.sleep(0.3)
+            return (f'Stream port {host}:{port} is already occupied by an incompatible or '
+                    'unverified server. Stop its owning process before changing replay inputs.')
         with self.lock:
             self.status = (
                 f"Starting paper trade stream server (from {start_date})..."
@@ -1000,6 +1002,7 @@ class PaperBook:
             time.sleep(0.5)
         return f"Paper trade stream server didn't come up on {host}:{port} in time."
 
+    @exclusive_paper_book
     def _run_thread(
         self,
         n_symbols: int,

@@ -547,7 +547,7 @@ def test_ensure_stream_server_passes_history_url() -> None:
              patch("core.paper_books.time.sleep"), \
              patch.object(book, "_kill_whatever_is_on"), \
              patch.object(book, "_probe_stream_status", return_value=None), \
-             patch.object(book, "_port_open", return_value=True):
+             patch.object(book, "_port_open", side_effect=[False, True]):
             err = book._ensure_stream_server("2025-01-02")
         assert err is None
         env = popen.call_args.kwargs["env"]
@@ -570,7 +570,7 @@ def test_ensure_stream_server_passes_ph_market() -> None:
          patch("core.paper_books.time.sleep"), \
          patch.object(book, "_kill_whatever_is_on"), \
          patch.object(book, "_probe_stream_status", return_value=None), \
-         patch.object(book, "_port_open", return_value=True):
+         patch.object(book, "_port_open", side_effect=[False, True]):
         err = book._ensure_stream_server("2026-01-01")
     assert err is None
     cmd = popen.call_args.args[0]
