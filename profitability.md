@@ -48,7 +48,7 @@ issue is committed separately; find its commit with `git log --grep=Fxx`.
 | F08 | **Done** | Persist separate decision completion; retry failures without replaying exits; 152 tests passed |
 | F09 | **Done** | Persist uncertified intervals; retain held names and stop after bounded retries; 65 tests passed |
 | F10 | **Done** | Advance over all loaded tapes; 30 replay tests passed |
-| F11 | **Partial** | Exact causal scanner context and deterministic budget (92 tests); capacity/deferred-work policy remains |
+| F11 | **Done** | Exact context, deterministic budget and bounded same-session deferral; 92 + 80 tests passed |
 | F12 | **Partial** | Active controls, causal participation and strict screener floor (89 tests); execution realism remains |
 | F13 | **Done** | Full journal, source/run identities, causal contexts, totals and atomic export; 67 tests passed |
 | F14 | **Partial** | Inclusive cutoff and net liquidation accounting (34 tests); corporate-action data unavailable |
@@ -493,21 +493,22 @@ symbols happened to print on the preceding date.
 
 Source: [advance algorithm](/home/engine-33ai/codes/trading/data/stream_server.py:539).
 
-### F11 — P2: Kronos capacity, contention and data sources select the trades — PARTIAL
+### F11 — P2: Kronos capacity, contention and data sources select the trades — DONE
 
-**Shipped correction:** daily model calls now receive the scanner's exact
-causal, last-400-bar context through a temporary content-addressed payload.
-The worker verifies its hash/cutoff and returns that identity; changed contexts
-cannot reuse cached votes. Daily replay no longer substitutes a different
-local PostgreSQL history. Exit and entry scheduling is deterministic within
-its priority classes; evidence distinguishes capacity/context/infrastructure
-failures from model votes. Temporary inputs are removed after the worker.
-Validation: **92 passed** across context, worker, gate and scanner integration.
-**Remaining:** the explicit per-flush capacity ceiling still rejects overflow;
-a benchmarked deferred-work policy and live GPU timeout/load evaluation remain.
-The cap was not silently removed or increased. Non-daily legacy contexts are
-explicitly tagged provider history and require separate daily-source support.
-
+**Resolution:** daily calls receive the scanner's exact causal last-400-bar
+context through a temporary content-addressed payload. The worker checks
+hash/cutoff, cache identity includes the context, and daily replay no longer
+substitutes local PostgreSQL history. Scheduling is deterministic within exit
+and entry priority classes. Historical confirm/exit mode defers capacity
+exclusions at the same session until all contexts are assessed, keeping the
+per-flush ceiling. Managed bars/counters/fills are not replayed. Repeated
+worker/context failures stop incomplete after three observations of a context;
+multiple pattern rows cannot exhaust that limit in one scan. Shadow modes
+remain non-blocking, and live failures remain fail-closed. Evidence separates
+capacity and infrastructure from model votes. Validation: **92 context/gate
+checks plus 80 capacity/restart/shadow/exit checks passed**. Real GPU performance
+is not benchmarked or claimed; legacy non-daily provider histories retain their
+explicit source limitation outside this V2 daily command.
 
 **Confirmed selection mechanism; realized impact not measured here.** The
 budget is the first **100 uncached contexts**, with open-position exits before

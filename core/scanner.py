@@ -289,6 +289,8 @@ class MarketScanner:
         self._missing_execution_tries: dict[tuple, int] = {}
         self._replay_asof: str | None = None
         self._preprocessed_fills: set[tuple[str,str]] = set()
+        self._kronos_retry_tries: dict[tuple, int] = {}
+        self._kronos_failure_seen: set[tuple] = set()
         # Same (symbol, pattern) → (exit_bar_count, was_loss) cooldown map the
         # backtester uses — without this, paper re-entered losers immediately
         # while backtests waited cooldown_bars. Seed from the persisted ledger
@@ -1012,6 +1014,7 @@ class MarketScanner:
         self.stats["scan_complete"] = False
         self._pending_decision_ids.clear()
         self._failed_decisions.clear()
+        self._kronos_failure_seen.clear()
         self.stats["daily_date_skew"] = 0
         snapshot_errors_before = self.stats["snapshot_errors"]
 
@@ -1377,6 +1380,10 @@ class MarketScanner:
         if not needs_decision:
             return new_closed_daily, None
         self._pending_decision_ids[decision_key] = identity_key
+        if not is_new_bar:
+            # An unassessed exit can retry its completed context without
+            # replaying stops, counters or entries on that same candle.
+            self._queue_kronos_exits(symbol,timeframe,snapshot.candle)
         if self._has_ready_pattern(symbol, timeframe):
             return new_closed_daily, snapshot
         return new_closed_daily, None
@@ -2234,6 +2241,9 @@ class MarketScanner:
         entry_rows, exit_rows = await asyncio.to_thread(gate.flush_with_exits)
         for signal, candle, verdict, evidence in entry_rows:
             signal.kronos_evidence = evidence
+            if self._defer_replay_kronos(signal,evidence):
+                self._append_signal_log(signal,status='deferred',reason=evidence['reason'])
+                continue
             if gate.mode == "shadow" or verdict.decision == "confirm":
                 await self._guard_signal(
                     signal, self._queue_entry, signal, candle,
@@ -2247,7 +2257,35 @@ class MarketScanner:
             self.stats["kronos_rejected"] = self.stats.get("kronos_rejected", 0) + 1
             self._append_signal_log(signal, status="rejected", reason=reason)
         for position, verdict, evidence in exit_rows:
+            if self._defer_replay_kronos(position,evidence):
+                position.kronos_exit_evidence=evidence
+                continue
             self._handle_kronos_exit(position, verdict, evidence)
+
+    def _defer_replay_kronos(self, value, evidence: dict) -> bool:
+        kind=evidence.get('failure_kind')
+        if (self._paper is None or not getattr(self._paper,'assume_session_open',False)
+                or kind not in ('capacity','infrastructure_or_context')):
+            return False
+        if ((evidence.get('scope')=='entry' and self._kronos_mode!='confirm')
+                or (evidence.get('scope')=='position' and self._kronos_exit_mode!='exit')):
+            return False
+        self._failed_decisions.add(f'{value.symbol}|{value.timeframe}')
+        self.stats['snapshot_errors']+=1
+        self.stats['kronos_deferred']=self.stats.get('kronos_deferred',0)+1
+        evidence['replay_action']='retry_same_session'
+        if kind!='capacity':
+            key=(value.symbol,value.timeframe,evidence.get('anchor_date'))
+            count=self._kronos_retry_tries.get(key,0)
+            if key not in self._kronos_failure_seen:
+                count+=1
+                self._kronos_failure_seen.add(key)
+            self._kronos_retry_tries[key]=count
+            if count>=3:
+                self._running=False
+                self.stats['termination_reason']='kronos_unavailable'
+                evidence['replay_action']='stopped_incomplete'
+        return True
 
     def _handle_kronos_exit(self, position, verdict, evidence: dict) -> None:
         """Apply one open-position vote: record it, and exit on `oppose`."""
