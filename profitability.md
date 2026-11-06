@@ -43,7 +43,7 @@ issue is committed separately; find its commit with `git log --grep=Fxx`.
 | F03 | **Done** | Cost-aware target and opening forecast checks; 86 focused tests passed |
 | F04 | **Partial** | Combined policy and binding order exposed (56 tests); independent evaluation remains |
 | F05 | **Partial** | Configured slippage fixed (85 tests); borrow/financing/partial-fill modelling remains |
-| F06 | Pending | Point-in-time universe and liquidity evidence |
+| F06 | **Partial** | Dated universe input and bias manifest (15 tests); verified historical membership still required |
 | F07 | Pending | Model-selection boundary and checkpoint provenance |
 | F08 | **Done** | Persist separate decision completion; retry failures without replaying exits; 152 tests passed |
 | F09 | **Done** | Persist uncertified intervals; retain held names and stop after bounded retries; 65 tests passed |
@@ -310,7 +310,21 @@ a simulated alternative execution path.
 
 Source: [actual constructor defaults](/home/engine-33ai/codes/trading/core/paper_trader.py:314).
 
-### F06 — P1: historical universe selection uses future information
+### F06 — P1: historical universe selection uses future information — PARTIAL
+
+**Shipped correction:** `--paper-universe=PATH` bypasses today's screener
+using a dated JSON snapshot. It requires a matching market, date no later
+than the explicit stream start, unique symbols and stable security IDs. The
+run manifest records the exact bytes' hash, members, source and actual count.
+Without a file, exports explicitly identify present-day selection bias;
+a supplied file is not automatically certified as authentic point-in-time
+data. Schema: `{"schema_version":1,"market":"us","as_of":"2025-10-31",
+"source":"provider/reference","members":[{"symbol":"AAPL","exchange":
+"NASDAQ","security_id":"provider-stable-id"}]}`. Validation: **15 passed**
+across input, future-date rejection, CLI and export checks. **Remaining:** a
+verified historical membership/listing/delisting snapshot and independent
+liquidity evidence. No historical membership was fabricated.
+
 
 **Confirmed evaluation bias.** `fetch_universe_cached(2000, 'us')` fetches
 or reuses a present-day TradingView list ranked by `value`, with a $20M

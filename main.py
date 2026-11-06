@@ -222,11 +222,18 @@ async def run_paper(
     duration_days: int | None = None,
     kronos_gate_mode: str | None = None,
     kronos_gate_samples: int | None = None,
+    paper_universe: str | None = None,
 ) -> None:
     os.makedirs("logs", exist_ok=True)
     os.makedirs("charts", exist_ok=True)
 
     profile = get_market(market)
+    frozen_rows=None
+    universe_evidence={'selection':'present_day_screener','point_in_time':False,
+                       'profitability_validation':'survivorship/liquidity selection bias remains'}
+    if paper_universe:
+        from core.replay_universe import load_replay_universe
+        frozen_rows,universe_evidence=load_replay_universe(paper_universe,profile.id,stream_start,n_symbols)
     if reset and export_trades_log and Path(export_trades_log).exists():
         import shutil
         from uuid import uuid4
@@ -339,7 +346,7 @@ async def run_paper(
                 f"Fetching top {n_symbols} symbols from TradingView "
                 f"(cached, {profile.tv_screener})..."
             )
-            symbol_rows = TVClient.fetch_universe_cached(n_symbols, profile.id)
+            symbol_rows = frozen_rows or TVClient.fetch_universe_cached(n_symbols, profile.id)
         else:
             data_feed = None
             log.info(
@@ -372,6 +379,7 @@ async def run_paper(
             kronos_gate_mode=kronos_gate_mode,
             kronos_gate_samples=kronos_gate_samples,
         )
+        account.run_manifest['universe']={**universe_evidence,'requested':n_symbols,'returned':len(symbols)}
         await scanner.run()
     finally:
         account.save()
@@ -644,6 +652,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "(same schema as the UI Export Trades button). "
         "E.g. --export-trades-log=output_trades.json.",
     )
+    parser.add_argument('--paper-universe', default=None, metavar='PATH',
+                        help='With --paper --stream=DATE, load a dated JSON universe instead of current ranks.')
     parser.add_argument(
         "--duration-days",
         type=int,
@@ -913,6 +923,7 @@ async def main(args: argparse.Namespace | None = None) -> None:
             duration_days=args.duration_days,
             kronos_gate_mode=args.kronos_gate_mode,
             kronos_gate_samples=args.kronos_gate_samples,
+            paper_universe=args.paper_universe,
         )
     elif args.backtest is not None:
         await run_backtest(
