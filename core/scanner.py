@@ -2073,6 +2073,23 @@ class MarketScanner:
             valid, verdict = False, None
         if not valid or verdict.decision != "confirm":
             raise ValueError("Kronos saved forecasts do not confirm this queued entry")
+        from core.entry_economics import net_direction_return
+        price = float(signal.price)
+        book = self._paper
+        fee = book.txn_cost_pct if book is not None else get_market(self._market).txn_cost_pct
+        slip = book.slippage_pct if book is not None else 0.0
+        rebased = [net_direction_return(
+            price, evidence['anchor_close'] * (1 + float(value)), signal.action, fee, slip,
+        ) for value in returns]
+        opening_vote = evaluate(summarize(price, evidence['band_pct'], rebased),
+                                signal.action, min_agree=gate.min_agree)
+        if opening_vote.decision != 'confirm':
+            raise ValueError('Kronos saved forecasts do not confirm net return from the execution price')
+        # Keep the decision evidence immutable and add the executable vote.
+        signal.kronos_evidence = {**evidence, 'opening_check': {
+            'entry_price': price, 'fee_per_side': fee, 'slippage_pct': slip,
+            'net_direction_returns': rebased, 'decision': opening_vote.decision,
+        }}
 
     async def _flush_kronos_confirm(self) -> None:
         """Resolve pending entry and open-position votes in one worker call."""

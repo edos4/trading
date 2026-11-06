@@ -731,7 +731,7 @@ class PaperAccount:
                     if candidate is None:
                         continue
                     if entry_check is not None:
-                        entry_check(signal)
+                        entry_check(candidate)
                     assessment = signal.laya_assessment or {}
                     if assessment.get("mode") == "filter":
                         if recheck is None:
@@ -844,6 +844,8 @@ class PaperAccount:
         from core.execution import validate_entry_geometry
         try:
             validate_entry_geometry(signal, entry_price)
+            from core.entry_economics import validate_target_reward
+            validate_target_reward(signal, entry_price, self.txn_cost_pct, self.slippage_pct)
         except ValueError as exc:
             return False, str(exc)
         signal.price = entry_price

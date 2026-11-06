@@ -40,7 +40,7 @@ issue is committed separately; find its commit with `git log --grep=Fxx`.
 | --- | --- | --- |
 | F01 | Pending | Funded portfolio limits and deterministic allocation |
 | F02 | **Done** | Reject malformed execution observations; 67 focused tests passed |
-| F03 | Pending | Recheck executable net reward and saved forecasts at the open |
+| F03 | **Done** | Cost-aware target and opening forecast checks; 86 focused tests passed |
 | F04 | Pending | Expose combined stop policy and validate on independent data |
 | F05 | Pending | Effective slippage and execution-cost limitations |
 | F06 | Pending | Point-in-time universe and liquidity evidence |
@@ -182,7 +182,18 @@ Sources: [scanner validation](/home/engine-33ai/codes/trading/core/scanner.py:11
 [ledger validation](/home/engine-33ai/codes/trading/core/paper_trader.py:1115),
 [worker validation](/home/engine-33ai/codes/trading/scripts/kronos_confirm_worker.py:81).
 
-### F03 — P1: next-open fills can have negative economics despite confirmation
+### F03 — P1: next-open fills can have negative economics despite confirmation — DONE
+
+**Resolution:** paper fills now reject targets that cannot earn positive net
+reward after both fees and exit slippage. Fill-time confirmation uses the
+candidate's slipped opening price and rebases saved forecast prices after
+costs before applying the existing directional majority/band. It never runs
+a new model forecast from the execution candle. Successful fills preserve
+an `opening_check` alongside the immutable decision evidence. Both long and
+short adverse gaps, costs and restart confirmation are covered. Validation:
+**86 passed** across entry economics, Kronos integration, short execution
+and paper permissions.
+
 
 **Confirmed missing execution check.** The gap guard only rejects a crossed
 target/stop or too little distance to the planned stop. It does not require
