@@ -185,6 +185,7 @@ def main(argv: list[str] | None = None) -> int:
         help="ignore bars after this ISO date (historical replay anchor)",
     )
     ap.add_argument("--out", required=True)
+    ap.add_argument('--require-provenance',action='store_true')
     args = ap.parse_args(argv)
 
     symbols = _parse_symbols(args.symbols)
@@ -193,6 +194,13 @@ def main(argv: list[str] | None = None) -> int:
     samples = max(1, min(int(args.samples), 9))
     samples = samples if samples % 2 else max(1, samples - 1)
 
+    from core.kronos_provenance import checkpoint_provenance
+    from core.kronos_finetune import FINETUNE_DIR
+    provenance=(checkpoint_provenance(FINETUNE_DIR,args.as_of,required=args.require_provenance)
+                if args.model=='finetuned' else {'identity_verified':False,'out_of_sample_eligible':False,
+                                                'reason':'base model training/selection boundary unavailable'})
+    if args.require_provenance and not provenance['identity_verified']:
+        raise ValueError(provenance['reason'])
     predictor, device = load_confirmation_predictor(args.model)
     log.info(f"Kronos-confirm | device={device}")
     results = []
@@ -213,6 +221,7 @@ def main(argv: list[str] | None = None) -> int:
             })
 
     payload = {
+        'model_provenance':provenance,
         "market": args.market,
         "model": args.model,
         "samples": samples,

@@ -208,6 +208,7 @@ class Settings(BaseSettings):
     kronos_gate_samples: int = 3
     # Which checkpoint the GPU worker loads (never both).
     kronos_gate_model: str = "finetuned"
+    kronos_require_provenance: bool = False
     # Torch device for every Kronos worker (confirm gate + web tab):
     # auto = CUDA when it has headroom, else CPU; cuda = require the GPU;
     # cpu = always CPU. A local LLM server on the same card can hold nearly all

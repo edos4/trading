@@ -59,6 +59,7 @@ class Forecast:
     anchor_close: float
     atr_pct: float
     error: str | None = None
+    provenance: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,7 @@ class PendingConfirm:
     anchor_close: float
     atr_pct: float
     band_pct: float
+    model_provenance: dict | None = None
 
     @property
     def symbol(self) -> str:
@@ -85,6 +87,7 @@ class PendingExit:
     anchor_close: float
     atr_pct: float
     band_pct: float
+    model_provenance: dict | None = None
 
 
 def _finite(value) -> bool:
@@ -371,6 +374,9 @@ class KronosConfirmGate:
             # A replay date is a hard information boundary. Without it the
             # worker loads the live series and the vote sees future bars.
             args += ["--as-of", as_of]
+        from config import settings
+        if settings.kronos_require_provenance:
+            args += ['--require-provenance']
         payload = run_worker(
             self.worker_script,
             args,
@@ -403,6 +409,7 @@ class KronosConfirmGate:
                 tuple(float(value) for value in raw), str(row.get("anchor_date") or ""),
                 float(row["anchor_close"]) if _finite(row.get("anchor_close")) else 0,
                 float(row["atr_pct"]) if _finite(row.get("atr_pct")) else float("nan"),
+                provenance=payload.get('model_provenance'),
             )
         return out
 
@@ -563,7 +570,7 @@ class KronosConfirmGate:
         return returns, False
 
     def _forecast_context(self, item, forecast: Forecast):
-        return replace(item, atr_pct=forecast.atr_pct, band_pct=sideways_band_pct(
+        return replace(item, model_provenance=forecast.provenance, atr_pct=forecast.atr_pct, band_pct=sideways_band_pct(
             forecast.atr_pct, k=self.sideways_atr,
             min_pct=self.sideways_min_pct, max_pct=self.sideways_max_pct,
         ))
@@ -610,6 +617,7 @@ def _evidence(
         "mode": gate.mode if scope == "entry" else gate.exit_mode,
         "scope": scope,
         "model": gate.model,
+        "model_provenance": item.model_provenance or {'identity_verified':False,'out_of_sample_eligible':False},
         "device": gate.last_device,
         "samples": gate.samples,
         "cached": bool(cached),

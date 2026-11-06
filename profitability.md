@@ -44,7 +44,7 @@ issue is committed separately; find its commit with `git log --grep=Fxx`.
 | F04 | **Partial** | Combined policy and binding order exposed (56 tests); independent evaluation remains |
 | F05 | **Partial** | Configured slippage fixed (85 tests); borrow/financing/partial-fill modelling remains |
 | F06 | **Partial** | Dated universe input and bias manifest (15 tests); verified historical membership still required |
-| F07 | Pending | Model-selection boundary and checkpoint provenance |
+| F07 | **Partial** | Checkpoint identity/selection guards (77 tests); authentic training manifest unavailable |
 | F08 | **Done** | Persist separate decision completion; retry failures without replaying exits; 152 tests passed |
 | F09 | **Done** | Persist uncertified intervals; retain held names and stop after bounded retries; 65 tests passed |
 | F10 | **Done** | Advance over all loaded tapes; 30 replay tests passed |
@@ -346,7 +346,21 @@ Sources: [universe choice](/home/engine-33ai/codes/trading/data/tv_client.py:528
 [cache](/home/engine-33ai/codes/trading/data/tv_client.py:587),
 [ranking query](/home/engine-33ai/codes/trading/data/tv_client.py:428).
 
-### F07 — P1: November–December 2025 overlaps model-selection validation
+### F07 — P1: November–December 2025 overlaps model-selection validation — PARTIAL
+
+**Shipped correction:** worker evidence explicitly records unknown holdout
+status when no checkpoint-linked manifest exists. A supplied
+`~/Kronos/finetuned/selection_manifest.json` binds every predictor/tokenizer
+file hash, corpus hashes, `selection_data_end` and `eligible_from`; changed
+weights, incomplete identities or replay before eligibility are refused.
+`KRONOS_REQUIRE_PROVENANCE=true` additionally refuses missing metadata rather
+than permitting labelled uncertified research. Manifest schema is exercised
+in `core/test_profitability_model_provenance.py`; identity checking does not
+independently prove a declared training history. Validation: **77 passed**.
+**Remaining:** the operator confirmed that no authentic selection manifest
+is available. Existing weights were neither retrained nor retroactively
+certified, and November–December 2025 remains unsuitable as a clean holdout.
+
 
 **Confirmed local corpus overlap; checkpoint provenance remains incomplete.**
 The local Kronos corpus reports cutoff **2026-01-01**. Read-only inspection
