@@ -617,6 +617,13 @@ class PaperAccount:
                 "stop_loss_pct": settings.stop_loss_pct,
                 "stop_loss_pct_scope": "legacy/indicator entries; patternsv2 uses its structural stop and ATR cap",
                 "paper_protection": "net-loss-trail-v1: 3% net loss budget and 3% of entry notional giveback; all paper entries and adopted open positions",
+                "combined_exit_policy": {
+                    'precedence':'nearest resting protection; opening orders before intrabar touches',
+                    'paper_loss_budget':'3% of entry notional, net of configured costs',
+                    'paper_giveback':'3 percentage points from best surviving net close; no pattern R activation',
+                    'pattern_orders':'structural/ATR stop, measured target and saved activation ladder remain active',
+                    'validation':'combined strategy has not been independently validated',
+                },
                 "stop_loss_trail_r": settings.stop_loss_trail_r,
                 "stop_loss_arm_r": settings.stop_loss_arm_r,
                 "stop_loss_min_risk_frac": settings.stop_loss_min_risk_frac,
@@ -1223,6 +1230,8 @@ class PaperAccount:
         exit_price, reason = _check_exit(candle, position, bar_idx)
         exit_check["raw_fill"] = exit_price
         exit_check["reason"] = reason or None
+        from core.exit_evidence import trigger_source
+        exit_check['trigger_source'] = trigger_source(exit_check['orders_before_bar'], position.action, candle, reason)
         if exit_price is None:
             _update_prev_hl(position, candle)
         if reason == "time_exit":
@@ -1269,6 +1278,9 @@ class PaperAccount:
         exit_price: float, reason: str, now: datetime, exit_check: dict[str, Any],
     ) -> BacktestTrade:
         """Settle a bar or observed-price exit through the same accounting."""
+        from core.exit_evidence import trigger_source
+        exit_check.setdefault('trigger_source', trigger_source(
+            exit_check['orders_before_bar'],position.action,candle,reason))
         _close_trade(position, exit_price, reason, candle, self.txn_cost_pct)
         risk = risk_dollars(position)
         exit_check.update(

@@ -108,8 +108,8 @@ def test_ui_and_cli_exports_include_the_same_execution_state(monkeypatch):
     account.positions[p.symbol] = [p]
     account.on_bar(p.symbol, candle(100, 131, 99, 110, 1), '1d')
     monkeypatch.setattr('core.paper_books.PaperAccount.load', lambda **kwargs: account)
-    monkeypatch.setattr('core.paper_books.load_signal_log', lambda *args: [])
-    monkeypatch.setattr('core.signal_log_store.load_signal_log', lambda *args: [])
+    monkeypatch.setattr('core.paper_books.load_signal_log', lambda *args, **kwargs: [])
+    monkeypatch.setattr('core.signal_log_store.load_signal_log', lambda *args, **kwargs: [])
     cli = build_paper_account_export(account)['books'][0]['closed_trades'][0]
     ui = build_paper_trade_export({'books': {'us': PaperBook('us').snapshot()}})['books'][0]['closed_trades'][0]
     assert ui == cli

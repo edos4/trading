@@ -41,7 +41,7 @@ issue is committed separately; find its commit with `git log --grep=Fxx`.
 | F01 | Pending | Funded portfolio limits and deterministic allocation |
 | F02 | **Done** | Reject malformed execution observations; 67 focused tests passed |
 | F03 | **Done** | Cost-aware target and opening forecast checks; 86 focused tests passed |
-| F04 | Pending | Expose combined stop policy and validate on independent data |
+| F04 | **Partial** | Combined policy and binding order exposed (56 tests); independent evaluation remains |
 | F05 | **Partial** | Configured slippage fixed (85 tests); borrow/financing/partial-fill modelling remains |
 | F06 | Pending | Point-in-time universe and liquidity evidence |
 | F07 | Pending | Model-selection boundary and checkpoint provenance |
@@ -221,7 +221,17 @@ choose any additional R:R/forecast-margin threshold on independent data.
 Sources: [opening checks](/home/engine-33ai/codes/trading/core/execution.py:111),
 [confirmation recheck](/home/engine-33ai/codes/trading/core/scanner.py:2039).
 
-### F04 — P1: the 3% paper overlay largely overrides the advertised ATR ladder
+### F04 — P1: the 3% paper overlay largely overrides the advertised ATR ladder — PARTIAL
+
+**Shipped correction:** execution metadata now explicitly describes both
+competing exit policies and their precedence. New completed-bar and quote
+exit evidence identifies `trigger_source` (paper protection, pattern stop,
+pattern trail/target or completed-close/Kronos decision), so safety-overlay
+exits cannot be attributed to the ATR ladder. No stop was widened or removed.
+Validation: **56 passed** across binding-order attribution, exit evidence,
+protection and quote settlement. **Remaining:** independent combined-policy
+evaluation on frozen holdout data; these engineering tests do not measure edge.
+
 
 **Confirmed policy interaction, not a reversed P&L formula.** V2 advertises
 a 3–8% ATR cap and a 2R arm/2R giveback pattern trail. Every new paper trade
