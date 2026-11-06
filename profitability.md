@@ -38,7 +38,7 @@ issue is committed separately; find its commit with `git log --grep=Fxx`.
 
 | Issue | Status | Resolution / remaining work |
 | --- | --- | --- |
-| F01 | Pending | Funded portfolio limits and deterministic allocation |
+| F01 | **Done** | Funded admission, collateral and deterministic opening phase; 104 tests passed |
 | F02 | **Done** | Reject malformed execution observations; 67 focused tests passed |
 | F03 | **Done** | Cost-aware target and opening forecast checks; 86 focused tests passed |
 | F04 | **Partial** | Combined policy and binding order exposed (56 tests); independent evaluation remains |
@@ -115,7 +115,21 @@ neither most of these settings nor an end date, universe snapshot, or checkpoint
 
 ## Findings requiring attention
 
-### F01 — P1: unlimited, concentrated, unfunded exposure
+### F01 — P1: unlimited, concentrated, unfunded exposure — DONE
+
+**Resolution:** fresh/reset books default to `PAPER_ACCOUNT_MODEL=funded`.
+They enforce cash including fees, reserved short proceeds plus 100% entry
+notional collateral, gross exposure (default 100%), configured total and
+per-pattern limits, a default one-position-per-symbol limit, and session
+realized-loss admission. Funded replay gathers observations, sorts entries
+by symbol/timeframe/setup, fills all openings before any intrabar exits,
+then manages full bars and detects signals. Future exit proceeds and feed
+arrival order cannot choose/fund opening seats. Summaries and exports identify
+the model/limits. Old ledgers and explicit `independent-fixed-notional` books
+retain labelled research semantics. No broker margin/borrow certification is
+implied. Validation: **104 passed**, including cash/collateral, daily reset,
+restart and reversed-feed-order examples plus existing paper integration.
+
 
 **Confirmed research-account behavior; dangerous if interpreted as a funded
 portfolio.** `_open_position_locked` explicitly removes portfolio, gross

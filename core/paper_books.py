@@ -428,7 +428,7 @@ class PaperBook:
             "execution_context": snap["execution_context"],
             "error": error,
             "use_stream": use_stream,
-            "account_model": "independent-fixed-notional",
+            "account_model": account.account_model,
             "pending_entries": [{"symbol": s.symbol, "pattern": s.pattern,
                                  "decision_date": s.signal_bar_timestamp.isoformat()} for s in account.pending_entries],
             "order_events": list(account.order_events),

@@ -283,14 +283,23 @@ def _position_mark_row(
     }
 
 
+class PaperResult(BacktestResult):
+    """Keep portfolio simulation distinct from independent trade summaries."""
+    account_model: str = 'independent-fixed-notional'
+
+    def summary(self, *args, **kwargs) -> str:
+        text = super().summary(*args, **kwargs)
+        if self.account_model == 'funded':
+            text = text.replace('PAPER RESEARCH (independent trades)', 'PAPER FUNDED SIMULATION')
+        return text
+
+
 class PaperAccount:
     """Virtual cash + positions ledger.
 
-    Mirrors the backtester's multi-position walk: a symbol carries every pattern
-    anchor as an independent flat-$10k trade at once, deduped by `setup_key`
-    (the `.cjs` usedSH1/usedSH2 registry) and capped per pattern by
-    `MAX_OPEN_PER_SYMBOL` (flag/pennant = 1). `positions` maps a symbol to the
-    list of its open trades.
+    New books enforce funded admission. Explicit independent research and old
+    saved ledgers retain their historical model, identified in every export.
+    Positions remain keyed by symbol and setup so existing exits are unchanged.
     """
 
     def __init__(
@@ -300,6 +309,7 @@ class PaperAccount:
         slippage_pct: float | None = None,
         market: str | None = None,
         max_daily_loss: float | None = None,
+        account_model: str | None = None,
     ):
         self.market = get_market(market).id
         profile = get_market(self.market)
@@ -322,8 +332,11 @@ class PaperAccount:
             raise ValueError("Transaction cost must be finite and nonnegative")
         if not math.isfinite(self.slippage_pct) or not 0 <= self.slippage_pct < 1:
             raise ValueError("Slippage must be finite and between zero and one")
-        # Vestigial — no daily-loss limit is enforced anymore.
-        self.max_daily_loss = float("inf") if max_daily_loss is None else max_daily_loss
+        self.account_model = account_model or settings.paper_account_model
+        if self.account_model not in ('funded','independent-fixed-notional'):
+            raise ValueError('Unknown paper account model')
+        self.max_daily_loss = (getattr(settings,'max_daily_loss_php' if self.market=='ph'
+                                     else 'max_daily_loss_usd') if max_daily_loss is None else max_daily_loss)
         self.positions: dict[str, list[BacktestTrade]] = {}
         self.closed: list[BacktestTrade] = []
         self.pending_entries: list[TradeSignal] = []
@@ -422,6 +435,11 @@ class PaperAccount:
     # ── Equity / accounting ─────────────────────────────────────────────
     def last_price(self, symbol: str, default: float) -> float:
         return self._last_price.get(symbol, default)
+
+    def mark_opening_price(self, symbol: str, price: float) -> None:
+        """Opening auction valuation for causal, session-wide capital allocation."""
+        with self._lock:
+            self._last_price[symbol] = price
 
     def record_execution_gap(self, symbol: str, timeframe: str, session: str | None,
                              reason: str) -> None:
@@ -599,6 +617,16 @@ class PaperAccount:
                 "scope": "current settings at snapshot; historical rules are saved per trade",
                 "sim_as_of": self._sim_now.isoformat() if self._sim_now else None,
                 "execution_model": self.execution_model,
+                "account_model": self.account_model,
+                "portfolio_limits": {
+                    'enforced':self.account_model=='funded',
+                    'max_open_positions':settings.max_open_positions,
+                    'max_open_per_pattern':settings.max_open_per_pattern,
+                    'max_open_per_symbol':settings.paper_max_open_per_symbol,
+                    'max_gross_exposure':settings.paper_max_gross_exposure,
+                    'max_daily_loss':self.max_daily_loss,
+                    'short_collateral':'sale proceeds plus 100% entry notional; no borrow certification',
+                },
                 "run_manifest": deepcopy(self.run_manifest),
                 "initial_capital": initial_capital,
                 "txn_cost_pct_per_side": self.txn_cost_pct,
@@ -764,7 +792,8 @@ class PaperAccount:
             return []  # Retry the observation; do not consume a valid pending order.
         outcomes = []
         with self._lock:
-            for signal in list(self.pending_entries):
+            for signal in sorted(list(self.pending_entries),key=lambda s:(s.symbol,s.timeframe,s.pattern,
+                                  str(s.signal_bar_timestamp),str(s.setup_key),s.action)):
                 if signal.symbol != symbol or signal.timeframe != timeframe:
                     continue
                 if candle.timestamp <= signal.signal_bar_timestamp:
@@ -810,6 +839,8 @@ class PaperAccount:
         self, signal: TradeSignal, candle: OHLCVCandle, store: OHLCVStore,
     ) -> tuple[bool, str]:
         from core.entry_policy import describe_short_entry_rejection
+        if candle.timestamp is not None:
+            self._reset_daily_if_needed(candle.timestamp)
 
         if signal.action not in ("BUY", "SELL"):
             return False, "Trade entries require BUY or SELL."
@@ -856,9 +887,8 @@ class PaperAccount:
                 f"carries the maximum concurrent {signal.pattern} trades."
             )
         profile = get_market(self.market)
-        # PH is long-only (retail shorts need SBL); every other constraint the
-        # engine used to enforce (portfolio caps, daily loss, gross exposure,
-        # cash affordability, R:R) is gone — trades are independent flat $10k.
+        # Market direction rules apply to both account models; funded limits
+        # are checked after executed sizing and lot rounding below.
         if profile.long_only and signal.action == "SELL":
             return False, (
                 f"Long-only {profile.label}: SELL/short signals are disabled."
@@ -924,6 +954,11 @@ class PaperAccount:
                     f"Lot rounding: {signal.symbol} size rounded below one board lot."
                 )
 
+        if self.account_model == 'funded':
+            reason = self._funding_rejection(signal, entry_price)
+            if reason:
+                return False, reason
+
         fill_candle = candle
         slip = self.slippage_pct
         if slip:
@@ -980,6 +1015,32 @@ class PaperAccount:
             f"Filled paper entry: {signal.action} {signal.qty:g} {signal.symbol} "
             f"@ {format_money(position.entry_price, self.market)} (pattern={signal.pattern})."
         )
+
+    def _funding_rejection(self, signal: TradeSignal, price: float) -> str | None:
+        """Conservative cash-backed admission, independent of short proceeds."""
+        positions = [p for _,p in self._all_open()]
+        if self.max_daily_loss > 0 and self._daily_pnl <= -self.max_daily_loss:
+            return 'Daily loss limit reached; new entries disabled for this session.'
+        limits = (
+            (settings.max_open_positions,len(positions),'Portfolio full'),
+            (settings.max_open_per_pattern,sum(p.pattern==signal.pattern for p in positions),'Pattern position cap'),
+            (settings.paper_max_open_per_symbol,sum(p.symbol==signal.symbol for p in positions),'Symbol position cap'),
+        )
+        for limit,count,label in limits:
+            if limit > 0 and count >= limit:
+                return f'{label}: {count}/{limit}.'
+        notional=price*signal.qty
+        # Short proceeds are collateral, not free cash. Reserving another
+        # full entry notional also prevents financing an unlimited short book.
+        reserved=sum(2*p.entry_price*p.qty for p in positions if p.action=='SELL')
+        if notional*(1+self.txn_cost_pct) > self.cash-reserved + 1e-8:
+            return 'Insufficient cash after fees and reserved short collateral.'
+        capital=min(self.equity(), self.initial_capital + self.realized_pnl_dollars()
+                    - sum(p.entry_fee_paid for p in positions))
+        gross=sum(self._last_price.get(p.symbol,p.entry_price)*p.qty for p in positions)+notional
+        if capital <= 0 or gross > capital*settings.paper_max_gross_exposure + 1e-8:
+            return 'Gross exposure cap reached.'
+        return None
 
     def ratchet_indicator_stop(self, position, new_stop: float) -> bool:
         """Tighten an indicators-only trailing stop. Never loosens it.
@@ -1363,7 +1424,7 @@ class PaperAccount:
     def to_result(self) -> BacktestResult:
         with self._lock:
             open_n = sum(len(lst) for lst in self.positions.values())
-            return BacktestResult(
+            result = PaperResult(
                 # Reports use simulated market time. The ledger retains the
                 # real fill timestamps used by the operator desk.
                 trades=[replace(t, entry_date=t.sim_entry_date or t.entry_date,
@@ -1373,13 +1434,15 @@ class PaperAccount:
                 position_notional=ENGINE.position_notional,
                 version=f"paper/{self.market}",
             )
+            result.account_model = self.account_model
+            return result
 
     # ── Persistence ───────────────────────────────────────────────────────
     def save(self, path: str | Path | None = None) -> None:
         with self._lock:
             payload = {
                 "execution_model": self.execution_model,
-                "account_model": "independent-fixed-notional",
+                "account_model": self.account_model,
                 "pending_entries": [asdict(v) | {"signal_bar_timestamp": v.signal_bar_timestamp.isoformat()}
                                     for v in self.pending_entries],
                 "consumed_anchors": [list(k[:3]) + [list(k[3])] for k in sorted(self.consumed_anchors)],
@@ -1445,6 +1508,7 @@ class PaperAccount:
             initial_capital=data.get("initial_capital", acct.initial_capital),
             txn_cost_pct=data.get("txn_cost_pct", acct.txn_cost_pct),
             slippage_pct=data.get("slippage_pct", 0.0),
+            account_model=data.get('account_model','independent-fixed-notional'),
         )
         model = data.get("execution_model", "legacy")
         if model not in ("legacy", "causal-v1"):

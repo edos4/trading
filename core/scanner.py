@@ -285,6 +285,7 @@ class MarketScanner:
         self._invalid_bar_tries: dict[tuple[str, str, str], int] = {}
         self._missing_execution_tries: dict[tuple, int] = {}
         self._replay_asof: str | None = None
+        self._preprocessed_fills: set[tuple[str,str]] = set()
         # Same (symbol, pattern) → (exit_bar_count, was_loss) cooldown map the
         # backtester uses — without this, paper re-entered losers immediately
         # while backtests waited cooldown_bars. Seed from the persisted ledger
@@ -1023,6 +1024,9 @@ class MarketScanner:
         # Latest detected signal per (symbol, timeframe) — unused for disk
         # charts (those render on dashboard click) but kept for vision checks.
         new_closed_daily = False
+        funded = self._paper is not None and self._paper.account_model == 'funded'
+        funded_snapshots = []
+        self._preprocessed_fills.clear()
         self._scan_snapshot_symbols: set[str] = set()
         self._scan_daily_dates: set[str] = set()
         self.stats["asof_skipped"] = 0
@@ -1060,6 +1064,9 @@ class MarketScanner:
             if result is None:
                 self.stats["snapshot_errors"] += 1
                 self._note_missing_execution(symbol, 'snapshot unavailable')
+                return None
+            if funded:
+                funded_snapshots.append((symbol,timeframe,result))
                 return None
             closed, pending = self._apply_bar(symbol, timeframe, result)
             if closed:
@@ -1150,6 +1157,30 @@ class MarketScanner:
                     task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             pbar.close()
+
+        if funded:
+            from core.candle_validation import candle_error
+            ordered = sorted(funded_snapshots,key=lambda item:(item[0],item[1]))
+            # All opening fills happen before any full-bar exits, so an
+            # earlier symbol's future intrabar proceeds cannot fund a later
+            # symbol's opening order. Feed completion order cannot pick seats.
+            for symbol,timeframe,snapshot in ordered:
+                if not candle_error(snapshot.candle):
+                    self._paper.mark_opening_price(symbol,snapshot.candle.open)
+            for symbol,timeframe,snapshot in ordered:
+                identity=bar_identity(timeframe,snapshot.candle.timestamp,market=self._market)
+                if (not candle_error(snapshot.candle)
+                        and is_closed_session_bar(timeframe,snapshot.candle.timestamp,market=self._market)
+                        and self._persisted_bar_ids.get(f'{symbol}|{timeframe}') != repr(identity)):
+                    self._fill_pending_observation(symbol,timeframe,snapshot.candle)
+                    self._preprocessed_fills.add((symbol,timeframe))
+            pending=[]
+            for symbol,timeframe,snapshot in ordered:
+                closed,snap=self._apply_bar(symbol,timeframe,snapshot)
+                new_closed_daily = new_closed_daily or closed
+                if snap is not None:
+                    pending.append(snap)
+            await self._run_analyzes(pending)
 
         if self._collect_first:
             await self._flush_collect_first()
@@ -1286,12 +1317,8 @@ class MarketScanner:
 
         if self._paper is not None:
             if is_new_bar and self._paper.assume_session_open:
-                for signal, opened, reason in self._paper.fill_pending(
-                        symbol, timeframe, snapshot.candle, self._store, recheck=self._laya_check,
-                        entry_check=self._check_kronos_entry):
-                    key = "trades_opened" if opened else "signals_rejected"
-                    self.stats[key] += 1
-                    self._append_signal_log(signal, status="filled" if opened else "rejected", reason=reason)
+                if (symbol,timeframe) not in self._preprocessed_fills:
+                    self._fill_pending_observation(symbol,timeframe,snapshot.candle)
             closed_positions = self._paper.on_bar(
                 symbol, snapshot.candle, timeframe, is_new_bar,
             )
@@ -1335,6 +1362,16 @@ class MarketScanner:
         self._failed_decisions.add(f'{snapshot.symbol}|{snapshot.timeframe}')
         self.stats['snapshot_errors'] += 1
         self.stats['analysis_errors'] = self.stats.get('analysis_errors', 0) + 1
+
+    def _fill_pending_observation(self, symbol: str, timeframe: str, candle) -> None:
+        if self._paper is None or not self._paper.assume_session_open:
+            return
+        for signal,opened,reason in self._paper.fill_pending(
+                symbol,timeframe,candle,self._store,recheck=self._laya_check,
+                entry_check=self._check_kronos_entry):
+            key='trades_opened' if opened else 'signals_rejected'
+            self.stats[key]+=1
+            self._append_signal_log(signal,status='filled' if opened else 'rejected',reason=reason)
 
     def _queue_kronos_exits(self, symbol: str, timeframe: str, candle) -> None:
         """Queue one open-position vote per symbol/timeframe/new bar."""

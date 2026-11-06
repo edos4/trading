@@ -114,6 +114,9 @@ class Settings(BaseSettings):
     # ── Paper trading ─────────────────────────────────────────────────────
     paper_initial_capital: float = 100_000.0
     paper_slippage_pct: float = 0.0005
+    paper_account_model: Literal['funded', 'independent-fixed-notional'] = 'funded'
+    paper_max_open_per_symbol: int = 1
+    paper_max_gross_exposure: float = 1.0
 
     # ── Paper trade stream (replays stocks_history when markets are closed) ──
     papertrade_stream_host: str = "127.0.0.1"
@@ -404,6 +407,21 @@ class Settings(BaseSettings):
         "env_file_encoding": "utf-8",
         "extra": "ignore",
     }
+
+    @field_validator('paper_max_gross_exposure')
+    @classmethod
+    def _positive_paper_exposure(cls, value: float) -> float:
+        import math
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError('paper_max_gross_exposure must be finite and positive')
+        return value
+
+    @field_validator('paper_max_open_per_symbol')
+    @classmethod
+    def _nonnegative_symbol_limit(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError('paper_max_open_per_symbol must be nonnegative')
+        return value
 
     @field_validator("market")
     @classmethod
