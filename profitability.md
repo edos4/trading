@@ -173,6 +173,10 @@ impossible ranges, nonfinite fields, invalid volume/timestamps and an intact
 store/book after rejection. Validation: **67 passed** across candle quality,
 scanner recovery, paper protection and live quote exits.
 
+**Fixture follow-up:** legacy indicator execution examples now use aware UTC
+timestamps, matching the actual replay input contract rather than weakening
+validation to admit naive dates. **12 focused admission/indicator checks passed.**
+
 
 **Confirmed defect.** Scanner and ledger admission check finite positive
 prices, but not `low <= open, close <= high` or `low <= high`. The stricter

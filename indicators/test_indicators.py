@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import numpy as np
@@ -221,7 +221,7 @@ def test_indicators_only_book_cap_does_not_apply_to_patterns(monkeypatch):
 
     candle = OHLCVCandle(
         open=50.0, high=51.0, low=49.0, close=50.0, volume=1_000,
-        timestamp=datetime(2026, 3, 5),
+        timestamp=datetime(2026, 3, 5, tzinfo=timezone.utc),
     )
 
     class Empty:
@@ -265,7 +265,7 @@ def test_indicator_stop_ratchets_only_when_indicators_only():
     )
     candle = OHLCVCandle(
         open=50.0, high=52.0, low=49.0, close=50.0, volume=1_000,
-        timestamp=datetime(2026, 3, 5),
+        timestamp=datetime(2026, 3, 5, tzinfo=timezone.utc),
     )
 
     class Empty:
@@ -321,7 +321,7 @@ def test_indicator_fill_skips_pattern_catalog_only_when_checked(monkeypatch):
     )
     candle = OHLCVCandle(
         open=50.0, high=51.0, low=49.0, close=50.0, volume=1_000,
-        timestamp=datetime(2026, 3, 5),
+        timestamp=datetime(2026, 3, 5, tzinfo=timezone.utc),
     )
 
     class Empty:
@@ -339,7 +339,7 @@ def test_indicator_fill_skips_pattern_catalog_only_when_checked(monkeypatch):
     )
     candle = OHLCVCandle(
         open=50.0, high=51.0, low=49.0, close=50.0, volume=1_000,
-        timestamp=datetime(2026, 3, 5),
+        timestamp=datetime(2026, 3, 5, tzinfo=timezone.utc),
     )
 
     class Empty:
