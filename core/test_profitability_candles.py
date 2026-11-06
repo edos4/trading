@@ -43,3 +43,13 @@ def test_stream_validates_before_overwriting_store_and_warm_flag():
 
 def test_flat_zero_volume_observation_is_valid():
     assert candle_error(replace(candle(100,100,100,100), volume=0)) is None
+
+
+def test_rejected_entry_candle_cannot_reset_the_daily_loss_budget():
+    from core.test_patternsv2_exits import signal
+    book,p=book_with_position(False)
+    book._daily_key='2026-01-05'; book._daily_pnl=-1500
+    bad=candle(100,101,99,80,1)
+    ok,reason=book.open_position(replace(signal(),symbol='OTHER'),bad,OHLCVStore())
+    assert not ok and 'Invalid trade candle' in reason
+    assert book._daily_key=='2026-01-05' and book._daily_pnl==-1500

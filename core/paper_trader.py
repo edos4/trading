@@ -852,16 +852,12 @@ class PaperAccount:
         store: OHLCVStore,
     ) -> tuple[bool, str]:
         with self._lock:
-            self._reset_daily_if_needed(candle.timestamp or datetime.now(timezone.utc))
             return self._open_position_locked(signal, candle, store)
 
     def _open_position_locked(
         self, signal: TradeSignal, candle: OHLCVCandle, store: OHLCVStore,
     ) -> tuple[bool, str]:
         from core.entry_policy import describe_short_entry_rejection
-        if candle.timestamp is not None:
-            self._reset_daily_if_needed(candle.timestamp)
-
         if signal.action not in ("BUY", "SELL"):
             return False, "Trade entries require BUY or SELL."
         # Recheck here as well: direct paper entries and saved pending orders
@@ -873,6 +869,7 @@ class PaperAccount:
         invalid = candle_error(candle, require_timestamp=self.assume_session_open)
         if invalid:
             return False, f"Invalid trade candle: {invalid}."
+        self._reset_daily_if_needed(candle.timestamp or datetime.now(timezone.utc))
         if any(value is not None and (not math.isfinite(value) or value <= 0)
                for value in (signal.stop_loss, signal.take_profit)):
             return False, "Trade stop and target must be finite and positive."
