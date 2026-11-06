@@ -45,7 +45,7 @@ issue is committed separately; find its commit with `git log --grep=Fxx`.
 | F05 | Pending | Effective slippage and execution-cost limitations |
 | F06 | Pending | Point-in-time universe and liquidity evidence |
 | F07 | Pending | Model-selection boundary and checkpoint provenance |
-| F08 | Pending | Separate management and completed-decision watermarks |
+| F08 | **Done** | Persist separate decision completion; retry failures without replaying exits; 152 tests passed |
 | F09 | Pending | Held-position coverage and stale-price certification |
 | F10 | **Done** | Advance over all loaded tapes; 30 replay tests passed |
 | F11 | Pending | Deterministic model scheduling and identical model context |
@@ -325,7 +325,18 @@ Sources: [dataset cutoff](/home/engine-33ai/codes/trading/learn/kronos_dataset.p
 [checkpoint selection](/home/engine-33ai/codes/trading/core/kronos_finetune.py:591),
 [model loader](/home/engine-33ai/codes/trading/scripts/kronos_confirm_worker.py:163).
 
-### F08 — P1: a failed detector can permanently consume its decision bar
+### F08 — P1: a failed detector can permanently consume its decision bar — DONE
+
+**Resolution:** management and decision completion now have independent
+persisted watermarks. V2 decisions commit only after detection and the gate
+batch finish; failed analysis marks the scan incomplete and retries the same
+session, including after restart, without repeating position management or
+bar counters. Strict scan detection propagates per-family failures rather
+than certifying an empty result. Old ledgers inherit their historical
+management watermark as completed because past missing decisions cannot be
+reconstructed reliably. Validation: **152 passed** across failure/restart,
+scanner recovery, fast-scan parity and V2 detector/causality tests.
+
 
 **Confirmed defect.** `_apply_bar` updates the persisted processed identity
 before returning the snapshot for analysis. V2 detection exceptions are

@@ -338,12 +338,13 @@ def detect_raw(
     """
     fn = detect or detect_fn()
     latest = len(close) - 1
+    options = {'strict': True} if getattr(fn, 'supports_strict', False) else {}
     if latest_bar_only and getattr(fn, "supports_latest_only", False):
         # One bar is wanted; let the bounded-pattern search skip the pivot pairs
         # that can only break out on a bar this call drops. Same answer for the
         # bar it keeps (verified against the full search), a fraction of the work.
-        return fn(high, low, close, latest=latest)
-    return fn(high, low, close)
+        return fn(high, low, close, latest=latest, **options)
+    return fn(high, low, close, **options)
 
 
 def signals_from_raw(

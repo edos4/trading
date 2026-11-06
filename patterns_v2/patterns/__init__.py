@@ -34,12 +34,14 @@ except ImportError:  # standalone checkout without the bot's logging stack
     _log = logging.getLogger(__name__)
 
 
-def _safe(fn, *args, **kwargs):
+def _safe(fn, *args, _failures=None, **kwargs):
     """One detector's numerical failure must not erase the symbol's other shapes."""
     try:
         return fn(*args, **kwargs)
     except Exception:
         _log.exception(f"Patternsv2 detector {getattr(fn, '__module__', fn)} failed")
+        if _failures is not None:
+            _failures.append(getattr(fn, '__module__', str(fn)))
         return []
 
 
@@ -72,7 +74,7 @@ _BULLISH_DETECTORS = (
 _LATEST_AWARE = frozenset({bull_flag.detect, bull_pennant.detect})
 
 
-def detect(h, l, c, zz_mult=2.0, latest=None):
+def detect(h, l, c, zz_mult=2.0, latest=None, strict=False):
     """h, l, c: float numpy arrays for ONE symbol, sorted by date. Returns list of signal dicts.
 
     ``latest`` restricts the bounded-pattern search to pivots that can break out
@@ -85,6 +87,9 @@ def detect(h, l, c, zz_mult=2.0, latest=None):
     if len(c) < MIN_BARS:
         return []
     a = atr(h, l, c)
+    from functools import partial
+    failures = []
+    run = partial(_safe, _failures=failures)
     sigs = []
     for d, (hh, ll, cc) in ((1, (h, l, c)), (-1, (-l, -h, -c))):
         P = zigzag(hh, ll, cc, a, zz_mult)
@@ -93,21 +98,23 @@ def detect(h, l, c, zz_mult=2.0, latest=None):
         found = []
         for fn in _BULLISH_DETECTORS:
             if fn in _LATEST_AWARE:
-                found.extend(_safe(fn, hh, ll, cc, a, P, latest=latest))
+                found.extend(run(fn, hh, ll, cc, a, P, latest=latest))
             else:
-                found.extend(_safe(fn, hh, ll, cc, a, P))
+                found.extend(run(fn, hh, ll, cc, a, P))
         # Bearish head-and-shoulders confirms on the joining neckline. The
         # up-sloping inverse keeps the horizontal at the right armpit.
         shoulder_name = "inv_head_shoulders" if d == 1 else "head_shoulders"
         if shoulder_name not in DISABLED:
-            found.extend(_safe(
+            found.extend(run(
                 inv_head_shoulders.detect, hh, ll, cc, a, P, join_neck=(d == -1),
             ))
         for s in found:
             if d == -1:
                 _mirror_signal(s)
             sigs.append(s)
-    sigs += _safe(detect_triangles, h, l, c, a, bullish_pivots, latest=latest)
+    sigs += run(detect_triangles, h, l, c, a, bullish_pivots, latest=latest)
+    if strict and failures:
+        raise RuntimeError('Incomplete Patternsv2 detection: ' + ', '.join(sorted(set(failures))))
     sigs = [s for s in sigs if s["pattern"] not in DISABLED
             and s["signal"] >= MIN_BARS - 1
             and tradable(h, l, c, s["start"], s["signal"])]
@@ -124,6 +131,7 @@ def detect(h, l, c, zz_mult=2.0, latest=None):
 # lets them detect that support instead of raising TypeError on an older
 # patterns package (PATTERNS_V2_ROOT can point at an external checkout).
 detect.supports_latest_only = True
+detect.supports_strict = True
 
 
 def add_forward_returns(sig, o, c, horizons=(5, 10, 20)):

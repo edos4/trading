@@ -267,6 +267,10 @@ class MarketScanner:
             and hasattr(paper_account, "processed_bar_identities_snapshot")
             else {}
         )
+        self._decision_bar_ids = (paper_account.decision_bar_identities_snapshot()
+                                  if paper_account is not None else {})
+        self._pending_decision_ids: dict[str, str] = {}
+        self._failed_decisions: set[str] = set()
         # Unique completed daily-session dates observed in this scanner run.
         # Counting per symbol/timeframe was wrong: 1,000 symbols would advance
         # the replay-day counter 1,000 times in a single market session.
@@ -949,6 +953,8 @@ class MarketScanner:
         self.stats["trades_opened"] = 0
         self.stats["rejection_by_gate"] = {}
         self.stats["scan_complete"] = False
+        self._pending_decision_ids.clear()
+        self._failed_decisions.clear()
         self.stats["daily_date_skew"] = 0
         snapshot_errors_before = self.stats["snapshot_errors"]
 
@@ -1108,6 +1114,14 @@ class MarketScanner:
         # pendings, so this must run after that flush.
         await self._flush_kronos_confirm()
 
+        # Management is already idempotently committed; decisions commit only
+        # after detection and the gate batch have reached a recorded outcome.
+        for key, identity in self._pending_decision_ids.items():
+            if key not in self._failed_decisions:
+                self._decision_bar_ids[key] = identity
+                if self._paper is not None:
+                    self._paper.mark_decision_processed(key, identity)
+
         # Mark equity against the completed simulated bar BEFORE advancing the
         # replay. PaperAccount deduplicates marks to one point per market
         # session, so Sharpe is a daily/session statistic rather than a
@@ -1256,12 +1270,20 @@ class MarketScanner:
             if identity_key is not None and self._paper is not None:
                 self._paper.mark_bar_processed(symbol, timeframe, identity_key)
                 self._persisted_bar_ids[f"{symbol}|{timeframe}"] = identity_key
-        if not is_new_bar:
+        decision_key = f'{symbol}|{timeframe}'
+        needs_decision = (closed_bar and identity_key is not None
+                          and self._decision_bar_ids.get(decision_key) != identity_key)
+        if not needs_decision:
             return new_closed_daily, None
-
+        self._pending_decision_ids[decision_key] = identity_key
         if self._has_ready_pattern(symbol, timeframe):
             return new_closed_daily, snapshot
         return new_closed_daily, None
+
+    def _analysis_failed(self, snapshot) -> None:
+        self._failed_decisions.add(f'{snapshot.symbol}|{snapshot.timeframe}')
+        self.stats['snapshot_errors'] += 1
+        self.stats['analysis_errors'] = self.stats.get('analysis_errors', 0) + 1
 
     def _queue_kronos_exits(self, symbol: str, timeframe: str, candle) -> None:
         """Queue one open-position vote per symbol/timeframe/new bar."""
@@ -1535,6 +1557,7 @@ class MarketScanner:
                     log.exception(
                         f"Scan | patternsv2 {snapshot.symbol} {snapshot.timeframe}"
                     )
+                    self._analysis_failed(snapshot)
                     self.stats["pattern_evaluations"] += 1
                     continue
                 await _emit(snapshot, found)
@@ -1561,6 +1584,7 @@ class MarketScanner:
                     log.exception(
                         f"Scan | patternsv2 {snapshot.symbol} {snapshot.timeframe}"
                     )
+                    self._analysis_failed(snapshot)
                     self.stats["pattern_evaluations"] += 1
                     continue
                 await _emit(snapshot, found)

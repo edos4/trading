@@ -356,6 +356,7 @@ class PaperAccount:
         # swing bar. Persisting these prevents a clean restart from replaying
         # the same daily/weekly bar and incrementing bar counters twice.
         self._processed_bar_ids: dict[str, str] = {}
+        self._decision_bar_ids: dict[str, str] = {}
         # Latest market/bar timestamp observed by the paper account. This is
         # the clock used by the UI for simulated age during replay.
         self._sim_now: datetime | None = None
@@ -467,10 +468,19 @@ class PaperAccount:
         with self._lock:
             self._processed_bar_ids[f"{symbol}|{timeframe}"] = identity_key
 
+    def decision_bar_identities_snapshot(self) -> dict[str, str]:
+        with self._lock:
+            return dict(self._decision_bar_ids)
+
+    def mark_decision_processed(self, key: str, identity: str) -> None:
+        with self._lock:
+            self._decision_bar_ids[key] = identity
+
     def clear_scan_clock(self) -> None:
         """Drop replay watermarks so an earlier start date is scanned again."""
         with self._lock:
             self._processed_bar_ids.clear()
+            self._decision_bar_ids.clear()
             self._sim_now = None
             self._sim_now_by_timeframe.clear()
             self._bar_count.clear()
@@ -1350,6 +1360,7 @@ class PaperAccount:
                 "daily_key": self._daily_key,
                 "daily_pnl": self._daily_pnl,
                 "processed_bar_ids": dict(self._processed_bar_ids),
+                "decision_bar_ids": dict(self._decision_bar_ids),
                 "sim_now": self._sim_now.isoformat() if self._sim_now else None,
                 "last_price": dict(self._last_price),
                 "positions": {
@@ -1435,6 +1446,8 @@ class PaperAccount:
         acct._processed_bar_ids = {
             str(k): str(v) for k, v in (data.get("processed_bar_ids") or {}).items()
         }
+        # Older ledgers cannot identify incomplete historical decisions.
+        acct._decision_bar_ids = dict(data.get('decision_bar_ids', acct._processed_bar_ids))
         if data.get("sim_now"):
             try:
                 acct._sim_now = datetime.fromisoformat(data["sim_now"])
