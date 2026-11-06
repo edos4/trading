@@ -68,6 +68,8 @@ def test_adapts_breakout_into_trade_signal():
     assert sig.trailing_ref_after_check
     assert any(a.get("pattern_version_id") == "patternsv2" for a in sig.chart_annotations)
     assert "Patternsv2 double_bottom" in sig.notes
+    assert "uncalibrated geometric strength" in sig.notes
+    assert sig.confidence == pytest.approx(0.5)
 
 
 def test_flag_stop_is_the_flag_rail_not_the_pole():
@@ -295,7 +297,7 @@ def test_one_failing_detector_keeps_the_symbols_other_patterns(monkeypatch):
     def double_bottom_stub(*_args, **_kwargs):
         return [{
             "pattern": "double_bottom", "direction": 1, "start": 10, "end": 40,
-            "signal": 50, "level": 150.0, "score": 5.0,
+            "signal": 60, "level": 150.0, "score": 5.0,
             "lines": [(10, 120.0, 40, 140.0)],
             "points": [(10, 120.0, "low 1"), (25, 140.0, "neck"), (40, 122.0, "low 2")],
         }]

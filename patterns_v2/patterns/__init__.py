@@ -24,6 +24,8 @@ from . import (
 from ._triangle_base import detect as detect_triangles
 from .common import DISABLED, MIRROR, PATTERN_NAMES, atr, first_break, sig, tradable, zigzag
 
+MIN_BARS = 60
+
 try:
     from loguru import logger as _log
 except ImportError:  # standalone checkout without the bot's logging stack
@@ -37,7 +39,7 @@ def _safe(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
     except Exception:
-        _log.exception("Patternsv2 detector %s failed", getattr(fn, "__module__", fn))
+        _log.exception(f"Patternsv2 detector {getattr(fn, '__module__', fn)} failed")
         return []
 
 
@@ -78,7 +80,9 @@ def detect(h, l, c, zz_mult=2.0, latest=None):
     bars, so a live scan asking for the last bar gets the same answer for it.
     """
     h, l, c = (np.asarray(x, float) for x in (h, l, c))
-    if len(c) < 60:
+    if any(x.ndim != 1 for x in (h, l, c)) or not (len(h) == len(l) == len(c)):
+        raise ValueError("high, low, and close must be equal-length one-dimensional arrays")
+    if len(c) < MIN_BARS:
         return []
     a = atr(h, l, c)
     sigs = []
@@ -104,7 +108,9 @@ def detect(h, l, c, zz_mult=2.0, latest=None):
                 _mirror_signal(s)
             sigs.append(s)
     sigs += _safe(detect_triangles, h, l, c, a, bullish_pivots, latest=latest)
-    sigs = [s for s in sigs if s["pattern"] not in DISABLED and tradable(h, l, c, s["start"], s["signal"])]
+    sigs = [s for s in sigs if s["pattern"] not in DISABLED
+            and s["signal"] >= MIN_BARS - 1
+            and tradable(h, l, c, s["start"], s["signal"])]
     seen, uniq = set(), []
     for s in sorted(sigs, key=lambda s: (s["signal"], -s["score"])):
         key = (s["pattern"], s["signal"])

@@ -1,4 +1,6 @@
 """Shared utilities for chart-pattern detectors."""
+from __future__ import annotations
+
 import numpy as np
 from scipy.signal import lfilter
 
@@ -36,11 +38,27 @@ PATTERN_NAMES = frozenset(
 
 
 def atr(h, l, c, n=14):
-    pc = np.r_[c[0], c[:-1]]
-    tr = np.maximum.reduce([h - l, np.abs(h - pc), np.abs(l - pc)])
+    """Smoothed true range on sane traded bars, aligned to the input.
+
+    Invalid/nontrading bars have NaN ATR and do not advance its clock. The
+    next valid bar measures its gap from the last valid close. This preserves
+    the existing values on clean data without letting one NaN poison history.
+    """
+    if n < 1 or int(n) != n:
+        raise ValueError("ATR period must be a positive integer")
+    n = int(n)
+    h, l, c = (np.asarray(x, float) for x in (h, l, c))
+    out = np.full(c.shape, np.nan)
+    good = sane_mask(h, l, c)
+    if int(good.sum()) < n:
+        return out
+    hh, ll, cc = h[good], l[good], c[good]
+    pc = np.r_[cc[0], cc[:-1]]
+    tr = np.maximum.reduce([hh - ll, np.abs(hh - pc), np.abs(ll - pc)])
     a = 1.0 / n
-    out = lfilter([a], [1, -(1 - a)], tr, zi=[tr[:n].mean() * (1 - a)])[0]
-    out[: n - 1] = np.nan
+    values = lfilter([a], [1, -(1 - a)], tr, zi=[tr[:n].mean() * (1 - a)])[0]
+    values[: n - 1] = np.nan
+    out[good] = values
     return out
 
 
@@ -89,7 +107,7 @@ def zigzag(h, l, c, a, mult=2.0):
     piv, d = [], 0
     sane = sane_mask(h, l, c)
     a = np.asarray(a, float)
-    bad_atr = np.isnan(a)
+    bad_atr = ~np.isfinite(a) | (a <= 0)
     hi = lo = 0
     for i in range(n):
         if sane[i]:
@@ -167,26 +185,29 @@ def sig(name, direction, start, end, signal_bar, level, score, lines=(), points=
 
 
 def trade_mask(h, l, c):
-    """True where a bar actually traded. A zero-range print did not, even if the price changed."""
-    h, l, c = (np.asarray(x, float) for x in (h, l, c))
-    scale = np.maximum(np.maximum(np.abs(h), np.abs(l)), np.maximum(np.abs(c), 1.0))
-    return np.abs(h - l) > 1e-8 * scale
+    """True only for sane ranged bars; malformed prints are not liquidity."""
+    return sane_mask(h, l, c)
 
 
-def has_split(c, i0, i1, limit=0.40):
+def has_split(c, i0, i1, limit=0.40, valid=None):
     """True if any close from i0 through i1 jumps more than `limit` versus the prior close.
 
     A one-day move past about 40% is a split or a bad print, not a pattern break.
+    ``valid`` excludes unusable OHLC bars; gaps compare successive usable closes.
     """
-    i0, i1 = int(i0), int(i1)
+    c = np.asarray(c, float)
+    i0, i1 = int(i0), min(int(i1), len(c) - 1)
     if i1 <= 0 or i0 > i1:
         return False
-    lo = max(i0, 1)
-    prev, cur = c[lo - 1 : i1], c[lo : i1 + 1]
-    good = np.isfinite(prev) & np.isfinite(cur) & (prev != 0)
-    rel = np.ones(cur.shape, float)
-    np.divide(cur, prev, out=rel, where=good)
-    return bool(np.any(good & (np.abs(rel - 1.0) > limit)))
+    good = np.isfinite(c[:i1 + 1]) & (c[:i1 + 1] != 0)
+    if valid is not None:
+        good &= np.asarray(valid, bool)[:i1 + 1]
+    xs = np.flatnonzero(good)
+    # Compare successive usable closes, including across a missing print.
+    # The preceding valid close may fall before the requested interval.
+    ends = xs[1:] >= max(i0, 1)
+    prev, cur = c[xs[:-1]][ends], c[xs[1:]][ends]
+    return bool(np.any(np.abs(cur / prev - 1.0) > limit))
 
 
 def _broken_line(sig):
@@ -242,11 +263,12 @@ def tradable(h, l, c, i0, i1, min_frac=0.70, min_n=12, gap=0.30):
     if i1 <= i0 or i1 >= len(c):
         return False
     h, l, c = (np.asarray(x, float) for x in (h, l, c))
-    act = trade_mask(h, l, c)[i0 : i1 + 1]
+    valid = trade_mask(h, l, c)
+    act = valid[i0 : i1 + 1]
     if int(act.sum()) < min_n or float(act.mean()) < min_frac:
         return False
     rng = (h[i0 : i1 + 1] - l[i0 : i1 + 1])[act]
-    price = float(np.median(np.abs(c[i0 : i1 + 1])))
+    price = float(np.median(np.abs(c[i0 : i1 + 1][act])))
     if price <= 0 or float(np.median(rng)) < 0.0015 * price:
         return False
-    return not has_split(c, i0, i1, gap)
+    return not has_split(c, i0, i1, gap, valid=valid)

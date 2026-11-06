@@ -6,9 +6,11 @@ week dip no deeper than the top third of the cup. Confirm with a close above
 the higher rim. A close under the handle low before that cancels it. The
 bearish twin (inverse cup with handle) is the mirror.
 """
+from __future__ import annotations
+
 import numpy as np
 
-from .common import first_break, sig
+from .common import first_break, sane_mask, sig
 
 
 def _u_shape(low, x0, x1, cup_low, depth):
@@ -33,7 +35,7 @@ def detect(
 ):
     I, Pr, H, C = P
     out = []
-    n = len(c)
+    sane = sane_mask(h, l, c)
     for k in range(2, len(I)):
         # Left rim, cup low, right rim. The handle is taken from raw bars below:
         # requiring it to be a ZigZag pivot demands a 2xATR swing against a pause
@@ -61,17 +63,23 @@ def detect(
             continue
         if not (min_depth <= depth / abs(top) <= max_depth):
             continue
-        # Handle: the lowest low in the few weeks after the right rim.
-        last = min(n - 1, x1 + max_handle)
-        if last - x1 < min_handle:
+        # Freeze the handle at the first closing breakout. Looking for its
+        # minimum in the full future handle window repainted earlier signals
+        # when a deeper pullback appeared after a perfectly valid breakout.
+        j = first_break(c, x1 + 1, x1 + max_handle + wait + 1,
+                        lambda _j, y=top: y, h=h, l=l)
+        if j is None or j < int(C[k]):
             continue
-        x_h = x1 + 1 + int(np.argmin(l[x1 + 1 : last + 1]))
+        last = min(j - 1, x1 + max_handle)
+        xs = np.flatnonzero(sane[x1 + 1:last + 1]) + x1 + 1
+        if not len(xs):
+            continue
+        x_h = int(xs[np.argmin(l[xs])])
         handle = float(l[x_h])
         handle_w = x_h - x1
         if not (min_handle <= handle_w <= max_handle) or handle_w >= cup_w:
             continue
-        # The pause must stay under the rim; a close through it is the breakout.
-        if c[x1 + 1 : x_h + 1].size and float(np.max(c[x1 + 1 : x_h + 1])) > top:
+        if j > x_h + wait:
             continue
         if (right - handle) <= 0 or not (min_retr <= (right - handle) / depth <= max_retr):
             continue
@@ -85,9 +93,9 @@ def detect(
             continue
         if not _u_shape(l, x0, x1, cup_low, depth):
             continue
-        j = first_break(c, max(C[k], x_h + 1), max(C[k], x_h + 1) + wait,
-                        lambda _j, y=top: y, floor=handle, h=h, l=l)
-        if j is None:
+        # Once the bounded handle window ends, a lower close cancels it.
+        after = np.flatnonzero(sane[last + 1:j]) + last + 1
+        if len(after) and np.any(c[after] < handle):
             continue
         lines = [
             (x0, left, x_cup, cup_low),

@@ -1,115 +1,188 @@
-"""Double bottom (W), Bulkowski identification guidelines.
+"""Double-bottom reversal with a preceding decline and a confirmed neckline.
 
-Two valleys after a decline from a higher base, within 3% of each other, with
-at least a 10% rise between them. The swing high before the pattern has to
-clear the neck, and price has to have been falling into the first valley.
-Confirmed by a close above the peak between the valleys. A close below the
-lower valley before that cancels it. Bearish twin is the mirror: a double top
-has to rise from a lower base.
+Two support tests, within 3% of price, separated by a rally of at least 10%.
+The prior high must clear the neckline by 10% and lead a decline lasting at
+least five bars. Minor swings may subdivide that decline or the W itself.
+Adjacent prints in a bottom zone belong to one test; another test requires
+an intervening recovery through half the remaining distance to the neckline.
+
+These numerical defaults are detection policy, not universal charting rules.
+The bearish double top uses this detector on negated prices.
 """
+from __future__ import annotations
+
 import numpy as np
 
-from .common import bar_sane, first_break, has_split, sig
+from .common import first_break, has_split, sane_mask, sig
+
+
+def _support_tests(
+    l: np.ndarray, c: np.ndarray, sane: np.ndarray,
+    start: int, stop: int, ceiling: float, recovery: float,
+) -> list[tuple[int, int]]:
+    """Group bottom-zone prints until a separate recovery has taken place.
+
+    A recovery bar must leave the support zone completely. A wide candle
+    touching both support and recovery cannot establish their intrabar order.
+    """
+    tests: list[tuple[int, int]] = []
+    recovered = True
+    for t in range(start, stop):
+        if not sane[t]:
+            continue
+        if l[t] <= ceiling:
+            if recovered:
+                tests.append((t, t))
+            else:
+                tests[-1] = (tests[-1][0], t)
+            recovered = False
+        elif c[t] >= recovery:
+            recovered = True
+    return tests
+
+
+def _trend_high(
+    h: np.ndarray, c: np.ndarray, sane: np.ndarray, first: int,
+    low: float, neck: float, lookback: int, min_bars: int,
+    trend_pct: float, base_pct: float,
+) -> int | None:
+    """Find the high of a material decline before the first bottom."""
+    start = max(0, first - lookback)
+    xs = np.flatnonzero(sane[start:first]) + start
+    if not len(xs):
+        return None
+    prior = float(np.max(h[xs]))
+    # Use the last equal high: a flat shelf followed by one plunge is not a
+    # multi-session decline just because the shelf began a long time ago.
+    idx = int(xs[np.flatnonzero(h[xs] == prior)[-1]])
+    if first - idx < min_bars or prior <= neck:
+        return None
+    if (prior - low) / abs(low) < trend_pct or (prior - neck) / abs(neck) < base_pct:
+        return None
+    traded = np.flatnonzero(sane[idx:first + 1]) + idx
+    if len(traded) < min_bars + 1:
+        return None
+    third = max(1, len(traded) // 3)
+    # Endpoint wicks or one final gap cannot supply the whole decline. The
+    # early and late thirds must also fall by half the minimum trend move.
+    if np.median(c[traded[:third]]) - np.median(c[traded[-third:]]) < 0.5 * trend_pct * abs(low):
+        return None
+    return idx
 
 
 def detect(
-    h, l, c, a, P,
-    tol_pct=0.03, peak_pct=0.10, trend_pct=0.10, base_pct=0.10,
-    min_w=10, max_w=120, wait=40, hold=0,
-):
+    h: np.ndarray, l: np.ndarray, c: np.ndarray, a: np.ndarray,
+    P: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
+    tol_pct: float = 0.03, peak_pct: float = 0.10,
+    trend_pct: float = 0.10, base_pct: float = 0.10,
+    min_w: int = 10, max_w: int = 120, wait: int = 40, hold: int = 0,
+    trend_lookback: int = 60, min_trend_bars: int = 5,
+) -> list[dict]:
+    """Return causal confirmations; ``wait`` counts bars after the second low.
+
+    ``hold`` optionally requires additional closes above the neckline. The
+    signal then belongs to the last required close, when that fact is known.
+    """
+    if hold < 0 or wait < 1:
+        raise ValueError("hold must be nonnegative and wait must be positive")
     I, Pr, H, C = P
-    out = []
-    for k in range(3, len(I)):
-        # prior high, low 1, neck, low 2
-        if not (H[k - 3] and not H[k - 2] and H[k - 1] and not H[k]):
+    out: list[dict] = []
+    sane = sane_mask(h, l, c)
+    lows = np.flatnonzero(~H)
+    for pos, k in enumerate(lows):
+        i_lo2, confirmed = int(I[k]), int(C[k])
+        if not (0 <= i_lo2 < confirmed < len(c)) or not sane[i_lo2]:
             continue
-        ai = a[C[k]]
+        ai = float(a[confirmed])
         if not np.isfinite(ai) or ai <= 0:
             continue
-        if not (min_w <= I[k] - I[k - 2] <= max_w):
-            continue
-        prior, lo1, neck, lo2 = Pr[k - 3], Pr[k - 2], Pr[k - 1], Pr[k]
-        ref = abs((lo1 + lo2) / 2.0)
-        if ref <= 0 or not np.isfinite(ref):
-            continue
-        if abs(lo2 - lo1) / ref > tol_pct:
-            continue
-        # Rally between the valleys, measured off the higher valley.
-        if (neck - max(lo1, lo2)) / ref < peak_pct:
-            continue
-        # Fell into the pattern from a higher base. The prior swing has to
-        # clear the neck, not sit inside the same range as the W, and the
-        # leg into the first valley has to be a decline.
-        if abs(lo1) <= 0 or abs(neck) <= 0:
-            continue
-        if (prior - lo1) / abs(lo1) < trend_pct or prior <= neck:
-            continue
-        if (prior - neck) / abs(neck) < base_pct:
-            continue
-        i_prior, i_lo1, i_neck, i_lo2 = (int(I[k - 3]), int(I[k - 2]), int(I[k - 1]), int(I[k]))
-        if not (i_prior < i_lo1 < i_neck < i_lo2 and i_neck > i_lo1 + 1 and i_lo2 > i_neck + 1):
-            continue
-        floor = min(lo1, lo2)
-        height = neck - floor
-        if height <= 0:
-            continue
-        # Close near the extreme, and the neck bar closed near the neck.
-        # On the mirror this is the peak close and the trough close (ASA, FUNI).
-        if c[i_lo1] - lo1 > 0.30 * height or c[i_lo2] - lo2 > 0.30 * height:
-            continue
-        if neck - c[i_neck] > 0.30 * height:
-            continue
-        # The neck is a separate swing. A valley whose high reaches into the
-        # neck is the same bar, not a W (the horizontal used to start on that bar).
-        if h[i_lo1] > neck - 0.08 * height or h[i_lo2] > neck - 0.08 * height:
-            continue
-        # A print back at either extreme in the middle is a third test.
-        # The ends are excluded: the second extreme is within tol_pct of the
-        # first, so the bars that form it are not another test.
-        span = i_lo2 - i_lo1
-        band = tol_pct * ref
-        if any(
-            abs(float(l[t]) - lo1) <= band or abs(float(l[t]) - lo2) <= band
-            for t in range(i_lo1 + span // 3, i_lo2 - span // 3)
-        ):
-            continue
-
-        def _spike(idx, vs_move):
-            if idx <= 0 or idx >= len(h) - 1:
-                return False
-            rng = float(h[idx] - l[idx])
-            nbr = max(float(h[idx - 1] - l[idx - 1]), float(h[idx + 1] - l[idx + 1]))
-            return nbr > 0 and rng > 2.5 * nbr and rng > vs_move
-
-        # Trend and valleys are swings, not one-bar spikes (CACI).
-        if _spike(i_prior, 0.5 * abs(float(prior - lo1))) or _spike(i_lo1, 0.40 * height) or _spike(i_lo2, 0.40 * height):
-            continue
-        j = first_break(c, C[k], C[k] + wait, lambda _: neck, floor=floor, margin=0.05 * height, h=h, l=l)
-        if j is None or has_split(c, i_prior, j) or float(h[j] - l[j]) > 2.0 * height:
-            continue
-        # A later print back at either extreme is another test (NP, TALMF).
-        # Measured from the shallower extreme: the 3% price band is wider than
-        # a normal pullback once the two tops already sit inside it (META).
-        shallow = max(float(lo1), float(lo2))
-        dust = 1e-8 * max(abs(shallow), 1.0)
-        if any(
-            bar_sane(h, l, c, t) and float(l[t]) <= shallow + dust
-            for t in range(i_lo2 + 1, j)
-        ):
-            continue
-        if hold and (j + hold >= len(c) or not (c[j + 1 : j + 1 + hold] > neck).all()):
-            continue
-        lines = [
-            (I[k - 3], prior, I[k - 2], lo1),
-            (I[k - 2], lo1, I[k - 1], neck),
-            (I[k - 1], neck, I[k], lo2),
-            (I[k - 1], neck, j, neck),
-        ]
-        points = [
-            (I[k - 3], prior, "trend"),
-            (I[k - 2], lo1, "low 1"),
-            (I[k - 1], neck, "neck"),
-            (I[k], lo2, "low 2"),
-        ]
-        out.append(sig("double_bottom", 1, I[k - 2], I[k], j, neck, (neck - floor) / ai, lines, points))
+        for prev in lows[:pos][::-1]:
+            i_lo1 = int(I[prev])
+            width = i_lo2 - i_lo1
+            if width > max_w:
+                break
+            if width < min_w or not sane[i_lo1]:
+                continue
+            lo1, lo2 = float(Pr[prev]), float(Pr[k])
+            ref = abs((lo1 + lo2) / 2.0)
+            if not np.isfinite(ref) or ref <= 0 or lo1 == 0 or lo2 == 0:
+                continue
+            if abs(lo2 - lo1) / ref > tol_pct:
+                continue
+            inside = np.flatnonzero(sane[i_lo1 + 1:i_lo2]) + i_lo1 + 1
+            if not len(inside):
+                continue
+            i_neck = int(inside[np.argmax(h[inside])])
+            neck = float(h[i_neck])
+            if neck == 0 or (neck - max(lo1, lo2)) / ref < peak_pct:
+                continue
+            if not (i_lo1 + 1 < i_neck < i_lo2 - 1):
+                continue
+            floor = min(lo1, lo2)
+            height = neck - floor
+            dust = 1e-8 * max(abs(floor), 1.0)
+            # A hidden lower valley cannot be skipped when pairing pivots.
+            if float(np.min(l[inside])) < floor - dust:
+                continue
+            i_prior = _trend_high(
+                h, c, sane, i_lo1, lo1, neck, trend_lookback,
+                min_trend_bars, trend_pct, base_pct,
+            )
+            if i_prior is None:
+                continue
+            # Search from the low, so a break before ZigZag confirmation is
+            # never forgotten and reissued later as a fresh breakout.
+            deadline = i_lo2 + wait + 1
+            j = first_break(c, i_lo2 + 1, deadline, lambda _: neck,
+                            floor=floor, margin=0.05 * height, h=h, l=l)
+            if j is None:
+                continue
+            if j < confirmed:
+                # The pivot is not yet known. Delay to its confirmation only
+                # if the original break held throughout the intervening bars.
+                if confirmed >= deadline or not sane[confirmed]:
+                    continue
+                xs = np.flatnonzero(sane[j:confirmed + 1]) + j
+                if np.any(c[xs] <= neck) or c[confirmed] <= neck + 0.05 * height:
+                    continue
+                j = confirmed
+            shallow = max(lo1, lo2)
+            ceiling = shallow + tol_pct * ref
+            recovery = ceiling + 0.5 * (neck - ceiling)
+            # Include the decline: otherwise the last two valleys of a triple
+            # bottom could borrow an old high and masquerade as a fresh W.
+            tests = _support_tests(l, c, sane, i_prior, j, ceiling, recovery)
+            if len(tests) != 2 or not (tests[0][0] <= i_lo1 <= tests[0][1]
+                                      and tests[1][0] <= i_lo2 <= tests[1][1]):
+                continue
+            # A new lower low is a new setup, even when its bar closes back
+            # above the neckline. Equal prints may still form one bottom.
+            after = np.flatnonzero(sane[i_lo2 + 1:j + 1]) + i_lo2 + 1
+            if len(after) and float(np.min(l[after])) < floor - dust:
+                continue
+            if float(h[j] - l[j]) > 2.0 * height:
+                continue
+            signal_bar = j + hold
+            if signal_bar >= len(c):
+                continue
+            if hold and (not sane[j + 1:signal_bar + 1].all()
+                         or not (c[j + 1:signal_bar + 1] > neck).all()):
+                continue
+            if hold and np.any(l[j + 1:signal_bar + 1] < floor - dust):
+                continue
+            if has_split(c, i_prior, signal_bar, valid=sane):
+                continue
+            prior = float(h[i_prior])
+            lines = [
+                (i_prior, prior, i_lo1, lo1),
+                (i_lo1, lo1, i_neck, neck),
+                (i_neck, neck, i_lo2, lo2),
+                (i_neck, neck, signal_bar, neck),
+            ]
+            points = [
+                (i_prior, prior, "trend"), (i_lo1, lo1, "low 1"),
+                (i_neck, neck, "neck"), (i_lo2, lo2, "low 2"),
+            ]
+            out.append(sig("double_bottom", 1, i_lo1, i_lo2, signal_bar,
+                           neck, height / ai, lines, points))
     return out

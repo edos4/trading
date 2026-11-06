@@ -298,7 +298,7 @@ def _to_signal(df: pd.DataFrame, raw: dict, *, symbol: str, timeframe: str, late
         return None
     score = _finite(raw.get("score")) or 0.0
     age = latest - idx
-    notes = f"Patternsv2 {name} score={score:.2f}"
+    notes = f"Patternsv2 {name} score={score:.2f} | uncalibrated geometric strength"
     if age > 0:
         notes = f"{notes} | chart-scan: triggered {age} bar(s) ago"
     stop_pct = stop_pct_for(df, idx, entry)
@@ -307,6 +307,7 @@ def _to_signal(df: pd.DataFrame, raw: dict, *, symbol: str, timeframe: str, late
         action="BUY" if direction > 0 else "SELL",
         pattern=name,
         timeframe=timeframe,
+        # Retain the ranking scale for callers; this is not a fitted win rate.
         confidence=float(min(1.0, max(0.0, score / 10.0))),
         price=round(entry, 4),
         qty=0.0,
