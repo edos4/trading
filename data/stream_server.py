@@ -540,9 +540,8 @@ class StreamServer:
             nxt = None
             on_asof = 0
             for tape in self._tapes.values():
-                if tape.index_for_asof(self._asof_ts) is None:
-                    continue
-                on_asof += 1
+                if tape.index_for_asof(self._asof_ts) is not None:
+                    on_asof += 1
                 cand = tape.next_ts_after(self._asof_ts)
                 if cand is not None and (nxt is None or cand < nxt):
                     nxt = cand
@@ -554,7 +553,7 @@ class StreamServer:
                 f"StreamServer | advanced asof to {asof_key(nxt)} "
                 f"({on_asof} tape(s) were on the prior date)"
             )
-            return on_asof
+            return max(1, on_asof)
 
         advanced = 0
         for symbol, tape in list(self._tapes.items()):

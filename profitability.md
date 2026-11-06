@@ -47,7 +47,7 @@ issue is committed separately; find its commit with `git log --grep=Fxx`.
 | F07 | Pending | Model-selection boundary and checkpoint provenance |
 | F08 | Pending | Separate management and completed-decision watermarks |
 | F09 | Pending | Held-position coverage and stale-price certification |
-| F10 | Pending | Replay calendar across sparse tapes |
+| F10 | **Done** | Advance over all loaded tapes; 30 replay tests passed |
 | F11 | Pending | Deterministic model scheduling and identical model context |
 | F12 | Pending | Active controls and execution liquidity |
 | F13 | Pending | Complete events, health, run identity and atomic export |
@@ -372,7 +372,16 @@ Sources: [skip handling](/home/engine-33ai/codes/trading/core/scanner.py:786),
 [scan completeness](/home/engine-33ai/codes/trading/core/scanner.py:1127),
 [last-price marks](/home/engine-33ai/codes/trading/core/paper_trader.py:511).
 
-### F10 — P2: sparse tapes can make the shared replay skip a valid date
+### F10 — P2: sparse tapes can make the shared replay skip a valid date — DONE
+
+**Resolution:** pinned replay now chooses the earliest later date across all
+loaded tapes, including symbols missing the current date. End-of-tape is
+reported only when none has a later bar. Tests cover interleaved missing
+sessions, future-only tapes, exhausted reference tapes and monotonic terminal
+behavior. Validation: **30 passed** with the existing replay synchronization
+suite. This fixes date omission; it does not certify the source's exchange
+calendar or missing-price coverage (F09/F14).
+
 
 **Confirmed calendar-control defect.** `StreamServer.advance` only considers
 future dates from tapes that have a bar on the **current** as-of date.
