@@ -546,6 +546,11 @@ research is not an execution-liquidity certificate; spreads, partial fills,
 borrow and independently validated strategy-gate choices remain unresolved.
 Unvalidated signal filters were not re-enabled simply to reduce losses.
 
+**Compatibility follow-up:** direct/legacy adapters may supply no candle
+store; this now records missing liquidity evidence instead of raising an
+attribute error. Strict history mode still refuses it. **74 additional
+regressions passed** across liquidity, execution, TV stacks and V2 adapters.
+
 
 **Confirmed configuration/expectation gap.** Omitting `--pattern-only` does
 not restore confidence, SMA200 regime, R:R or post-loss cooldown checks:

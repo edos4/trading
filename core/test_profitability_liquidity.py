@@ -26,6 +26,7 @@ def test_future_volume_cannot_approve_an_oversized_order():
 def test_missing_history_requires_explicit_certification_policy():
     s=candidate(False)
     assert not execution_liquidity(s,OHLCVStore(),.01,False)['verified']
+    assert not execution_liquidity(s,None,.01,False)['verified']
     with pytest.raises(ValueError,match='20 valid'):
         execution_liquidity(s,OHLCVStore(),.01,True)
     assert _parse_args(['--paper','--kronos-exit-mode','off']).kronos_exit_mode=='off'
