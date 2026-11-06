@@ -46,7 +46,7 @@ issue is committed separately; find its commit with `git log --grep=Fxx`.
 | F06 | Pending | Point-in-time universe and liquidity evidence |
 | F07 | Pending | Model-selection boundary and checkpoint provenance |
 | F08 | **Done** | Persist separate decision completion; retry failures without replaying exits; 152 tests passed |
-| F09 | Pending | Held-position coverage and stale-price certification |
+| F09 | **Done** | Persist uncertified intervals; retain held names and stop after bounded retries; 65 tests passed |
 | F10 | **Done** | Advance over all loaded tapes; 30 replay tests passed |
 | F11 | Pending | Deterministic model scheduling and identical model context |
 | F12 | Pending | Active controls and execution liquidity |
@@ -360,7 +360,18 @@ Sources: [early watermark](/home/engine-33ai/codes/trading/core/scanner.py:1253)
 [caught detector failure](/home/engine-33ai/codes/trading/core/scanner.py:1529),
 [family suppression](/home/engine-33ai/codes/trading/patterns_v2/patterns/__init__.py:45).
 
-### F09 — P1: missing held-name bars leave unverified stops and stale equity
+### F09 — P1: missing held-name bars leave unverified stops and stale equity — DONE
+
+**Resolution:** missing/invalid held-name observations invalidate scan
+completeness and record persistent unresolved execution intervals. Held names
+are never silently marked dead. Historical replay retries the date and stops
+incomplete after three failed observations instead of advancing on stale
+prices indefinitely. Coverage, last observed timestamps and mark semantics
+are exported in `execution_context.execution_coverage`; a later valid bar or
+restart does not erase the unknown interval. No exit is invented. Source
+remediation remains an operator task. Validation: **65 passed** across coverage,
+candle rejection, recovery, exit evidence and paper protection.
+
 
 **Confirmed behavior with material reporting risk.** `asof_mismatch` only
 increments a skip counter; it does not make the scan incomplete. `no_data`

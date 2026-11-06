@@ -331,6 +331,8 @@ class PaperAccount:
         self.execution_model = "causal-v1"
         self.equity_curve: list[tuple[str, float]] = []
         self._last_price: dict[str, float] = {}
+        self._last_price_at: dict[str, str] = {}
+        self.execution_gaps: dict[str, dict] = {}
         self._tick = 0
         # Cumulative scan clock: every completed scan adds its duration here so
         # the desk can show the book's total scanning time (across start/stop
@@ -418,6 +420,14 @@ class PaperAccount:
     # ── Equity / accounting ─────────────────────────────────────────────
     def last_price(self, symbol: str, default: float) -> float:
         return self._last_price.get(symbol, default)
+
+    def record_execution_gap(self, symbol: str, timeframe: str, session: str | None,
+                             reason: str) -> None:
+        """Keep unknown execution intervals visible even after a later valid bar."""
+        with self._lock:
+            key = f'{symbol}|{timeframe}|{session or "unknown"}'
+            self.execution_gaps[key] = {'symbol':symbol,'timeframe':timeframe,
+                                        'session':session,'reason':reason}
 
     def _all_open(self):
         """Yield (symbol, position) for every open trade across all symbols."""
@@ -601,6 +611,12 @@ class PaperAccount:
                 "stop_loss_arm_r": settings.stop_loss_arm_r,
                 "stop_loss_min_risk_frac": settings.stop_loss_min_risk_frac,
                 "target_max_r": settings.target_max_r,
+                "execution_coverage": {
+                    'verified': not self.execution_gaps,
+                    'unresolved_intervals': list(self.execution_gaps.values()),
+                    'last_observed_at': dict(self._last_price_at),
+                    'marks_are_liquidation_values': False,
+                },
             }
 
         long_value = 0.0
@@ -1136,8 +1152,12 @@ class PaperAccount:
         invalid = candle_error(candle)
         if invalid:
             log.warning(f"Paper | ignoring invalid candle for {symbol}: {invalid}")
+            if self.positions.get(symbol):
+                self.record_execution_gap(symbol, timeframe or '1d',
+                    candle.timestamp.isoformat() if isinstance(candle.timestamp, datetime) else None, invalid)
             return []
         self._last_price[symbol] = candle.close
+        self._last_price_at[symbol] = candle.timestamp.isoformat()
         if candle.timestamp is not None:
             if self._sim_now is None or candle.timestamp > self._sim_now:
                 self._sim_now = candle.timestamp
@@ -1363,6 +1383,8 @@ class PaperAccount:
                 "decision_bar_ids": dict(self._decision_bar_ids),
                 "sim_now": self._sim_now.isoformat() if self._sim_now else None,
                 "last_price": dict(self._last_price),
+                "last_price_at": dict(self._last_price_at),
+                "execution_gaps": dict(self.execution_gaps),
                 "positions": {
                     sym: [_trade_to_dict(t) for t in lst]
                     for sym, lst in self.positions.items()
@@ -1443,6 +1465,8 @@ class PaperAccount:
                 continue
         acct._daily_key = data.get("daily_key", "")
         acct._daily_pnl = data.get("daily_pnl", 0.0)
+        acct._last_price_at = dict(data.get('last_price_at') or {})
+        acct.execution_gaps = dict(data.get('execution_gaps') or {})
         acct._processed_bar_ids = {
             str(k): str(v) for k, v in (data.get("processed_bar_ids") or {}).items()
         }

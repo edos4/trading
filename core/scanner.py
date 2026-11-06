@@ -281,6 +281,8 @@ class MarketScanner:
         # One retry per symbol/timeframe/session day. A bar that is still
         # invalid on the next pass must not freeze the whole replay.
         self._invalid_bar_tries: dict[tuple[str, str, str], int] = {}
+        self._missing_execution_tries: dict[tuple, int] = {}
+        self._replay_asof: str | None = None
         # Same (symbol, pattern) → (exit_bar_count, was_loss) cooldown map the
         # backtester uses — without this, paper re-entered losers immediately
         # while backtests waited cooldown_bars. Seed from the persisted ledger
@@ -795,6 +797,9 @@ class MarketScanner:
         log.warning(f"Scan | drop {symbol} for this run — {reason}")
 
     def _note_fetch_skip(self, symbol: str, exc: FetchSkip) -> None:
+        if self._paper is not None and self._paper.open_for(symbol):
+            self._note_missing_execution(symbol, str(exc))
+            return
         if exc.code == "no_data":
             self._note_dead_symbol(symbol, str(exc))
         elif exc.code == "asof_mismatch":
@@ -802,6 +807,21 @@ class MarketScanner:
         else:
             # history_unavailable and other transients: skip this cycle.
             self.stats["snapshot_errors"] += 1
+
+    def _note_missing_execution(self, symbol: str, reason: str) -> None:
+        if self._paper is None or not self._paper.open_for(symbol):
+            return
+        self.stats['snapshot_errors'] += 1
+        self.stats['held_coverage_errors'] = self.stats.get('held_coverage_errors', 0) + 1
+        key = (symbol, self._replay_asof)
+        tries = self._missing_execution_tries.get(key, 0) + 1
+        self._missing_execution_tries[key] = tries
+        for p in self._paper.open_for(symbol):
+            self._paper.record_execution_gap(symbol, p.timeframe, self._replay_asof, reason)
+        if tries >= 3 and self._paper.assume_session_open:
+            self.stats['termination_reason'] = 'missing_execution_bars'
+            self._running = False
+            log.error(f'Replay stopped: missing execution evidence for held {symbol}: {reason}')
 
     def _feed_worker_count(self) -> int:
         n = max(len(self._symbols), 1)
@@ -854,6 +874,7 @@ class MarketScanner:
         for ref in self._pin_candidates():
             asof_day = await pin(ref, feed_sessions[0])
             if asof_day:
+                self._replay_asof = asof_day
                 log.info(f"Scan | replay asof pinned to {asof_day} via {ref}")
                 return
 
@@ -1017,6 +1038,7 @@ class MarketScanner:
                 return None
             if result is None:
                 self.stats["snapshot_errors"] += 1
+                self._note_missing_execution(symbol, 'snapshot unavailable')
                 return None
             closed, pending = self._apply_bar(symbol, timeframe, result)
             if closed:
@@ -1183,6 +1205,7 @@ class MarketScanner:
         from core.candle_validation import candle_error
         invalid = candle_error(candle)
         if invalid:
+            self._note_missing_execution(symbol, invalid)
             stamp = candle.timestamp
             day = stamp.date().isoformat() if isinstance(stamp, datetime) else ""
             key = (symbol, timeframe, day)
