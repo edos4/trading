@@ -116,6 +116,14 @@ default 3 samples, BUY shown; SELL mirrors it):
   (up to N). Missing/invalid simulations never lower the configured majority.
   With five samples, two `up` and three `down` oppose a BUY, even when
   `min_agree=2`. One requested sample requires its one vote.
+- A simulation is *usable* only when it is finite and within
+  `±core.kronos_confirm.MAX_CREDIBLE_RETURN` (50%) of its own anchor. Kronos
+  occasionally collapses on a context it cannot represent: on a 7.8%-ATR name it
+  returned −85%, −66% and −123% closes for one bar. A collapse is not a
+  direction, so it is dropped exactly like a missing simulation — it never
+  votes, and the survivors still have to reach the configured majority.
+  Measured live, usable 1-day votes span −31%..+31%, so the bound separates the
+  artifacts from every observed vote rather than trimming one.
 - Everything else is `no_opinion`.
 - In `confirm` mode both `oppose` and `no_opinion` block. They are counted separately so the
   report can distinguish "the model disagreed" from "the model had nothing to say".
@@ -186,6 +194,15 @@ Sample independence: `predict()` returns a single aggregated DataFrame even when
 `(symbol, anchor_date, sample_index)` via `torch.manual_seed` so a rerun is reproducible and
 the cache is meaningful. If the upstream predictor exposes its own seed kwarg, prefer it; the
 design does not depend on which.
+
+Unusable simulations are dropped per sample, never per symbol: when one draw collapses the
+worker still draws the remaining `samples`, so N−1 votes survive and the gate's majority rule
+decides on them. A symbol whose simulations are *all* unusable returns an empty forecast
+rather than an exception — that is the gate's `no_opinion` case ("only 0 usable
+forecast(s); need 2 to vote"), not a worker failure, and the worker logs the rejected count
+(`rejected` in its payload). Raising instead put a raw `ValueError` in the Paper signal log
+on every scan of the same `(symbol, anchor_date)`, because a failed forecast is deliberately
+never cached.
 
 The worker loads `finetuned` by default and never both models — that is why this is a
 separate script rather than a flag on `scripts/kronos_web_forecast.py`, which always loads
@@ -326,13 +343,19 @@ Pure logic and wiring, no GPU and no database:
 
 ```bash
 .venv/bin/pytest core/test_kronos_confirm.py -q
+.venv/bin/pytest core/test_kronos_confirm_worker.py -q
 .venv/bin/pytest core/test_scanner_kronos_confirm.py -q
 .venv/bin/pytest -m "not slow" -q
 ```
 
 - `core/test_kronos_confirm.py` — band clamps at both ends; `classify` at exact boundaries;
   vote tallies; the full 3-vote truth table including `min_agree` ties; cache hit/miss;
-  unavailable → `no_opinion`.
+  unavailable → `no_opinion`; the credibility bound dropping an implausible simulation
+  instead of letting it manufacture a majority; an all-unusable forecast reading as
+  `no_opinion` rather than a worker error.
+- `core/test_kronos_confirm_worker.py` — input validation, per-sample seeding, and the
+  per-sample drop rule: one degenerate draw leaves the other votes intact and is counted in
+  `rejected`, and a bad draw never reaches `returns`.
 - `core/test_scanner_kronos_confirm.py` — modelled on `core/test_scanner_dii_gate.py`:
   mocked store, `votes_fn` injected. Asserts shadow never blocks and stamps evidence;
   `confirm` queues only `confirm`; `oppose` and `no_opinion` both block; unavailable and
@@ -439,3 +462,27 @@ access was required for async/HTTP tests. Forecasts were injected in tests; this
 does not measure live GPU prediction quality. The configured worker and selected
 fine-tuned checkpoint directories were checked for availability without starting
 or changing a running paper book.
+
+### Collapsed simulations no longer abort a symbol
+
+A replay scan of the US paper book filled the Paper tab's signal log with
+`Kronos worker error for STTK: ValueError: Kronos returned a nonpositive or
+nonfinite predicted close`. Reproduced against the real checkpoint: for that
+`(symbol, anchor date)` the fine-tuned model returns collapsed paths — closes of
+−123%, −66% and −85% on a 7.8%-ATR name whose siblings sit at −31%..+31%.
+
+Two defects, one root: an unusable draw was treated as a symbol-level failure.
+The worker raised on the *first* bad draw, so the other two simulations were
+discarded and the raw exception was re-created on every scan (a failed forecast
+is deliberately never cached), while a merely *implausible* draw — positive, so
+it passed the old check — would have become a decisive `down` vote, vetoing
+entries and arming the exit gate with a number the model never predicted.
+
+Now an unusable draw only removes itself: the worker keeps sampling, the gate
+drops implausible returns in `summarize`, and whichever simulations survive still
+have to reach the configured majority. STTK's three collapsed draws leave an
+empty vote set, which reads as `no_opinion` ("only 0 usable forecast(s); need 2
+to vote") and blocks the entry exactly as the failure table says it should —
+without a `ValueError` in the log. AAPL and MSFT votes are unchanged by the
+change, and the credibility bound is a single constant,
+`core.kronos_confirm.MAX_CREDIBLE_RETURN`.

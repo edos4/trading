@@ -62,10 +62,45 @@ def test_one_day_samples_have_distinct_reproducible_seeds_and_daily_atr():
 
 @pytest.mark.parametrize("price", [0, np.nan, np.inf])
 def test_bad_predicted_prices_never_become_directional_votes(price):
+    """The invariant is the vote, not the transport: a bad close never votes.
+
+    It used to abort the symbol with a ValueError, which surfaced the raw
+    exception in the Paper signal log on every scan of that anchor date.
+    """
     predictor = SimpleNamespace(set_seed=lambda _: None,
                                 predict=lambda **kw: pd.DataFrame({"close": [price]}))
-    with pytest.raises(ValueError, match="predicted close"):
-        worker.forecast_returns(predictor, "TEST", frame(), 3)
+    row = worker.forecast_returns(predictor, "TEST", frame(), 3)
+    assert row["returns"] == [] and row["predicted"] == [] and row["rejected"] == 3
+
+
+def test_one_unusable_simulation_does_not_discard_the_others():
+    """A degenerate draw must not take the whole symbol's vote set with it."""
+    predictor = SimpleNamespace(
+        set_seed=lambda _: None,
+        predict=Mock(side_effect=[pd.DataFrame({"close": [v]}) for v in (101., 0., 103.)]),
+    )
+    row = worker.forecast_returns(predictor, "TEST", frame(), 3)
+    assert predictor.predict.call_count == 3
+    assert row["returns"] == [pytest.approx(0.01), pytest.approx(0.03)]
+    assert row["predicted"] == [101.0, 103.0]
+    assert row["rejected"] == 1
+
+
+@pytest.mark.parametrize("price", [-120., 160.])
+def test_implausible_simulations_are_rejected_like_invalid_ones(price):
+    predictor = SimpleNamespace(set_seed=lambda _: None,
+                                predict=lambda **kw: pd.DataFrame({"close": [price]}))
+    row = worker.forecast_returns(predictor, "TEST", frame(), 3)
+    assert row["returns"] == [] and row["rejected"] == 3
+
+
+def test_credible_close_boundary_matches_the_gate_budget():
+    from core.kronos_confirm import MAX_CREDIBLE_RETURN
+
+    assert worker._credible_close(100.0 * (1 + MAX_CREDIBLE_RETURN), 100.0) is True
+    assert worker._credible_close(100.0 * (1 + MAX_CREDIBLE_RETURN) + 0.01, 100.0) is False
+    assert worker._credible_close(100.0 * (1 - MAX_CREDIBLE_RETURN) - 0.01, 100.0) is False
+    assert worker._credible_close(0.0, 100.0) is False
 
 
 def test_selected_finetuned_model_cannot_silently_fall_back_to_base(monkeypatch, tmp_path):

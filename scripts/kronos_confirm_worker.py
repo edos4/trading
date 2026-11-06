@@ -103,9 +103,27 @@ def _seed(symbol: str, anchor_date: str, sample_index: int) -> int:
     return zlib.crc32(raw) & 0x7FFFFFFF
 
 
+def _credible_close(predicted_close: float, anchor_close: float) -> bool:
+    """Whether a sampled close may stand as a one-day forecast.
+
+    Non-finite, nonpositive, collapsed and exploded closes are all model
+    artifacts rather than directional evidence (docs/kronos-3-preds.md §4), so
+    all of them are rejected the same way.
+    """
+    from core.kronos_confirm import MAX_CREDIBLE_RETURN
+
+    if not np.isfinite(predicted_close) or predicted_close <= 0:
+        return False
+    if not np.isfinite(anchor_close) or anchor_close <= 0:
+        return False
+    return abs(predicted_close / anchor_close - 1.0) <= MAX_CREDIBLE_RETURN
+
+
 def forecast_returns(
     predictor, symbol: str, df: pd.DataFrame, samples: int, lookback: int = LOOKBACK,
 ) -> dict:
+    from core.kronos_confirm import atr_pct_from_frame
+
     prepared = _prep_1d_frame(df, lookback)
     if prepared is None:
         if df is None or len(df) < MIN_BARS:
@@ -116,6 +134,7 @@ def forecast_returns(
     use_seed = callable(getattr(predictor, "set_seed", None))
     returns: list[float] = []
     predicted: list[float] = []
+    rejected = 0
     for index in range(samples):
         seed = _seed(symbol, anchor_date, index)
         if use_seed:
@@ -135,11 +154,22 @@ def forecast_returns(
             verbose=False,
         )
         predicted_close = float(pred["close"].iloc[0])
-        if not np.isfinite(predicted_close) or predicted_close <= 0:
-            raise ValueError("Kronos returned a nonpositive or nonfinite predicted close")
+        # One unusable simulation must not discard the whole symbol. Dropping it
+        # leaves the gate's majority rule to block on the survivors, where
+        # aborting the symbol raised a raw worker error on every scan instead.
+        if not _credible_close(predicted_close, anchor_close):
+            rejected += 1
+            continue
         predicted.append(round(predicted_close, 4))
         returns.append(predicted_close / anchor_close - 1.0)
-    from core.kronos_confirm import atr_pct_from_frame
+    if rejected:
+        log.warning(
+            f"Kronos-confirm | {symbol} dropped {rejected}/{samples} unusable simulations"
+        )
+    # A model that produced no usable simulation has nothing to say, which is
+    # the gate's no_opinion case, not a worker failure. Raising here put an
+    # unreadable ValueError in the Paper signal log on every scan of the same
+    # (symbol, anchor date); the surviving count travels in the payload instead.
     return {
         "symbol": symbol.upper(),
         "anchor_close": round(anchor_close, 4),
@@ -147,6 +177,7 @@ def forecast_returns(
         "atr_pct": atr_pct_from_frame(x_df, anchor_close),
         "predicted": predicted,
         "returns": [round(value, 6) for value in returns],
+        "rejected": rejected,
     }
 
 

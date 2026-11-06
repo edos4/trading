@@ -31,6 +31,15 @@ WORKER_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "kronos_con
 ATR_PERIOD = 14
 MIN_BARS = 60
 
+# A one-day forecast further than this from its own anchor is not a forecast.
+# Kronos occasionally collapses on a context it cannot represent: on a 7.8%-ATR
+# name it returned closes of -85% and -66% (its sibling sample was nonpositive).
+# Usable paper votes span about -31%..+31% at this horizon, so the bound
+# separates the two without touching any observed vote. An implausible
+# simulation is dropped exactly like a non-finite one: it never votes, and it
+# never lowers the majority that the surviving samples must reach.
+MAX_CREDIBLE_RETURN = 0.50
+
 Direction = Literal["up", "down", "flat"]
 Decision = Literal["confirm", "oppose", "no_opinion"]
 
@@ -147,7 +156,19 @@ def summarize(
     band_pct: float,
     returns: Sequence[float],
 ) -> ConfirmSummary:
-    usable = tuple(float(r) for r in returns if _finite(r))
+    """Count the simulations that may vote.
+
+    A return that is non-finite or beyond ±``MAX_CREDIBLE_RETURN`` is not
+    evidence about direction, it is a model artifact, so it is dropped — the
+    same way a missing simulation is. Survivors still have to reach the
+    configured majority in ``evaluate``, so dropping one never makes a
+    confirmation easier.
+    """
+    usable = tuple(
+        value
+        for value in (float(r) for r in returns if _finite(r))
+        if abs(value) <= MAX_CREDIBLE_RETURN
+    )
     counts = {"up": 0, "down": 0, "flat": 0}
     for ret in usable:
         counts[classify(ret, band_pct)] += 1

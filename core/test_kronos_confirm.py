@@ -60,6 +60,21 @@ def test_vote_tally():
     assert summary.mean_return == pytest.approx(0.0)
 
 
+def test_implausible_simulation_is_dropped_instead_of_voting():
+    """A collapsed or exploded close is an artifact, not a directional vote."""
+    summary = summarize(100.0, 0.56, (0.01, 0.9, 0.02))
+    assert summary.returns == (0.01, 0.02)
+    assert (summary.up, summary.down, summary.flat) == (2, 0, 0)
+    assert summarize(100.0, 0.56, (-0.9, -0.8, 0.01)).returns == (0.01,)
+
+
+def test_implausible_simulations_cannot_manufacture_a_majority():
+    # Without the credibility bound these two artifacts would oppose the BUY.
+    assert _verdict((0.01, -0.9, -0.8), "BUY").decision == "no_opinion"
+    verdict = _verdict((0.01, -0.9, -0.8), "BUY")
+    assert "usable" in verdict.reason
+
+
 @pytest.mark.parametrize("returns,action,expected", [
     ((0.01, 0.02, -0.01), "BUY", "confirm"),
     ((0.01, 0.02, 0.0), "BUY", "confirm"),
@@ -141,6 +156,20 @@ def test_unavailable_is_no_opinion():
     rows = gate.flush()
     assert rows[0][2].decision == "no_opinion"
     assert "unavailable" in rows[0][3]["reason"].lower()
+
+
+def test_no_usable_simulation_is_no_opinion_not_a_worker_error():
+    """The worker's all-rejected row must read as "nothing to say"."""
+    def fetch(symbols):
+        empty: tuple[float, ...] = ()
+        return {symbol: empty for symbol in symbols}
+
+    gate = KronosConfirmGate(mode="confirm", fetch_fn=fetch)
+    gate.queue(_signal(), _candle(), None)
+    rows = gate.flush()
+    assert rows[0][2].decision == "no_opinion"
+    assert "usable" in rows[0][3]["reason"]
+    assert "worker error" not in rows[0][3]["reason"].lower()
 
 
 def test_over_cap_symbols_vote_no_opinion():
