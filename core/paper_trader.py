@@ -627,6 +627,11 @@ class PaperAccount:
                     'max_daily_loss':self.max_daily_loss,
                     'short_collateral':'sale proceeds plus 100% entry notional; no borrow certification',
                 },
+                "execution_liquidity": {
+                    'maximum_prior_daily_share_participation':settings.paper_max_volume_participation,
+                    'require_history':settings.paper_require_liquidity_history,
+                    'missing_history_is_certified':False,
+                },
                 "run_manifest": deepcopy(self.run_manifest),
                 "initial_capital": initial_capital,
                 "txn_cost_pct_per_side": self.txn_cost_pct,
@@ -973,6 +978,14 @@ class PaperAccount:
             reason = self._funding_rejection(signal, entry_price)
             if reason:
                 return False, reason
+            from core.paper_liquidity import execution_liquidity
+            try:
+                liquidity=execution_liquidity(signal,store,settings.paper_max_volume_participation,
+                                               settings.paper_require_liquidity_history)
+            except ValueError as exc:
+                return False,str(exc)
+        else:
+            liquidity={'verified':False,'reason':'independent-trade research model'}
 
         fill_candle = candle
         slip = self.slippage_pct
@@ -993,6 +1006,7 @@ class PaperAccount:
         # fill needs the real wall-clock moment. Keep the bar time in
         # sim_entry_date so days_held() still reports simulated holding time.
         position.sim_entry_date = position.entry_date
+        position.resolved_rules['execution_liquidity']=liquidity
         position.entry_date = datetime.now(timezone.utc)
         position.exit_date = position.entry_date
         position.entry_fee_paid = position.entry_price * position.qty * self.txn_cost_pct

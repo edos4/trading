@@ -137,6 +137,7 @@ def paper_run_settings(
     duration_days: int | None = None,
     kronos_gate_mode: str | None = None,
     kronos_gate_samples: int | None = None,
+    kronos_exit_mode: str | None = None,
 ) -> dict[str, Any]:
     """The filters one paper run was started with, as exportable JSON.
 
@@ -176,7 +177,7 @@ def paper_run_settings(
         "laya_mode": laya_mode or "off",
         "laya_policy_id": laya_policy_id or "",
         "kronos_gate_mode": (settings.kronos_gate_mode if kronos_gate_mode is None else kronos_gate_mode).strip().lower(),
-        "kronos_exit_mode": settings.kronos_exit_mode,
+        "kronos_exit_mode": settings.kronos_exit_mode if kronos_exit_mode is None else kronos_exit_mode,
         "kronos_gate_samples": (
             _normalize_samples(kronos_gate_samples or settings.kronos_gate_samples)
         ),

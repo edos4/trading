@@ -117,6 +117,8 @@ class Settings(BaseSettings):
     paper_account_model: Literal['funded', 'independent-fixed-notional'] = 'funded'
     paper_max_open_per_symbol: int = 1
     paper_max_gross_exposure: float = 1.0
+    paper_max_volume_participation: float = 0.01
+    paper_require_liquidity_history: bool = False
 
     # ── Paper trade stream (replays stocks_history when markets are closed) ──
     papertrade_stream_host: str = "127.0.0.1"
@@ -409,7 +411,7 @@ class Settings(BaseSettings):
         "extra": "ignore",
     }
 
-    @field_validator('paper_max_gross_exposure')
+    @field_validator('paper_max_gross_exposure','paper_max_volume_participation')
     @classmethod
     def _positive_paper_exposure(cls, value: float) -> float:
         import math

@@ -224,6 +224,7 @@ async def run_paper(
     kronos_gate_samples: int | None = None,
     paper_universe: str | None = None,
     stream_end: str | None = None,
+    kronos_exit_mode: str | None = None,
 ) -> None:
     os.makedirs("logs", exist_ok=True)
     os.makedirs("charts", exist_ok=True)
@@ -294,6 +295,7 @@ async def run_paper(
         duration_days=duration_days,
         kronos_gate_mode=kronos_gate_mode or settings.kronos_gate_mode,
         kronos_gate_samples=kronos_gate_samples,
+        kronos_exit_mode=kronos_exit_mode,
     )
     run_status = paper_run_status(run_settings)
 
@@ -382,6 +384,7 @@ async def run_paper(
             kronos_gate_mode=kronos_gate_mode,
             kronos_gate_samples=kronos_gate_samples,
             stream_end=stream_end,
+            kronos_exit_mode=kronos_exit_mode,
         )
         account.run_manifest['universe']={**universe_evidence,'requested':n_symbols,'returned':len(symbols)}
         account.run_manifest['stream_end']=stream_end
@@ -661,6 +664,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help='With --paper --stream=DATE, load a dated JSON universe instead of current ranks.')
     parser.add_argument('--stream-end',type=parse_stream_date,default=None,metavar='DATE',
                         help='Inclusive final session for a dated paper replay; no forced liquidation.')
+    parser.add_argument('--kronos-exit-mode',choices=['off','shadow','exit'],default=None,
+                        help='Paper open-position model policy, independent of entry confirmation.')
     parser.add_argument(
         "--duration-days",
         type=int,
@@ -932,6 +937,7 @@ async def main(args: argparse.Namespace | None = None) -> None:
             kronos_gate_samples=args.kronos_gate_samples,
             paper_universe=args.paper_universe,
             stream_end=args.stream_end,
+            kronos_exit_mode=args.kronos_exit_mode,
         )
     elif args.backtest is not None:
         await run_backtest(

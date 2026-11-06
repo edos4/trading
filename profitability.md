@@ -49,7 +49,7 @@ issue is committed separately; find its commit with `git log --grep=Fxx`.
 | F09 | **Done** | Persist uncertified intervals; retain held names and stop after bounded retries; 65 tests passed |
 | F10 | **Done** | Advance over all loaded tapes; 30 replay tests passed |
 | F11 | **Partial** | Exact causal scanner context and deterministic budget (92 tests); capacity/deferred-work policy remains |
-| F12 | Pending | Active controls and execution liquidity |
+| F12 | **Partial** | Active controls, causal participation and strict screener floor (89 tests); execution realism remains |
 | F13 | **Done** | Full journal, source/run identities, causal contexts, totals and atomic export; 67 tests passed |
 | F14 | **Partial** | Inclusive cutoff and net liquidation accounting (34 tests); corporate-action data unavailable |
 | F15 | **Done** | Cross-process ledger/cursor leases, safe port refusal and export backup; 48 tests passed |
@@ -531,7 +531,21 @@ Sources: [budget priority](/home/engine-33ai/codes/trading/core/kronos_confirm.p
 [worker database](/home/engine-33ai/codes/trading/scripts/kronos_confirm_worker.py:42),
 [GPU lock/timeout](/home/engine-33ai/codes/trading/core/kronos_process.py:50).
 
-### F12 — P2: strategy controls are dead, hidden, or not liquidity controls
+### F12 — P2: strategy controls are dead, hidden, or not liquidity controls — PARTIAL
+
+**Shipped correction:** run manifests enumerate active controls and explicitly
+identify inactive confidence/regime/cooldown/R:R compatibility gates. CLI
+`--kronos-exit-mode=off|shadow|exit` makes exits independent of entry confirmation
+in both runtime and exported settings. The US screener never falls back to
+unfiltered symbols when its turnover floor removes everything. Funded fills
+check a configurable maximum participation against 20 prior dated volume
+observations, excluding execution-session future volume; missing history is
+saved as unverified and `PAPER_REQUIRE_LIQUIDITY_HISTORY=true` rejects it.
+Validation: **89 passed**. **Remaining:** default permissive missing-history
+research is not an execution-liquidity certificate; spreads, partial fills,
+borrow and independently validated strategy-gate choices remain unresolved.
+Unvalidated signal filters were not re-enabled simply to reduce losses.
+
 
 **Confirmed configuration/expectation gap.** Omitting `--pattern-only` does
 not restore confidence, SMA200 regime, R:R or post-loss cooldown checks:

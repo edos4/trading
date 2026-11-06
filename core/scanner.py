@@ -411,6 +411,17 @@ class MarketScanner:
             )
             self._kronos_pending = self._kronos_gate.pending
             self._kronos_exit_pending = self._kronos_gate.pending_exits
+        if self._paper is not None:
+            self._paper.run_manifest['active_controls']={
+                'account_model':self._paper.account_model,'volume_gate':self._volume_gate,
+                'dii_mode':'shadow' if settings.dii_gate_shadow else settings.paper_dii_gate_mode,
+                'vision':settings.vision_confirmation_enabled,'collect_first':self._collect_first,
+                'kronos_entry':self._kronos_mode,'kronos_exit':self._kronos_exit_mode,
+                'inactive_compatibility_gates':['minimum_confidence','SMA200_regime','post_loss_cooldown','generic_RR'],
+                'geometry_and_net_target_checks':True,
+                'liquidity_history_required':settings.paper_require_liquidity_history,
+                'max_daily_share_participation':settings.paper_max_volume_participation,
+            }
 
     def _load_rule_filter(self) -> None:
         from core.rule_contracts import RulePayload

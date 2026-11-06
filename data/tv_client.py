@@ -462,10 +462,9 @@ class TVClient:
             if filtered.empty:
                 log.warning(
                     f"TVClient | ADV floor {min_value:.0f} removed every row — "
-                    f"keeping unfiltered top {want_n}"
+                    "universe is empty"
                 )
-            else:
-                df = filtered
+            df = filtered
 
         return _rows_from_screener_df(df, want_n)
 
