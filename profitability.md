@@ -1,5 +1,16 @@
 # Profitability audit of the V2 / Kronos paper replay
 
+**Implementation checkpoint — November 6, 2026:** **9 issues done, 6 partial**.
+Every issue has its own commit(s), listed below. New/reset paper books now use
+funded admission and configured slippage; old saved books retain their explicit
+historical model. The operator confirmed that dated membership, verified
+corporate-action metadata and authentic Kronos selection records are unavailable,
+so those claims remain uncertified. Independent strategy validation and realistic
+execution/borrow modelling are also unfinished. No profitable edge is claimed.
+
+The original audit evidence is preserved below; resolution notes and the tracker
+supersede its descriptions of old behavior.
+
 Reviewed November 6, 2026 (Asia/Manila), against working tree based on
 `a552f4748ac698250df5038ca426114e3357defd`, including the existing uncommitted
 V2 detector changes. This is a command-path and execution audit, not a new
@@ -36,23 +47,51 @@ shipped correction and passing relevant checks. **Partial** means code improved
 but stated acceptance criteria or external validation remain. Each resolved
 issue is committed separately; find its commit with `git log --grep=Fxx`.
 
-| Issue | Status | Resolution / remaining work |
-| --- | --- | --- |
-| F01 | **Done** | Funded admission, collateral and deterministic opening phase; 104 tests passed |
-| F02 | **Done** | Reject malformed execution observations; 67 focused tests passed |
-| F03 | **Done** | Cost-aware target and opening forecast checks; 86 focused tests passed |
-| F04 | **Partial** | Combined policy and binding order exposed (56 tests); independent evaluation remains |
-| F05 | **Partial** | Configured slippage fixed (85 tests); borrow/financing/partial-fill modelling remains |
-| F06 | **Partial** | Dated universe input and bias manifest (15 tests); verified historical membership still required |
-| F07 | **Partial** | Checkpoint identity/selection guards (77 tests); authentic training manifest unavailable |
-| F08 | **Done** | Persist separate decision completion; retry failures without replaying exits; 152 tests passed |
-| F09 | **Done** | Persist uncertified intervals; retain held names and stop after bounded retries; 65 tests passed |
-| F10 | **Done** | Advance over all loaded tapes; 30 replay tests passed |
-| F11 | **Done** | Exact context, deterministic budget and bounded same-session deferral; 92 + 80 tests passed |
-| F12 | **Partial** | Active controls, causal participation and strict screener floor (89 tests); execution realism remains |
-| F13 | **Done** | Full journal, source/run identities, causal contexts, totals and atomic export; 67 tests passed |
-| F14 | **Partial** | Inclusive cutoff and net liquidation accounting (34 tests); corporate-action data unavailable |
-| F15 | **Done** | Cross-process ledger/cursor leases, safe port refusal and export backup; 48 tests passed |
+| Issue | Status | Resolution / remaining work | Commit(s) |
+| --- | --- | --- | --- |
+| F01 | **Done** | Funded admission, collateral and deterministic opening phase; 104 tests passed | `aeab813, d5a47d2` |
+| F02 | **Done** | Reject malformed execution observations; 67 focused tests passed | `fa97f1c, 12a585e, 3a194a1` |
+| F03 | **Done** | Cost-aware target and opening forecast checks; 86 focused tests passed | `074b118` |
+| F04 | **Partial** | Combined policy and binding order exposed (56 tests); independent evaluation remains | `dc81c8f` |
+| F05 | **Partial** | Configured slippage fixed (85 tests); borrow/financing/partial-fill modelling remains | `acb303a` |
+| F06 | **Partial** | Dated universe input and bias manifest (15 tests); verified historical membership still required | `3cdfaa1` |
+| F07 | **Partial** | Checkpoint identity/selection guards (77 tests); authentic training manifest unavailable | `7f86268` |
+| F08 | **Done** | Persist separate decision completion; retry failures without replaying exits; 152 tests passed | `74abcc7` |
+| F09 | **Done** | Persist uncertified intervals; retain held names and stop after bounded retries; 65 tests passed | `31309aa` |
+| F10 | **Done** | Advance over all loaded tapes; 30 replay tests passed | `f9a2727` |
+| F11 | **Done** | Exact context, deterministic budget and bounded same-session deferral; 92 + 80 tests passed | `c101500, 06acb2d` |
+| F12 | **Partial** | Active controls, causal participation and strict screener floor (89 tests); execution realism remains | `4dea7b1, 80e6c4e` |
+| F13 | **Done** | Full journal, source/run identities, causal contexts, totals and atomic export; 67 tests passed | `a1dae07, a6a5c70` |
+| F14 | **Partial** | Inclusive cutoff and net liquidation accounting (34 tests); corporate-action data unavailable | `92c15fb` |
+| F15 | **Done** | Cross-process ledger/cursor leases, safe port refusal and export backup; 48 tests passed | `af52fec` |
+
+## Final implementation validation
+
+The exact committed Python source passed the full non-slow suite in an isolated
+copy of tracked files, with no operator `.env`, runtime ledger or tape cache:
+**2,560 passed, 154 skipped, 10 deselected, 5 subtests passed**. Local sockets were
+available for async/HTTP checks. Nine warnings were the existing Loguru deprecation
+and NumPy divisions on constant synthetic scoring inputs. Opt-in suites, including
+the disposable database/catalog coverage, remain skipped; slow golden-number
+checks were excluded. The first broad attempt exposed adapter regressions and
+fixture assumptions, plus a temporary runner/cwd problem; all were resolved before
+this final passing run. `git diff --check` passed.
+
+The full output is temporarily available at
+[/tmp/profitability_full_suite_final.txt](/tmp/profitability_full_suite_final.txt).
+The isolated source snapshot is `/tmp/profitability-validation-ew25yz1i`; source
+and adversarial regression tests are committed in the workspace. No live GPU
+forecast, full historical strategy replay, corporate-action reconstruction or
+holdout profitability result was run or inferred. The requested reset replay was
+not executed, and the existing `pt.json` was not overwritten. The pre-existing
+untracked `patternsv2-findings.md` was left untouched.
+
+Continue from the six **Partial** rows. Do not mark them done merely because
+engineering tests pass: F04 needs independent combined-policy outcomes; F05 needs
+execution/borrow/financing models and inputs; F06 needs authentic dated membership;
+F07 needs checkpoint-linked training/selection records; F12 needs complete
+execution-liquidity evidence; F14 needs verified corporate actions/adjustments and
+terminal coverage. Each section specifies the shipped guard and remaining work.
 
 ## What the command actually does
 
@@ -783,7 +822,7 @@ These are proposed corrections and validation requirements. No claim is made
 that restoring a particular signal filter, widening a stop, removing shorts,
 or increasing trade count will improve profit without outcome evidence.
 
-## Validation record
+## Original audit validation record
 
 **273 focused existing regressions passed**, covering CLI parsing, Kronos
 votes/worker context, scanner confirmation/exits/recovery, short entry policy,
@@ -817,7 +856,8 @@ WATCHLIST=SPY TV_SCREENER=america TV_EXCHANGE=NASDAQ \
   /home/engine-33ai/codes/trading/.venv/bin/python /tmp/profitability_trace_probe.py
 ```
 
-Selected source SHA-256 values bind this audit to the mixed working tree:
+Selected source SHA-256 values bind the **original audit snapshot**, not the
+latest implementation, to its mixed working tree:
 
 | File | SHA-256 |
 | --- | --- |
