@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{% block title %}Trading Bot{% endblock %}</title>
-  <link rel="stylesheet" href="/static/app.css?v=31" />
+  <link rel="stylesheet" href="/static/app.css?v=32" />
 </head>
 <body>
   {% if user %}
@@ -19,6 +19,7 @@
       <a href="/builder" class="{% if active == 'builder' %}active{% endif %}">Builder</a>
       <a href="/laya" class="{% if active == 'laya' %}active{% endif %}">Laya</a>
       <a href="/system" class="{% if active == 'system' %}active{% endif %}">System</a>
+      <a href="/settings" class="{% if active == 'settings' %}active{% endif %}">Settings</a>
       {% if hermes_enabled %}<a href="/hermes" class="{% if active == 'hermes' %}active{% endif %}">Hermes</a>{% endif %}
       <a href="/kronos" class="{% if active == 'kronos' %}active{% endif %}">Kronos</a>
       <a href="/docs" class="{% if active == 'docs' %}active{% endif %}">Documentation</a>

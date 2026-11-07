@@ -402,6 +402,41 @@ def create_app() -> FastAPI:
     async def system_page(request: Request, _user: str = Depends(require_login)):
         return render(request, "system.html", active="system")
 
+    # ── Settings ──────────────────────────────────────────────────────────
+    @app.get("/settings", response_class=HTMLResponse)
+    async def settings_page(request: Request, _user: str = Depends(require_login)):
+        from web import settings_store
+
+        return render(request, "settings.html", active="settings",
+                      catalog=settings_store.describe())
+
+    @app.get("/api/settings")
+    async def api_settings(_user: str = Depends(require_login)):
+        from web import settings_store
+
+        return settings_store.describe()
+
+    @app.post("/api/settings")
+    async def api_settings_save(request: Request, _user: str = Depends(require_login)):
+        from web import settings_store
+
+        try:
+            body = await _json_body(request)
+            values = body.get("values")
+            if not isinstance(values, dict):
+                raise settings_store.SettingsError("values must be an object")
+            return settings_store.save(values)
+        except settings_store.SettingsError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
+        except Exception:
+            log.exception("Web settings | save failed")
+            return JSONResponse(
+                {"detail": "Could not save settings; see server logs."},
+                status_code=500,
+            )
+
     @app.get("/api/system")
     async def api_system(top: int = 6, _user: str = Depends(require_login)):
         try:

@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Settings — Trading Bot{% endblock %}
+{% block content %}
+<form id="settings-form" autocomplete="off">
+  <section class="panel page-head settings-head">
+    <div class="page-head-title">
+      <h1>Settings</h1>
+      <p class="muted small">Every value in <code>{{ catalog.env_file }}</code>, grouped by area.
+        Each field explains what it controls. Saves are written back to the env file and applied
+        to the running process; fields marked <span class="pill">restart</span> need a web-service
+        restart before they take effect.</p>
+      <p class="muted small">Secrets are never shown. Leave a secret box blank to keep the current
+        value, or tick <strong>Clear</strong> to remove it.</p>
+    </div>
+    <div class="page-head-controls settings-controls">
+      <label>Search <input type="search" id="settings-search" placeholder="name, env var or description" /></label>
+      <div class="settings-actions">
+        <button type="button" class="btn ghost" id="settings-reset" disabled>Reset</button>
+        <button type="submit" class="btn primary" id="settings-save" disabled>Save changes</button>
+      </div>
+      <span id="settings-status" class="status" role="status" aria-live="polite"></span>
+    </div>
+  </section>
+
+  <div id="settings-empty" class="panel muted small" hidden>No settings match that search.</div>
+
+  {% for group in catalog.groups %}
+  <details class="panel settings-group" data-group="{{ group.id }}" open>
+    <summary>
+      <span class="settings-group-title">{{ group.title }}</span>
+      <span class="muted small">{{ group.fields|length }} settings</span>
+    </summary>
+    <p class="muted small settings-blurb">{{ group.blurb }}</p>
+    <div class="settings-grid">
+      {% for f in group.fields %}
+      <div class="settings-field" data-field="{{ f.name }}"
+           data-search="{{ (f.label ~ ' ' ~ f.env ~ ' ' ~ f.description)|lower }}">
+        <div class="settings-field-head">
+          <label for="set-{{ f.name }}">{{ f.label }}</label>
+          {% if f.restart %}<span class="pill">restart</span>{% endif %}
+          {% if f.kind == 'secret' %}
+          <span class="settings-secret-state {% if f.configured %}is-set{% endif %}">
+            {% if f.configured %}Set{% else %}Not set{% endif %}
+          </span>
+          {% endif %}
+        </div>
+        <p class="settings-desc">{{ f.description }}</p>
+        <p class="settings-env"><code>{{ f.env }}</code></p>
+        <div class="settings-control">
+          {% if f.kind == 'bool' %}
+          <label class="check">
+            <input type="checkbox" id="set-{{ f.name }}" data-setting="{{ f.name }}"
+                   data-kind="bool" {% if f.value %}checked{% endif %} />
+            <span>Enabled</span>
+          </label>
+          {% elif f.kind == 'select' %}
+          <select id="set-{{ f.name }}" data-setting="{{ f.name }}" data-kind="text">
+            {% for option in f.options %}
+            <option value="{{ option }}" {% if f.value|string == option %}selected{% endif %}>{{ option }}</option>
+            {% endfor %}
+          </select>
+          {% elif f.kind == 'int' or f.kind == 'float' %}
+          <input type="number" id="set-{{ f.name }}" data-setting="{{ f.name }}"
+                 data-kind="{{ f.kind }}" step="{{ 1 if f.kind == 'int' else 'any' }}"
+                 value="{{ f.value if f.value is not none else '' }}" />
+          {% elif f.kind == 'secret' %}
+          <input type="password" id="set-{{ f.name }}" data-setting="{{ f.name }}"
+                 data-kind="secret" autocomplete="new-password"
+                 placeholder="{% if f.configured %}Leave blank to keep current{% else %}Not configured — enter a value{% endif %}" />
+          <label class="check settings-clear" {% if not f.configured %}hidden{% endif %}>
+            <input type="checkbox" data-clear-for="{{ f.name }}" {% if not f.configured %}disabled{% endif %} />
+            <span>Clear</span>
+          </label>
+          {% else %}
+          <input type="text" id="set-{{ f.name }}" data-setting="{{ f.name }}"
+                 data-kind="text" value="{{ f.value if f.value is not none else '' }}" />
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </details>
+  {% endfor %}
+
+  <div class="settings-savebar">
+    <span class="muted small" id="settings-dirty">No unsaved changes</span>
+    <div class="settings-actions">
+      <button type="button" class="btn ghost" id="settings-reset-bottom" disabled>Reset</button>
+      <button type="submit" class="btn primary" id="settings-save-bottom" disabled>Save changes</button>
+    </div>
+  </div>
+</form>
+{% endblock %}
+{% block scripts %}
+<script src="/static/settings.js?v=1"></script>
+{% endblock %}
