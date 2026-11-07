@@ -305,10 +305,18 @@ SYMBOL_EXCHANGE_OVERRIDES: dict[str, str] = {
 _SYMBOLS_CACHE_DIR = Path("data/cache")
 _SYMBOLS_CACHE_TTL_SECONDS = 6 * 3600
 
-# TradingView's `value` column is None for every PSE row. Peso turnover lives
-# in `Value.Traded`; 10-day ADV ≈ close * average_volume_10d_calc.
-_PH_TRADED_COL = "Value.Traded"
-_PH_AVG_VOL_COL = "average_volume_10d_calc"
+# TradingView's `value` column (session dollar volume) is None for every PSE
+# row, and on 2026-11-07 it went None for every /america row too — the $20M ADV
+# floor then dropped the whole US universe and paper refused to start with
+# "No symbols from screener or additional list." The same quantities are
+# published under other names, so every dollar-volume read falls back in turn:
+# `Value.Traded` (session value = close * volume) and then 10-session dollar
+# volume = close * `average_volume_10d_calc`.
+_US_VALUE_COL = "value"
+_TRADED_VALUE_COL = "Value.Traded"
+_AVG_VOL_10D_COL = "average_volume_10d_calc"
+_PH_TRADED_COL = _TRADED_VALUE_COL
+_PH_AVG_VOL_COL = _AVG_VOL_10D_COL
 
 
 def _numeric_col(df: pd.DataFrame, name: str) -> pd.Series:
@@ -324,6 +332,34 @@ def _ph_peso_adv(df: pd.DataFrame) -> pd.Series:
     traded = _numeric_col(df, _PH_TRADED_COL)
     session = close * _numeric_col(df, "volume")
     return adv10.fillna(traded).fillna(session).fillna(0.0)
+
+
+def _us_dollar_volume(df: pd.DataFrame) -> pd.Series:
+    """Session or 10-session dollar volume for the US ADV floor.
+
+    Prefers TV's `value`, then the same quantity under `Value.Traded`, then
+    10-session share volume * close. Never share volume alone — that ranks
+    penny names (see ``_ph_peso_adv``).
+    """
+    close = _numeric_col(df, "close")
+    value = _numeric_col(df, _US_VALUE_COL)
+    traded = _numeric_col(df, _TRADED_VALUE_COL)
+    adv10 = close * _numeric_col(df, _AVG_VOL_10D_COL)
+    session = close * _numeric_col(df, "volume")
+    return value.fillna(traded).fillna(adv10).fillna(session).fillna(0.0)
+
+
+def _rank_values_present(df: pd.DataFrame, rank_col: str) -> bool:
+    """False when the screener returned `rank_col` but nulled every row.
+
+    `order_by` on a nulled column comes back as an arbitrary slice, and a floor
+    built on that column empties the universe, so a nulled rank column must fall
+    through to the next candidate instead of counting as a successful query.
+    A column that was never selected is unknown, not null.
+    """
+    if rank_col not in df.columns:
+        return True
+    return bool(_numeric_col(df, rank_col).notna().any())
 
 
 def _rows_from_screener_df(df: pd.DataFrame, want_n: int) -> list[tuple[str, str]]:
@@ -422,8 +458,10 @@ class TVClient:
             fetch_n = max(want_n, min(want_n * 4, 10_000))
 
         select_cols = ["name", "exchange"]
-        if rank in ("value", "volume") or min_value:
-            select_cols.extend(["value", "volume"])
+        if min_value or rank in ("value", "volume", _TRADED_VALUE_COL, _AVG_VOL_10D_COL):
+            select_cols.extend([
+                _US_VALUE_COL, _TRADED_VALUE_COL, _AVG_VOL_10D_COL, "volume", "close",
+            ])
 
         def _query(rank_col: str) -> pd.DataFrame | None:
             q = (
@@ -436,9 +474,11 @@ class TVClient:
             _, df = _get_scanner_data(q)
             return df
 
-        df = None
+        df: pd.DataFrame | None = None
         tried = []
-        for rank_col in (rank, "volume", "market_cap_basic"):
+        for rank_col in (
+            rank, _US_VALUE_COL, _TRADED_VALUE_COL, "volume", "market_cap_basic",
+        ):
             if rank_col in tried:
                 continue
             tried.append(rank_col)
@@ -447,26 +487,34 @@ class TVClient:
             except Exception as exc:
                 log.warning(f"TVClient | universe order_by={rank_col} failed: {exc}")
                 df = None
-            if df is not None and not df.empty:
+                continue
+            if df is None or df.empty:
+                continue
+            if _rank_values_present(df, rank_col):
                 break
+            log.warning(
+                f"TVClient | universe order_by={rank_col} came back null on "
+                "every row — trying the next ranking column"
+            )
+            df = None
         if df is None or df.empty:
             return []
+        frame: pd.DataFrame = df
 
         if exchange:
             exch = exchange.upper()
-            if "exchange" in df.columns:
-                df = df[df["exchange"].astype(str).str.upper() == exch]
-        if min_value and "value" in df.columns:
-            vals = pd.to_numeric(df["value"], errors="coerce").fillna(0.0)
-            filtered = df[vals >= float(min_value)]
+            if "exchange" in frame.columns:
+                frame = frame.loc[frame["exchange"].astype(str).str.upper() == exch]
+        if min_value:
+            filtered = frame.loc[_us_dollar_volume(frame) >= float(min_value)]
             if filtered.empty:
                 log.warning(
                     f"TVClient | ADV floor {min_value:.0f} removed every row — "
                     "universe is empty"
                 )
-            df = filtered
+            frame = filtered
 
-        return _rows_from_screener_df(df, want_n)
+        return _rows_from_screener_df(frame, want_n)
 
     @staticmethod
     def _fetch_ph_universe(

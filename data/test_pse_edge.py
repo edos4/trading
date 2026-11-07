@@ -263,3 +263,51 @@ def test_ph_universe_fetch_is_not_capped_below_request(monkeypatch):
         1000, "philippines", min_value=5_000_000, exchange="PSE",
     )
     assert seen["limit"] >= 1000
+
+
+def test_us_universe_survives_a_null_value_column(monkeypatch):
+    """TV nulled `value` across /america (2026-11-07): ordering by it returned an
+    arbitrary slice, the $20M floor dropped every row, and paper refused to start
+    with "No symbols from screener or additional list."
+    """
+    df = pd.DataFrame({
+        "name": ["AAA", "BBB", "CCC"],
+        "exchange": ["NASDAQ", "NYSE", "OTC"],
+        "value": [None, None, None],
+        "volume": [1e6, 2e6, 3e6],
+        "close": [10.0, 20.0, 0.5],
+        "Value.Traded": [9e9, 8e7, 1e5],
+        "average_volume_10d_calc": [1e6, 4e6, 1e6],
+    })
+    ranked: list[str] = []
+
+    def fake(q):
+        ranked.append(q.query["sort"]["sortBy"])
+        return len(df), df.copy()
+
+    monkeypatch.setattr(tv_client, "_get_scanner_data", fake)
+    rows = TVClient.fetch_top_symbols_with_exchanges(
+        2, "america", order_by="value", min_value=20_000_000,
+    )
+    assert ranked[0] == "value" and tv_client._TRADED_VALUE_COL in ranked
+    # CCC traded $100k: the floor still bites, it just reads another column.
+    assert [s for s, _ex in rows] == ["AAA", "BBB"]
+
+
+def test_us_adv_floor_falls_back_to_ten_day_dollar_volume(monkeypatch):
+    """Both value columns missing: 10-session share volume * close decides, so
+    share-volume rank never smuggles a penny name through the floor."""
+    df = pd.DataFrame({
+        "name": ["LIQ", "THIN"],
+        "exchange": ["NASDAQ", "OTC"],
+        "value": [None, None],
+        "Value.Traded": [None, None],
+        "close": [50.0, 0.01],
+        "average_volume_10d_calc": [2e6, 5e6],
+        "volume": [1e6, 5e6],
+    })
+    monkeypatch.setattr(tv_client, "_get_scanner_data", lambda _q: (len(df), df.copy()))
+    rows = TVClient.fetch_top_symbols_with_exchanges(
+        2, "america", order_by="value", min_value=20_000_000,
+    )
+    assert [s for s, _ex in rows] == ["LIQ"]  # $100M passes, $50k does not
