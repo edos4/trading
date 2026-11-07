@@ -339,8 +339,8 @@ collapse. A run that goes to zero trades is not an edge — it is sample death.
 ## Symbol Explorer UI
 
 Authenticated browser UI with the same Explorer / Backtest / Paper surfaces (plus
-Patterns, Indicators, Laya, Kronos, Documentation, and a Trello-style **Tasks**
-board). The **Kronos** tab forecasts N trading days ahead for one or more
+Patterns, Indicators, Laya, Kronos, Settings, Documentation, and a Trello-style
+**Tasks** board). The **Kronos** tab forecasts N trading days ahead for one or more
 symbols — comma-separated (`AAPL, NVDA, MSFT`, spaces ignored) — or for the
 **top X NASDAQ stocks** by dollar volume (enter X), and draws one chart per
 symbol.
@@ -366,6 +366,29 @@ Auth: form login → signed HttpOnly session cookie (`tb_session`). All pages an
 `WEB_UI_HTTPS=true`. The session cookie is also flagged `Secure` automatically
 whenever a request arrives over TLS (`X-Forwarded-Proto: https`), so no extra
 config is needed behind a TLS-terminating proxy or the Cloudflare Tunnel below.
+
+### Settings tab
+
+The **Settings** tab lists every `config.Settings` value (the same names as the
+`.env` keys), grouped into Trading & risk, Paper trading, Scanner, Kronos, data
+sources, Web UI, MCP, deploy, and so on. Each field carries a one-line
+description of what it controls. Search filters by label, env name or
+description.
+
+- **Storage:** saving writes the changed keys back into the repo `.env`
+  (comments and untouched keys are preserved) and applies them to the running
+  process, so most changes take effect immediately.
+- **Restart badge:** bind address, login credentials and session lifetime are
+  saved but marked `restart` — restart the web service to activate them.
+  Credential changes are deliberately not applied live so the session doing the
+  save is not invalidated mid-request.
+- **Secrets:** API keys, tokens and passwords are never sent to the browser.
+  A secret shows only `Set` / `Not set`; leave the box blank to keep the current
+  value, or tick **Clear** to remove it. `WEB_UI_PASSWORD` cannot be cleared.
+- **API:** `GET /api/settings` returns the grouped catalog with secrets masked
+  and `POST /api/settings` accepts `{"values": {"field_name": value}}`.
+- **Scope:** these are process-wide config values, not per-run backtest/paper
+  knobs — use the Backtest/Paper forms for per-run settings.
 
 ### Laya text assessment (optional, seventh tab)
 
