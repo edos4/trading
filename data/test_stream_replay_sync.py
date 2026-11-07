@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from unittest.mock import patch
 
 from data.stream_server import StreamServer, _SymbolTape, _load_symbol_db
@@ -407,6 +408,37 @@ def test_indexed_tape_matches_last_same_day_print_and_skips_missing_days():
     assert empty.snapshot() is None
 
 
+def test_degenerate_duplicate_print_cannot_shadow_the_session_bar():
+    """A zero-price re-ingest row must not stand in for a real session bar."""
+    from datetime import datetime, timezone
+
+    def ts(day, hour):
+        return int(datetime(2026, 8, day, hour, tzinfo=timezone.utc).timestamp())
+
+    real = {"open": 0.002, "high": 0.002, "low": 0.002, "close": 0.002,
+            "volume": 0, "timestamp": ts(17, 13)}
+    junk = {"open": 0.0, "high": 0.0, "low": 0.0, "close": 0.0,
+            "volume": 90000, "timestamp": ts(17, 14)}
+    tape = _SymbolTape([real, junk])
+    assert tape.rows == [real]
+    assert tape.index_for_asof(ts(17, 21)) == 0
+    assert tape.snapshot(ts(17, 21), include_history=False)["candle"]["close"] == 0.002
+
+    server = StreamServer()
+    server._tapes = {"AAPT": tape}
+    server._asof_ts = ts(17, 21)
+    assert server._snapshot_message("AAPT")["candle"]["close"] == 0.002
+
+    # A session whose only print is degenerate is not a bar at all: the replay
+    # skips it (asof_mismatch) instead of handing the scanner a bad candle on
+    # every scan, which would keep the scan incomplete and pin the date.
+    degraded = _SymbolTape([junk])
+    assert degraded.rows == [] and degraded.snapshot(ts(17, 21)) is None
+    server._tapes = {"AAPT": degraded}
+    skip = server._snapshot_message("AAPT")
+    assert skip["code"] == "asof_mismatch"
+
+
 def test_stream_client_transport_failure_requests_reconnection():
     import asyncio
     import pytest
@@ -443,4 +475,84 @@ def test_missing_or_malformed_symbol_reply_is_retryable_and_keeps_other_symbols(
         assert isinstance(result[symbol], FetchSkip)
         assert result[symbol].code == "history_unavailable"
     assert result["CCC"].candle.close == 1
+
+
+def _us_ts(day: int, month: int = 1, hour: int = 21) -> int:
+    from datetime import datetime, timezone
+
+    return int(datetime(2026, month, day, hour, tzinfo=timezone.utc).timestamp())
+
+
+def test_advance_skips_a_us_holiday_print_only_foreign_tapes_carry():
+    """MLK Day 2026-01-19: foreign/OTC listings print, cash-session names don't.
+
+    Publishing that date made every cash-session symbol asof_mismatch and a held
+    symbol stopped the whole book after its bounded retry.
+    """
+    server = StreamServer(market="us")
+    try:
+        cash = _SymbolTape([
+            {"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1,
+             "timestamp": _us_ts(15)},
+            {"open": 2, "high": 2, "low": 2, "close": 2, "volume": 1,
+             "timestamp": _us_ts(16)},
+            {"open": 3, "high": 3, "low": 3, "close": 3, "volume": 1,
+             "timestamp": _us_ts(20)},
+        ])
+        otc = _SymbolTape([
+            {"open": 9, "high": 9, "low": 9, "close": 9, "volume": 1,
+             "timestamp": _us_ts(16)},
+            {"open": 8, "high": 8, "low": 8, "close": 8, "volume": 1,
+             "timestamp": _us_ts(19)},
+            {"open": 7, "high": 7, "low": 7, "close": 7, "volume": 1,
+             "timestamp": _us_ts(20)},
+        ])
+        server._tapes = {"AAPL": cash, "OTC1": otc}
+        server._asof_ts = _us_ts(16)
+
+        assert server.advance() > 0
+        assert server.status_payload()["asof_day"] == "2026-01-20"
+        assert server._snapshot_message("AAPL")["candle"]["close"] == 3
+        assert server._snapshot_message("OTC1")["candle"]["close"] == 7
+        assert server.advance() == 0
+        assert server.status_payload()["asof_day"] == "2026-01-20"
+    finally:
+        server._load_pool.shutdown(wait=True)
+
+
+def test_resumed_replay_is_rolled_off_a_closed_session():
+    """A book saved on a holiday cannot be marked there, so resume must not
+    re-enter the date that stopped it."""
+    server = StreamServer(market="us")
+    try:
+        cash = _SymbolTape([
+            {"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1,
+             "timestamp": _us_ts(16)},
+            {"open": 2, "high": 2, "low": 2, "close": 2, "volume": 1,
+             "timestamp": _us_ts(20)},
+        ])
+        server._tapes = {"AAPL": cash}
+        server._asof_ts = _us_ts(19)
+
+        pinned = server.pin_asof("AAPL")
+        assert pinned == _us_ts(20)
+        assert server.status_payload()["asof_day"] == "2026-01-20"
+        assert server._snapshot_message("AAPL")["candle"]["close"] == 2
+    finally:
+        server._load_pool.shutdown(wait=True)
+
+
+def test_session_start_rolls_forward_past_floating_us_holidays():
+    from data.stream_server import _is_likely_cash_session, _parse_start_ts, asof_key
+
+    def rolled(day: str) -> str | None:
+        ts = _parse_start_ts(day, market="us")
+        return None if ts is None else str(asof_key(ts))
+
+    assert rolled("2026-01-19") == "2026-01-20"   # MLK Day (Monday)
+    assert rolled("2026-07-03") == "2026-07-06"   # Sat 4 July observed Friday
+    assert rolled("2026-11-26") == "2026-11-27"   # Thanksgiving
+    # PH keeps its own calendar: MLK Day is a normal PSE session.
+    assert _is_likely_cash_session(date(2026, 1, 19), "ph") is True
+    assert _is_likely_cash_session(date(2026, 1, 19), "us") is False
 

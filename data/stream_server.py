@@ -58,17 +58,17 @@ import websockets
 from config import PATTERN_SCAN_HISTORY_BARS, settings
 from data.stream_client import LOCAL_STREAM_WS
 from data.stream_tape_cache import CACHE_MISS, cache_get, cache_put
+from data.tv_client import OHLCVCandle
 from utils.logger import log
 
 # Real daily bars are unix seconds (~1.7e9 in 2026). Unit tests use tiny
 # integers as sequential bar ids — those must match exactly, not by calendar day.
 _UNIX_TS_FLOOR = 1_000_000_000
 
-# US fixed-date holidays that close the NYSE cash session when they fall on a
-# weekday. Floating holidays (MLK, Thanksgiving, …) are not listed — the
-# pin_asof skip below still covers weekends + these fixed dates, which is
-# what pinned paper replay to empty scans on 2026-01-01 (New Year's).
-_US_FIXED_HOLIDAYS = {(1, 1), (6, 19), (7, 4), (12, 25)}
+# How many consecutive non-session prints the replay clock may step over before
+# it reports end-of-tape. Bounded so a pathological tape set cannot spin the
+# server's single-threaded request loop.
+_MAX_SESSION_SKIPS = 20
 
 
 def _session_date_for_ts(ts: int, market: str | None) -> date:
@@ -79,14 +79,33 @@ def _session_date_for_ts(ts: int, market: str | None) -> date:
 
 
 def _is_likely_cash_session(day: date, market: str | None) -> bool:
-    """True when the listing's cash session is expected to print a daily bar."""
+    """True when the listing's cash session is expected to print a daily bar.
+
+    The US side is the full NYSE/Nasdaq holiday calendar (`is_us_holiday`,
+    computed per year so none is ever "missing from the table"). daily_bars
+    mixes venues: foreign/OTC listings keep printing on US market holidays —
+    120 of the 2,000-symbol US universe carried a bar on MLK Day 2026-01-19
+    while every cash-session name had none — so a holiday print must never be
+    read as a session.
+    """
     if day.weekday() >= 5:
         return False
-    from core.market import MARKET_PH, get_market, is_ph_holiday
+    from core.market import MARKET_PH, get_market, is_ph_holiday, is_us_holiday
 
     if get_market(market).id == MARKET_PH:
         return not is_ph_holiday(day)
-    return (day.month, day.day) not in _US_FIXED_HOLIDAYS
+    return not is_us_holiday(day)
+
+
+def _publishable_asof(ts: int, market: str | None) -> bool:
+    """May the replay clock hold `ts` as its date?
+
+    Synthetic unit-test bar ids keep exact-match semantics; every real bar must
+    fall on a cash session for the market.
+    """
+    if ts < _UNIX_TS_FLOOR:
+        return True
+    return _is_likely_cash_session(_session_date_for_ts(ts, market), market)
 
 
 def _roll_forward_session_day(day: date, market: str | None) -> date:
@@ -130,8 +149,35 @@ def _stream_history_bars() -> int:
     return max(int(settings.papertrade_stream_lookback_bars), PATTERN_SCAN_HISTORY_BARS)
 
 
+def _servable_row(row: dict) -> bool:
+    """True when a tape row can be handed to the scanner as an execution candle.
+
+    Re-ingest artifacts leave degenerate prints on a session that also has a
+    real one: AAPT 2025-11-17 carries ``O=H=L=C=0`` (volume 90000) beside a
+    genuine 0.002 print. The last-same-day-print rule served the junk row, the
+    scanner rejects an invalid candle on *every* scan, and a scan that is never
+    complete never advances the replay date — one bad row pinned a whole book
+    on its eighth session. Degenerate prints are not bars; dropping them also
+    keeps zero prices out of the history arrays the detectors read.
+    """
+    try:
+        candle = OHLCVCandle(
+            open=row["open"], high=row["high"], low=row["low"],
+            close=row["close"], volume=row.get("volume") or 0,
+            timestamp=datetime.fromtimestamp(row["timestamp"], tz=timezone.utc),
+        )
+    except (KeyError, TypeError, ValueError, OverflowError):
+        # Partial fixture row (unit tests carry close + timestamp only): the
+        # client's own validation still gates what reaches the scanner.
+        return True
+    from core.candle_validation import candle_error
+
+    return candle_error(candle) is None
+
+
 class _SymbolTape:
     def __init__(self, rows: list[dict], start_ts: int | None = None):
+        rows = [row for row in rows if _servable_row(row)]
         self.rows = rows  # sorted by timestamp ascending
         self._asof_keys = [asof_key(row["timestamp"]) for row in rows]
         if start_ts is not None:
@@ -488,14 +534,13 @@ class StreamServer:
     def _pin_asof(self, symbol: str) -> tuple[int | None, str | None]:
         """Pin the replay control date to `symbol`'s current cursor bar.
 
-        Skips weekend / fixed-holiday prints on the control tape. Illiquid
-        names sometimes carry a New Year's print that would otherwise pin
-        the whole universe to a day most symbols have no bar for — paper
-        then reports sim_days=1 with zero signals while drowning in
-        asof_mismatch skips.
+        Skips weekend / holiday prints on the control tape. Illiquid names
+        sometimes carry a New Year's print that would otherwise pin the whole
+        universe to a day most symbols have no bar for — paper then reports
+        sim_days=1 with zero signals while drowning in asof_mismatch skips.
         """
         if self._asof_ts is not None:
-            return self._asof_ts, None
+            return self._roll_off_non_session(), None
         tape, err = self._tape_lookup(symbol)
         if tape is None or not tape.rows:
             return None, err or "no_data"
@@ -528,6 +573,62 @@ class StreamServer:
         )
         return self._asof_ts, None
 
+    def _next_clock_ts(self, after_ts: int) -> int | None:
+        """Next replay date after `after_ts`, over cash sessions only.
+
+        The candidate is the earliest later print across *all* loaded tapes —
+        sparse tapes must not fall out of the calendar (F10) — but a print that
+        does not land on a cash session is stepped over. daily_bars mixes
+        venues, so on a US holiday the union of loaded tapes is non-empty (120
+        of the 2,000 US names printed on 2026-01-19) while no cash-session name
+        has a bar: publishing that date turned the whole scan into
+        asof_mismatch skips and, for a held symbol, stopped the book after its
+        bounded retry. None means no session is left on any loaded tape.
+        """
+        asof = after_ts
+        for _ in range(_MAX_SESSION_SKIPS):
+            nxt = None
+            for tape in self._tapes.values():
+                cand = tape.next_ts_after(asof)
+                if cand is not None and (nxt is None or cand < nxt):
+                    nxt = cand
+            if nxt is None:
+                return None
+            if _publishable_asof(nxt, self._market):
+                return nxt
+            log.info(
+                f"StreamServer | replay clock skips {asof_key(nxt)} — "
+                f"no {self._market.upper()} cash session that day"
+            )
+            asof = nxt
+        log.warning(
+            f"StreamServer | no cash session within {_MAX_SESSION_SKIPS} prints "
+            f"after {asof_key(after_ts)}"
+        )
+        return None
+
+    def _roll_off_non_session(self) -> int | None:
+        """Move a served date that is not a cash session up to the next one.
+
+        A book that stopped (and saved its replay date) on a closed session
+        cannot be resumed there: no cash-session tape has a bar, so every held
+        name is unmarkable and the run stops again on the same bounded retry.
+        Rolling forward is the only survivable reading of a date that never
+        existed as a session.
+        """
+        current = self._asof_ts
+        if current is None or _publishable_asof(current, self._market):
+            return current
+        nxt = self._next_clock_ts(current)
+        if nxt is None:
+            return current
+        log.info(
+            f"StreamServer | replay clock was on {asof_key(current)}, not a "
+            f"cash session — rolled forward to {asof_key(nxt)}"
+        )
+        self._asof_ts = nxt
+        return self._asof_ts
+
     def advance(self) -> int:
         """Advance every loaded tape exactly one bar.
 
@@ -537,14 +638,11 @@ class StreamServer:
         longer than the old fixed 60-second stream interval.
         """
         if self._asof_ts is not None:
-            nxt = None
-            on_asof = 0
-            for tape in self._tapes.values():
-                if tape.index_for_asof(self._asof_ts) is not None:
-                    on_asof += 1
-                cand = tape.next_ts_after(self._asof_ts)
-                if cand is not None and (nxt is None or cand < nxt):
-                    nxt = cand
+            on_asof = sum(
+                1 for tape in self._tapes.values()
+                if tape.index_for_asof(self._asof_ts) is not None
+            )
+            nxt = self._next_clock_ts(self._asof_ts)
             if nxt is None:
                 log.debug("StreamServer | asof advance: no later bar among pinned tapes")
                 return 0
