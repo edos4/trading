@@ -13,6 +13,7 @@ from core.market import (
     get_market,
     is_closed_session_bar,
     is_ph_holiday,
+    is_us_holiday,
     last_closed_session_date,
     may_assume_fill,
     merge_extra_symbols,
@@ -117,6 +118,24 @@ def test_ph_holiday_2026():
     assert is_ph_holiday(date(2026, 8, 21))
     assert is_ph_holiday(date(2026, 8, 31))
     assert not is_ph_holiday(date(2026, 8, 13))
+
+
+def test_us_holiday_calendar_covers_floating_and_observed_days():
+    """The replay clock reads this; a missing year would readmit holiday prints."""
+    assert is_us_holiday(date(2026, 1, 19))    # MLK Day (3rd Monday)
+    assert is_us_holiday(date(2026, 2, 16))    # Washington's Birthday
+    assert is_us_holiday(date(2026, 4, 3))     # Good Friday
+    assert is_us_holiday(date(2026, 5, 25))    # Memorial Day (last Monday)
+    assert is_us_holiday(date(2026, 6, 19))    # Juneteenth
+    assert is_us_holiday(date(2026, 7, 3))     # Sat 4 July observed Friday
+    assert is_us_holiday(date(2026, 9, 7))     # Labor Day
+    assert is_us_holiday(date(2026, 11, 26))   # Thanksgiving (4th Thursday)
+    # Observance can cross a year boundary: Sat 1 Jan 2022 closed Fri 31 Dec 2021.
+    assert is_us_holiday(date(2021, 12, 31))
+    assert not is_us_holiday(date(2026, 1, 20))
+    assert not is_us_holiday(date(2026, 7, 6))
+    # A US holiday is not a PSE holiday.
+    assert is_ph_holiday(date(2026, 1, 19)) is False
 
 
 def test_merge_extra_symbols_skips_screener_dupes():

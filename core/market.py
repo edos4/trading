@@ -352,11 +352,80 @@ def apply_lot_rounding(signal, *, as_of: date | None = None) -> bool:
     return True
 
 
+def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
+    """The n-th `weekday` (Mon=0) of a month, e.g. 3rd Monday of January."""
+    first = date(year, month, 1)
+    return first + timedelta(days=(weekday - first.weekday()) % 7 + 7 * (n - 1))
+
+
+def _last_weekday(year: int, month: int, weekday: int) -> date:
+    """The last `weekday` (Mon=0) of a month, e.g. last Monday of May."""
+    last = (date(year, month, 1) + timedelta(days=31)).replace(day=1) - timedelta(days=1)
+    return last - timedelta(days=(last.weekday() - weekday) % 7)
+
+
+def _easter_sunday(year: int) -> date:
+    """Anonymous Gregorian computus; Good Friday is two days before it."""
+    a = year % 19
+    b, c = divmod(year, 100)
+    d, e = divmod(b, 4)
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = divmod(c, 4)
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month, day = divmod(h + l - 7 * m + 114, 31)
+    return date(year, month, day + 1)
+
+
+def _observed_holiday(day: date) -> date:
+    """NYSE observance: a Saturday holiday closes the preceding Friday, a
+    Sunday holiday the following Monday."""
+    if day.weekday() == 5:
+        return day - timedelta(days=1)
+    if day.weekday() == 6:
+        return day + timedelta(days=1)
+    return day
+
+
+def _us_holiday_dates(year: int) -> frozenset[date]:
+    """NYSE/Nasdaq full-day closures for one year — computed, not tabled."""
+    return frozenset((
+        _observed_holiday(date(year, 1, 1)),      # New Year's Day
+        _nth_weekday(year, 1, 0, 3),              # MLK Day
+        _nth_weekday(year, 2, 0, 3),              # Washington's Birthday
+        _easter_sunday(year) - timedelta(days=2),  # Good Friday
+        _last_weekday(year, 5, 0),                # Memorial Day
+        _observed_holiday(date(year, 6, 19)),     # Juneteenth
+        _observed_holiday(date(year, 7, 4)),      # Independence Day
+        _nth_weekday(year, 9, 0, 1),              # Labor Day
+        _nth_weekday(year, 11, 3, 4),             # Thanksgiving
+        _observed_holiday(date(year, 12, 25)),    # Christmas Day
+    ))
+
+
+def is_us_holiday(day: date) -> bool:
+    """True when the US cash session is closed all day.
+
+    Floating holidays are derived rather than listed: the paper replay walks
+    any window, and a year absent from a table would silently readmit exactly
+    the prints this excludes. Substituting in a fixed-date table missed MLK Day
+    2026-01-19 (and observed Independence Day 2026-07-03), both of which carry
+    bars for ~120 of the 2,000-symbol US universe — foreign/OTC listings still
+    printing — while every cash-session name has none.
+
+    Adjacent years are consulted because observance can cross a year boundary
+    (a Saturday 1 January closes the previous 31 December).
+    """
+    return any(
+        day in _us_holiday_dates(year)
+        for year in (day.year - 1, day.year, day.year + 1)
+    )
+
+
 def _last_monday_of_august(year: int) -> date:
-    d = date(year, 8, 31)
-    while d.weekday() != 0:
-        d -= timedelta(days=1)
-    return d
+    return _last_weekday(year, 8, 0)
 
 
 def is_ph_holiday(day: date) -> bool:
