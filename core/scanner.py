@@ -284,7 +284,10 @@ class MarketScanner:
         self._dead_symbols: set[str] = set()
         self._thin_logged: set[tuple[str, str]] = set()
         # One retry per symbol/timeframe/session day. A bar that is still
-        # invalid on the next pass must not freeze the whole replay.
+        # invalid on the next pass must not freeze the whole replay. The
+        # fetch-skip path keys the same dict with ``(symbol, "invalid_candle",
+        # replay_asof)`` — no timeframe is known there, and a real timeframe
+        # never spells that code, so the two key spaces cannot collide.
         self._invalid_bar_tries: dict[tuple[str, str, str], int] = {}
         self._missing_execution_tries: dict[tuple, int] = {}
         self._replay_asof: str | None = None
@@ -347,6 +350,7 @@ class MarketScanner:
             "daily_date_skew": 0,
             "daily_dates_seen": 0,
             "asof_skipped": 0,
+            "invalid_bar_skipped": 0,
             "dead_symbols": 0,
         }
         # Ring buffer of per-signal accept/reject decisions. Persisted to
@@ -842,6 +846,25 @@ class MarketScanner:
             self._note_dead_symbol(symbol, str(exc))
         elif exc.code == "asof_mismatch":
             self.stats["asof_skipped"] += 1
+        elif exc.code == "invalid_candle":
+            # A degenerate bar (zero/NaN prices) is a data defect, not a
+            # transport failure: re-reading the same session cannot repair it.
+            # Count one error so the cycle retries once, then treat the symbol
+            # as having no bar this session. Counting it every scan would keep
+            # scan_complete False forever, and an incomplete scan never
+            # advances the replay date — the book would sit on one session.
+            key = (symbol, exc.code, str(self._replay_asof or ""))
+            tries = self._invalid_bar_tries.get(key, 0) + 1
+            self._invalid_bar_tries[key] = tries
+            if tries == 1:
+                self.stats["snapshot_errors"] += 1
+                log.warning(
+                    f"Scan | invalid candle for {symbol}: {exc}; retrying"
+                )
+            else:
+                self.stats["invalid_bar_skipped"] = (
+                    self.stats.get("invalid_bar_skipped", 0) + 1
+                )
         else:
             # history_unavailable and other transients: skip this cycle.
             self.stats["snapshot_errors"] += 1
@@ -1047,6 +1070,7 @@ class MarketScanner:
         self._scan_snapshot_symbols: set[str] = set()
         self._scan_daily_dates: set[str] = set()
         self.stats["asof_skipped"] = 0
+        self.stats["invalid_bar_skipped"] = 0
         await self._pin_replay_asof(feed_sessions)
 
         from tqdm import tqdm
