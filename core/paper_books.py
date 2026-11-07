@@ -905,15 +905,28 @@ class PaperBook:
         except OSError:
             return False
 
-    @staticmethod
-    def _kill_whatever_is_on(port: int) -> None:
+    def _owns_stream_server(self) -> bool:
+        """True when this book's own stream child is the process on the port.
+
+        Only a child this book spawned may be stopped: another market's book, a
+        foreign replay arm, or any process that is not ours is refused, never
+        killed.
+        """
+        proc = self._stream_proc
+        return proc is not None and proc.poll() is None
+
+    def _stop_stream_server(self) -> None:
+        """Stop the stream child this book started, freeing its port."""
+        proc, self._stream_proc = self._stream_proc, None
+        if proc is None or proc.poll() is not None:
+            return
+        proc.terminate()
         try:
-            subprocess.run(
-                ["fuser", "-k", f"{port}/tcp"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+        log.info("PaperBook | stopped the paper trade stream server this book started")
 
     def _probe_stream_status(self) -> dict | None:
         """Ask the process on the stream port who it is. None if nobody answers."""
@@ -970,8 +983,22 @@ class PaperBook:
                         f"Reusing paper trade stream ({loaded} tapes, asof {asof})..."
                     )
                 return None
-            return (f'Stream port {host}:{port} is already occupied by an incompatible or '
-                    'unverified server. Stop its owning process before changing replay inputs.')
+            if not self._owns_stream_server():
+                return (f'Stream port {host}:{port} is already occupied by an incompatible or '
+                        'unverified server. Stop its owning process before changing replay inputs.')
+            # The occupant is the stream child this book started, which _run_thread
+            # deliberately leaves up between Starts. Its tapes cannot serve the
+            # inputs this Start needs, so stop it and start the requested one.
+            # A process this book did not spawn was refused above, never killed.
+            log.info(
+                f"PaperBook | restarting own paper trade stream for new replay inputs "
+                f"market={self.market} start={start_date or 'near-end'} resume={resume}"
+            )
+            self._stop_stream_server()
+            for _ in range(25):
+                if not self._port_open(host, port):
+                    break
+                time.sleep(0.2)
         with self.lock:
             self.status = (
                 f"Starting paper trade stream server (from {start_date})..."
@@ -1185,8 +1212,9 @@ class PaperBook:
                 else:
                     self.status = "Stopped."
                 # The stream process keeps its tapes. The next Start reuses it
-                # when the market and replay clock still match; a mismatch
-                # kills the port from _ensure_stream_server.
+                # when the market and replay clock still match; otherwise
+                # _ensure_stream_server stops this book's own server and starts
+                # the requested one (a foreign occupant is refused, not killed).
                 if self._stream_proc is not None and self._stream_proc.poll() is None:
                     log.info(
                         "PaperBook | leaving paper trade stream server up "
@@ -1284,6 +1312,18 @@ class PaperBookManager:
                         f"Paper stream is already in use by {holder.upper()}. "
                         f"Stop {holder.upper()} or run {book.market.upper()} live."
                     )
+                if holder is None:
+                    # No session is running, but a sibling book may still own the
+                    # stream left up by its last run. That owner is idle, so
+                    # stopping it is what makes this Start possible; a process
+                    # this app did not spawn is never touched.
+                    for other in self.books.values():
+                        if other is not book and other._owns_stream_server():
+                            log.info(
+                                f"PaperBookManager | stopping idle {other.market} "
+                                f"stream server for {book.market} start"
+                            )
+                            other._stop_stream_server()
             return book.start(
                 n_symbols,
                 extra_symbols=extra_symbols,

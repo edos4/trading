@@ -36,5 +36,5 @@ def test_incompatible_port_is_never_killed(monkeypatch):
     book=PaperBook('us')
     monkeypatch.setattr(book,'_port_open',lambda *args:True)
     monkeypatch.setattr(book,'_probe_stream_status',lambda: {'market':'ph','start_date':'other'})
-    monkeypatch.setattr(book,'_kill_whatever_is_on',lambda *args: pytest.fail('killed another process'))
+    monkeypatch.setattr(book,'_stop_stream_server',lambda *args: pytest.fail('stopped another process'))
     assert 'already occupied' in book._ensure_stream_server(start_date='2025-11-03')
