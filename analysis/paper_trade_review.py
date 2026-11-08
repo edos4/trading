@@ -80,6 +80,7 @@ def _verify_orders(actual: dict, saved: dict) -> None:
 
 
 def replay_trade(trade: dict, *, target_max_r: float | None = None,
+                 target_price: float | None = None,
                  trailing_stop_basis: str | None = None,
                  paper_loss_protection: bool = False,
                  allow_inconsistent_ohlc: bool = False) -> dict:
@@ -140,7 +141,12 @@ def replay_trade(trade: dict, *, target_max_r: float | None = None,
         ensure_paper_protection(position, saved_policy["txn_cost_pct"], saved_policy["slippage_pct"],
                                 datetime.fromisoformat(saved_policy["adopted_at"]), at_entry=True)
     risk = trade_risk_dollars(position)
-    counterfactual = target_max_r is not None or trailing_stop_basis is not None or paper_loss_protection
+    counterfactual = (target_max_r is not None or target_price is not None
+                      or trailing_stop_basis is not None or paper_loss_protection)
+    if target_price is not None:
+        if not math.isfinite(target_price) or target_price <= 0 or sign * (target_price - entry) <= 0:
+            raise ValueError("Counterfactual target must remain beyond the executed entry")
+        position.take_profit = target_price
     if trailing_stop_basis is not None:
         if trailing_stop_basis not in ("reference", "entry"):
             raise ValueError("Unknown trailing stop basis")
@@ -227,6 +233,7 @@ def replay_trade(trade: dict, *, target_max_r: float | None = None,
         "entry_date": trade["sim_opened"], "last_observed": bars[-1].timestamp.isoformat(),
         "exit_date": bar.timestamp.isoformat() if closed else None,
         "exit_reason": position.exit_reason or "open", "pnl": net,
+        "net_return_pct": net / (entry * qty) * 100,
         "net_r": net/risk if risk else None, "initial_risk": risk,
         "risk_pct": risk/(entry*qty)*100 if risk else None,
         "target_r": sign*(position.take_profit-entry)*qty/risk
@@ -249,6 +256,43 @@ def replay_trade(trade: dict, *, target_max_r: float | None = None,
         "same_session_exit": closed and bar.timestamp == bars[0].timestamp,
         "entry_range_r": (bars[0].high-bars[0].low)*qty/risk if risk else None,
         "ambiguous_bars": ambiguous,
+    }
+
+
+def boundary_objective_comparison(trades: list[dict], **replay_options) -> dict:
+    """Saved-entry diagnostic; never claim a rescan or alternative portfolio."""
+    rows, excluded, targets = [], [], []
+    for trade in trades:
+        requested = trade.get("requested_rules") or {}
+        resolved = trade.get("resolved_rules") or {}
+        levels = {a["price"] for a in trade.get("chart_annotations", [])
+                  if a.get("type") == "hline" and a.get("label") == "level"}
+        if (trade.get("provenance") != "patternsv2" or len(levels) != 1
+                or not requested.get("price") or not requested.get("take_profit")
+                or not resolved.get("take_profit")):
+            excluded.append({"trade_id": trade["trade_id"], "reason": "missing patternsv2 objective evidence"})
+            continue
+        if not math.isclose(requested["take_profit"], resolved["take_profit"], abs_tol=.0001, rel_tol=0):
+            excluded.append({"trade_id": trade["trade_id"], "reason": "execution already changed the requested objective"})
+            continue
+        # The old adapter measured from the signal close. Keep the original
+        # pattern height, shifting only that anchor to the saved boundary.
+        target = resolved["take_profit"] + next(iter(levels)) - requested["price"]
+        sign = -1 if trade["action"] == "SELL" else 1
+        if target <= 0 or sign * (target - resolved["price"]) <= 0:
+            excluded.append({"trade_id": trade["trade_id"], "reason": "objective exhausted before entry"})
+            continue
+        if sign * (target - resolved["take_profit"]) > .0001:
+            excluded.append({"trade_id": trade["trade_id"], "reason": "boundary target is not tighter"})
+            continue
+        rows.append(replay_trade(trade, target_price=round(target, 4), **replay_options))
+        targets.append({"trade_id": trade["trade_id"], "symbol": trade["symbol"],
+                        "saved_target": resolved["take_profit"], "boundary_target": round(target, 4)})
+    return {
+        "scope": "same saved entries, quantities, costs and external exit decisions; observed OHLC only",
+        "closed": summarize([row for row in rows if row["exit_reason"] != "open"]),
+        "total_liquidation_pnl": sum(row["pnl"] for row in rows),
+        "excluded": excluded, "targets": targets, "rows": rows,
     }
 
 
@@ -404,6 +448,12 @@ def review_export(path: Path, *, allow_inconsistent_ohlc: bool = False) -> dict:
             return r["entry_date"][:4] + "Q" + str((int(r["entry_date"][5:7])-1)//3+1)
         result["books"].append({
             "market": book["market"], "currency": book["currency"],
+            "run_completion": {
+                "termination_reason": (book.get("scan_stats") or {}).get("termination_reason"),
+                "scan_complete": (book.get("scan_stats") or {}).get("scan_complete"),
+                "sim_as_of": (book.get("execution_context") or {}).get("sim_as_of"),
+                "execution_coverage": (book.get("execution_context") or {}).get("execution_coverage"),
+            },
             "baseline_reproduced": True, "baseline_verified": not anomalies,
             "ohlc_anomalies": anomalies,
             "summary": summarize(closed),
@@ -425,6 +475,12 @@ def review_export(path: Path, *, allow_inconsistent_ohlc: bool = False) -> dict:
             "trailing_armed_count": sum(r["trailing_armed"] for r in rows),
             "ambiguous_exit_count": sum(bool(r["ambiguous_bars"]) for r in closed),
             "gap_exit_count": sum(r["gap_exit"] for r in closed),
+            "paper_budget_breaches": [
+                {"symbol": row["symbol"], "trade_id": row["trade_id"],
+                 "net_return_pct": row["net_return_pct"], "gap_exit": row["gap_exit"]}
+                for row in closed if row["paper_protection"] is not None
+                and row["net_return_pct"] < -100 * row["paper_protection"]["loss_limit_pct"] - .000001
+            ],
             "median_entry_range_r": median(r["entry_range_r"] for r in rows) if rows else None,
             "without_best_trade": summarize(ranked[1:]), "without_best_three": summarize(ranked[3:]),
             "signal_log_status_counts": dict(Counter(r["status"] for r in book.get("signal_logs", []))),
@@ -446,6 +502,7 @@ def review_export(path: Path, *, allow_inconsistent_ohlc: bool = False) -> dict:
                 if r["target_r"] is not None and r["activation_r"] is not None
                 and r["target_r"] <= r["activation_r"]],
             "comparisons": {
+                "boundary_objectives": boundary_objective_comparison(trades, **replay_options),
                 "target_cap_2r_closed": summarize([r for r in cap if r["exit_reason"] != "open"]),
                 "target_cap_2r_total_liquidation_pnl": sum(r["pnl"] for r in cap),
                 "long_only_closed": summarize([r for r in closed if r["action"] == "BUY"]),

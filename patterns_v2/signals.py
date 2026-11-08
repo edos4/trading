@@ -5,27 +5,16 @@ fills at the next observed open. Stop is the
 price that cancels the pattern: the failure pivots for reversals, or the
 unbroken rail on the breakout bar for flags, pennants, triangles, wedges,
 channels, and rectangles. Target uses the full measured move (pole, bowl, or
-pattern width) from the fill. Keep those structural levels even when the
+pattern width) from the breakout boundary. Keep those structural levels even when the
 breakout close makes the measured reward smaller than the full-depth risk.
-Execution stops are volatility-scaled rather than flat: the initial stop is
-``clamp(1.5 * ATR14, 3%, 8%)`` from the fill, and the trailing stop sits 2R
-behind the best close once the trade is +2R, so the give-back is a fixed
-fraction of the risk taken instead of a fixed fraction of price. A flat 3% cap
-was inside half an average daily range for most of the US universe (median
-0.52x ATR14 over 2025-11..2026-10): 11 of 13 closed paper trades stopped out at
-exactly -3.0% while 85% of them later showed >= 2R of favourable excursion.
+The pattern ladder retains an ATR-based research cap of 3% to 8%, with a
+2R activation and 2R entry-price giveback. Paper execution additionally installs
+an independent, cost-aware 3% net loss budget and a three-percentage-point
+trail from the best surviving close. That tighter paper order never waits for
+pattern activation, and saved positions keep their original targets and rules.
+Gaps and delayed quotes can execute beyond the loss budget. Geometry scores
+rank shapes; they are not calibrated probabilities or evidence of profitability.
 
-The historical reference-percentage 2R/2R pair was swept over 1,696 US names and 225
-patternsv2 signals (2022-01..2026-10, flat $10k, the real causal-v1 exit
-engine): the previous 1R arm / 1.5R give-back returned PF 0.89 and -$10.4k,
-tightening the give-back to 1.0R or 0.75R was worse (-$25.7k / -$26.7k), while
-2R/2R returned PF 1.15 with the win rate unchanged (32.4% vs 32.0%) and only 12
-trailing exits in 185 trades. A trail closer than 2R cuts target-bound trades
-inside one bar's noise. Treat it as a disaster brake, not an exit strategy.
-Those results predate the entry-based distance correction and do not validate
-the corrected ladder. New signals fix giveback in entry-price dollars;
-existing positions retain their saved reference-percentage trail.
-Structural levels remain available for charting.
 """
 
 from __future__ import annotations
@@ -220,9 +209,13 @@ def _measured_height(raw: dict, level: float, extreme: float) -> float:
 
 
 def _levels(raw: dict, entry: float) -> tuple[float | None, float | None]:
-    direction = 1 if int(raw.get("direction") or 0) > 0 else -1
+    direction = raw.get("direction")
+    if direction not in (-1, 1):
+        return None, None
     level = _finite(raw.get("level"))
     if level is None or level <= 0:
+        return None, None
+    if direction * (entry - level) < 0:
         return None, None
     extreme = _failure_price(raw, level, direction)
     if extreme is None:
@@ -234,16 +227,17 @@ def _levels(raw: dict, entry: float) -> tuple[float | None, float | None]:
         return None, None
     if direction > 0:
         stop = extreme if extreme < entry else (level if level < entry else None)
-        target = entry + height
+        target = level + height
     else:
         stop = extreme if extreme > entry else (level if level > entry else None)
-        target = entry - height
+        target = level - height
     if target <= 0 or stop is None or stop <= 0:
         return None, None
     risk = (entry - stop) if direction > 0 else (stop - entry)
     reward = (target - entry) if direction > 0 else (entry - target)
-    # A confirmed reversal closes beyond the neckline, so its full-depth
-    # risk necessarily exceeds its measured height. A 1R floor disables it.
+    # A breakout consumes part of the measured move. Never move its objective
+    # further away just because the confirmation candle overshot the boundary.
+    # Reject an already exhausted objective rather than chasing the move.
     if risk <= 0 or reward <= 0:
         return None, None
     return stop, target
@@ -339,6 +333,8 @@ def detect_raw(
     fn = detect or detect_fn()
     latest = len(close) - 1
     options = {'strict': True} if getattr(fn, 'supports_strict', False) else {}
+    if getattr(fn, "supports_all_candidates", False):
+        options["all_candidates"] = True
     if latest_bar_only and getattr(fn, "supports_latest_only", False):
         # One bar is wanted; let the bounded-pattern search skip the pivot pairs
         # that can only break out on a bar this call drops. Same answer for the
@@ -374,7 +370,7 @@ def signals_from_raw(
     latest = n - 1
     floor = 0 if lookback is None else max(0, n - int(lookback))
     muted = _muted_names() if found else frozenset()
-    best: dict[str, tuple[int, float, dict]] = {}
+    candidates: dict[str, list[tuple[int, float, dict]]] = {}
     for raw in found or ():
         idx = int(raw.get("signal"))
         if latest_bar_only and idx != latest:
@@ -385,15 +381,15 @@ def signals_from_raw(
         if name in muted:
             continue
         score = _finite(raw.get("score")) or 0.0
-        prev = best.get(name)
-        if prev is None or idx > prev[0] or (idx == prev[0] and score > prev[1]):
-            best[name] = (idx, score, raw)
+        candidates.setdefault(name, []).append((idx, score, raw))
     out: list[TradeSignal] = []
-    for _idx, _score, raw in sorted(best.values(), key=lambda item: item[0]):
-        signal = _to_signal(df, raw, symbol=symbol, timeframe=timeframe, latest=latest)
-        if signal is not None:
-            out.append(signal)
-    return out
+    for group in candidates.values():
+        for _idx, _score, raw in sorted(group, key=lambda item: (item[0], item[1]), reverse=True):
+            signal = _to_signal(df, raw, symbol=symbol, timeframe=timeframe, latest=latest)
+            if signal is not None:
+                out.append(signal)
+                break
+    return sorted(out, key=lambda signal: signal.signal_bar_idx)
 
 
 def detect_trade_signals(

@@ -112,6 +112,7 @@ def test_cup_stop_is_the_handle_not_the_bowl():
 
 def test_channel_stop_is_the_unbroken_rail():
     df = _frame()
+    df.loc[df.index[20], ["open", "high", "low", "close"]] = [99., 100., 98., 99.]
     raw = _raw(
         pattern="descending_channel",
         direction=-1,
@@ -129,7 +130,7 @@ def test_channel_stop_is_the_unbroken_rail():
     assert hits[0].action == "SELL"
     assert hits[0].trailing_stop_mode == "lowest_close"
     assert hits[0].stop_loss == 140.0
-    assert hits[0].take_profit == 80.0
+    assert hits[0].take_profit == 60.0
 
 
 def test_breakout_under_one_r_keeps_structural_levels():
@@ -142,7 +143,7 @@ def test_breakout_under_one_r_keeps_structural_levels():
     )
     assert len(hits) == 1
     assert hits[0].stop_loss == 120.0
-    assert hits[0].take_profit == 170.0
+    assert hits[0].take_profit == 160.0
 
 
 @pytest.mark.parametrize("bear", [False, True])
@@ -160,7 +161,7 @@ def test_actual_double_breakout_survives_on_signal_bar(bear):
     assert signal.action == ("SELL" if bear else "BUY")
     assert signal.price == pytest.approx(136.6 if bear else 113.4)
     assert signal.stop_loss == pytest.approx(161.0 if bear else 89.0)
-    assert signal.take_profit == pytest.approx(114.6 if bear else 135.4)
+    assert signal.take_profit == pytest.approx(117.0 if bear else 133.0)
     assert 0 < abs(signal.take_profit - signal.price) < abs(signal.stop_loss - signal.price)
 
 
@@ -194,7 +195,7 @@ def test_actual_cup_breakout_keeps_handle_stop_and_full_bowl_target(bear):
     assert signal.action == ("SELL" if bear else "BUY")
     assert signal.price == pytest.approx(98.8 if bear else 101.2)
     assert signal.stop_loss == pytest.approx(107.0 if bear else 93.0)
-    assert signal.take_profit == pytest.approx(71.8 if bear else 128.2)
+    assert signal.take_profit == pytest.approx(72.0 if bear else 128.0)
     assert abs(signal.take_profit - signal.price) >= abs(signal.stop_loss - signal.price)
     signal_bar = 81
     prefix_hits = detect_trade_signals(df.iloc[:signal_bar + 1], symbol="TEST", timeframe="1d",
@@ -210,7 +211,7 @@ def test_converging_pattern_uses_full_width_for_target():
     hits = detect_trade_signals(df, symbol="TEST", timeframe="1d", detect=lambda *a: [raw])
     assert len(hits) == 1
     assert hits[0].stop_loss == 140.0
-    assert hits[0].take_profit == 190.0
+    assert hits[0].take_profit == 189.0
 
 
 def test_latest_bar_only_drops_older_breakouts():

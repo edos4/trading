@@ -210,6 +210,19 @@ def exit_state(position: BacktestTrade) -> dict[str, Any]:
     return state
 
 
+def _position_bar_is_due(position: BacktestTrade, as_of: datetime) -> bool:
+    """Only a new range at or after the fill can update a position."""
+    # Older paper ledgers may retain the simulation clock only in marks;
+    # entry_date is the wall-clock fill time and must not freeze that replay.
+    first_mark = next((mark["sim_bar"] for mark in position.position_marks if mark.get("sim_bar")), None)
+    entered = position.sim_entry_date or (datetime.fromisoformat(first_mark) if first_mark else position.entry_date)
+    if as_of < entered:
+        return False
+    last_checked = next((mark.get("sim_bar") for mark in reversed(position.position_marks)
+                         if mark.get("exit_check") and mark.get("sim_bar")), None)
+    return last_checked is None or as_of > datetime.fromisoformat(last_checked)
+
+
 def _trade_to_dict(t: BacktestTrade) -> dict:
     d = asdict(t)
     d["entry_date"] = t.entry_date.isoformat()
@@ -1201,6 +1214,12 @@ class PaperAccount:
                     candle.timestamp or now,
                 )
                 state = exit_state(position)
+                from core.backtester import ExitRuntimeChangedError, validate_exit_runtime
+                runtime_error = None
+                try:
+                    validate_exit_runtime(position)
+                except ExitRuntimeChangedError as exc:
+                    runtime_error = str(exc)
                 short = position.action == "SELL"
                 reason = ""
                 # A completed-close market decision becomes executable at
@@ -1213,14 +1232,14 @@ class PaperAccount:
                 resting = [paper_protective_order(position)]
                 resting += [(state[key], False, label) for key, label in (
                     ("hard_stop", "stop_loss"), ("trailing_stop", "trailing_stop"))
-                    if state[key] is not None and not state[key + "_on_close"]]
+                    if not runtime_error and state[key] is not None and not state[key + "_on_close"]]
                 stops = sorted((order for order in resting if order is not None),
                                key=lambda order: order[0], reverse=not short)
                 for trigger, _, label in stops:
                     if not reason and (price >= trigger if short else price <= trigger):
                         reason = label
                 target = state["target"]
-                if (not reason and target is not None and not state["target_on_close"]
+                if (not runtime_error and not reason and target is not None and not state["target_on_close"]
                         and (price <= target if short else price >= target)):
                     reason = "take_profit"
                 if not reason:
@@ -1235,6 +1254,8 @@ class PaperAccount:
                          "observation_kind": "live_quote",
                          "source_bar": candle.timestamp.isoformat() if candle.timestamp else None,
                          "raw_fill": price, "reason": reason}
+                if runtime_error:
+                    check.update(pattern_runtime_error=runtime_error, management_mode="paper_protection_only")
                 bar_idx = self.bar_count(symbol, timeframe)
                 position.exit_bar_idx = bar_idx
                 self._reset_daily_if_needed(now)
@@ -1277,6 +1298,10 @@ class PaperAccount:
                 self.record_execution_gap(symbol, timeframe or '1d',
                     candle.timestamp.isoformat() if isinstance(candle.timestamp, datetime) else None, invalid)
             return []
+        matching = [p for p in self.positions.get(symbol, [])
+                    if timeframe is None or p.timeframe == timeframe]
+        if is_new_bar and matching and not any(_position_bar_is_due(p, candle.timestamp) for p in matching):
+            return []
         self._last_price[symbol] = candle.close
         self._last_price_at[symbol] = candle.timestamp.isoformat()
         if candle.timestamp is not None:
@@ -1315,6 +1340,10 @@ class PaperAccount:
     def _manage_position(
         self, symbol: str, position: BacktestTrade, candle: OHLCVCandle, now: datetime,
     ) -> BacktestTrade | None:
+        # A delayed feed response must not use today's tightened stop against
+        # an earlier range, or close a position on a candle preceding its fill.
+        if not _position_bar_is_due(position, now):
+            return None
         bar_idx = self.bar_count(symbol, position.timeframe)
         from core.position_protection import ensure_paper_protection
         ensure_paper_protection(position, self.txn_cost_pct, self.slippage_pct, now)
@@ -1331,7 +1360,17 @@ class PaperAccount:
             "execution_model": position.execution_model,
         }
         _update_neckline_state(position, candle, bar_idx)
-        exit_price, reason = _check_exit(candle, position, bar_idx)
+        from core.backtester import ExitRuntimeChangedError
+        try:
+            exit_price, reason = _check_exit(candle, position, bar_idx)
+        except ExitRuntimeChangedError as exc:
+            from core.position_protection import check_paper_protection_only
+            # The independent 3% order must survive a detector/runtime update.
+            # Preserve the mismatch in evidence instead of rewriting provenance.
+            exit_check["pattern_runtime_error"] = str(exc)
+            exit_check["management_mode"] = "paper_protection_only"
+            exit_price, reason = check_paper_protection_only(position, candle, bar_idx)
+            log.warning(f"Paper | {symbol}: {exc}; managing independent protection")
         exit_check["raw_fill"] = exit_price
         exit_check["reason"] = reason or None
         from core.exit_evidence import trigger_source

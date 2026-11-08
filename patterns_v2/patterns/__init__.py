@@ -74,12 +74,14 @@ _BULLISH_DETECTORS = (
 _LATEST_AWARE = frozenset({bull_flag.detect, bull_pennant.detect})
 
 
-def detect(h, l, c, zz_mult=2.0, latest=None, strict=False):
+def detect(h, l, c, zz_mult=2.0, latest=None, strict=False, all_candidates=False):
     """h, l, c: float numpy arrays for ONE symbol, sorted by date. Returns list of signal dicts.
 
     ``latest`` restricts the bounded-pattern search to pivots that can break out
     on that bar (see ``_triangle_base.detect``). It drops only signals on other
     bars, so a live scan asking for the last bar gets the same answer for it.
+    ``all_candidates`` lets execution validate objectives before selecting a
+    same-family winner. The standalone chart API remains deduplicated.
     """
     h, l, c = (np.asarray(x, float) for x in (h, l, c))
     if any(x.ndim != 1 for x in (h, l, c)) or not (len(h) == len(l) == len(c)):
@@ -118,6 +120,8 @@ def detect(h, l, c, zz_mult=2.0, latest=None, strict=False):
     sigs = [s for s in sigs if s["pattern"] not in DISABLED
             and s["signal"] >= MIN_BARS - 1
             and tradable(h, l, c, s["start"], s["signal"])]
+    if all_candidates:
+        return sorted(sigs, key=lambda s: (s["signal"], -s["score"]))
     seen, uniq = set(), []
     for s in sorted(sigs, key=lambda s: (s["signal"], -s["score"])):
         key = (s["pattern"], s["signal"])
@@ -132,6 +136,7 @@ def detect(h, l, c, zz_mult=2.0, latest=None, strict=False):
 # patterns package (PATTERNS_V2_ROOT can point at an external checkout).
 detect.supports_latest_only = True
 detect.supports_strict = True
+detect.supports_all_candidates = True
 
 
 def add_forward_returns(sig, o, c, horizons=(5, 10, 20)):

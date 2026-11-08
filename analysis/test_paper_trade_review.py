@@ -8,7 +8,9 @@ import json
 
 import pytest
 
-from analysis.paper_trade_review import replay_trade, review_export, signal_evidence, signal_funnel, summarize
+from analysis.paper_trade_review import (
+    boundary_objective_comparison, replay_trade, review_export, signal_evidence, signal_funnel, summarize,
+)
 from core.backtester import _open_trade
 from core.test_patternsv2_exits import candle, signal
 
@@ -19,6 +21,23 @@ def test_signal_funnel_keeps_repeat_replays_separate_and_deduplicates_within_run
             {**row, "run_id": "second", "status": "filled"}]
     assert signal_funnel(rows)["BUY"] == {
         "observed_decisions": 2, "outcomes": {"DII": 1, "filled": 1}}
+
+
+@pytest.mark.parametrize("short", [False, True])
+def test_boundary_objective_comparison_uses_saved_geometry_and_keeps_input(short):
+    trade = saved_trade(short)
+    sign = -1 if short else 1
+    trade["requested_rules"] = {"price": 100 + sign * 25,
+                               "take_profit": trade["resolved_rules"]["take_profit"]}
+    trade["chart_annotations"] = [{"type": "hline", "label": "level", "price": 100}]
+    original = deepcopy(trade)
+    result = boundary_objective_comparison([trade])
+    assert not result["excluded"]
+    assert result["rows"][0]["exit_reason"] == "take_profit"
+    assert result["rows"][0]["exit"] == (95 if short else 105)
+    assert trade == original
+    trade["requested_rules"]["price"] = 100 + sign * 31
+    assert boundary_objective_comparison([trade])["excluded"][0]["reason"] == "objective exhausted before entry"
 
 
 def test_review_flags_unrelated_logs_instead_of_explaining_scan_rejections_with_them():

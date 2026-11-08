@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from core.backtester import BacktestTrade
+    from data.tv_client import OHLCVCandle
 
 LOSS_LIMIT_PCT = 0.03
 TRAIL_GIVEBACK_PCT = 0.03
@@ -84,6 +85,31 @@ def paper_protective_order(position: BacktestTrade) -> tuple[float, bool, str] |
         return None
     reason = "trailing_stop" if policy["peak_net_pct"] > 0 else "stop_loss"
     return policy["stop"], False, reason
+
+
+def check_paper_protection_only(
+    position: BacktestTrade, candle: OHLCVCandle, bar_idx: int,
+) -> tuple[float | None, str]:
+    """Keep risk exits executable when a saved pattern engine is unavailable.
+
+    Do not reinterpret an incompatible pattern's target, trail or time stop.
+    An already queued market exit still executes at the following open.
+    """
+    from core.backtester import _gap_aware_trigger_fill
+
+    order = paper_protective_order(position)
+    if order is None:
+        raise ValueError("Independent paper protection is required")
+    if position.pending_exit_reason:
+        position.exit_bar_idx = bar_idx
+        return candle.open, position.pending_exit_reason
+    stop, _, reason = order
+    price = _gap_aware_trigger_fill(candle, stop, is_short=position.action == "SELL", favorable=False)
+    if price is not None:
+        position.exit_bar_idx = bar_idx
+        return price, reason
+    ratchet_paper_protection(position, candle.close)
+    return None, ""
 
 
 def ratchet_paper_protection(position: BacktestTrade, close: float) -> None:

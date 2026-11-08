@@ -51,6 +51,9 @@ _CACHE_TTL_SECONDS = 6 * 3600
 # The pre-audit engine uses the identical exit ladder. Recheck this allowance
 # whenever exit helpers change; new entries still require the current runtime.
 _COMPATIBLE_EXIT_ENGINE_HASHES = frozenset({
+    # Boundary-anchored objectives affect new signals only; saved exits retain
+    # their levels. Paper can also enforce safety when a pattern runtime drifts.
+    "40c0c80c62b35a6f71ffb9bd1dac81f10ac02c25800277f5cfe5d604ef10f63e",
     # Additive paper safety order; absent policy retains the saved ladder.
     "a63bde2d2a4cc481f5c74ee40c355aec2a3946a5c369da9b0ab7c0edeff7753c",
     # Additive trail basis; missing basis retains reference-percentage exits.
@@ -68,6 +71,7 @@ _COMPATIBLE_EXIT_ENGINE_HASHES = frozenset({
 # Entry corrections and an opt-in trail basis preserve these audited engines'
 # existing ladders. Missing basis always means the old reference percentage.
 _COMPATIBLE_CAUSAL_EXIT_ENGINE_HASHES = frozenset({
+    "40c0c80c62b35a6f71ffb9bd1dac81f10ac02c25800277f5cfe5d604ef10f63e",
     "a63bde2d2a4cc481f5c74ee40c355aec2a3946a5c369da9b0ab7c0edeff7753c",
     # The new entry-based trail is opt-in per signal. Old positions keep
     # their reference-based ladder, including after a ledger reload.
@@ -81,6 +85,20 @@ def causal_exit_runtime_compatible(saved_engine: str | None) -> bool:
     from core.pattern_provenance import engine_hash
 
     return saved_engine == engine_hash() or saved_engine in _COMPATIBLE_CAUSAL_EXIT_ENGINE_HASHES
+
+
+class ExitRuntimeChangedError(RuntimeError):
+    """Saved pattern rules require a different exit implementation."""
+
+
+def validate_exit_runtime(position: BacktestTrade) -> None:
+    """Validate the pattern ladder independently of paper safety orders."""
+    if position.execution_model == "legacy":
+        _validate_legacy_exit_runtime(position)
+    elif position.execution_model != "causal-v1":
+        raise ValueError("Unknown position execution model")
+    elif position.resolved_rules and not causal_exit_runtime_compatible(position.resolved_rules.get("engine_sha256")):
+        raise ExitRuntimeChangedError("Position exit runtime changed; restore its compatible engine before management")
 
 
 # ── Trade record ─────────────────────────────────────────────────────────────
@@ -655,13 +673,13 @@ def _time_exit_allowed(position: BacktestTrade, candle: OHLCVCandle) -> bool:
 def _check_exit(candle: OHLCVCandle, position: BacktestTrade, bar_idx: int):
     from core.position_protection import paper_protective_order, ratchet_paper_protection
 
+    validate_exit_runtime(position)
     if position.execution_model == "legacy":
         # A migrated legacy paper trade gains a resting safety stop while its
         # pattern ladder retains its historical semantics. Opening orders act
         # before intrabar touches, including an already queued market exit.
         protective = paper_protective_order(position)
         if protective is not None and not position.pending_exit_reason:
-            _validate_legacy_exit_runtime(position)
             short = position.action == "SELL"
             resting = [protective]
             if not (position.stop_loss_on_close or position.exit_fill_at_close):
@@ -687,10 +705,6 @@ def _check_exit(candle: OHLCVCandle, position: BacktestTrade, bar_idx: int):
         if result[0] is None:
             ratchet_paper_protection(position, candle.close)
         return result
-    if position.execution_model != "causal-v1":
-        raise ValueError("Unknown position execution model")
-    if position.resolved_rules and not causal_exit_runtime_compatible(position.resolved_rules.get("engine_sha256")):
-        raise RuntimeError("Position exit runtime changed; restore its compatible engine before management")
     if position.pending_exit_reason:
         position.exit_bar_idx = bar_idx
         return candle.open, position.pending_exit_reason
@@ -757,7 +771,7 @@ def _validate_legacy_exit_runtime(position: BacktestTrade) -> None:
     if position.pattern_version_id and position.resolved_rules:
         saved_engine = position.resolved_rules.get("engine_sha256")
         if saved_engine != engine_hash() and saved_engine not in _COMPATIBLE_EXIT_ENGINE_HASHES:
-            raise RuntimeError("Position exit runtime changed; restore its compatible engine before management")
+            raise ExitRuntimeChangedError("Position exit runtime changed; restore its compatible engine before management")
 
 
 def _check_exit_legacy(

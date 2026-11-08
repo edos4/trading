@@ -1356,6 +1356,15 @@ class MarketScanner:
         from core.candle_validation import candle_error
         invalid = candle_error(candle)
         if invalid:
+            # A malformed forming range cannot support pattern analysis, but
+            # a finite observed last price can still execute a live safety stop.
+            # Replay cannot turn a historical close into an observed tick.
+            if (self._paper is not None and not self._paper.assume_session_open
+                    and isinstance(candle.timestamp, datetime)
+                    and candle.timestamp.tzinfo is not None and candle.timestamp.utcoffset() is not None
+                    and not is_closed_session_bar(timeframe, candle.timestamp, market=self._market)):
+                self._record_paper_exits(self._paper.on_quote(
+                    symbol, candle, timeframe, observed_at=snapshot.timestamp))
             self._note_missing_execution(symbol, invalid)
             stamp = candle.timestamp
             day = stamp.date().isoformat() if isinstance(stamp, datetime) else ""
