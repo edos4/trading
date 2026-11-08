@@ -721,11 +721,11 @@ img, video, canvas, pre, table { max-width: 100%; }
   .topbar-right { font-size: 0.9rem; }
 }
 
-/* Hermes tab: the proxy serves the Hermes Agent dashboard in a full-height
- * frame, so this page opts out of the usual padded <main>. */
-.hermes-main { padding-bottom: 0; }
-.hermes-main .page-head { margin: 1rem 1.25rem 0.75rem; }
-.hermes-frame {
+/* Hermes / DeepSeek tabs: the proxy serves the agent dashboard in a full-height
+ * frame, so these pages opt out of the usual padded <main>. */
+.hermes-main, .deepseek-main { padding-bottom: 0; }
+.hermes-main .page-head, .deepseek-main .page-head { margin: 1rem 1.25rem 0.75rem; }
+.hermes-frame, .deepseek-frame {
   display: block;
   width: 100%;
   height: min(900px, calc(100vh - 9rem));
@@ -735,8 +735,8 @@ img, video, canvas, pre, table { max-width: 100%; }
   background: #0b0f14;
 }
 @media (max-width: 600px) {
-  .hermes-main .page-head { margin: 0.85rem 0.85rem 0.6rem; }
-  .hermes-frame { height: calc(100vh - 12rem); min-height: 360px; }
+  .hermes-main .page-head, .deepseek-main .page-head { margin: 0.85rem 0.85rem 0.6rem; }
+  .hermes-frame, .deepseek-frame { height: calc(100vh - 12rem); min-height: 360px; }
 }
 
 /* ── System page ─────────────────────────────────────────────────────────

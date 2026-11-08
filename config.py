@@ -359,6 +359,21 @@ class Settings(BaseSettings):
     # behaves exactly as before.
     hermes_dashboard_url: str = ""
 
+    # ── DeepSeek Harness (dsh) — optional agent UI ─────────────────────────
+    # DeepSeek Harness (github.com/deepseek-ai/deepseek-harness) serves its own
+    # browser UI on 127.0.0.1:3080. When this is set the UI reverse-proxies it
+    # same-origin at /deepseek, reachable by URL under the existing login (it is
+    # deliberately *not* in the navbar; see docs/deepseek-harness.md). Empty
+    # (default) disables the mount, so a clone that never installs the harness
+    # behaves exactly as before.
+    deepseek_harness_url: str = ""
+    # File holding the harness's per-process launch token (written by
+    # run_dsh.sh). dsh exchanges that token — on `GET /?token=…` only — for its
+    # signed session cookie, so the proxy replays it for a browser that has no
+    # cookie yet. Empty = no automatic sign-in; the tokenized URL printed at
+    # startup has to be opened by hand once.
+    deepseek_harness_token_file: str = ""
+
     # ── Laya text assessment (optional, research-only by default) ──────────────
     # Local optional assessment service with its own research workspace. Off by
     # default: enables assessment execution, never entry filtering on its own.

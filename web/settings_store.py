@@ -262,7 +262,8 @@ GROUPS: list[tuple[str, str, str, list[str]]] = [
             "web_ui_users", "web_ui_secret_key", "web_ui_https",
             "web_ui_session_hours", "tasks_enabled", "task_database_url",
             "task_schema", "rules_database_url", "rules_schema",
-            "hermes_dashboard_url",
+            "hermes_dashboard_url", "deepseek_harness_url",
+            "deepseek_harness_token_file",
         ],
     ),
     (
@@ -444,6 +445,8 @@ INFO: dict[str, tuple[str, str]] = {
     "rules_database_url": ("Rules database URL", "PostgreSQL DSN for the Builder's indicator rules. Empty reuses DATABASE_URL/db_*."),
     "rules_schema": ("Rules schema", "Schema holding Builder rules (production: rules)."),
     "hermes_dashboard_url": ("Hermes dashboard URL", "Loopback URL of the Hermes Agent dashboard; set to proxy it at /hermes and show the tab. Empty hides it."),
+    "deepseek_harness_url": ("DeepSeek Harness URL", "Loopback URL of the DeepSeek Harness (dsh) Web UI, e.g. http://127.0.0.1:3080; set to serve it at /deepseek (by URL, no navbar entry). Empty disables it."),
+    "deepseek_harness_token_file": ("DeepSeek launch token file", "File run_dsh.sh writes the harness's launch token to, so the /deepseek tab signs in without the printed tokenized URL. Empty disables automatic sign-in."),
     # Laya
     "laya_enabled": ("Enable Laya", "Allow the local text-assessment worker to run. Off by default."),
     "laya_worker_python": ("Worker interpreter", "Python path of the isolated Laya environment. Empty renders the tab unavailable."),

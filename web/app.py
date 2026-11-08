@@ -49,6 +49,7 @@ from web.patterns import pattern_edits, patterns_error
 from web import replay_store
 from web.documentation import build_document
 from web.hermes_proxy import HermesDashboardProxy
+from web.deepseek_proxy import DeepSeekHarnessProxy
 from web.remote_proxy import RemotePatternProxy
 from web.services import TIMEFRAMES, get_explorer
 from web.system_stats import snapshot as system_snapshot
@@ -276,6 +277,10 @@ def create_app() -> FastAPI:
     # Inert unless HERMES_DASHBOARD_URL is set: proxies the Hermes Agent
     # dashboard same-origin at /hermes so it is reachable over the tunnel.
     app.add_middleware(HermesDashboardProxy)
+    # Inert unless DEEPSEEK_HARNESS_URL is set: proxies the DeepSeek Harness
+    # Web UI same-origin at /deepseek, signing the browser in with the launch
+    # token the harness prints at startup.
+    app.add_middleware(DeepSeekHarnessProxy)
 
     app.mount("/static", StaticFiles(directory=str(ROOT / "static")), name="static")
 
@@ -481,6 +486,13 @@ def create_app() -> FastAPI:
         if not (settings.hermes_dashboard_url or "").strip():
             raise HTTPException(status_code=404, detail="Hermes dashboard not configured")
         return render(request, "hermes.html", active="hermes")
+
+    @app.get("/deepseek", response_class=HTMLResponse)
+    async def deepseek_page(request: Request, _user: str = Depends(require_login)):
+        if not (settings.deepseek_harness_url or "").strip():
+            raise HTTPException(status_code=404,
+                                detail="DeepSeek harness not configured")
+        return render(request, "deepseek.html", active="deepseek")
 
     # ── Kronos ────────────────────────────────────────────────────────────
     @app.get("/kronos", response_class=HTMLResponse)

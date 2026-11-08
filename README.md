@@ -341,7 +341,9 @@ collapse. A run that goes to zero trades is not an edge — it is sample death.
 
 Authenticated browser UI with the same Explorer / Backtest / Paper surfaces (plus
 Patterns, Indicators, Laya, Kronos, Settings, Documentation, and a Trello-style
-**Tasks** board). The **Kronos** tab forecasts N trading days ahead for one or more
+**Tasks** board). The DeepSeek Harness UI is additionally served at `/deepseek`
+(no navbar entry — open it by URL), and the **Kronos** tab forecasts N trading
+days ahead for one or more
 symbols — comma-separated (`AAPL, NVDA, MSFT`, spaces ignored) — or for the
 **top X NASDAQ stocks** by dollar volume (enter X), and draws one chart per
 symbol.
@@ -398,6 +400,35 @@ description.
   and `POST /api/settings` accepts `{"values": {"field_name": value}}`.
 - **Scope:** these are process-wide config values, not per-run backtest/paper
   knobs — use the Backtest/Paper forms for per-run settings.
+
+### DeepSeek Harness agent tab (optional)
+
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) is an
+open-source agent harness that reads and edits a workspace and runs commands.
+When it is installed and `DEEPSEEK_HARNESS_URL` is set, the UI serves its Web UI
+same-origin at `/deepseek`, reachable over the HTTPS tunnel under the existing
+login. It has **no navbar entry** — open `https://<host>/deepseek` directly
+(full design record and proxy contract:
+[docs/deepseek-harness.md](docs/deepseek-harness.md)).
+
+```bash
+# Install + supervise (systemd user unit; survives restarts)
+npm install --global --prefix ~/.local @deepseek-ai/dsh
+systemctl --user enable --now deepseek-harness.service   # runs ./run_dsh.sh
+
+# .env
+DEEPSEEK_HARNESS_URL=http://127.0.0.1:3080
+DEEPSEEK_HARNESS_TOKEN_FILE=/home/<you>/.local/state/deepseek-harness/token
+```
+
+`run_dsh.sh` starts `dsh web` in the repo root (its default workspace) and
+publishes the launch token to a 0600 file; the proxy replays that token, so the
+page signs a browser in transparently — no tokenized URL to copy. Its model
+provider is configured in the harness itself (`$DSH_HOME`), not here; this host
+runs it on **Command Code** (`commandcode`) — see
+[docs/deepseek-harness.md §5](docs/deepseek-harness.md). Empty
+`DEEPSEEK_HARNESS_URL` (the default) disables the mount and changes nothing else,
+so a clone without the harness behaves exactly as before.
 
 ### Laya text assessment (optional, seventh tab)
 
