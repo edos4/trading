@@ -150,6 +150,21 @@ class WebPaperApiTests(unittest.TestCase):
         self.assertIn('id="us-kronos-mode"', page.text)
         self.assertIn('value="confirm" selected', page.text)
         self.assertIn('Kronos exits: EXIT', page.text)
+        self.assertIn('id="us-dii-mode"', page.text)
+        self.assertIn('value="shadow" selected', page.text)
+        self.assertIn('cost-aware 3% loss stop', page.text)
+
+    def test_dii_choice_reaches_each_started_book(self) -> None:
+        self._login()
+        for mode in ("shadow", "filter"):
+            with patch("web.app.paper_books.start", return_value=None) as start:
+                response = self.client.post("/api/paper/start", json={"market": "us", "dii_gate_mode": mode})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(start.call_args.kwargs["dii_gate_mode"], mode)
+        with patch("web.app.paper_books.start") as start:
+            response = self.client.post("/api/paper/start", json={"market": "us", "dii_gate_mode": "off"})
+        self.assertEqual(response.status_code, 400)
+        start.assert_not_called()
 
     def test_kronos_modes_are_forwarded_without_silently_forcing_off(self) -> None:
         self._login()

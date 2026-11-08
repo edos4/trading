@@ -1,0 +1,1033 @@
+{
+  "export_sha256": "ab66ceead403b46614c5c2daabc34d86c27ff17000e24ef52b63c7326c13c883",
+  "exported_at": "2026-11-08T09:30:53.974649+00:00",
+  "engine_sha256": "40c0c80c62b35a6f71ffb9bd1dac81f10ac02c25800277f5cfe5d604ef10f63e",
+  "scope": "saved entries and OHLC through original exits/latest open marks; no rescanning",
+  "books": [
+    {
+      "market": "us",
+      "currency": "USD",
+      "baseline_reproduced": true,
+      "baseline_verified": true,
+      "ohlc_anomalies": [],
+      "summary": {
+        "count": 1,
+        "wins": 1,
+        "losses": 0,
+        "net_pnl": 984.2885092906913,
+        "profit_factor": null,
+        "win_rate_pct": 100.0,
+        "descriptive_win_rate_95pct_interval": [
+          20.654931437723747,
+          100.0
+        ],
+        "average_win": 984.2885092906913,
+        "average_loss": 0,
+        "expectancy_per_trade": 984.2885092906913,
+        "average_net_r": 3.623309176089885,
+        "breakeven_win_rate_pct": null,
+        "exit_reasons": {
+          "trailing_stop": 1
+        }
+      },
+      "closed_fees_paid": 18.783628805446345,
+      "closed_gross_pnl": 1003.0721380961377,
+      "by_side": {
+        "BUY": {
+          "count": 0,
+          "wins": 0,
+          "losses": 0,
+          "net_pnl": 0,
+          "profit_factor": null,
+          "win_rate_pct": null,
+          "descriptive_win_rate_95pct_interval": null,
+          "average_win": 0,
+          "average_loss": 0,
+          "expectancy_per_trade": null,
+          "average_net_r": null,
+          "breakeven_win_rate_pct": null,
+          "exit_reasons": {}
+        },
+        "SELL": {
+          "count": 1,
+          "wins": 1,
+          "losses": 0,
+          "net_pnl": 984.2885092906913,
+          "profit_factor": null,
+          "win_rate_pct": 100.0,
+          "descriptive_win_rate_95pct_interval": [
+            20.654931437723747,
+            100.0
+          ],
+          "average_win": 984.2885092906913,
+          "average_loss": 0,
+          "expectancy_per_trade": 984.2885092906913,
+          "average_net_r": 3.623309176089885,
+          "breakeven_win_rate_pct": null,
+          "exit_reasons": {
+            "trailing_stop": 1
+          }
+        }
+      },
+      "by_pattern": {
+        "symmetrical_triangle": {
+          "count": 1,
+          "wins": 1,
+          "losses": 0,
+          "net_pnl": 984.2885092906913,
+          "profit_factor": null,
+          "win_rate_pct": 100.0,
+          "descriptive_win_rate_95pct_interval": [
+            20.654931437723747,
+            100.0
+          ],
+          "average_win": 984.2885092906913,
+          "average_loss": 0,
+          "expectancy_per_trade": 984.2885092906913,
+          "average_net_r": 3.623309176089885,
+          "breakeven_win_rate_pct": null,
+          "exit_reasons": {
+            "trailing_stop": 1
+          }
+        }
+      },
+      "by_entry_price": {
+        "below_5": {
+          "BUY": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          },
+          "SELL": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          }
+        },
+        "5_to_10": {
+          "BUY": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          },
+          "SELL": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          }
+        },
+        "10_to_50": {
+          "BUY": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          },
+          "SELL": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          }
+        },
+        "50_and_above": {
+          "BUY": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          },
+          "SELL": {
+            "count": 1,
+            "wins": 1,
+            "losses": 0,
+            "net_pnl": 984.2885092906913,
+            "profit_factor": null,
+            "win_rate_pct": 100.0,
+            "descriptive_win_rate_95pct_interval": [
+              20.654931437723747,
+              100.0
+            ],
+            "average_win": 984.2885092906913,
+            "average_loss": 0,
+            "expectancy_per_trade": 984.2885092906913,
+            "average_net_r": 3.623309176089885,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {
+              "trailing_stop": 1
+            }
+          }
+        }
+      },
+      "by_entry_quarter": {
+        "2026Q1": {
+          "BUY": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          },
+          "SELL": {
+            "count": 1,
+            "wins": 1,
+            "losses": 0,
+            "net_pnl": 984.2885092906913,
+            "profit_factor": null,
+            "win_rate_pct": 100.0,
+            "descriptive_win_rate_95pct_interval": [
+              20.654931437723747,
+              100.0
+            ],
+            "average_win": 984.2885092906913,
+            "average_loss": 0,
+            "expectancy_per_trade": 984.2885092906913,
+            "average_net_r": 3.623309176089885,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {
+              "trailing_stop": 1
+            }
+          }
+        }
+      },
+      "path": {
+        "daily_marked_max_drawdown": 309.6914907093087,
+        "peak_concurrent_including_entry_day": 1,
+        "last_marked_pnl": 984.2885092906913
+      },
+      "same_session": {
+        "count": 0,
+        "wins": 0,
+        "losses": 0,
+        "net_pnl": 0,
+        "profit_factor": null,
+        "win_rate_pct": null,
+        "descriptive_win_rate_95pct_interval": null,
+        "average_win": 0,
+        "average_loss": 0,
+        "expectancy_per_trade": null,
+        "average_net_r": null,
+        "breakeven_win_rate_pct": null,
+        "exit_reasons": {}
+      },
+      "trailing_armed_count": 1,
+      "ambiguous_exit_count": 0,
+      "gap_exit_count": 0,
+      "median_entry_range_r": 0.8969462308687468,
+      "without_best_trade": {
+        "count": 0,
+        "wins": 0,
+        "losses": 0,
+        "net_pnl": 0,
+        "profit_factor": null,
+        "win_rate_pct": null,
+        "descriptive_win_rate_95pct_interval": null,
+        "average_win": 0,
+        "average_loss": 0,
+        "expectancy_per_trade": null,
+        "average_net_r": null,
+        "breakeven_win_rate_pct": null,
+        "exit_reasons": {}
+      },
+      "without_best_three": {
+        "count": 0,
+        "wins": 0,
+        "losses": 0,
+        "net_pnl": 0,
+        "profit_factor": null,
+        "win_rate_pct": null,
+        "descriptive_win_rate_95pct_interval": null,
+        "average_win": 0,
+        "average_loss": 0,
+        "expectancy_per_trade": null,
+        "average_net_r": null,
+        "breakeven_win_rate_pct": null,
+        "exit_reasons": {}
+      },
+      "signal_log_status_counts": {
+        "rejected": 2,
+        "filled": 2
+      },
+      "signal_funnel": {
+        "BUY": {
+          "observed_decisions": 4,
+          "outcomes": {
+            "other_rejection": 2,
+            "filled": 2
+          }
+        },
+        "SELL": {
+          "observed_decisions": 0,
+          "outcomes": {}
+        }
+      },
+      "signal_funnel_scope": "exported journal grouped by run and decision; not inferred from scan counters",
+      "signal_evidence": {
+        "run_funnel": {
+          "source": "scan_stats.run_totals; no missing decisions reconstructed",
+          "detected": 26,
+          "rejected": 25,
+          "filled": 1,
+          "rejection_by_gate": {
+            "dii": 20,
+            "kronos": 5
+          },
+          "rejection_rate_pct": 96.15384615384616
+        },
+        "journal": {
+          "rows": 4,
+          "rows_within_scan_window": 0,
+          "rows_outside_scan_window": 4,
+          "rows_without_comparable_window": 0,
+          "run_ids": [
+            "343e981a5d104eb6b0a77c1c1d94090c",
+            "ed694495d6ed4b14a405a330b3e29040"
+          ],
+          "ledger_trades_without_matching_fill_ids": [
+            "1f18a40500174fe4a48c258c4b66fdd0"
+          ]
+        },
+        "warnings": [
+          "Journal rows outside the saved scan run cannot explain that run's rejections.",
+          "Ledger trades lack matching filled journal identities; journal coverage is incomplete.",
+          "No journal rows are tied to the saved scan window; per-side rejection analysis is unavailable."
+        ]
+      },
+      "logged_rejections": {
+        "other": 2
+      },
+      "last_kronos_exit_decisions": {
+        "confirm": 1
+      },
+      "open_marked_pnl": 0,
+      "open_liquidation_pnl": 0,
+      "total_liquidation_pnl": 984.2885092906913,
+      "open_positions": [],
+      "targets_inside_trail_activation": [],
+      "comparisons": {
+        "target_cap_2r_closed": {
+          "count": 1,
+          "wins": 1,
+          "losses": 0,
+          "net_pnl": 564.4107972791726,
+          "profit_factor": null,
+          "win_rate_pct": 100.0,
+          "descriptive_win_rate_95pct_interval": [
+            20.654931437723747,
+            100.0
+          ],
+          "average_win": 564.4107972791726,
+          "average_loss": 0,
+          "expectancy_per_trade": 564.4107972791726,
+          "average_net_r": 2.0776782432820933,
+          "breakeven_win_rate_pct": null,
+          "exit_reasons": {
+            "take_profit": 1
+          }
+        },
+        "target_cap_2r_total_liquidation_pnl": 564.4107972791726,
+        "long_only_closed": {
+          "count": 0,
+          "wins": 0,
+          "losses": 0,
+          "net_pnl": 0,
+          "profit_factor": null,
+          "win_rate_pct": null,
+          "descriptive_win_rate_95pct_interval": null,
+          "average_win": 0,
+          "average_loss": 0,
+          "expectancy_per_trade": null,
+          "average_net_r": null,
+          "breakeven_win_rate_pct": null,
+          "exit_reasons": {}
+        },
+        "long_only_total_liquidation_pnl": 0,
+        "entry_basis_trail": {
+          "closed": {
+            "count": 1,
+            "wins": 1,
+            "losses": 0,
+            "net_pnl": 984.2885092906913,
+            "profit_factor": null,
+            "win_rate_pct": 100.0,
+            "descriptive_win_rate_95pct_interval": [
+              20.654931437723747,
+              100.0
+            ],
+            "average_win": 984.2885092906913,
+            "average_loss": 0,
+            "expectancy_per_trade": 984.2885092906913,
+            "average_net_r": 3.623309176089885,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {
+              "trailing_stop": 1
+            }
+          },
+          "coverage_exhausted": [],
+          "total_liquidation_pnl": 984.2885092906913
+        },
+        "paper_3pct_protection": {
+          "closed": {
+            "count": 1,
+            "wins": 1,
+            "losses": 0,
+            "net_pnl": 984.288509290693,
+            "profit_factor": null,
+            "win_rate_pct": 100.0,
+            "descriptive_win_rate_95pct_interval": [
+              20.654931437723747,
+              100.0
+            ],
+            "average_win": 984.288509290693,
+            "average_loss": 0,
+            "expectancy_per_trade": 984.288509290693,
+            "average_net_r": 3.6233091760899145,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {
+              "trailing_stop": 1
+            }
+          },
+          "coverage_exhausted": [],
+          "total_liquidation_pnl": 984.288509290693
+        }
+      },
+      "extra_friction_per_side_stress": {
+        "0.0005": 974.8966948879681,
+        "0.001": 965.5048804852449,
+        "0.002": 946.7212516797986
+      },
+      "baseline": [
+        {
+          "trade_id": "1f18a40500174fe4a48c258c4b66fdd0",
+          "symbol": "SHOP",
+          "action": "SELL",
+          "pattern": "symmetrical_triangle",
+          "entry_date": "2026-01-15T14:30:00+00:00",
+          "last_observed": "2026-01-22T14:30:00+00:00",
+          "exit_date": "2026-01-22T14:30:00+00:00",
+          "exit_reason": "trailing_stop",
+          "pnl": 984.2885092906913,
+          "net_r": 3.623309176089885,
+          "initial_risk": 271.6545736107709,
+          "risk_pct": 2.745829882261673,
+          "target_r": 13.05706664395583,
+          "activation_r": 4.306530450553636,
+          "entry": 159.57016889953613,
+          "qty": 62,
+          "exit": 143.39158602701778,
+          "txn_cost_pct_per_side": 0.001,
+          "slippage_pct_per_side": 0.000500000000000056,
+          "fees_paid": 18.783628805446345,
+          "marked_open_pnl": 0,
+          "open_liquidation_pnl": 0,
+          "trailing_armed": true,
+          "pattern_trailing_armed": true,
+          "paper_trailing_armed": true,
+          "bars": 5,
+          "gap_exit": false,
+          "trailing_stop_basis": "entry",
+          "paper_protection": {
+            "policy": "net-loss-trail-v1",
+            "loss_limit_pct": 0.03,
+            "giveback_pct": 0.03,
+            "txn_cost_pct": 0.001,
+            "slippage_pct": 0.0005,
+            "adopted_at": "2026-01-15T14:30:00+00:00",
+            "peak_net_pct": 0.1294899060838056,
+            "stop": 143.31992606398578,
+            "initial_stop": 163.951694280355
+          },
+          "best_surviving_close_r": 4.799738398291072,
+          "ohlc_anomalies": [],
+          "coverage_exhausted": false,
+          "same_session_exit": false,
+          "entry_range_r": 0.8969462308687468,
+          "ambiguous_bars": []
+        }
+      ],
+      "target_cap_2r": [
+        {
+          "trade_id": "1f18a40500174fe4a48c258c4b66fdd0",
+          "symbol": "SHOP",
+          "action": "SELL",
+          "pattern": "symmetrical_triangle",
+          "entry_date": "2026-01-15T14:30:00+00:00",
+          "last_observed": "2026-01-22T14:30:00+00:00",
+          "exit_date": "2026-01-20T14:30:00+00:00",
+          "exit_reason": "take_profit",
+          "pnl": 564.4107972791726,
+          "net_r": 2.0776782432820933,
+          "initial_risk": 271.6545736107709,
+          "risk_pct": 2.745829882261673,
+          "target_r": 2.000004139631016,
+          "activation_r": 4.306530450553636,
+          "entry": 159.57016889953613,
+          "qty": 62,
+          "exit": 150.15704173278812,
+          "txn_cost_pct_per_side": 0.001,
+          "slippage_pct_per_side": 0.000500000000000056,
+          "fees_paid": 19.20308705920411,
+          "marked_open_pnl": 0,
+          "open_liquidation_pnl": 0,
+          "trailing_armed": true,
+          "pattern_trailing_armed": false,
+          "paper_trailing_armed": true,
+          "bars": 3,
+          "gap_exit": true,
+          "trailing_stop_basis": "entry",
+          "paper_protection": {
+            "policy": "net-loss-trail-v1",
+            "loss_limit_pct": 0.03,
+            "giveback_pct": 0.03,
+            "txn_cost_pct": 0.001,
+            "slippage_pct": 0.0005,
+            "adopted_at": "2026-01-15T14:30:00+00:00",
+            "peak_net_pct": 0.021099233609421727,
+            "stop": 160.58993033644666,
+            "initial_stop": 163.951694280355
+          },
+          "best_surviving_close_r": 0.8581877346650496,
+          "ohlc_anomalies": [],
+          "coverage_exhausted": false,
+          "same_session_exit": false,
+          "entry_range_r": 0.8969462308687468,
+          "ambiguous_bars": []
+        }
+      ],
+      "entry_basis_trail": [
+        {
+          "trade_id": "1f18a40500174fe4a48c258c4b66fdd0",
+          "symbol": "SHOP",
+          "action": "SELL",
+          "pattern": "symmetrical_triangle",
+          "entry_date": "2026-01-15T14:30:00+00:00",
+          "last_observed": "2026-01-22T14:30:00+00:00",
+          "exit_date": "2026-01-22T14:30:00+00:00",
+          "exit_reason": "trailing_stop",
+          "pnl": 984.2885092906913,
+          "net_r": 3.623309176089885,
+          "initial_risk": 271.6545736107709,
+          "risk_pct": 2.745829882261673,
+          "target_r": 13.05706664395583,
+          "activation_r": 4.306530450553636,
+          "entry": 159.57016889953613,
+          "qty": 62,
+          "exit": 143.39158602701778,
+          "txn_cost_pct_per_side": 0.001,
+          "slippage_pct_per_side": 0.000500000000000056,
+          "fees_paid": 18.783628805446345,
+          "marked_open_pnl": 0,
+          "open_liquidation_pnl": 0,
+          "trailing_armed": true,
+          "pattern_trailing_armed": true,
+          "paper_trailing_armed": true,
+          "bars": 5,
+          "gap_exit": false,
+          "trailing_stop_basis": "entry",
+          "paper_protection": {
+            "policy": "net-loss-trail-v1",
+            "loss_limit_pct": 0.03,
+            "giveback_pct": 0.03,
+            "txn_cost_pct": 0.001,
+            "slippage_pct": 0.0005,
+            "adopted_at": "2026-01-15T14:30:00+00:00",
+            "peak_net_pct": 0.1294899060838056,
+            "stop": 143.31992606398578,
+            "initial_stop": 163.951694280355
+          },
+          "best_surviving_close_r": 4.799738398291072,
+          "ohlc_anomalies": [],
+          "coverage_exhausted": false,
+          "same_session_exit": false,
+          "entry_range_r": 0.8969462308687468,
+          "ambiguous_bars": []
+        }
+      ],
+      "paper_3pct_protection": [
+        {
+          "trade_id": "1f18a40500174fe4a48c258c4b66fdd0",
+          "symbol": "SHOP",
+          "action": "SELL",
+          "pattern": "symmetrical_triangle",
+          "entry_date": "2026-01-15T14:30:00+00:00",
+          "last_observed": "2026-01-22T14:30:00+00:00",
+          "exit_date": "2026-01-22T14:30:00+00:00",
+          "exit_reason": "trailing_stop",
+          "pnl": 984.288509290693,
+          "net_r": 3.6233091760899145,
+          "initial_risk": 271.65457361076915,
+          "risk_pct": 2.745829882261655,
+          "target_r": 13.057066643955913,
+          "activation_r": 4.306530450553664,
+          "entry": 159.57016889953613,
+          "qty": 62,
+          "exit": 143.39158602701775,
+          "txn_cost_pct_per_side": 0.001,
+          "slippage_pct_per_side": 0.000500000000000056,
+          "fees_paid": 18.783628805446345,
+          "marked_open_pnl": 0,
+          "open_liquidation_pnl": 0,
+          "trailing_armed": true,
+          "pattern_trailing_armed": true,
+          "paper_trailing_armed": true,
+          "bars": 5,
+          "gap_exit": false,
+          "trailing_stop_basis": "entry",
+          "paper_protection": {
+            "policy": "net-loss-trail-v1",
+            "loss_limit_pct": 0.03,
+            "giveback_pct": 0.03,
+            "txn_cost_pct": 0.001,
+            "slippage_pct": 0.000500000000000056,
+            "adopted_at": "2026-01-15T14:30:00+00:00",
+            "peak_net_pct": 0.12948990608380542,
+            "stop": 143.31992606398575,
+            "initial_stop": 163.95169428035499
+          },
+          "best_surviving_close_r": 4.799738398291103,
+          "ohlc_anomalies": [],
+          "coverage_exhausted": false,
+          "same_session_exit": false,
+          "entry_range_r": 0.8969462308687526,
+          "ambiguous_bars": []
+        }
+      ]
+    },
+    {
+      "market": "ph",
+      "currency": "PHP",
+      "baseline_reproduced": true,
+      "baseline_verified": true,
+      "ohlc_anomalies": [],
+      "summary": {
+        "count": 0,
+        "wins": 0,
+        "losses": 0,
+        "net_pnl": 0,
+        "profit_factor": null,
+        "win_rate_pct": null,
+        "descriptive_win_rate_95pct_interval": null,
+        "average_win": 0,
+        "average_loss": 0,
+        "expectancy_per_trade": null,
+        "average_net_r": null,
+        "breakeven_win_rate_pct": null,
+        "exit_reasons": {}
+      },
+      "closed_fees_paid": 0,
+      "closed_gross_pnl": 0,
+      "by_side": {
+        "BUY": {
+          "count": 0,
+          "wins": 0,
+          "losses": 0,
+          "net_pnl": 0,
+          "profit_factor": null,
+          "win_rate_pct": null,
+          "descriptive_win_rate_95pct_interval": null,
+          "average_win": 0,
+          "average_loss": 0,
+          "expectancy_per_trade": null,
+          "average_net_r": null,
+          "breakeven_win_rate_pct": null,
+          "exit_reasons": {}
+        },
+        "SELL": {
+          "count": 0,
+          "wins": 0,
+          "losses": 0,
+          "net_pnl": 0,
+          "profit_factor": null,
+          "win_rate_pct": null,
+          "descriptive_win_rate_95pct_interval": null,
+          "average_win": 0,
+          "average_loss": 0,
+          "expectancy_per_trade": null,
+          "average_net_r": null,
+          "breakeven_win_rate_pct": null,
+          "exit_reasons": {}
+        }
+      },
+      "by_pattern": {},
+      "by_entry_price": {
+        "below_5": {
+          "BUY": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          },
+          "SELL": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          }
+        },
+        "5_to_10": {
+          "BUY": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          },
+          "SELL": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          }
+        },
+        "10_to_50": {
+          "BUY": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          },
+          "SELL": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          }
+        },
+        "50_and_above": {
+          "BUY": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          },
+          "SELL": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          }
+        }
+      },
+      "by_entry_quarter": {},
+      "path": {
+        "daily_marked_max_drawdown": 0.0,
+        "peak_concurrent_including_entry_day": 0,
+        "last_marked_pnl": 0
+      },
+      "same_session": {
+        "count": 0,
+        "wins": 0,
+        "losses": 0,
+        "net_pnl": 0,
+        "profit_factor": null,
+        "win_rate_pct": null,
+        "descriptive_win_rate_95pct_interval": null,
+        "average_win": 0,
+        "average_loss": 0,
+        "expectancy_per_trade": null,
+        "average_net_r": null,
+        "breakeven_win_rate_pct": null,
+        "exit_reasons": {}
+      },
+      "trailing_armed_count": 0,
+      "ambiguous_exit_count": 0,
+      "gap_exit_count": 0,
+      "median_entry_range_r": null,
+      "without_best_trade": {
+        "count": 0,
+        "wins": 0,
+        "losses": 0,
+        "net_pnl": 0,
+        "profit_factor": null,
+        "win_rate_pct": null,
+        "descriptive_win_rate_95pct_interval": null,
+        "average_win": 0,
+        "average_loss": 0,
+        "expectancy_per_trade": null,
+        "average_net_r": null,
+        "breakeven_win_rate_pct": null,
+        "exit_reasons": {}
+      },
+      "without_best_three": {
+        "count": 0,
+        "wins": 0,
+        "losses": 0,
+        "net_pnl": 0,
+        "profit_factor": null,
+        "win_rate_pct": null,
+        "descriptive_win_rate_95pct_interval": null,
+        "average_win": 0,
+        "average_loss": 0,
+        "expectancy_per_trade": null,
+        "average_net_r": null,
+        "breakeven_win_rate_pct": null,
+        "exit_reasons": {}
+      },
+      "signal_log_status_counts": {},
+      "signal_funnel": {
+        "BUY": {
+          "observed_decisions": 0,
+          "outcomes": {}
+        },
+        "SELL": {
+          "observed_decisions": 0,
+          "outcomes": {}
+        }
+      },
+      "signal_funnel_scope": "exported journal grouped by run and decision; not inferred from scan counters",
+      "signal_evidence": {
+        "run_funnel": {
+          "source": "scan_stats.run_totals; no missing decisions reconstructed",
+          "detected": null,
+          "rejected": null,
+          "filled": null,
+          "rejection_by_gate": null,
+          "rejection_rate_pct": null
+        },
+        "journal": {
+          "rows": 0,
+          "rows_within_scan_window": 0,
+          "rows_outside_scan_window": 0,
+          "rows_without_comparable_window": 0,
+          "run_ids": [],
+          "ledger_trades_without_matching_fill_ids": []
+        },
+        "warnings": []
+      },
+      "logged_rejections": {},
+      "last_kronos_exit_decisions": {},
+      "open_marked_pnl": 0,
+      "open_liquidation_pnl": 0,
+      "total_liquidation_pnl": 0,
+      "open_positions": [],
+      "targets_inside_trail_activation": [],
+      "comparisons": {
+        "target_cap_2r_closed": {
+          "count": 0,
+          "wins": 0,
+          "losses": 0,
+          "net_pnl": 0,
+          "profit_factor": null,
+          "win_rate_pct": null,
+          "descriptive_win_rate_95pct_interval": null,
+          "average_win": 0,
+          "average_loss": 0,
+          "expectancy_per_trade": null,
+          "average_net_r": null,
+          "breakeven_win_rate_pct": null,
+          "exit_reasons": {}
+        },
+        "target_cap_2r_total_liquidation_pnl": 0,
+        "long_only_closed": {
+          "count": 0,
+          "wins": 0,
+          "losses": 0,
+          "net_pnl": 0,
+          "profit_factor": null,
+          "win_rate_pct": null,
+          "descriptive_win_rate_95pct_interval": null,
+          "average_win": 0,
+          "average_loss": 0,
+          "expectancy_per_trade": null,
+          "average_net_r": null,
+          "breakeven_win_rate_pct": null,
+          "exit_reasons": {}
+        },
+        "long_only_total_liquidation_pnl": 0,
+        "entry_basis_trail": {
+          "closed": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          },
+          "coverage_exhausted": [],
+          "total_liquidation_pnl": 0
+        },
+        "paper_3pct_protection": {
+          "closed": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          },
+          "coverage_exhausted": [],
+          "total_liquidation_pnl": 0
+        }
+      },
+      "extra_friction_per_side_stress": {
+        "0.0005": 0,
+        "0.001": 0,
+        "0.002": 0
+      },
+      "baseline": [],
+      "target_cap_2r": [],
+      "entry_basis_trail": [],
+      "paper_3pct_protection": []
+    }
+  ]
+}

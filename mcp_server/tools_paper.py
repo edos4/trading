@@ -42,6 +42,7 @@ def paper_start(
     volume_gate: bool = True,
     kronos_gate_mode: Optional[str] = None,
     kronos_gate_samples: Optional[int] = None,
+    dii_gate_mode: Optional[str] = None,
 ) -> dict:
     """Start the paper trading scanner for one market ("us" or "ph").
 
@@ -69,6 +70,7 @@ def paper_start(
         "collect_first_top_n": collect_first_top_n,
         "kronos_gate_mode": kronos_gate_mode,
         "kronos_gate_samples": kronos_gate_samples,
+        "dii_gate_mode": dii_gate_mode,
         "volume_gate": volume_gate,
     }
     return get_client().post("/api/paper/start", json=body)

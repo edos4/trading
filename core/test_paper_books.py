@@ -832,7 +832,7 @@ def test_run_settings_header_lists_every_paper_filter():
 
     cfg = paper_run_settings(
         market="us", n_symbols=2000, use_stream=True, interval_seconds=0,
-        stream_start="2025-11-03", patterns_v2=True,
+        stream_start="2025-11-03", patterns_v2=True, dii_gate_mode="shadow",
     )
     assert paper_run_status(cfg) == (
         "Running — US (NASDAQ/NYSE), 2000 symbols, scan-paced replay, "

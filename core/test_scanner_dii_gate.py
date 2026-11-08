@@ -117,3 +117,27 @@ def test_paper_advisory_dii_does_not_change_explicit_filter_or_nonpaper_gates(
     assert scanner._finish_signal.await_count == int(passes)
     assert scanner._append_signal_log.call_args.kwargs['status'] == ('shadow' if passes else 'rejected')
     assert scanner.stats['signals_rejected'] == int(not passes)
+
+
+@pytest.mark.parametrize('action', ['BUY', 'SELL'])
+@pytest.mark.parametrize('mode', ['shadow', 'filter'])
+def test_paper_run_dii_choice_overrides_server_default_and_is_frozen(monkeypatch, action, mode):
+    monkeypatch.setattr(settings, 'short_entries_enabled', True)
+    monkeypatch.setattr(settings, 'paper_dii_gate_mode', 'filter' if mode == 'shadow' else 'shadow')
+    monkeypatch.setattr('analysis.pattern_dii.describe_pattern_dii_rejection',
+                        lambda *args, **kwargs: 'DII outside required band')
+    monkeypatch.setattr('core.scanner.regime_filter_required', lambda *args: False)
+    monkeypatch.setattr('core.scanner.describe_risk_gate_rejection', lambda *args, **kwargs: None)
+    book = PaperAccount(market='us')
+    scanner = MarketScanner(symbols=['TEST'], market='us', paper_account=book,
+                            dii_gate_mode=mode, volume_gate=False)
+    scanner._store.get_df = Mock(return_value=None)
+    scanner._append_signal_log = Mock()
+    scanner._finish_signal = AsyncMock()
+    monkeypatch.setattr(settings, 'paper_dii_gate_mode', 'filter' if mode == 'shadow' else 'shadow')
+    candidate = TradeSignal(symbol='TEST', action=action, pattern='double_top' if action == 'SELL' else 'double_bottom',
+                            provenance='patternsv2', timeframe='1d', confidence=1, price=100, qty=1,
+                            stop_loss=110 if action == 'SELL' else 90, take_profit=80 if action == 'SELL' else 120)
+    asyncio.run(scanner._process_signal(candidate))
+    assert scanner._finish_signal.await_count == int(mode == 'shadow')
+    assert book.run_manifest['active_controls']['dii_mode'] == mode

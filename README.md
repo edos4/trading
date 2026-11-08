@@ -503,9 +503,16 @@ uses them two ways:
    "context before the pattern" layer — e.g. require `ADX(14) >= 20` so
    sideways breakouts are rejected.
 
-**Mandatory DII gate for Patterns and Patternsv2.** Every detected pattern entry
-must pass a breadth band on the side it trades, using DII defaults (20, 40) on
-the scanned timeframe. A **BUY requires a bullish percentage between 17% and
+**DII entry votes for Patterns and Patternsv2.** The Paper tab defaults to
+**DII entries → Shadow**: record the vote and continue through the remaining
+entry checks. Choose **Filter** explicitly to make DII veto entries for that
+run. The choice is frozen at Start and saved in the run settings/export;
+changing it requires a new run. API/MCP callers can pass `dii_gate_mode` as
+`shadow` or `filter`; omitting it inherits `PAPER_DII_GATE_MODE` and the global
+shadow setting. Non-paper scanners retain their configured gate.
+
+In Filter mode, entries must pass a breadth band on the side they trade,
+using DII defaults (20, 40) on the scanned timeframe. A **BUY requires a bullish percentage between 17% and
 40%**, inclusive; a **SELL requires a bearish percentage between 26% and 42%**,
 inclusive (equivalently 58%–74% bulls). Because bulls and bears sum to 100, the
 two bands do not overlap: the 40%–58% middle passes neither side, and a tape
@@ -514,12 +521,23 @@ level is only traded in the band matching its direction. Outside-band or invalid
 readings skip the entry. Short history (fewer than 60 candles, e.g. while bulk
 history preloads at process start) does not reject — the gate engages once
 enough candles are stored — and a zero-event window (no new `length`-bar high or
-low in the last `period` bars) counts as balanced 50/50, not unavailable. Paper scanner
-rejections are recorded with the DII reason and `dii_rejected` count, before
-other entry checks and collect-first ranking. Pattern-only mode and optional
-shadow rules do not bypass this gate. Explorer applies it to the detected bar's
+low in the last `period` bars) counts as balanced 50/50, not unavailable.
+Filter rejections are recorded with the DII reason and `dii_rejected` count;
+Shadow records the same reason with `dii_shadow` and continues. The vote runs
+before other entry checks and collect-first ranking. Pattern-only mode and
+optional rule filters retain the chosen DII mode. Explorer applies its gate to the detected bar's
 historical prefix. Indicators-only scans, including standalone DII and saved-rule
 strategies, keep their own entry policy. Existing position exits are unchanged.
+
+Paper exit monitoring includes every held or queued `(symbol, timeframe)`,
+even after reducing the entry universe or disabling its detector. Held symbols
+remain eligible for feed retries after a dead-symbol flag. These additional
+requests do not create new entry candidates outside the selected universe.
+Both long sells and short buybacks retain the cost-aware 3% net loss budget
+and three-percentage-point trail from the best surviving completed net close.
+Live resting stops are checked when each quote arrives, before waiting for the
+rest of a funded scan. Replay still processes opening orders before full-bar
+exits. A gap or a move between polls can exceed the stop budget.
 
 **Directional Imbalance Index [BigBeluga]** is available under Trend with
 `length=20`, `period=40`. Outputs are `bulls`/`bears` (0–100%), `up`/`down`

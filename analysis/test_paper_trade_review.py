@@ -8,9 +8,38 @@ import json
 
 import pytest
 
-from analysis.paper_trade_review import replay_trade, review_export, signal_funnel, summarize
+from analysis.paper_trade_review import replay_trade, review_export, signal_evidence, signal_funnel, summarize
 from core.backtester import _open_trade
 from core.test_patternsv2_exits import candle, signal
+
+
+def test_signal_funnel_keeps_repeat_replays_separate_and_deduplicates_within_run():
+    row = dict(signal_id="same-decision", action="BUY", status="rejected", reason="DII outside band")
+    rows = [{**row, "run_id": "first"}, {**row, "run_id": "first"},
+            {**row, "run_id": "second", "status": "filled"}]
+    assert signal_funnel(rows)["BUY"] == {
+        "observed_decisions": 2, "outcomes": {"DII": 1, "filled": 1}}
+
+
+def test_review_flags_unrelated_logs_instead_of_explaining_scan_rejections_with_them():
+    book = {
+        "scan_stats": {"run_started_at": "2026-11-08T09:05:00+00:00",
+                       "run_finished_at": "2026-11-08T09:15:00+00:00",
+                       "patterns_found": 0, "signals_rejected": 0,
+                       "run_totals": {"patterns_found": 26, "signals_rejected": 25,
+                                      "trades_opened": 1, "rejection_by_gate": {"dii": 20, "kronos": 5}}},
+        "signal_logs": [{"ts": "2026-11-08T09:26:00+00:00", "run_id": "other",
+                         "status": "filled", "symbol": "AAA", "trade_id": None}],
+        "closed_trades": [{"trade_id": "shop-trade", "signal_id": None}],
+    }
+    evidence = signal_evidence(book)
+    assert evidence["run_funnel"]["detected"] == 26
+    assert evidence["run_funnel"]["rejected"] == 25
+    assert evidence["run_funnel"]["rejection_rate_pct"] == pytest.approx(96.153846)
+    assert evidence["journal"]["rows_within_scan_window"] == 0
+    assert evidence["journal"]["rows_outside_scan_window"] == 1
+    assert evidence["journal"]["ledger_trades_without_matching_fill_ids"] == ["shop-trade"]
+    assert len(evidence["warnings"]) == 3
 
 
 @pytest.mark.parametrize("short", [False, True])

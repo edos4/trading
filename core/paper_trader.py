@@ -1157,6 +1157,13 @@ class PaperAccount:
             return position
 
     # ── Per-bar update / exit check ──────────────────────────────────────
+    def execution_watchlist(self) -> set[tuple[str, str]]:
+        """Keep held positions and queued orders observable across entry changes."""
+        with self._lock:
+            return {(p.symbol, p.timeframe) for rows in self.positions.values() for p in rows} | {
+                (signal.symbol, signal.timeframe) for signal in self.pending_entries
+            }
+
     def on_quote(
         self, symbol: str, candle: OHLCVCandle, timeframe: str,
         *, observed_at: datetime | None = None,

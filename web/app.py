@@ -124,6 +124,7 @@ class PaperStartRequest(BaseModel):
     laya_policy_id: str = ""
     kronos_gate_mode: Optional[Literal["off", "shadow", "confirm"]] = None
     kronos_gate_samples: Optional[int] = Field(None, ge=1, le=9)
+    dii_gate_mode: Optional[Literal["shadow", "filter"]] = None
 
 
 class PaperStopRequest(BaseModel):
@@ -1274,6 +1275,7 @@ def create_app() -> FastAPI:
             rule_filter_position=payload.rule_filter_position,
             kronos_gate_mode=payload.kronos_gate_mode,
             kronos_gate_samples=payload.kronos_gate_samples,
+            dii_gate_mode=payload.dii_gate_mode,
         )
 
     @app.post("/api/paper/start")

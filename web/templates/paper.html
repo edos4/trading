@@ -24,7 +24,7 @@
   </div>
 </section>
 
-<p class="muted">Pattern books model independent fixed-notional trades. Historical streams simulate next-open fills; a closed-bar live feed cannot assume an executable entry.</p>
+<p class="muted">New books enforce cash, exposure and short collateral limits. Both sides use a cost-aware 3% loss stop and a trail allowing 3 percentage points of giveback from the best completed net close. Gaps can exceed this budget. Historical streams simulate next-open fills.</p>
 
 <section class="book-grid">
   {% for book in book_cards %}
@@ -68,6 +68,12 @@
         </select>
       </label>
       <label class="check"><input type="checkbox" id="{{ book.id }}-volume" /> Volume gate</label>
+      <label class="check" title="Shadow records DII votes while allowing entries. Filter rejects signals outside the DII bands. Stops and portfolio limits apply in both modes.">
+        DII entries <select id="{{ book.id }}-dii-mode">
+          <option value="shadow" selected>Shadow</option>
+          <option value="filter">Filter</option>
+        </select>
+      </label>
       <label class="check" title="Confirm requires a majority of Kronos forecasts before entry. Shadow records forecasts without blocking. Stops and targets always remain active.">
         Kronos entries <select id="{{ book.id }}-kronos-mode">
           {% for mode in ['confirm', 'shadow', 'off'] %}

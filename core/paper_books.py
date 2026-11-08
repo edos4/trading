@@ -138,6 +138,7 @@ def paper_run_settings(
     kronos_gate_mode: str | None = None,
     kronos_gate_samples: int | None = None,
     kronos_exit_mode: str | None = None,
+    dii_gate_mode: str | None = None,
 ) -> dict[str, Any]:
     """The filters one paper run was started with, as exportable JSON.
 
@@ -147,6 +148,7 @@ def paper_run_settings(
     """
     profile = get_market(market)
     from core.kronos_confirm import _normalize_samples
+    from core.entry_policy import resolve_dii_gate_mode
     pace = (
         "scan-paced replay"
         if use_stream and int(interval_seconds) <= 0
@@ -161,7 +163,7 @@ def paper_run_settings(
         "scan_interval_seconds": int(interval_seconds or 0),
         "stream_start": stream_start if use_stream else None,
         "volume_gate": bool(volume_gate),
-        "dii_gate_mode": "shadow" if settings.dii_gate_shadow else settings.paper_dii_gate_mode,
+        "dii_gate_mode": resolve_dii_gate_mode(dii_gate_mode, paper=True),
         "pattern_only": bool(pattern_only and not indicators_only),
         "indicators_only": bool(indicators_only),
         "patterns_v2": bool(patterns_v2 and not indicators_only),
@@ -707,7 +709,13 @@ class PaperBook:
         rule_filter_position: str = "after",
         kronos_gate_mode: str | None = None,
         kronos_gate_samples: int | None = None,
+        dii_gate_mode: str | None = None,
     ) -> str | None:
+        from core.entry_policy import resolve_dii_gate_mode
+        try:
+            dii_gate_mode = resolve_dii_gate_mode(dii_gate_mode, paper=True)
+        except ValueError as exc:
+            return str(exc)
         stack_name = ""
         tv_stack_id = (tv_stack_id or "").strip()
         rule_id = (rule_id or "").strip()
@@ -800,7 +808,7 @@ class PaperBook:
                 indicators_only, patterns_v2, collect_first, collect_first_top_n,
                 stream_start, tv_stack_id, laya_mode, laya_policy_id,
                 duration_days, rule_id, rule_filter_id, rule_filter_mode,
-                rule_filter_position, kronos_gate_mode, kronos_gate_samples,
+                rule_filter_position, kronos_gate_mode, kronos_gate_samples, dii_gate_mode,
             ),
             name=f"paper-{self.market}",
             daemon=True,
@@ -1053,6 +1061,7 @@ class PaperBook:
         rule_filter_position: str = "after",
         kronos_gate_mode: str | None = None,
         kronos_gate_samples: int | None = None,
+        dii_gate_mode: str | None = None,
     ) -> None:
         data_feed = None
         profile = get_market(self.market)
@@ -1146,6 +1155,7 @@ class PaperBook:
                 rule_filter_position=rule_filter_position,
                 kronos_gate_mode=kronos_gate_mode,
                 kronos_gate_samples=kronos_gate_samples,
+                dii_gate_mode=dii_gate_mode,
             )
             self.scanner = scanner
             self.task = loop.create_task(scanner.run())
@@ -1178,6 +1188,7 @@ class PaperBook:
                 duration_days=duration_days,
                 kronos_gate_mode=kronos_gate_mode,
                 kronos_gate_samples=kronos_gate_samples,
+                dii_gate_mode=dii_gate_mode,
             )
             self.run_settings = run_settings
             self.status = paper_run_status(run_settings)
@@ -1302,6 +1313,7 @@ class PaperBookManager:
         rule_filter_position: str = "after",
         kronos_gate_mode: str | None = None,
         kronos_gate_samples: int | None = None,
+        dii_gate_mode: str | None = None,
     ) -> str | None:
         with self._start_lock:
             book = self._book(market)
@@ -1345,6 +1357,7 @@ class PaperBookManager:
                 rule_filter_position=rule_filter_position,
                 kronos_gate_mode=kronos_gate_mode,
                 kronos_gate_samples=kronos_gate_samples,
+                dii_gate_mode=dii_gate_mode,
             )
 
     def start_both(self, specs: dict[str, dict[str, Any]]) -> dict[str, str]:
@@ -1376,6 +1389,7 @@ class PaperBookManager:
                 rule_filter_position=str(payload.get("rule_filter_position") or "after"),
                 kronos_gate_mode=payload.get("kronos_gate_mode"),
                 kronos_gate_samples=payload.get("kronos_gate_samples"),
+                dii_gate_mode=payload.get("dii_gate_mode"),
             )
             if err:
                 errors[mid] = err

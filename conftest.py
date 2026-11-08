@@ -24,6 +24,25 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def isolated_paper_signal_logs(monkeypatch, tmp_path):
+    """Scanner tests must never append to or reset the operator's journal."""
+    from core import signal_log_store
+
+    monkeypatch.setattr(signal_log_store, "_log_dir", tmp_path / "paper_logs")
+
+
+@pytest.fixture(autouse=True)
+def local_paper_dii_mode(monkeypatch):
+    """Use shipped paper defaults unless a test explicitly selects a veto."""
+    from config import settings
+
+    monkeypatch.setattr(settings, "dii_gate_shadow", False)
+    monkeypatch.setattr(settings, "paper_dii_gate_mode", "shadow")
+    monkeypatch.setenv("DII_GATE_SHADOW", "false")
+    monkeypatch.setenv("PAPER_DII_GATE_MODE", "shadow")
+
+
+@pytest.fixture(autouse=True)
 def local_pattern_registry(monkeypatch):
     """Tests never inherit a remote registry from the developer's .env.
 

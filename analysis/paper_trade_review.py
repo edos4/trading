@@ -288,9 +288,10 @@ def signal_funnel(logs: list[dict]) -> dict:
     for row in logs:
         if row.get("status") == "exited":
             continue
-        key = (row.get("signal_id") or (
+        identity = (row.get("signal_id") or (
             row.get("symbol"), row.get("timeframe"), row.get("pattern"),
             row.get("action"), row.get("sim_bar")))
+        key = (row.get("run_id"), identity)
         groups[key].append(row)
     result = {}
     for side in ("BUY", "SELL"):
@@ -316,6 +317,57 @@ def signal_funnel(logs: list[dict]) -> dict:
             outcomes[outcome] += 1
         result[side] = {"observed_decisions": len(decisions), "outcomes": dict(outcomes)}
     return result
+
+
+def signal_evidence(book: dict) -> dict:
+    """Keep cumulative scan counters separate from a possibly unrelated journal."""
+    stats = book.get("scan_stats") or {}
+    totals = stats.get("run_totals") or {}
+    logs = book.get("signal_logs") or []
+    start, end = stats.get("run_started_at"), stats.get("run_finished_at")
+    within, outside, undated = [], [], []
+    for row in logs:
+        stamp = row.get("ts")
+        if not stamp or not start or not end:
+            undated.append(row)
+        elif datetime.fromisoformat(start) <= datetime.fromisoformat(stamp) <= datetime.fromisoformat(end):
+            within.append(row)
+        else:
+            outside.append(row)
+    trades = book.get("closed_trades", []) + book.get("open_positions", [])
+    fills = [r for r in logs if r.get("status") == "filled"]
+    def matched(trade):
+        return any(
+            (trade.get("trade_id") and trade["trade_id"] == row.get("trade_id"))
+            or (trade.get("signal_id") and trade["signal_id"] == row.get("signal_id"))
+            for row in fills)
+    missing = [t["trade_id"] for t in trades if not matched(t)]
+    warnings = []
+    if outside:
+        warnings.append("Journal rows outside the saved scan run cannot explain that run's rejections.")
+    if missing:
+        warnings.append("Ledger trades lack matching filled journal identities; journal coverage is incomplete.")
+    if totals and not within and logs:
+        warnings.append("No journal rows are tied to the saved scan window; per-side rejection analysis is unavailable.")
+    detected, rejected = totals.get("patterns_found"), totals.get("signals_rejected")
+    return {
+        "run_funnel": {
+            "source": "scan_stats.run_totals; no missing decisions reconstructed",
+            "detected": detected, "rejected": rejected,
+            "filled": totals.get("trades_opened"),
+            "rejection_by_gate": totals.get("rejection_by_gate"),
+            "rejection_rate_pct": 100 * rejected / detected
+            if detected and rejected is not None else None,
+        },
+        "journal": {
+            "rows": len(logs), "rows_within_scan_window": len(within),
+            "rows_outside_scan_window": len(outside),
+            "rows_without_comparable_window": len(undated),
+            "run_ids": sorted({r["run_id"] for r in logs if r.get("run_id")}),
+            "ledger_trades_without_matching_fill_ids": missing,
+        },
+        "warnings": warnings,
+    }
 
 
 def review_export(path: Path, *, allow_inconsistent_ohlc: bool = False) -> dict:
@@ -377,6 +429,8 @@ def review_export(path: Path, *, allow_inconsistent_ohlc: bool = False) -> dict:
             "without_best_trade": summarize(ranked[1:]), "without_best_three": summarize(ranked[3:]),
             "signal_log_status_counts": dict(Counter(r["status"] for r in book.get("signal_logs", []))),
             "signal_funnel": signal_funnel(book.get("signal_logs", [])),
+            "signal_funnel_scope": "exported journal grouped by run and decision; not inferred from scan counters",
+            "signal_evidence": signal_evidence(book),
             "logged_rejections": dict(Counter(
                 "DII" if r["reason"].startswith("DII") else
                 "shorts_disabled" if r["reason"].startswith("Short entries are disabled") else

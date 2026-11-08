@@ -186,8 +186,11 @@ class MarketScanner:
         kronos_exit_mode: str | None = None,
         kronos_exit_min_agree: int | None = None,
         stream_end: str | None = None,
+        dii_gate_mode: str | None = None,
     ):
         self._symbols = symbols or settings.symbols
+        from core.entry_policy import resolve_dii_gate_mode
+        self._dii_gate_mode = resolve_dii_gate_mode(dii_gate_mode, paper=paper_account is not None)
         self._disabled_patterns = set(disabled_patterns or [])
         profile = get_market(market if market is not None else getattr(paper_account, "market", None))
         self._market = profile.id
@@ -420,7 +423,7 @@ class MarketScanner:
         if self._paper is not None:
             self._paper.run_manifest['active_controls']={
                 'account_model':self._paper.account_model,'volume_gate':self._volume_gate,
-                'dii_mode':'shadow' if settings.dii_gate_shadow else settings.paper_dii_gate_mode,
+                'dii_mode':self._dii_gate_mode,
                 'vision':settings.vision_confirmation_enabled,'collect_first':self._collect_first,
                 'kronos_entry':self._kronos_mode,'kronos_exit':self._kronos_exit_mode,
                 'inactive_compatibility_gates':['minimum_confidence','SMA200_regime','post_loss_cooldown','generic_RR'],
@@ -1049,6 +1052,23 @@ class MarketScanner:
         all_timeframes: set[str] = set()
         for p in self._patterns:
             all_timeframes.update(p.timeframes)
+        # Entry selection must never remove an existing trade's exit feed.
+        # Keep its own timeframe even when the originating detector is muted.
+        entry_symbols = set(self._symbols)
+        watchlist = self._paper.execution_watchlist() if self._paper is not None else set()
+        managed_symbols = {symbol for symbol, _ in watchlist}
+        timeframes_by_symbol = {symbol: set(all_timeframes) for symbol in self._symbols}
+        for symbol, timeframe in watchlist:
+            timeframes_by_symbol.setdefault(symbol, set()).add(timeframe)
+        scan_symbols = sorted(managed_symbols) + [s for s in self._symbols if s not in managed_symbols]
+        self.stats["symbols_total"] = len(scan_symbols)
+        self.stats["entry_symbols_total"] = len(entry_symbols)
+        self.stats["execution_watchlist_pairs"] = len(watchlist)
+
+        def entry_snapshot(symbol: str, timeframe: str, snapshot):
+            # Extra watchlist requests manage exits/orders only. They cannot
+            # expand the operator's selected entry universe or timeframes.
+            return snapshot if symbol in entry_symbols and timeframe in all_timeframes else None
 
         fetch_many = getattr(self._tv, "fetch_snapshots", None)
         batch_size = 1
@@ -1056,7 +1076,7 @@ class MarketScanner:
             batch_size = max(1, int(getattr(self._tv, "snapshot_batch_size", 1) or 1))
         concurrency = settings.scanner_concurrency
         log.info(
-            f"Scan | {len(self._symbols)} symbols x {len(all_timeframes)} timeframes "
+            f"Scan | {len(scan_symbols)} symbols x {len(all_timeframes)} entry timeframes "
             f"({sorted(all_timeframes)}) x {len(self._patterns)} patterns | "
             f"concurrency={concurrency}"
             + (f" batch={batch_size}" if batch_size > 1 else "")
@@ -1082,10 +1102,10 @@ class MarketScanner:
 
         # Fill a work queue with every symbol
         queue: asyncio.Queue[str] = asyncio.Queue()
-        for s in self._symbols:
+        for s in scan_symbols:
             queue.put_nowait(s)
 
-        pbar = tqdm(total=len(self._symbols), desc="Scanning", unit="sym", ncols=80)
+        pbar = tqdm(total=len(scan_symbols), desc="Scanning", unit="sym", ncols=80)
 
         def _take_batch() -> list[str]:
             batch: list[str] = []
@@ -1095,7 +1115,7 @@ class MarketScanner:
                     symbol = queue.get_nowait()
                 except asyncio.QueueEmpty:
                     break
-                if symbol in self._dead_symbols:
+                if symbol in self._dead_symbols and symbol not in managed_symbols:
                     pbar.update(1)
                     continue
                 batch.append(symbol)
@@ -1118,12 +1138,19 @@ class MarketScanner:
                     self._cutoff_reached=True
                     return None
             if funded:
+                # Live stops act as soon as a quote arrives, even if another
+                # feed worker is slow. Replay retains all-opening-fills-first
+                # accounting so future bar proceeds cannot fund entries.
+                if (not self._paper.assume_session_open
+                        and not is_closed_session_bar(timeframe, result.candle.timestamp, market=self._market)):
+                    self._record_paper_exits(self._paper.on_quote(
+                        symbol, result.candle, timeframe, observed_at=result.timestamp))
                 funded_snapshots.append((symbol,timeframe,result))
                 return None
             closed, pending = self._apply_bar(symbol, timeframe, result)
             if closed:
                 new_closed_daily = True
-            return pending
+            return entry_snapshot(symbol, timeframe, pending)
 
         async def _drain(mcp) -> None:
             while True:
@@ -1132,10 +1159,12 @@ class MarketScanner:
                     return
                 pending: list[MarketSnapshot] = []
                 if fetch_many is not None:
-                    for timeframe in all_timeframes:
+                    batch_timeframes = set().union(*(timeframes_by_symbol[s] for s in batch))
+                    for timeframe in sorted(batch_timeframes):
+                        requested = [s for s in batch if timeframe in timeframes_by_symbol[s]]
                         try:
                             results = await fetch_many(
-                                batch, timeframe,
+                                requested, timeframe,
                                 store=self._store, mcp_session=mcp,
                             )
                         except ConnectionError:
@@ -1143,10 +1172,12 @@ class MarketScanner:
                                 await self._run_analyzes(pending)
                             raise
                         except Exception as exc:
-                            self.stats["snapshot_errors"] += len(batch)
+                            self.stats["snapshot_errors"] += len(requested)
+                            for symbol in requested:
+                                self._note_missing_execution(symbol, str(exc))
                             log.warning(f"Scan | batch snapshot failed: {exc}")
-                            break
-                        for symbol in batch:
+                            continue
+                        for symbol in requested:
                             snap = await _apply_result(
                                 symbol, timeframe, (results or {}).get(symbol),
                             )
@@ -1154,7 +1185,7 @@ class MarketScanner:
                                 pending.append(snap)
                 else:
                     for symbol in batch:
-                        for timeframe in all_timeframes:
+                        for timeframe in sorted(timeframes_by_symbol[symbol]):
                             try:
                                 snapshot = await self._tv.fetch_snapshot(
                                     symbol, timeframe,
@@ -1171,6 +1202,7 @@ class MarketScanner:
                             except Exception as exc:
                                 self.stats["timeframe_requests"] += 1
                                 self.stats["snapshot_errors"] += 1
+                                self._note_missing_execution(symbol, str(exc))
                                 log.warning(
                                     f"Scan | snapshot failed {symbol} {timeframe}: {exc}"
                                 )
@@ -1186,7 +1218,7 @@ class MarketScanner:
             async with self._tv.mcp_session() as mcp:
                 await _drain(mcp)
 
-        n_workers = min(self._feed_worker_count(), max(len(self._symbols), 1))
+        n_workers = min(self._feed_worker_count(), max(len(scan_symbols), 1))
         if feed_sessions:
             workers = [_drain(mcp) for mcp in feed_sessions[:n_workers]]
         else:
@@ -1230,6 +1262,7 @@ class MarketScanner:
             for symbol,timeframe,snapshot in ordered:
                 closed,snap=self._apply_bar(symbol,timeframe,snapshot)
                 new_closed_daily = new_closed_daily or closed
+                snap = entry_snapshot(symbol, timeframe, snap)
                 if snap is not None:
                     pending.append(snap)
             await self._run_analyzes(pending)
@@ -1381,19 +1414,7 @@ class MarketScanner:
                 closed_positions += self._paper.on_quote(
                     symbol, snapshot.candle, timeframe, observed_at=snapshot.timestamp,
                 )
-            for closed in closed_positions:
-                bar_idx = self._paper.bar_count(
-                    closed.symbol, closed.timeframe,
-                )
-                self._cooldown_tracker[
-                    (closed.symbol, closed.pattern)
-                ] = (bar_idx, closed.pnl < 0)
-                if closed.exit_reason == "kronos_exit":
-                    log.info(
-                        f"Kronos EXIT FILLED | {closed.symbol} "
-                        f"{closed.pattern} | pnl={closed.pnl_pct:+.2f}%"
-                    )
-                    self._append_exit_log(closed)
+            self._record_paper_exits(closed_positions)
             if is_new_bar:
                 self._queue_kronos_exits(symbol, timeframe, snapshot.candle)
                 self._trail_indicators(symbol, timeframe, snapshot.candle)
@@ -1416,6 +1437,15 @@ class MarketScanner:
         if self._has_ready_pattern(symbol, timeframe):
             return new_closed_daily, snapshot
         return new_closed_daily, None
+
+    def _record_paper_exits(self, positions) -> None:
+        """Record both immediate quote exits and completed-bar settlements."""
+        for closed in positions:
+            bar_idx = self._paper.bar_count(closed.symbol, closed.timeframe)
+            self._cooldown_tracker[(closed.symbol, closed.pattern)] = (bar_idx, closed.pnl < 0)
+            if closed.exit_reason == "kronos_exit":
+                log.info(f"Kronos EXIT FILLED | {closed.symbol} {closed.pattern} | pnl={closed.pnl_pct:+.2f}%")
+                self._append_exit_log(closed)
 
     def _analysis_failed(self, snapshot) -> None:
         self._failed_decisions.add(f'{snapshot.symbol}|{snapshot.timeframe}')
@@ -1857,9 +1887,7 @@ class MarketScanner:
             df = self._store.get_df(signal.symbol, signal.timeframe, min_bars=MIN_BARS)
             dii_reason = describe_pattern_dii_rejection(df, action=signal.action)
             if dii_reason is not None:
-                if settings.dii_gate_shadow or (
-                    self._paper is not None and settings.paper_dii_gate_mode == "shadow"
-                ):
+                if self._dii_gate_mode == "shadow":
                     # A/B mode: record what the gate would have done but let
                     # the entry continue, so both books can be compared.
                     log.info(
