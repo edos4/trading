@@ -1,4 +1,4 @@
-"""Explorer pattern discovery must honor DISABLED_PATTERNS."""
+"""Explorer pattern discovery must honor the Settings-tab pattern toggles."""
 
 from __future__ import annotations
 
@@ -13,8 +13,9 @@ from web.services import discover_patterns
 
 class DiscoverPatternsDisabledTests(unittest.TestCase):
     def test_excludes_disabled_pattern_names(self):
-        disabled = ["pattern_009_flag_pattern", "pattern_011_breakout_retest"]
-        with patch("web.services.DISABLED_PATTERNS", disabled):
+        # 003/006 run by default, so an explicit toggle list must remove them.
+        disabled = ["pattern_003_double_bottom", "pattern_006_upward_channel"]
+        with patch("web.services.disabled_pattern_names", return_value=disabled):
             names = {p.name for p in discover_patterns()}
         for name in disabled:
             self.assertNotIn(name, names)

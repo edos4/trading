@@ -1109,6 +1109,18 @@ img, video, canvas, pre, table { max-width: 100%; }
 .settings-control { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .settings-control input:not([type="checkbox"]), .settings-control select { width: 100%; }
 .settings-control .check { flex: 0 0 auto; font-size: 0.82rem; }
+.settings-field-title { font-weight: 600; font-size: 0.9rem; }
+/* Pattern toggle lists: one checkbox per detector, muted boxes dimmed. */
+.settings-checklist {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0.2rem 0.7rem;
+  width: 100%;
+  align-items: center;
+}
+.settings-checklist .check { justify-content: flex-start; }
+.settings-checklist .check.is-forced { opacity: 0.6; }
+.settings-checklist .pill { font-size: 0.62rem; }
 .settings-clear { margin-left: auto; }
 .settings-secret-state {
   font-size: 0.7rem;

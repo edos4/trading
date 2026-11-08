@@ -86,6 +86,10 @@ BLOCK_LIVE: set[str] = {
     "web_ui_secret_key",
 }
 
+# Field names rendered as a checkbox list of the shipped pattern detectors
+# instead of a free-text value (see core.pattern_toggles).
+CHECKLIST_FIELDS: set[str] = {"disabled_patterns", "disabled_patterns_v2"}
+
 # String fields whose accepted values are a fixed set (the validators enforce
 # the same list). Literal fields discover their choices automatically.
 CHOICES: dict[str, list[str]] = {
@@ -100,6 +104,15 @@ CHOICES: dict[str, list[str]] = {
 
 # group id, title, blurb, ordered field names
 GROUPS: list[tuple[str, str, str, list[str]]] = [
+    (
+        "patterns",
+        "Patterns",
+        "Which detectors may trade. Tick a pattern to scan it; an unticked pattern "
+        "is skipped by the scanner, paper books, backtests and the explorer. "
+        "Patterns marked Retired or Off by default ship disabled and stay off. "
+        "Changes take effect on the next scan or book start.",
+        ["disabled_patterns", "disabled_patterns_v2"],
+    ),
     (
         "risk",
         "Trading & risk",
@@ -290,6 +303,9 @@ GROUPS: list[tuple[str, str, str, list[str]]] = [
 # field -> (label, description). Labels are title-cased from the env name when
 # omitted; every field needs a description so the tab is self-explanatory.
 INFO: dict[str, tuple[str, str]] = {
+    # Patterns
+    "disabled_patterns": ("v1 patterns", "Tick a pattern to scan it. Unticked patterns are skipped by the scanner, paper books, backtests and the explorer. Boxes marked Retired or Off by default ship disabled and cannot be ticked."),
+    "disabled_patterns_v2": ("v2 patterns", "Tick a patterns_v2 detector to scan it. Unticked detectors are skipped by patterns_v2 scans, replays and paper books. Boxes marked Off by default ship disabled and cannot be ticked."),
     # Trading & risk
     "trading_mode": ("Trading mode", "Master mode: paper simulates fills; live sends orders to IBKR. Change deliberately."),
     "market": ("Default market", "us = NASDAQ/NYSE USD book; ph = PSE PHP long-only daytime book. Individual runs can override."),
@@ -506,6 +522,8 @@ def _unwrap_optional(annotation: Any) -> Any:
 def _kind(name: str, annotation: Any) -> tuple[str, list[str]]:
     if name in SECRET_FIELDS:
         return "secret", []
+    if name in CHECKLIST_FIELDS:
+        return "checklist", []
     base = _unwrap_optional(annotation)
     if base is bool:
         return "bool", []
@@ -547,6 +565,28 @@ def _display_value(value: Any) -> Any:
     return value
 
 
+def _bind_checklist(entry: dict[str, Any], name: str) -> None:
+    """Turn a pattern-toggle field into its checkbox list.
+
+    ``value`` becomes the ids currently muted (so the template can untick them)
+    and ``forced`` the ids that ship disabled. Neither depends on the editor
+    database; a detector package that cannot load leaves the list empty rather
+    than breaking the page.
+    """
+    from core import pattern_toggles
+
+    try:
+        options = pattern_toggles.catalog(name)
+        muted = pattern_toggles.muted(name)
+    except Exception:  # noqa: BLE001 - a degraded page beats a 500
+        log.exception(f"Settings | pattern toggle catalog unavailable for {name}")
+        options, muted = [], []
+    entry["options"] = options
+    entry["forced"] = [option["id"] for option in options if option["forced"]]
+    entry["value"] = muted
+    entry["default"] = []
+
+
 def _all_fields() -> list[str]:
     return list(Settings.model_fields)
 
@@ -572,6 +612,9 @@ def _catalog_fields() -> dict[str, dict[str, Any]]:
             # Never echo the secret itself.
             entry["value"] = ""
             entry["configured"] = bool(str(raw or "").strip())
+        elif kind == "checklist":
+            # value = the ids currently muted; options = every shipped detector.
+            _bind_checklist(entry, name)
         else:
             entry["value"] = _display_value(raw)
         fields[name] = entry
@@ -782,6 +825,15 @@ def save(values: dict[str, Any]) -> dict[str, Any]:
         except Exception:
             log.exception(f"Settings | could not apply {name} live")
             restart_required.append(name)
+
+    # The v2 toggles have to reach the loaded detector package, which reads its
+    # DISABLED set at call time instead of taking it as a scan argument.
+    try:
+        from core import pattern_toggles
+
+        pattern_toggles.apply()
+    except Exception:  # noqa: BLE001 - a broken detector package must not fail the save
+        log.exception("Settings | could not apply the pattern toggles")
 
     fields = _catalog_fields()
     extra_after = {

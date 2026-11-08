@@ -7,7 +7,7 @@ import threading
 import time
 from typing import Any, Optional
 
-from config import DISABLED_PATTERNS
+from config import disabled_pattern_names
 from core.backtester import Backtester, BacktestResult, discover_pattern_names
 from core.backtest_params import PARAMS, _universe_for_pattern
 from core.market import default_market, get_market
@@ -87,7 +87,7 @@ def normalize_backtest_form(raw: dict[str, Any]) -> dict[str, Any]:
         "market": market,
         "txn_cost_pct": float(p.get("txn_cost_pct") or 0.0),
         "max_workers": int(p.get("max_workers") or 0),
-        "disabled_patterns": list(DISABLED_PATTERNS),
+        "disabled_patterns": disabled_pattern_names(),
     }
     return {
         "extra_symbols": extra_symbols,

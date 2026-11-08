@@ -25,7 +25,7 @@ import matplotlib
 matplotlib.use("Agg", force=True)
 import matplotlib.pyplot as plt
 
-from config import settings, DISABLED_PATTERNS
+from config import settings, disabled_pattern_names
 from core.market import (
     MARKET_PH,
     MARKET_US,
@@ -1123,7 +1123,7 @@ class PaperBook:
                 symbols=symbols,
                 exchange_overrides=exchange_overrides,
                 paper_account=self.account,
-                disabled_patterns=DISABLED_PATTERNS,
+                disabled_patterns=disabled_pattern_names(),
                 data_feed=data_feed,
                 scan_interval_seconds=(
                     settings.papertrade_stream_interval_seconds if use_stream else profile.scan_interval_seconds

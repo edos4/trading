@@ -20,8 +20,36 @@
     return form.querySelector(`[data-clear-for="${name}"]`);
   }
 
+  // ── Pattern toggle lists (one checkbox per shipped detector) ────────────
+  // Checked means enabled, so the field value is the muted (unticked) ids —
+  // which is also what the server reports back for these fields.
+  function checklistBoxes(name) {
+    return Array.from(form.querySelectorAll(`[data-checklist-for="${name}"] input[data-pattern]`));
+  }
+
+  function isForcedBox(box) {
+    return box.dataset.forced === "1";
+  }
+
+  function mutedIds(name) {
+    return checklistBoxes(name)
+      .filter((box) => isForcedBox(box) || !box.checked)
+      .map((box) => box.dataset.pattern)
+      .sort();
+  }
+
+  function forcedIds(name) {
+    return new Set(checklistBoxes(name).filter(isForcedBox).map((box) => box.dataset.pattern));
+  }
+
+  function mutedList(raw) {
+    const items = Array.isArray(raw) ? raw : String(raw == null ? "" : raw).split(",");
+    return new Set(items.map((item) => String(item).trim()).filter(Boolean));
+  }
+
   function readRaw(el) {
     const kind = el.dataset.kind;
+    if (kind === "checklist") return mutedIds(el.dataset.setting).join(",");
     if (kind === "bool") return el.checked ? "on" : "off";
     if (kind === "secret") {
       if (el.value !== "") return "new:" + el.value;
@@ -33,6 +61,12 @@
 
   function readValue(el) {
     const kind = el.dataset.kind;
+    if (kind === "checklist") {
+      // Persist only the boxes the operator can change; the shipped-off ones are
+      // muted regardless, and the server adds them back to the field value.
+      const locked = forcedIds(el.dataset.setting);
+      return mutedIds(el.dataset.setting).filter((id) => !locked.has(id)).join(",");
+    }
     if (kind === "bool") return el.checked;
     if (kind === "secret") return el.value;
     if (kind === "int") {
@@ -48,6 +82,13 @@
 
   function writeRaw(el, raw) {
     const kind = el.dataset.kind;
+    if (kind === "checklist") {
+      const muted = mutedList(raw);
+      checklistBoxes(el.dataset.setting).forEach((box) => {
+        box.checked = !isForcedBox(box) && !muted.has(box.dataset.pattern);
+      });
+      return;
+    }
     if (kind === "bool") {
       el.checked = raw === "on" || raw === true;
       return;
@@ -113,7 +154,8 @@
 
   function labelFor(name) {
     const field = form.querySelector(`.settings-field[data-field="${name}"]`);
-    const label = field && field.querySelector("label[for]");
+    if (!field) return name;
+    const label = field.querySelector("label[for], .settings-field-title");
     return label ? label.textContent.trim() : name;
   }
 

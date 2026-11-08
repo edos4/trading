@@ -713,9 +713,14 @@ class MarketScanner:
             self._analyze_pool = None
             return
         if getattr(self, "_patterns_v2", False):
+            from core.pattern_toggles import FIELD_V2, muted
+
             n = analyze_worker_count()
             self._analyze_workers = n
-            self._analyze_pool = make_v2_pool(n)
+            # Spawn workers import their own detector copy, so the Settings
+            # tab's mute list must travel with the pool or the paper book
+            # would scan patterns the page shows as unchecked.
+            self._analyze_pool = make_v2_pool(n, disabled=muted(FIELD_V2))
             if self._analyze_pool is not None:
                 log.info(f"Scanner | patternsv2 analyze pool: {n} spawn workers")
             return

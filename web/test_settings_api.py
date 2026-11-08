@@ -10,7 +10,9 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+import config
 from config import Settings
+from patterns_v2 import loader as patterns_v2_loader
 from web import settings_store
 
 
@@ -42,6 +44,7 @@ class WebSettingsApiTests(unittest.TestCase):
             web_ui_secret_key="test-secret-key",
         )
         self.patches = [
+            patch("config.settings", self.settings),
             patch("web.auth.settings", self.settings),
             patch("web.app.settings", self.settings),
             patch("web.settings_store.settings", self.settings),
@@ -231,6 +234,65 @@ class WebSettingsApiTests(unittest.TestCase):
             json.loads('"' + line.split("=", 1)[1][1:-1] + '"'),
             "SPY:AMEX, BRK.B:NYSE#x",
         )
+
+    # ── Pattern toggles ──────────────────────────────────────────────────
+
+    def test_pattern_toggles_render_as_checkbox_lists(self) -> None:
+        self._login()
+        page = self.client.get("/settings")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('data-checklist-for="disabled_patterns"', page.text)
+        self.assertIn('data-checklist-for="disabled_patterns_v2"', page.text)
+        self.assertIn('data-pattern="pattern_003_double_bottom"', page.text)
+        self.assertIn('data-pattern="double_bottom"', page.text)
+
+        groups = {group["id"]: group for group in self.client.get("/api/settings").json()["groups"]}
+        fields = {field["name"]: field for field in groups["patterns"]["fields"]}
+        self.assertEqual(set(fields), {"disabled_patterns", "disabled_patterns_v2"})
+
+        v1 = fields["disabled_patterns"]
+        self.assertEqual(v1["kind"], "checklist")
+        self.assertIn("pattern_003_double_bottom", [option["id"] for option in v1["options"]])
+        # Retired classes ship off: unticked in the page and unreachable in the API.
+        self.assertIn("pattern_011_breakout_retest", v1["forced"])
+        self.assertIn("pattern_011_breakout_retest", v1["value"])
+        self.assertNotIn("pattern_003_double_bottom", v1["value"])
+
+        v2 = fields["disabled_patterns_v2"]
+        self.assertEqual(v2["kind"], "checklist")
+        self.assertEqual(v2["forced"], sorted(v2["value"]))
+
+    def test_saving_pattern_toggles_writes_env_and_mutes_the_detectors(self) -> None:
+        self._login()
+        module = patterns_v2_loader.detector_module()
+        pristine = module.DISABLED
+        try:
+            response = self.client.post(
+                "/api/settings",
+                json={"values": {
+                    "disabled_patterns": "pattern_003_double_bottom",
+                    "disabled_patterns_v2": "double_bottom,bull_flag",
+                }},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            text = self._env_text()
+            self.assertIn("DISABLED_PATTERNS=pattern_003_double_bottom", text)
+            self.assertIn("DISABLED_PATTERNS_V2=double_bottom,bull_flag", text)
+            self.assertEqual(self.settings.disabled_patterns_v2, "double_bottom,bull_flag")
+
+            values = response.json()["values"]
+            self.assertIn("pattern_003_double_bottom", values["disabled_patterns"])
+            self.assertEqual(
+                sorted(values["disabled_patterns_v2"]),
+                ["bull_flag", "double_bottom", "head_shoulders", "inv_head_shoulders"],
+            )
+            self.assertIn("pattern_003_double_bottom", config.disabled_pattern_names())
+            self.assertTrue(
+                {"double_bottom", "bull_flag", "head_shoulders"} <= set(module.DISABLED)
+            )
+            self.assertNotIn("rectangle", module.DISABLED)
+        finally:
+            setattr(module, "DISABLED", pristine)
 
 
 if __name__ == "__main__":

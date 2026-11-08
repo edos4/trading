@@ -57,6 +57,29 @@ def local_kronos_gate(monkeypatch):
     monkeypatch.setenv("KRONOS_EXIT_MODE", "off")
 
 
+@pytest.fixture(autouse=True)
+def local_pattern_toggles(monkeypatch):
+    """Tests never inherit the developer's .env pattern mute lists.
+
+    Building an app pushes ``DISABLED_PATTERNS`` / ``DISABLED_PATTERNS_V2`` into
+    the loaded patterns_v2 package, so a host that mutes a detector in the
+    Settings tab would silently mute it for every test after the first app.
+    Clear both lists, and hand the package its shipped set back after each test.
+    """
+    from config import settings
+    from patterns_v2 import loader
+
+    monkeypatch.setattr(settings, "disabled_patterns", "")
+    monkeypatch.setattr(settings, "disabled_patterns_v2", "")
+    monkeypatch.setenv("DISABLED_PATTERNS", "")
+    monkeypatch.setenv("DISABLED_PATTERNS_V2", "")
+    module = loader.detector_module()
+    shipped = frozenset(module.DISABLED)
+    setattr(module, "DISABLED", shipped)
+    yield
+    setattr(module, "DISABLED", shipped)
+
+
 @pytest.fixture
 def editor_store_factory():
     from psycopg import sql

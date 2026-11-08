@@ -370,10 +370,18 @@ config is needed behind a TLS-terminating proxy or the Cloudflare Tunnel below.
 ### Settings tab
 
 The **Settings** tab lists every `config.Settings` value (the same names as the
-`.env` keys), grouped into Trading & risk, Paper trading, Scanner, Kronos, data
+`.env` keys), grouped into Patterns, Trading & risk, Paper trading, Scanner, Kronos, data
 sources, Web UI, MCP, deploy, and so on. Each field carries a one-line
 description of what it controls. Search filters by label, env name or
 description.
+
+- **Patterns:** the **Patterns** group is one checkbox per shipped detector —
+  `DISABLED_PATTERNS` for the v1 setups, `DISABLED_PATTERNS_V2` for patterns_v2.
+  Ticked means enabled; saving stores the *unticked* ids, so a new detector is
+  on by default. Retired or default-muted detectors ship unticked and disabled.
+  The scanner, paper books, backtests and the explorer then skip unticked
+  patterns — a paper book that is already running drops them from its next
+  scan, because the mute list gates signal conversion as well as detection.
 
 - **Storage:** saving writes the changed keys back into the repo `.env`
   (comments and untouched keys are preserved) and applies them to the running

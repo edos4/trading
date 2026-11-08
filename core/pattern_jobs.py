@@ -102,25 +102,38 @@ def _min_bars(pattern: BasePattern) -> int:
     return max(int(getattr(pattern, "MIN_BARS", 2) or 2), PATTERN_SCAN_HISTORY_BARS)
 
 
-def init_v2_worker() -> None:
+def init_v2_worker(disabled=()) -> None:
     """ProcessPoolExecutor initializer for the Patternsv2 detector.
 
     There is no pinned version set to load: the detector is one shared pass.
     Importing here keeps the module cache warm in every spawned worker.
+
+    A spawned worker imports its own copy of the detector package, so the
+    Settings tab's mute list has to be handed to it: the package reads a
+    module-level ``DISABLED`` set at call time and the parent's apply() never
+    crosses a process boundary. The worker's shipped set is kept as well, so a
+    name the package itself mutes can never be re-enabled here.
     """
-    from patterns_v2.loader import detect_fn
+    from patterns_v2.loader import detect_fn, detector_module
 
     detect_fn()
+    module = detector_module()
+    setattr(module, "DISABLED", frozenset(module.DISABLED) |
+            frozenset(str(name) for name in disabled))
 
 
-def make_v2_pool(workers: int) -> ProcessPoolExecutor | None:
-    """Persistent spawn pool for ``detect_v2_batch``; None runs inline."""
+def make_v2_pool(workers: int, disabled=()) -> ProcessPoolExecutor | None:
+    """Persistent spawn pool for ``detect_v2_batch``; None runs inline.
+
+    ``disabled`` is the live patterns_v2 mute set, applied in every worker.
+    """
     if workers <= 1:
         return None
     return ProcessPoolExecutor(
         max_workers=workers,
         mp_context=multiprocessing.get_context("spawn"),
         initializer=init_v2_worker,
+        initargs=(tuple(disabled),),
     )
 
 

@@ -347,6 +347,19 @@ def detect_raw(
     return fn(high, low, close, **options)
 
 
+def _muted_names() -> frozenset[str]:
+    """Names the Settings tab mutes right now.
+
+    Read from the settings-driven list rather than the detector package's
+    module global, so the guard still holds when that global is stale: a worker
+    pool opened before a save keeps its spawned copy, and app startup applies
+    the list only to this process.
+    """
+    from core.pattern_toggles import FIELD_V2, muted
+
+    return frozenset(muted(FIELD_V2))
+
+
 def signals_from_raw(
     df: pd.DataFrame,
     found,
@@ -360,6 +373,7 @@ def signals_from_raw(
     n = len(df)
     latest = n - 1
     floor = 0 if lookback is None else max(0, n - int(lookback))
+    muted = _muted_names() if found else frozenset()
     best: dict[str, tuple[int, float, dict]] = {}
     for raw in found or ():
         idx = int(raw.get("signal"))
@@ -368,6 +382,8 @@ def signals_from_raw(
         if idx < floor or idx > latest:
             continue
         name = str(raw.get("pattern") or "")
+        if name in muted:
+            continue
         score = _finite(raw.get("score")) or 0.0
         prev = best.get(name)
         if prev is None or idx > prev[0] or (idx == prev[0] and score > prev[1]):

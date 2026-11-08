@@ -62,10 +62,10 @@ class Snapshot:
 
 def freeze(root, disabled=None):
     """Include skipped/disabled detectors, actual bytes, and explicit dynamic edges."""
-    from config import DISABLED_PATTERNS
+    from config import disabled_pattern_names
     from core.pattern_loader import load_version_source
     root = Path(root).resolve()
-    disabled = sorted(DISABLED_PATTERNS if disabled is None else disabled)
+    disabled = sorted(disabled_pattern_names() if disabled is None else disabled)
     runtime = runtime_manifest(root)
     sources = sorted(p.relative_to(root).as_posix() for p in (root / 'patterns').glob('[0-9]*.py'))
     if len(sources) != 10:

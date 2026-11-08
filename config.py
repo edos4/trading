@@ -15,6 +15,11 @@ from enum import Enum
 PATTERN_SCAN_HISTORY_BARS = 30
 
 
+def csv_names(raw: str | None) -> list[str]:
+    """Split a comma-separated name list, ignoring blank entries."""
+    return [name.strip() for name in (raw or "").split(",") if name.strip()]
+
+
 class TradingMode(str, Enum):
     PAPER = "paper"
     LIVE = "live"
@@ -110,6 +115,18 @@ class Settings(BaseSettings):
     # on the selected winners. Off by default so existing runs are unchanged.
     collect_first_enabled: bool = False
     collect_first_top_n: int = 4
+
+    # ── Pattern toggles (Settings tab) ────────────────────────────────────
+    # Comma-separated ids the scanner, paper books and backtests must SKIP —
+    # i.e. the patterns whose checkbox is left unchecked in the Settings tab.
+    # Empty means every pattern is enabled. One list per detector family; the
+    # names come from the shipped source, not from the editor database, so the
+    # toggles work without PostgreSQL. Flows: `disabled_patterns` is passed to
+    # the scanner/backtester at construction (read at that moment), while
+    # `disabled_patterns_v2` is pushed into the loaded detector package by
+    # core.pattern_toggles on startup and on save.
+    disabled_patterns: str = ""
+    disabled_patterns_v2: str = ""
 
     # ── Paper trading ─────────────────────────────────────────────────────
     paper_initial_capital: float = 100_000.0
@@ -726,3 +743,18 @@ settings = Settings()
 # default; 011 is retired via `skipped = True` on its class. Re-add a name here
 # only to mute it in an unattended combined run.
 DISABLED_PATTERNS: list[str] = []
+
+
+def disabled_pattern_names() -> list[str]:
+    """v1 pattern ids the scanner must skip.
+
+    The Settings tab owns the list; ``DISABLED_PATTERNS`` above is the shipped
+    mute set that is *always* skipped, so a name in it cannot be re-enabled by
+    unchecking a box (core.pattern_toggles reports those as forced).
+    """
+    return sorted(set(DISABLED_PATTERNS) | set(csv_names(settings.disabled_patterns)))
+
+
+def disabled_patterns_v2_names() -> list[str]:
+    """patterns_v2 detector names the Settings tab mutes (shipped set aside)."""
+    return sorted(set(csv_names(settings.disabled_patterns_v2)))

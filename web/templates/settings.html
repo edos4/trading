@@ -34,9 +34,13 @@
     <div class="settings-grid">
       {% for f in group.fields %}
       <div class="settings-field" data-field="{{ f.name }}"
-           data-search="{{ (f.label ~ ' ' ~ f.env ~ ' ' ~ f.description)|lower }}">
+           data-search="{{ (f.label ~ ' ' ~ f.env ~ ' ' ~ f.description)|lower }}{% if f.kind == 'checklist' %} {{ f.options|map(attribute='label')|join(' ')|lower }} {{ f.options|map(attribute='id')|join(' ')|lower }}{% endif %}">
         <div class="settings-field-head">
+          {% if f.kind == 'checklist' %}
+          <span class="settings-field-title">{{ f.label }}</span>
+          {% else %}
           <label for="set-{{ f.name }}">{{ f.label }}</label>
+          {% endif %}
           {% if f.restart %}<span class="pill">restart</span>{% endif %}
           {% if f.kind == 'secret' %}
           <span class="settings-secret-state {% if f.configured %}is-set{% endif %}">
@@ -46,7 +50,7 @@
         </div>
         <p class="settings-desc">{{ f.description }}</p>
         <p class="settings-env"><code>{{ f.env }}</code></p>
-        <div class="settings-control">
+        <div class="settings-control"{% if f.kind == 'checklist' %} data-setting="{{ f.name }}" data-kind="checklist" data-checklist-for="{{ f.name }}"{% endif %}>
           {% if f.kind == 'bool' %}
           <label class="check">
             <input type="checkbox" id="set-{{ f.name }}" data-setting="{{ f.name }}"
@@ -63,6 +67,19 @@
           <input type="number" id="set-{{ f.name }}" data-setting="{{ f.name }}"
                  data-kind="{{ f.kind }}" step="{{ 1 if f.kind == 'int' else 'any' }}"
                  value="{{ f.value if f.value is not none else '' }}" />
+          {% elif f.kind == 'checklist' %}
+          <div class="settings-checklist">
+            {% for opt in f.options %}
+            <label class="check{% if opt.forced %} is-forced{% endif %}">
+              <input type="checkbox" data-pattern="{{ opt.id }}"
+                     data-forced="{{ 1 if opt.forced else 0 }}"
+                     {% if opt.id not in f.value %}checked{% endif %}
+                     {% if opt.forced %}disabled{% endif %} />
+              <span>{{ opt.label }}</span>
+              {% if opt.forced %}<span class="pill">{{ opt.reason or 'Off' }}</span>{% endif %}
+            </label>
+            {% endfor %}
+          </div>
           {% elif f.kind == 'secret' %}
           <input type="password" id="set-{{ f.name }}" data-setting="{{ f.name }}"
                  data-kind="secret" autocomplete="new-password"
@@ -92,5 +109,5 @@
 </form>
 {% endblock %}
 {% block scripts %}
-<script src="/static/settings.js?v=1"></script>
+<script src="/static/settings.js?v=2"></script>
 {% endblock %}

@@ -46,7 +46,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from config import settings, DISABLED_PATTERNS
+from config import settings, disabled_pattern_names
 from core.scanner import MarketScanner
 from core.backtester import Backtester
 from core.engine_defaults import ENGINE
@@ -194,7 +194,7 @@ async def run_scanner(
     scanner = MarketScanner(
         symbols=symbols,
         exchange_overrides=exchange_overrides,
-        disabled_patterns=DISABLED_PATTERNS,
+        disabled_patterns=disabled_pattern_names(),
         volume_gate=use_volume,
         market=profile.id,
         collect_first=collect_first,
@@ -371,7 +371,7 @@ async def run_paper(
             symbols=symbols,
             exchange_overrides=exchange_overrides,
             paper_account=account,
-            disabled_patterns=DISABLED_PATTERNS,
+            disabled_patterns=disabled_pattern_names(),
             data_feed=data_feed,
             scan_interval_seconds=scan_interval if use_stream else None,
             volume_gate=use_volume,
@@ -510,7 +510,7 @@ async def run_backtest(
         market=profile.id,
         txn_cost_pct=txn_cost,
         pattern_filter=pattern,
-        disabled_patterns=DISABLED_PATTERNS,
+        disabled_patterns=disabled_pattern_names(),
         version=version,
     )
     result = await backtester.run()
@@ -910,6 +910,14 @@ async def main(args: argparse.Namespace | None = None) -> None:
         raise SystemExit(2)
 
     collect_first, collect_first_top_n = _resolve_collect_first(args)
+    # Settings-tab pattern toggles: the v1 mutes travel in the scanner args above,
+    # the patterns_v2 ones must be pushed into the loaded detector package.
+    try:
+        from core.pattern_toggles import apply as apply_pattern_toggles
+
+        apply_pattern_toggles()
+    except Exception:  # noqa: BLE001 - a missing detector package must not stop a v1 run
+        log.exception("Pattern toggles | could not apply")
     stream_start = None
     use_stream = args.stream is not None
     if use_stream and args.stream:

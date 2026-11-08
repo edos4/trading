@@ -259,6 +259,15 @@ async def _json_body(request: Request) -> dict[str, Any]:
 def create_app() -> FastAPI:
     require_password_configured()
 
+    # Settings-tab pattern toggles: the v1 mutes are read by whoever builds a
+    # scanner, but patterns_v2 reads a module global, so push it once at start.
+    try:
+        from core.pattern_toggles import apply as apply_pattern_toggles
+
+        apply_pattern_toggles()
+    except Exception:  # noqa: BLE001 - a missing detector package must not stop the app
+        log.exception("Pattern toggles | could not apply at startup")
+
     app = FastAPI(title="Trading Bot Web UI", docs_url=None, redoc_url=None)
     app.add_middleware(GZipMiddleware, minimum_size=500)
     # Inert unless PATTERN_API_URL is set: a client with no editor database has

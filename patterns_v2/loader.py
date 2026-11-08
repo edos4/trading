@@ -66,3 +66,9 @@ def detect_fn():
             raise
         _DETECT = module.detect
         return _DETECT
+
+
+def detector_module():
+    """The loaded Patternsv2 detector package (``tpd_patterns``), loading it first."""
+    detect_fn()
+    return sys.modules[_PKG]

@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 from analysis.chart_renderer import ChartRenderer
 from analysis.price_volume import volume_confirm_gate
-from config import PATTERN_SCAN_HISTORY_BARS, settings, DISABLED_PATTERNS
+from config import PATTERN_SCAN_HISTORY_BARS, settings, disabled_pattern_names
 from core.engine_defaults import passes_min_confidence, passes_regime_filter
 from core.market import get_market
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
@@ -23,7 +23,9 @@ TIMEFRAMES = ["1d", "1W"]
 
 def discover_patterns(disabled_patterns=None):
     from core.pattern_loader import discover
-    return discover(DISABLED_PATTERNS if disabled_patterns is None else disabled_patterns)
+    if disabled_patterns is None:
+        disabled_patterns = disabled_pattern_names()
+    return discover(disabled_patterns)
 
 
 def discover_indicators():
