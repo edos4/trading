@@ -346,7 +346,7 @@ def signal_evidence(book: dict) -> dict:
     if outside:
         warnings.append("Journal rows outside the saved scan run cannot explain that run's rejections.")
     if missing:
-        warnings.append("Ledger trades lack matching filled journal identities; journal coverage is incomplete.")
+        warnings.append("Ledger trades lack matching filled journal identities; journal linkage is incomplete.")
     if totals and not within and logs:
         warnings.append("No journal rows are tied to the saved scan window; per-side rejection analysis is unavailable.")
     detected, rejected = totals.get("patterns_found"), totals.get("signals_rejected")

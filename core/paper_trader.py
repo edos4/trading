@@ -835,6 +835,16 @@ class PaperAccount:
                     point = replace(candle, open=candle.open, high=candle.open,
                                     low=candle.open, close=candle.open)
                     ok, reason = self._open_position_locked(candidate, point, store)
+                    if ok:
+                        # The journal receives the saved queue object, while
+                        # execution used a copy with rebased rules/evidence.
+                        # Attach the actual fill identity and economics before
+                        # returning it to the scanner's filled-event logger.
+                        position = self.positions[symbol][-1]
+                        for field in ("trade_id", "signal_id", "resolved_rules", "execution_model",
+                                      "decision_date", "entry_fee_paid", "kronos_evidence", "laya_assessment"):
+                            setattr(signal, field, deepcopy(getattr(position, field, None)))
+                        signal.price, signal.qty = position.entry_price, position.qty
                 except Exception as exc:
                     ok, reason = False, str(exc)
                 # Assessor failures are explicit rejections; they never skip position management.

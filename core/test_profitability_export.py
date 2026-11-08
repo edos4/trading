@@ -19,7 +19,8 @@ def test_export_retains_full_journal_and_health(monkeypatch,tmp_path):
     assert len(logs.load_signal_log('us'))==1000  # bounded UI read
     assert len(logs.load_signal_log('us',limit=0))==2101
     health={'snapshot_errors':5,'asof_skipped':20,'dead_symbols':50,'symbols_total':2000,
-            'symbols_with_snapshot':1600,'run_totals':{'signals_rejected':2101}}
+            'symbols_with_snapshot':1600,'entry_symbols_total':1998,'execution_watchlist_pairs':2,
+            'run_totals':{'signals_rejected':2101}}
     book=PaperAccount(market='us',slippage_pct=0)
     book.run_manifest=build_run_manifest(patterns_v2=True,market='us')
     export=build_paper_account_export(book,scan_stats=health)['books'][0]

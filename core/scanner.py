@@ -502,6 +502,14 @@ class MarketScanner:
         with self._signal_log_lock:
             self._signal_log.clear()
 
+    def _ensure_signal_id(self, signal: TradeSignal) -> None:
+        """Identify a decision before a gate or pending order copies it."""
+        if not signal.signal_id:
+            import hashlib
+            key = repr((self._market, signal.symbol, signal.timeframe, signal.pattern,
+                        signal.action, signal.signal_bar_timestamp))
+            signal.signal_id = hashlib.sha256(key.encode()).hexdigest()
+
     def _append_signal_log(
         self,
         signal: TradeSignal,
@@ -509,11 +517,7 @@ class MarketScanner:
         status: str,
         reason: str,
     ) -> None:
-        if not signal.signal_id:
-            import hashlib
-            key = repr((self._market,signal.symbol,signal.timeframe,signal.pattern,
-                        signal.action,signal.signal_bar_timestamp))
-            signal.signal_id = hashlib.sha256(key.encode()).hexdigest()
+        self._ensure_signal_id(signal)
         entry = {
             "ts": datetime.now(timezone.utc).isoformat(),
             "market": self._market,
@@ -1455,6 +1459,11 @@ class MarketScanner:
     def _fill_pending_observation(self, symbol: str, timeframe: str, candle) -> None:
         if self._paper is None or not self._paper.assume_session_open:
             return
+        # Older queues may predate early identity stamping. Identify the
+        # saved decision before opening_candidate copies it for execution.
+        for signal in self._paper.pending_entries:
+            if signal.symbol == symbol and signal.timeframe == timeframe:
+                self._ensure_signal_id(signal)
         for signal,opened,reason in self._paper.fill_pending(
                 symbol,timeframe,candle,self._store,recheck=self._laya_check,
                 entry_check=self._check_kronos_entry):
@@ -1825,6 +1834,7 @@ class MarketScanner:
                 if self._paper is not None else None
             )
             signal.signal_bar_timestamp = candle.timestamp
+        self._ensure_signal_id(signal)
 
         # V2 already supplies a causal volatility cap and its own trail.
         self._apply_fixed_stop(signal, candle)
@@ -2191,6 +2201,9 @@ class MarketScanner:
 
     async def _queue_entry(self, signal: TradeSignal, candle) -> None:
         # Completed-bar decisions queue for retrospective next-open simulation.
+        if signal.signal_bar_timestamp is None and candle is not None:
+            signal.signal_bar_timestamp = candle.timestamp
+        self._ensure_signal_id(signal)
         if self._paper is not None and candle is not None:
             if not self._paper.assume_session_open:
                 self._append_signal_log(signal, status="rejected", reason=(

@@ -154,7 +154,7 @@ def _scan_stats(raw: Any) -> Optional[dict[str, Any]]:
         run_totals termination_reason scan_complete symbols_total symbols_with_snapshot
         snapshot_errors timeframe_requests timeframe_snapshots_ok new_bars pattern_evaluations
         daily_date_skew daily_dates_seen asof_skipped dead_symbols held_coverage_errors
-        invalid_bar_skipped
+        invalid_bar_skipped entry_symbols_total execution_watchlist_pairs
         analysis_errors volume_gate_rejected dii_rejected dii_shadow kronos_rejected
         kronos_exit_shadow kronos_exits kronos_exit_deferred collect_first_ranked
         collect_first_selected rule_filter_shadow rule_filter_rejected rule_filter_prefiltered

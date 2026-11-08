@@ -1,0 +1,1506 @@
+{
+  "export_sha256": "706f3b0e089337497e568d225c39812a1da267fe33dfbb6cdad4d976c881ab70",
+  "exported_at": "2026-11-08T10:03:06.064040+00:00",
+  "engine_sha256": "40c0c80c62b35a6f71ffb9bd1dac81f10ac02c25800277f5cfe5d604ef10f63e",
+  "scope": "saved entries and OHLC through original exits/latest open marks; no rescanning",
+  "books": [
+    {
+      "market": "us",
+      "currency": "USD",
+      "baseline_reproduced": true,
+      "baseline_verified": true,
+      "ohlc_anomalies": [],
+      "summary": {
+        "count": 3,
+        "wins": 1,
+        "losses": 2,
+        "net_pnl": 620.7846256281487,
+        "profit_factor": 2.707779898727166,
+        "win_rate_pct": 33.33333333333333,
+        "descriptive_win_rate_95pct_interval": [
+          6.149194472039621,
+          79.23403991979522
+        ],
+        "average_win": 984.2885092906913,
+        "average_loss": -181.75194183127132,
+        "expectancy_per_trade": 206.92820854271622,
+        "average_net_r": 0.7672966133232815,
+        "breakeven_win_rate_pct": 15.587104345856083,
+        "exit_reasons": {
+          "trailing_stop": 2,
+          "stop_loss": 1
+        }
+      },
+      "closed_fees_paid": 58.52754430747492,
+      "closed_gross_pnl": 679.3121699356236,
+      "by_side": {
+        "BUY": {
+          "count": 1,
+          "wins": 0,
+          "losses": 1,
+          "net_pnl": -299.7688000882549,
+          "profit_factor": 0.0,
+          "win_rate_pct": 0.0,
+          "descriptive_win_rate_95pct_interval": [
+            0.0,
+            79.34506856227625
+          ],
+          "average_win": 0,
+          "average_loss": -299.7688000882549,
+          "expectancy_per_trade": -299.7688000882549,
+          "average_net_r": -1.0892534681187604,
+          "breakeven_win_rate_pct": null,
+          "exit_reasons": {
+            "stop_loss": 1
+          }
+        },
+        "SELL": {
+          "count": 2,
+          "wins": 1,
+          "losses": 1,
+          "net_pnl": 920.5534257164036,
+          "profit_factor": 15.44343325671542,
+          "win_rate_pct": 50.0,
+          "descriptive_win_rate_95pct_interval": [
+            9.453120573423075,
+            90.54687942657694
+          ],
+          "average_win": 984.2885092906913,
+          "average_loss": -63.7350835742877,
+          "expectancy_per_trade": 460.2767128582018,
+          "average_net_r": 1.6955716540443024,
+          "breakeven_win_rate_pct": 6.081455036718714,
+          "exit_reasons": {
+            "trailing_stop": 2
+          }
+        }
+      },
+      "by_pattern": {
+        "falling_wedge": {
+          "count": 1,
+          "wins": 0,
+          "losses": 1,
+          "net_pnl": -299.7688000882549,
+          "profit_factor": 0.0,
+          "win_rate_pct": 0.0,
+          "descriptive_win_rate_95pct_interval": [
+            0.0,
+            79.34506856227625
+          ],
+          "average_win": 0,
+          "average_loss": -299.7688000882549,
+          "expectancy_per_trade": -299.7688000882549,
+          "average_net_r": -1.0892534681187604,
+          "breakeven_win_rate_pct": null,
+          "exit_reasons": {
+            "stop_loss": 1
+          }
+        },
+        "symmetrical_triangle": {
+          "count": 2,
+          "wins": 1,
+          "losses": 1,
+          "net_pnl": 920.5534257164036,
+          "profit_factor": 15.44343325671542,
+          "win_rate_pct": 50.0,
+          "descriptive_win_rate_95pct_interval": [
+            9.453120573423075,
+            90.54687942657694
+          ],
+          "average_win": 984.2885092906913,
+          "average_loss": -63.7350835742877,
+          "expectancy_per_trade": 460.2767128582018,
+          "average_net_r": 1.6955716540443024,
+          "breakeven_win_rate_pct": 6.081455036718714,
+          "exit_reasons": {
+            "trailing_stop": 2
+          }
+        }
+      },
+      "by_entry_price": {
+        "below_5": {
+          "BUY": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          },
+          "SELL": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          }
+        },
+        "5_to_10": {
+          "BUY": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          },
+          "SELL": {
+            "count": 1,
+            "wins": 0,
+            "losses": 1,
+            "net_pnl": -63.7350835742877,
+            "profit_factor": 0.0,
+            "win_rate_pct": 0.0,
+            "descriptive_win_rate_95pct_interval": [
+              0.0,
+              79.34506856227625
+            ],
+            "average_win": 0,
+            "average_loss": -63.7350835742877,
+            "expectancy_per_trade": -63.7350835742877,
+            "average_net_r": -0.2321658680012799,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {
+              "trailing_stop": 1
+            }
+          }
+        },
+        "10_to_50": {
+          "BUY": {
+            "count": 1,
+            "wins": 0,
+            "losses": 1,
+            "net_pnl": -299.7688000882549,
+            "profit_factor": 0.0,
+            "win_rate_pct": 0.0,
+            "descriptive_win_rate_95pct_interval": [
+              0.0,
+              79.34506856227625
+            ],
+            "average_win": 0,
+            "average_loss": -299.7688000882549,
+            "expectancy_per_trade": -299.7688000882549,
+            "average_net_r": -1.0892534681187604,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {
+              "stop_loss": 1
+            }
+          },
+          "SELL": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          }
+        },
+        "50_and_above": {
+          "BUY": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          },
+          "SELL": {
+            "count": 1,
+            "wins": 1,
+            "losses": 0,
+            "net_pnl": 984.2885092906913,
+            "profit_factor": null,
+            "win_rate_pct": 100.0,
+            "descriptive_win_rate_95pct_interval": [
+              20.654931437723747,
+              100.0
+            ],
+            "average_win": 984.2885092906913,
+            "average_loss": 0,
+            "expectancy_per_trade": 984.2885092906913,
+            "average_net_r": 3.623309176089885,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {
+              "trailing_stop": 1
+            }
+          }
+        }
+      },
+      "by_entry_quarter": {
+        "2026Q1": {
+          "BUY": {
+            "count": 1,
+            "wins": 0,
+            "losses": 1,
+            "net_pnl": -299.7688000882549,
+            "profit_factor": 0.0,
+            "win_rate_pct": 0.0,
+            "descriptive_win_rate_95pct_interval": [
+              0.0,
+              79.34506856227625
+            ],
+            "average_win": 0,
+            "average_loss": -299.7688000882549,
+            "expectancy_per_trade": -299.7688000882549,
+            "average_net_r": -1.0892534681187604,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {
+              "stop_loss": 1
+            }
+          },
+          "SELL": {
+            "count": 1,
+            "wins": 1,
+            "losses": 0,
+            "net_pnl": 984.2885092906913,
+            "profit_factor": null,
+            "win_rate_pct": 100.0,
+            "descriptive_win_rate_95pct_interval": [
+              20.654931437723747,
+              100.0
+            ],
+            "average_win": 984.2885092906913,
+            "average_loss": 0,
+            "expectancy_per_trade": 984.2885092906913,
+            "average_net_r": 3.623309176089885,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {
+              "trailing_stop": 1
+            }
+          }
+        },
+        "2026Q2": {
+          "BUY": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          },
+          "SELL": {
+            "count": 1,
+            "wins": 0,
+            "losses": 1,
+            "net_pnl": -63.7350835742877,
+            "profit_factor": 0.0,
+            "win_rate_pct": 0.0,
+            "descriptive_win_rate_95pct_interval": [
+              0.0,
+              79.34506856227625
+            ],
+            "average_win": 0,
+            "average_loss": -63.7350835742877,
+            "expectancy_per_trade": -63.7350835742877,
+            "average_net_r": -0.2321658680012799,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {
+              "trailing_stop": 1
+            }
+          }
+        }
+      },
+      "path": {
+        "daily_marked_max_drawdown": 673.1953743718514,
+        "peak_concurrent_including_entry_day": 1,
+        "last_marked_pnl": 620.7846256281487
+      },
+      "same_session": {
+        "count": 0,
+        "wins": 0,
+        "losses": 0,
+        "net_pnl": 0,
+        "profit_factor": null,
+        "win_rate_pct": null,
+        "descriptive_win_rate_95pct_interval": null,
+        "average_win": 0,
+        "average_loss": 0,
+        "expectancy_per_trade": null,
+        "average_net_r": null,
+        "breakeven_win_rate_pct": null,
+        "exit_reasons": {}
+      },
+      "trailing_armed_count": 2,
+      "ambiguous_exit_count": 0,
+      "gap_exit_count": 0,
+      "median_entry_range_r": 1.27402378375802,
+      "without_best_trade": {
+        "count": 2,
+        "wins": 0,
+        "losses": 2,
+        "net_pnl": -363.50388366254265,
+        "profit_factor": 0.0,
+        "win_rate_pct": 0.0,
+        "descriptive_win_rate_95pct_interval": [
+          0.0,
+          65.76197724933469
+        ],
+        "average_win": 0,
+        "average_loss": -181.75194183127132,
+        "expectancy_per_trade": -181.75194183127132,
+        "average_net_r": -0.6607096680600202,
+        "breakeven_win_rate_pct": null,
+        "exit_reasons": {
+          "trailing_stop": 1,
+          "stop_loss": 1
+        }
+      },
+      "without_best_three": {
+        "count": 0,
+        "wins": 0,
+        "losses": 0,
+        "net_pnl": 0,
+        "profit_factor": null,
+        "win_rate_pct": null,
+        "descriptive_win_rate_95pct_interval": null,
+        "average_win": 0,
+        "average_loss": 0,
+        "expectancy_per_trade": null,
+        "average_net_r": null,
+        "breakeven_win_rate_pct": null,
+        "exit_reasons": {}
+      },
+      "signal_log_status_counts": {
+        "rejected": 23,
+        "shadow": 20,
+        "filled": 3,
+        "queued": 3
+      },
+      "signal_funnel": {
+        "BUY": {
+          "observed_decisions": 18,
+          "outcomes": {
+            "Kronos_oppose": 9,
+            "Kronos_no_opinion": 8,
+            "filled": 1
+          }
+        },
+        "SELL": {
+          "observed_decisions": 8,
+          "outcomes": {
+            "Kronos_no_opinion": 4,
+            "Kronos_oppose": 2,
+            "filled": 2
+          }
+        }
+      },
+      "signal_funnel_scope": "exported journal grouped by run and decision; not inferred from scan counters",
+      "signal_evidence": {
+        "run_funnel": {
+          "source": "scan_stats.run_totals; no missing decisions reconstructed",
+          "detected": 26,
+          "rejected": 23,
+          "filled": 3,
+          "rejection_by_gate": {
+            "kronos": 23
+          },
+          "rejection_rate_pct": 88.46153846153847
+        },
+        "journal": {
+          "rows": 49,
+          "rows_within_scan_window": 49,
+          "rows_outside_scan_window": 0,
+          "rows_without_comparable_window": 0,
+          "run_ids": [
+            "dcb8d5585f4b42f59b26b2bd2e506483"
+          ],
+          "ledger_trades_without_matching_fill_ids": [
+            "58a4c9db589b426abccb0fb109808282"
+          ]
+        },
+        "warnings": [
+          "Ledger trades lack matching filled journal identities; journal linkage is incomplete."
+        ]
+      },
+      "logged_rejections": {
+        "other": 23
+      },
+      "last_kronos_exit_decisions": {
+        "confirm": 2,
+        "no_opinion": 1
+      },
+      "open_marked_pnl": 0,
+      "open_liquidation_pnl": 0,
+      "total_liquidation_pnl": 620.7846256281487,
+      "open_positions": [],
+      "targets_inside_trail_activation": [],
+      "comparisons": {
+        "target_cap_2r_closed": {
+          "count": 3,
+          "wins": 1,
+          "losses": 2,
+          "net_pnl": 200.90691361662996,
+          "profit_factor": 1.5526953703832806,
+          "win_rate_pct": 33.33333333333333,
+          "descriptive_win_rate_95pct_interval": [
+            6.149194472039621,
+            79.23403991979522
+          ],
+          "average_win": 564.4107972791726,
+          "average_loss": -181.75194183127132,
+          "expectancy_per_trade": 66.96897120554333,
+          "average_net_r": 0.25208630238735097,
+          "breakeven_win_rate_pct": 24.358217357241845,
+          "exit_reasons": {
+            "take_profit": 1,
+            "stop_loss": 1,
+            "trailing_stop": 1
+          }
+        },
+        "target_cap_2r_total_liquidation_pnl": 200.90691361662996,
+        "long_only_closed": {
+          "count": 1,
+          "wins": 0,
+          "losses": 1,
+          "net_pnl": -299.7688000882549,
+          "profit_factor": 0.0,
+          "win_rate_pct": 0.0,
+          "descriptive_win_rate_95pct_interval": [
+            0.0,
+            79.34506856227625
+          ],
+          "average_win": 0,
+          "average_loss": -299.7688000882549,
+          "expectancy_per_trade": -299.7688000882549,
+          "average_net_r": -1.0892534681187604,
+          "breakeven_win_rate_pct": null,
+          "exit_reasons": {
+            "stop_loss": 1
+          }
+        },
+        "long_only_total_liquidation_pnl": -299.7688000882549,
+        "entry_basis_trail": {
+          "closed": {
+            "count": 3,
+            "wins": 1,
+            "losses": 2,
+            "net_pnl": 620.7846256281487,
+            "profit_factor": 2.707779898727166,
+            "win_rate_pct": 33.33333333333333,
+            "descriptive_win_rate_95pct_interval": [
+              6.149194472039621,
+              79.23403991979522
+            ],
+            "average_win": 984.2885092906913,
+            "average_loss": -181.75194183127132,
+            "expectancy_per_trade": 206.92820854271622,
+            "average_net_r": 0.7672966133232815,
+            "breakeven_win_rate_pct": 15.587104345856083,
+            "exit_reasons": {
+              "trailing_stop": 2,
+              "stop_loss": 1
+            }
+          },
+          "coverage_exhausted": [],
+          "total_liquidation_pnl": 620.7846256281487
+        },
+        "paper_3pct_protection": {
+          "closed": {
+            "count": 3,
+            "wins": 1,
+            "losses": 2,
+            "net_pnl": 620.7846256281504,
+            "profit_factor": 2.707779898727171,
+            "win_rate_pct": 33.33333333333333,
+            "descriptive_win_rate_95pct_interval": [
+              6.149194472039621,
+              79.23403991979522
+            ],
+            "average_win": 984.288509290693,
+            "average_loss": -181.75194183127132,
+            "expectancy_per_trade": 206.9282085427168,
+            "average_net_r": 0.7672966133232914,
+            "breakeven_win_rate_pct": 15.587104345856059,
+            "exit_reasons": {
+              "trailing_stop": 2,
+              "stop_loss": 1
+            }
+          },
+          "coverage_exhausted": [],
+          "total_liquidation_pnl": 620.7846256281504
+        }
+      },
+      "extra_friction_per_side_stress": {
+        "0.0005": 591.5208534744112,
+        "0.001": 562.2570813206737,
+        "0.002": 503.72953701319875
+      },
+      "baseline": [
+        {
+          "trade_id": "58a4c9db589b426abccb0fb109808282",
+          "symbol": "SHOP",
+          "action": "SELL",
+          "pattern": "symmetrical_triangle",
+          "entry_date": "2026-01-15T14:30:00+00:00",
+          "last_observed": "2026-01-22T14:30:00+00:00",
+          "exit_date": "2026-01-22T14:30:00+00:00",
+          "exit_reason": "trailing_stop",
+          "pnl": 984.2885092906913,
+          "net_r": 3.623309176089885,
+          "initial_risk": 271.6545736107709,
+          "risk_pct": 2.745829882261673,
+          "target_r": 13.05706664395583,
+          "activation_r": 4.306530450553636,
+          "entry": 159.57016889953613,
+          "qty": 62,
+          "exit": 143.39158602701778,
+          "txn_cost_pct_per_side": 0.001,
+          "slippage_pct_per_side": 0.000500000000000056,
+          "fees_paid": 18.783628805446345,
+          "marked_open_pnl": 0,
+          "open_liquidation_pnl": 0,
+          "trailing_armed": true,
+          "pattern_trailing_armed": true,
+          "paper_trailing_armed": true,
+          "bars": 5,
+          "gap_exit": false,
+          "trailing_stop_basis": "entry",
+          "paper_protection": {
+            "policy": "net-loss-trail-v1",
+            "loss_limit_pct": 0.03,
+            "giveback_pct": 0.03,
+            "txn_cost_pct": 0.001,
+            "slippage_pct": 0.0005,
+            "adopted_at": "2026-01-15T14:30:00+00:00",
+            "peak_net_pct": 0.1294899060838056,
+            "stop": 143.31992606398578,
+            "initial_stop": 163.951694280355
+          },
+          "best_surviving_close_r": 4.799738398291072,
+          "ohlc_anomalies": [],
+          "coverage_exhausted": false,
+          "same_session_exit": false,
+          "entry_range_r": 0.8969462308687468,
+          "ambiguous_bars": []
+        },
+        {
+          "trade_id": "23bae29dae8b4c778e9426c0ae10e317",
+          "symbol": "BXSL",
+          "action": "BUY",
+          "pattern": "falling_wedge",
+          "entry_date": "2026-03-05T14:30:00+00:00",
+          "last_observed": "2026-03-06T14:30:00+00:00",
+          "exit_date": "2026-03-06T14:30:00+00:00",
+          "exit_reason": "stop_loss",
+          "pnl": -299.7688000882549,
+          "net_r": -1.0892534681187604,
+          "initial_risk": 275.20573389220675,
+          "risk_pct": 2.754179892749197,
+          "target_r": 4.078329502264353,
+          "activation_r": 3.1664598318212165,
+          "entry": 24.312149236679076,
+          "qty": 411,
+          "exit": 23.63072763645183,
+          "txn_cost_pct_per_side": 0.001,
+          "slippage_pct_per_side": 0.0004999999999999449,
+          "fees_paid": 19.704522394856802,
+          "marked_open_pnl": 0,
+          "open_liquidation_pnl": 0,
+          "trailing_armed": false,
+          "pattern_trailing_armed": false,
+          "paper_trailing_armed": false,
+          "bars": 2,
+          "gap_exit": false,
+          "trailing_stop_basis": "entry",
+          "paper_protection": {
+            "policy": "net-loss-trail-v1",
+            "loss_limit_pct": 0.03,
+            "giveback_pct": 0.03,
+            "txn_cost_pct": 0.001,
+            "slippage_pct": 0.0005,
+            "adopted_at": "2026-03-05T14:30:00+00:00",
+            "peak_net_pct": 0.0,
+            "stop": 23.642548910907283,
+            "initial_stop": 23.642548910907283
+          },
+          "best_surviving_close_r": 0.0,
+          "ohlc_anomalies": [],
+          "coverage_exhausted": false,
+          "same_session_exit": false,
+          "entry_range_r": 1.344084797887335,
+          "ambiguous_bars": []
+        },
+        {
+          "trade_id": "db64fbd3dae641fca3da6380794ffa72",
+          "symbol": "SBET",
+          "action": "SELL",
+          "pattern": "symmetrical_triangle",
+          "entry_date": "2026-05-13T13:30:00+00:00",
+          "last_observed": "2026-05-14T13:30:00+00:00",
+          "exit_date": "2026-05-14T13:30:00+00:00",
+          "exit_reason": "trailing_stop",
+          "pnl": -63.7350835742877,
+          "net_r": -0.2321658680012799,
+          "initial_risk": 274.52391741725074,
+          "risk_pct": 2.745829882261671,
+          "target_r": 14.421567510764168,
+          "activation_r": 5.827017945780822,
+          "entry": 7.146425095319748,
+          "qty": 1399,
+          "exit": 7.177658612451354,
+          "txn_cost_pct_per_side": 0.001,
+          "slippage_pct_per_side": 0.0004999999999999449,
+          "fees_paid": 20.039393107171772,
+          "marked_open_pnl": 0,
+          "open_liquidation_pnl": 0,
+          "trailing_armed": true,
+          "pattern_trailing_armed": false,
+          "paper_trailing_armed": true,
+          "bars": 2,
+          "gap_exit": false,
+          "trailing_stop_basis": "entry",
+          "paper_protection": {
+            "policy": "net-loss-trail-v1",
+            "loss_limit_pct": 0.03,
+            "giveback_pct": 0.03,
+            "txn_cost_pct": 0.001,
+            "slippage_pct": 0.0005,
+            "adopted_at": "2026-05-13T13:30:00+00:00",
+            "peak_net_pct": 0.023625120220008754,
+            "stop": 7.174071576663023,
+            "initial_stop": 7.342653771100485
+          },
+          "best_surviving_close_r": 0.9500398269062595,
+          "ohlc_anomalies": [],
+          "coverage_exhausted": false,
+          "same_session_exit": false,
+          "entry_range_r": 1.27402378375802,
+          "ambiguous_bars": []
+        }
+      ],
+      "target_cap_2r": [
+        {
+          "trade_id": "58a4c9db589b426abccb0fb109808282",
+          "symbol": "SHOP",
+          "action": "SELL",
+          "pattern": "symmetrical_triangle",
+          "entry_date": "2026-01-15T14:30:00+00:00",
+          "last_observed": "2026-01-22T14:30:00+00:00",
+          "exit_date": "2026-01-20T14:30:00+00:00",
+          "exit_reason": "take_profit",
+          "pnl": 564.4107972791726,
+          "net_r": 2.0776782432820933,
+          "initial_risk": 271.6545736107709,
+          "risk_pct": 2.745829882261673,
+          "target_r": 2.000004139631016,
+          "activation_r": 4.306530450553636,
+          "entry": 159.57016889953613,
+          "qty": 62,
+          "exit": 150.15704173278812,
+          "txn_cost_pct_per_side": 0.001,
+          "slippage_pct_per_side": 0.000500000000000056,
+          "fees_paid": 19.20308705920411,
+          "marked_open_pnl": 0,
+          "open_liquidation_pnl": 0,
+          "trailing_armed": true,
+          "pattern_trailing_armed": false,
+          "paper_trailing_armed": true,
+          "bars": 3,
+          "gap_exit": true,
+          "trailing_stop_basis": "entry",
+          "paper_protection": {
+            "policy": "net-loss-trail-v1",
+            "loss_limit_pct": 0.03,
+            "giveback_pct": 0.03,
+            "txn_cost_pct": 0.001,
+            "slippage_pct": 0.0005,
+            "adopted_at": "2026-01-15T14:30:00+00:00",
+            "peak_net_pct": 0.021099233609421727,
+            "stop": 160.58993033644666,
+            "initial_stop": 163.951694280355
+          },
+          "best_surviving_close_r": 0.8581877346650496,
+          "ohlc_anomalies": [],
+          "coverage_exhausted": false,
+          "same_session_exit": false,
+          "entry_range_r": 0.8969462308687468,
+          "ambiguous_bars": []
+        },
+        {
+          "trade_id": "23bae29dae8b4c778e9426c0ae10e317",
+          "symbol": "BXSL",
+          "action": "BUY",
+          "pattern": "falling_wedge",
+          "entry_date": "2026-03-05T14:30:00+00:00",
+          "last_observed": "2026-03-06T14:30:00+00:00",
+          "exit_date": "2026-03-06T14:30:00+00:00",
+          "exit_reason": "stop_loss",
+          "pnl": -299.7688000882549,
+          "net_r": -1.0892534681187604,
+          "initial_risk": 275.20573389220675,
+          "risk_pct": 2.754179892749197,
+          "target_r": 1.9999254955221168,
+          "activation_r": 3.1664598318212165,
+          "entry": 24.312149236679076,
+          "qty": 411,
+          "exit": 23.63072763645183,
+          "txn_cost_pct_per_side": 0.001,
+          "slippage_pct_per_side": 0.0004999999999999449,
+          "fees_paid": 19.704522394856802,
+          "marked_open_pnl": 0,
+          "open_liquidation_pnl": 0,
+          "trailing_armed": false,
+          "pattern_trailing_armed": false,
+          "paper_trailing_armed": false,
+          "bars": 2,
+          "gap_exit": false,
+          "trailing_stop_basis": "entry",
+          "paper_protection": {
+            "policy": "net-loss-trail-v1",
+            "loss_limit_pct": 0.03,
+            "giveback_pct": 0.03,
+            "txn_cost_pct": 0.001,
+            "slippage_pct": 0.0005,
+            "adopted_at": "2026-03-05T14:30:00+00:00",
+            "peak_net_pct": 0.0,
+            "stop": 23.642548910907283,
+            "initial_stop": 23.642548910907283
+          },
+          "best_surviving_close_r": 0.0,
+          "ohlc_anomalies": [],
+          "coverage_exhausted": false,
+          "same_session_exit": false,
+          "entry_range_r": 1.344084797887335,
+          "ambiguous_bars": []
+        },
+        {
+          "trade_id": "db64fbd3dae641fca3da6380794ffa72",
+          "symbol": "SBET",
+          "action": "SELL",
+          "pattern": "symmetrical_triangle",
+          "entry_date": "2026-05-13T13:30:00+00:00",
+          "last_observed": "2026-05-14T13:30:00+00:00",
+          "exit_date": "2026-05-14T13:30:00+00:00",
+          "exit_reason": "trailing_stop",
+          "pnl": -63.7350835742877,
+          "net_r": -0.2321658680012799,
+          "initial_risk": 274.52391741725074,
+          "risk_pct": 2.745829882261671,
+          "target_r": 1.999835619123472,
+          "activation_r": 5.827017945780822,
+          "entry": 7.146425095319748,
+          "qty": 1399,
+          "exit": 7.177658612451354,
+          "txn_cost_pct_per_side": 0.001,
+          "slippage_pct_per_side": 0.0004999999999999449,
+          "fees_paid": 20.039393107171772,
+          "marked_open_pnl": 0,
+          "open_liquidation_pnl": 0,
+          "trailing_armed": true,
+          "pattern_trailing_armed": false,
+          "paper_trailing_armed": true,
+          "bars": 2,
+          "gap_exit": false,
+          "trailing_stop_basis": "entry",
+          "paper_protection": {
+            "policy": "net-loss-trail-v1",
+            "loss_limit_pct": 0.03,
+            "giveback_pct": 0.03,
+            "txn_cost_pct": 0.001,
+            "slippage_pct": 0.0005,
+            "adopted_at": "2026-05-13T13:30:00+00:00",
+            "peak_net_pct": 0.023625120220008754,
+            "stop": 7.174071576663023,
+            "initial_stop": 7.342653771100485
+          },
+          "best_surviving_close_r": 0.9500398269062595,
+          "ohlc_anomalies": [],
+          "coverage_exhausted": false,
+          "same_session_exit": false,
+          "entry_range_r": 1.27402378375802,
+          "ambiguous_bars": []
+        }
+      ],
+      "entry_basis_trail": [
+        {
+          "trade_id": "58a4c9db589b426abccb0fb109808282",
+          "symbol": "SHOP",
+          "action": "SELL",
+          "pattern": "symmetrical_triangle",
+          "entry_date": "2026-01-15T14:30:00+00:00",
+          "last_observed": "2026-01-22T14:30:00+00:00",
+          "exit_date": "2026-01-22T14:30:00+00:00",
+          "exit_reason": "trailing_stop",
+          "pnl": 984.2885092906913,
+          "net_r": 3.623309176089885,
+          "initial_risk": 271.6545736107709,
+          "risk_pct": 2.745829882261673,
+          "target_r": 13.05706664395583,
+          "activation_r": 4.306530450553636,
+          "entry": 159.57016889953613,
+          "qty": 62,
+          "exit": 143.39158602701778,
+          "txn_cost_pct_per_side": 0.001,
+          "slippage_pct_per_side": 0.000500000000000056,
+          "fees_paid": 18.783628805446345,
+          "marked_open_pnl": 0,
+          "open_liquidation_pnl": 0,
+          "trailing_armed": true,
+          "pattern_trailing_armed": true,
+          "paper_trailing_armed": true,
+          "bars": 5,
+          "gap_exit": false,
+          "trailing_stop_basis": "entry",
+          "paper_protection": {
+            "policy": "net-loss-trail-v1",
+            "loss_limit_pct": 0.03,
+            "giveback_pct": 0.03,
+            "txn_cost_pct": 0.001,
+            "slippage_pct": 0.0005,
+            "adopted_at": "2026-01-15T14:30:00+00:00",
+            "peak_net_pct": 0.1294899060838056,
+            "stop": 143.31992606398578,
+            "initial_stop": 163.951694280355
+          },
+          "best_surviving_close_r": 4.799738398291072,
+          "ohlc_anomalies": [],
+          "coverage_exhausted": false,
+          "same_session_exit": false,
+          "entry_range_r": 0.8969462308687468,
+          "ambiguous_bars": []
+        },
+        {
+          "trade_id": "23bae29dae8b4c778e9426c0ae10e317",
+          "symbol": "BXSL",
+          "action": "BUY",
+          "pattern": "falling_wedge",
+          "entry_date": "2026-03-05T14:30:00+00:00",
+          "last_observed": "2026-03-06T14:30:00+00:00",
+          "exit_date": "2026-03-06T14:30:00+00:00",
+          "exit_reason": "stop_loss",
+          "pnl": -299.7688000882549,
+          "net_r": -1.0892534681187604,
+          "initial_risk": 275.20573389220675,
+          "risk_pct": 2.754179892749197,
+          "target_r": 4.078329502264353,
+          "activation_r": 3.1664598318212165,
+          "entry": 24.312149236679076,
+          "qty": 411,
+          "exit": 23.63072763645183,
+          "txn_cost_pct_per_side": 0.001,
+          "slippage_pct_per_side": 0.0004999999999999449,
+          "fees_paid": 19.704522394856802,
+          "marked_open_pnl": 0,
+          "open_liquidation_pnl": 0,
+          "trailing_armed": false,
+          "pattern_trailing_armed": false,
+          "paper_trailing_armed": false,
+          "bars": 2,
+          "gap_exit": false,
+          "trailing_stop_basis": "entry",
+          "paper_protection": {
+            "policy": "net-loss-trail-v1",
+            "loss_limit_pct": 0.03,
+            "giveback_pct": 0.03,
+            "txn_cost_pct": 0.001,
+            "slippage_pct": 0.0005,
+            "adopted_at": "2026-03-05T14:30:00+00:00",
+            "peak_net_pct": 0.0,
+            "stop": 23.642548910907283,
+            "initial_stop": 23.642548910907283
+          },
+          "best_surviving_close_r": 0.0,
+          "ohlc_anomalies": [],
+          "coverage_exhausted": false,
+          "same_session_exit": false,
+          "entry_range_r": 1.344084797887335,
+          "ambiguous_bars": []
+        },
+        {
+          "trade_id": "db64fbd3dae641fca3da6380794ffa72",
+          "symbol": "SBET",
+          "action": "SELL",
+          "pattern": "symmetrical_triangle",
+          "entry_date": "2026-05-13T13:30:00+00:00",
+          "last_observed": "2026-05-14T13:30:00+00:00",
+          "exit_date": "2026-05-14T13:30:00+00:00",
+          "exit_reason": "trailing_stop",
+          "pnl": -63.7350835742877,
+          "net_r": -0.2321658680012799,
+          "initial_risk": 274.52391741725074,
+          "risk_pct": 2.745829882261671,
+          "target_r": 14.421567510764168,
+          "activation_r": 5.827017945780822,
+          "entry": 7.146425095319748,
+          "qty": 1399,
+          "exit": 7.177658612451354,
+          "txn_cost_pct_per_side": 0.001,
+          "slippage_pct_per_side": 0.0004999999999999449,
+          "fees_paid": 20.039393107171772,
+          "marked_open_pnl": 0,
+          "open_liquidation_pnl": 0,
+          "trailing_armed": true,
+          "pattern_trailing_armed": false,
+          "paper_trailing_armed": true,
+          "bars": 2,
+          "gap_exit": false,
+          "trailing_stop_basis": "entry",
+          "paper_protection": {
+            "policy": "net-loss-trail-v1",
+            "loss_limit_pct": 0.03,
+            "giveback_pct": 0.03,
+            "txn_cost_pct": 0.001,
+            "slippage_pct": 0.0005,
+            "adopted_at": "2026-05-13T13:30:00+00:00",
+            "peak_net_pct": 0.023625120220008754,
+            "stop": 7.174071576663023,
+            "initial_stop": 7.342653771100485
+          },
+          "best_surviving_close_r": 0.9500398269062595,
+          "ohlc_anomalies": [],
+          "coverage_exhausted": false,
+          "same_session_exit": false,
+          "entry_range_r": 1.27402378375802,
+          "ambiguous_bars": []
+        }
+      ],
+      "paper_3pct_protection": [
+        {
+          "trade_id": "58a4c9db589b426abccb0fb109808282",
+          "symbol": "SHOP",
+          "action": "SELL",
+          "pattern": "symmetrical_triangle",
+          "entry_date": "2026-01-15T14:30:00+00:00",
+          "last_observed": "2026-01-22T14:30:00+00:00",
+          "exit_date": "2026-01-22T14:30:00+00:00",
+          "exit_reason": "trailing_stop",
+          "pnl": 984.288509290693,
+          "net_r": 3.6233091760899145,
+          "initial_risk": 271.65457361076915,
+          "risk_pct": 2.745829882261655,
+          "target_r": 13.057066643955913,
+          "activation_r": 4.306530450553664,
+          "entry": 159.57016889953613,
+          "qty": 62,
+          "exit": 143.39158602701775,
+          "txn_cost_pct_per_side": 0.001,
+          "slippage_pct_per_side": 0.000500000000000056,
+          "fees_paid": 18.783628805446345,
+          "marked_open_pnl": 0,
+          "open_liquidation_pnl": 0,
+          "trailing_armed": true,
+          "pattern_trailing_armed": true,
+          "paper_trailing_armed": true,
+          "bars": 5,
+          "gap_exit": false,
+          "trailing_stop_basis": "entry",
+          "paper_protection": {
+            "policy": "net-loss-trail-v1",
+            "loss_limit_pct": 0.03,
+            "giveback_pct": 0.03,
+            "txn_cost_pct": 0.001,
+            "slippage_pct": 0.000500000000000056,
+            "adopted_at": "2026-01-15T14:30:00+00:00",
+            "peak_net_pct": 0.12948990608380542,
+            "stop": 143.31992606398575,
+            "initial_stop": 163.95169428035499
+          },
+          "best_surviving_close_r": 4.799738398291103,
+          "ohlc_anomalies": [],
+          "coverage_exhausted": false,
+          "same_session_exit": false,
+          "entry_range_r": 0.8969462308687526,
+          "ambiguous_bars": []
+        },
+        {
+          "trade_id": "23bae29dae8b4c778e9426c0ae10e317",
+          "symbol": "BXSL",
+          "action": "BUY",
+          "pattern": "falling_wedge",
+          "entry_date": "2026-03-05T14:30:00+00:00",
+          "last_observed": "2026-03-06T14:30:00+00:00",
+          "exit_date": "2026-03-06T14:30:00+00:00",
+          "exit_reason": "stop_loss",
+          "pnl": -299.7688000882549,
+          "net_r": -1.0892534681187604,
+          "initial_risk": 275.20573389220675,
+          "risk_pct": 2.754179892749197,
+          "target_r": 4.078329502264353,
+          "activation_r": 3.1664598318212165,
+          "entry": 24.312149236679076,
+          "qty": 411,
+          "exit": 23.63072763645183,
+          "txn_cost_pct_per_side": 0.001,
+          "slippage_pct_per_side": 0.0004999999999999449,
+          "fees_paid": 19.704522394856802,
+          "marked_open_pnl": 0,
+          "open_liquidation_pnl": 0,
+          "trailing_armed": false,
+          "pattern_trailing_armed": false,
+          "paper_trailing_armed": false,
+          "bars": 2,
+          "gap_exit": false,
+          "trailing_stop_basis": "entry",
+          "paper_protection": {
+            "policy": "net-loss-trail-v1",
+            "loss_limit_pct": 0.03,
+            "giveback_pct": 0.03,
+            "txn_cost_pct": 0.001,
+            "slippage_pct": 0.0004999999999999449,
+            "adopted_at": "2026-03-05T14:30:00+00:00",
+            "peak_net_pct": 0.0,
+            "stop": 23.642548910907283,
+            "initial_stop": 23.642548910907283
+          },
+          "best_surviving_close_r": 0.0,
+          "ohlc_anomalies": [],
+          "coverage_exhausted": false,
+          "same_session_exit": false,
+          "entry_range_r": 1.344084797887335,
+          "ambiguous_bars": []
+        },
+        {
+          "trade_id": "db64fbd3dae641fca3da6380794ffa72",
+          "symbol": "SBET",
+          "action": "SELL",
+          "pattern": "symmetrical_triangle",
+          "entry_date": "2026-05-13T13:30:00+00:00",
+          "last_observed": "2026-05-14T13:30:00+00:00",
+          "exit_date": "2026-05-14T13:30:00+00:00",
+          "exit_reason": "trailing_stop",
+          "pnl": -63.7350835742877,
+          "net_r": -0.2321658680012799,
+          "initial_risk": 274.52391741725074,
+          "risk_pct": 2.745829882261671,
+          "target_r": 14.421567510764168,
+          "activation_r": 5.827017945780822,
+          "entry": 7.146425095319748,
+          "qty": 1399,
+          "exit": 7.177658612451354,
+          "txn_cost_pct_per_side": 0.001,
+          "slippage_pct_per_side": 0.0004999999999999449,
+          "fees_paid": 20.039393107171772,
+          "marked_open_pnl": 0,
+          "open_liquidation_pnl": 0,
+          "trailing_armed": true,
+          "pattern_trailing_armed": false,
+          "paper_trailing_armed": true,
+          "bars": 2,
+          "gap_exit": false,
+          "trailing_stop_basis": "entry",
+          "paper_protection": {
+            "policy": "net-loss-trail-v1",
+            "loss_limit_pct": 0.03,
+            "giveback_pct": 0.03,
+            "txn_cost_pct": 0.001,
+            "slippage_pct": 0.0004999999999999449,
+            "adopted_at": "2026-05-13T13:30:00+00:00",
+            "peak_net_pct": 0.023625120220008754,
+            "stop": 7.174071576663023,
+            "initial_stop": 7.342653771100485
+          },
+          "best_surviving_close_r": 0.9500398269062595,
+          "ohlc_anomalies": [],
+          "coverage_exhausted": false,
+          "same_session_exit": false,
+          "entry_range_r": 1.27402378375802,
+          "ambiguous_bars": []
+        }
+      ]
+    },
+    {
+      "market": "ph",
+      "currency": "PHP",
+      "baseline_reproduced": true,
+      "baseline_verified": true,
+      "ohlc_anomalies": [],
+      "summary": {
+        "count": 0,
+        "wins": 0,
+        "losses": 0,
+        "net_pnl": 0,
+        "profit_factor": null,
+        "win_rate_pct": null,
+        "descriptive_win_rate_95pct_interval": null,
+        "average_win": 0,
+        "average_loss": 0,
+        "expectancy_per_trade": null,
+        "average_net_r": null,
+        "breakeven_win_rate_pct": null,
+        "exit_reasons": {}
+      },
+      "closed_fees_paid": 0,
+      "closed_gross_pnl": 0,
+      "by_side": {
+        "BUY": {
+          "count": 0,
+          "wins": 0,
+          "losses": 0,
+          "net_pnl": 0,
+          "profit_factor": null,
+          "win_rate_pct": null,
+          "descriptive_win_rate_95pct_interval": null,
+          "average_win": 0,
+          "average_loss": 0,
+          "expectancy_per_trade": null,
+          "average_net_r": null,
+          "breakeven_win_rate_pct": null,
+          "exit_reasons": {}
+        },
+        "SELL": {
+          "count": 0,
+          "wins": 0,
+          "losses": 0,
+          "net_pnl": 0,
+          "profit_factor": null,
+          "win_rate_pct": null,
+          "descriptive_win_rate_95pct_interval": null,
+          "average_win": 0,
+          "average_loss": 0,
+          "expectancy_per_trade": null,
+          "average_net_r": null,
+          "breakeven_win_rate_pct": null,
+          "exit_reasons": {}
+        }
+      },
+      "by_pattern": {},
+      "by_entry_price": {
+        "below_5": {
+          "BUY": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          },
+          "SELL": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          }
+        },
+        "5_to_10": {
+          "BUY": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          },
+          "SELL": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          }
+        },
+        "10_to_50": {
+          "BUY": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          },
+          "SELL": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          }
+        },
+        "50_and_above": {
+          "BUY": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          },
+          "SELL": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          }
+        }
+      },
+      "by_entry_quarter": {},
+      "path": {
+        "daily_marked_max_drawdown": 0.0,
+        "peak_concurrent_including_entry_day": 0,
+        "last_marked_pnl": 0
+      },
+      "same_session": {
+        "count": 0,
+        "wins": 0,
+        "losses": 0,
+        "net_pnl": 0,
+        "profit_factor": null,
+        "win_rate_pct": null,
+        "descriptive_win_rate_95pct_interval": null,
+        "average_win": 0,
+        "average_loss": 0,
+        "expectancy_per_trade": null,
+        "average_net_r": null,
+        "breakeven_win_rate_pct": null,
+        "exit_reasons": {}
+      },
+      "trailing_armed_count": 0,
+      "ambiguous_exit_count": 0,
+      "gap_exit_count": 0,
+      "median_entry_range_r": null,
+      "without_best_trade": {
+        "count": 0,
+        "wins": 0,
+        "losses": 0,
+        "net_pnl": 0,
+        "profit_factor": null,
+        "win_rate_pct": null,
+        "descriptive_win_rate_95pct_interval": null,
+        "average_win": 0,
+        "average_loss": 0,
+        "expectancy_per_trade": null,
+        "average_net_r": null,
+        "breakeven_win_rate_pct": null,
+        "exit_reasons": {}
+      },
+      "without_best_three": {
+        "count": 0,
+        "wins": 0,
+        "losses": 0,
+        "net_pnl": 0,
+        "profit_factor": null,
+        "win_rate_pct": null,
+        "descriptive_win_rate_95pct_interval": null,
+        "average_win": 0,
+        "average_loss": 0,
+        "expectancy_per_trade": null,
+        "average_net_r": null,
+        "breakeven_win_rate_pct": null,
+        "exit_reasons": {}
+      },
+      "signal_log_status_counts": {},
+      "signal_funnel": {
+        "BUY": {
+          "observed_decisions": 0,
+          "outcomes": {}
+        },
+        "SELL": {
+          "observed_decisions": 0,
+          "outcomes": {}
+        }
+      },
+      "signal_funnel_scope": "exported journal grouped by run and decision; not inferred from scan counters",
+      "signal_evidence": {
+        "run_funnel": {
+          "source": "scan_stats.run_totals; no missing decisions reconstructed",
+          "detected": null,
+          "rejected": null,
+          "filled": null,
+          "rejection_by_gate": null,
+          "rejection_rate_pct": null
+        },
+        "journal": {
+          "rows": 0,
+          "rows_within_scan_window": 0,
+          "rows_outside_scan_window": 0,
+          "rows_without_comparable_window": 0,
+          "run_ids": [],
+          "ledger_trades_without_matching_fill_ids": []
+        },
+        "warnings": []
+      },
+      "logged_rejections": {},
+      "last_kronos_exit_decisions": {},
+      "open_marked_pnl": 0,
+      "open_liquidation_pnl": 0,
+      "total_liquidation_pnl": 0,
+      "open_positions": [],
+      "targets_inside_trail_activation": [],
+      "comparisons": {
+        "target_cap_2r_closed": {
+          "count": 0,
+          "wins": 0,
+          "losses": 0,
+          "net_pnl": 0,
+          "profit_factor": null,
+          "win_rate_pct": null,
+          "descriptive_win_rate_95pct_interval": null,
+          "average_win": 0,
+          "average_loss": 0,
+          "expectancy_per_trade": null,
+          "average_net_r": null,
+          "breakeven_win_rate_pct": null,
+          "exit_reasons": {}
+        },
+        "target_cap_2r_total_liquidation_pnl": 0,
+        "long_only_closed": {
+          "count": 0,
+          "wins": 0,
+          "losses": 0,
+          "net_pnl": 0,
+          "profit_factor": null,
+          "win_rate_pct": null,
+          "descriptive_win_rate_95pct_interval": null,
+          "average_win": 0,
+          "average_loss": 0,
+          "expectancy_per_trade": null,
+          "average_net_r": null,
+          "breakeven_win_rate_pct": null,
+          "exit_reasons": {}
+        },
+        "long_only_total_liquidation_pnl": 0,
+        "entry_basis_trail": {
+          "closed": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          },
+          "coverage_exhausted": [],
+          "total_liquidation_pnl": 0
+        },
+        "paper_3pct_protection": {
+          "closed": {
+            "count": 0,
+            "wins": 0,
+            "losses": 0,
+            "net_pnl": 0,
+            "profit_factor": null,
+            "win_rate_pct": null,
+            "descriptive_win_rate_95pct_interval": null,
+            "average_win": 0,
+            "average_loss": 0,
+            "expectancy_per_trade": null,
+            "average_net_r": null,
+            "breakeven_win_rate_pct": null,
+            "exit_reasons": {}
+          },
+          "coverage_exhausted": [],
+          "total_liquidation_pnl": 0
+        }
+      },
+      "extra_friction_per_side_stress": {
+        "0.0005": 0,
+        "0.001": 0,
+        "0.002": 0
+      },
+      "baseline": [],
+      "target_cap_2r": [],
+      "entry_basis_trail": [],
+      "paper_3pct_protection": []
+    }
+  ]
+}
