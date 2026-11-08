@@ -166,6 +166,9 @@ def _scan_stats(raw: Any) -> Optional[dict[str, Any]]:
 def _book_export(snap: dict[str, Any]) -> dict[str, Any]:
     metrics = dict(snap.get("metrics") or {})
     metrics.pop("equity_png_b64", None)
+    execution_context = deepcopy(snap.get("execution_context"))
+    if isinstance(execution_context, dict):
+        execution_context.pop("run_manifest", None)
     return {
         "market": snap.get("market"),
         "label": snap.get("label"),
@@ -178,7 +181,7 @@ def _book_export(snap: dict[str, Any]) -> dict[str, Any]:
         # so a review knows which gates produced these trades.
         "status": snap.get("status"),
         "settings": dict(snap.get("settings") or {}),
-        "execution_context": deepcopy(snap.get("execution_context")),
+        "execution_context": execution_context,
         "use_stream": snap.get("use_stream"),
         "duration_days": snap.get("duration_days"),
         "laya": snap.get("laya"),
