@@ -132,6 +132,17 @@ class WebPaperApiTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(start.call_args.args[1], 8000)
 
+    def test_paper_tab_defaults_to_patternsv2_on_and_volume_gate_off(self) -> None:
+        self._login()
+        # The env default must not leak into the tab: Patternsv2 ships ticked
+        # and the volume gate ships clear.
+        self.app_s.volume_gate_enabled = True
+        page = self.client.get("/paper")
+        self.assertEqual(page.status_code, 200)
+        for book in ("us", "ph"):
+            self.assertIn(f'id="{book}-patterns-v2" checked', page.text)
+            self.assertIn(f'id="{book}-volume" /> Volume gate', page.text)
+
     def test_paper_controls_show_entry_and_exit_policy(self) -> None:
         self._login()
         page = self.client.get("/paper")

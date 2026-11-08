@@ -311,9 +311,10 @@ records the metrics).
 | `python main.py --paper` | same |
 | `python main.py --backtest` | same; add `--volume-gate-compare` for A/B |
 
-UI checkboxes default to the `.env` value but can override for that session.
-Startup logs print `Volume gate: ON/OFF`. Rejects log as
-`Volume gate REJECT | SYM pattern | reason`.
+The **Explorer** checkbox defaults to the `.env` value and can override it for
+that session; the **Paper** tab's Volume gate checkbox always starts clear, and
+its Patternsv2 box starts ticked. Startup logs print `Volume gate: ON/OFF`.
+Rejects log as `Volume gate REJECT | SYM pattern | reason`.
 
 ### `.env` settings
 

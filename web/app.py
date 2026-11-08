@@ -370,7 +370,6 @@ def create_app() -> FastAPI:
             request,
             "paper.html",
             active="paper",
-            volume_gate=settings.volume_gate_enabled,
             markets=markets_payload(),
             us=us,
             ph=ph,
