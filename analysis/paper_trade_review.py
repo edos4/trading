@@ -93,8 +93,9 @@ def replay_trade(trade: dict, *, target_max_r: float | None = None,
     marks = trade.get("daily_marks") or []
     if not marks or any(not m.get("exit_check") for m in marks):
         raise ValueError("Saved OHLC exit evidence is required; never infer it from fills")
-    if any(m["exit_check"].get("observation_kind") == "live_quote" for m in marks):
-        raise ValueError("Live quote exits require tick evidence; a completed-bar replay cannot verify them")
+    if ((trade.get("paper_protection") or {}).get("last_quote")
+            or any(m["exit_check"].get("observation_kind") in ("live_quote", "live_bar_close") for m in marks)):
+        raise ValueError("Live quote management requires tick evidence; a completed-bar replay cannot verify it")
     bars, anomalies = [], []
     for mark in marks:
         stamp = datetime.fromisoformat(mark["sim_bar"])
@@ -158,6 +159,7 @@ def replay_trade(trade: dict, *, target_max_r: float | None = None,
         if position.take_profit is not None and sign*(position.take_profit-target) > 0:
             position.take_profit = round(target, 4)
     armed, paper_armed, ambiguous, gap_fill, best_close_r = False, False, [], False, 0.0
+    opening_gap_through_protection = False
     for index, (bar, mark) in enumerate(zip(bars, marks), 1):
         if saved_policy and not paper_loss_protection and bar.timestamp >= datetime.fromisoformat(saved_policy["adopted_at"]):
             ensure_paper_protection(position, saved_policy["txn_cost_pct"], saved_policy["slippage_pct"],
@@ -199,6 +201,12 @@ def replay_trade(trade: dict, *, target_max_r: float | None = None,
             trigger = target if reason == "take_profit" else stop
             gap_fill = (trigger is not None and not orders["pending_exit_reason"]
                         and not math.isclose(price, trigger, abs_tol=.000001))
+            # A queued model exit can share an opening gap through protection.
+            # Keep its actual order reason while diagnosing the budget breach.
+            opening_gap_through_protection = bool(
+                orders.get("paper_protective_stop") is not None
+                and sign * (bar.open - orders["paper_protective_stop"]) < 0
+            )
             _close_trade(position, price * (1 - sign*slip), reason, bar, fee)
             break
         if risk:
@@ -248,6 +256,7 @@ def replay_trade(trade: dict, *, target_max_r: float | None = None,
         "trailing_armed": armed or paper_armed,
         "pattern_trailing_armed": armed, "paper_trailing_armed": paper_armed,
         "bars": index, "gap_exit": gap_fill,
+        "opening_gap_through_paper_stop": opening_gap_through_protection,
         "trailing_stop_basis": position.trailing_stop_basis,
         "paper_protection": position.paper_protection,
         "best_surviving_close_r": best_close_r,
@@ -477,7 +486,9 @@ def review_export(path: Path, *, allow_inconsistent_ohlc: bool = False) -> dict:
             "gap_exit_count": sum(r["gap_exit"] for r in closed),
             "paper_budget_breaches": [
                 {"symbol": row["symbol"], "trade_id": row["trade_id"],
-                 "net_return_pct": row["net_return_pct"], "gap_exit": row["gap_exit"]}
+                 "net_return_pct": row["net_return_pct"], "gap_exit": row["gap_exit"],
+                 "opening_gap_through_paper_stop": row["opening_gap_through_paper_stop"],
+                 "exit_reason": row["exit_reason"]}
                 for row in closed if row["paper_protection"] is not None
                 and row["net_return_pct"] < -100 * row["paper_protection"]["loss_limit_pct"] - .000001
             ],

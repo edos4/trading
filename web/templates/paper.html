@@ -24,7 +24,7 @@
   </div>
 </section>
 
-<p class="muted">New books enforce cash, exposure and short collateral limits. Both sides use a cost-aware 3% loss stop and a trail allowing 3 percentage points of giveback from the best completed net close. Gaps can exceed this budget. Historical streams simulate next-open fills.</p>
+<p class="muted">New books enforce cash, exposure and short collateral limits. Both sides use a cost-aware 3% loss stop and a trail allowing 3 percentage points of giveback from the best net close or observed live price. Gaps can exceed this budget. Historical streams trail completed closes and simulate next-open fills.</p>
 
 <section class="book-grid">
   {% for book in book_cards %}

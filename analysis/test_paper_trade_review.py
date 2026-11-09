@@ -318,11 +318,44 @@ def test_funnel_separates_model_opposition_abstention_and_data_errors():
         Kronos_oppose=1, Kronos_no_opinion=1, Kronos_context_error=1, Kronos_worker_error=1)
 
 
-def test_quote_exit_cannot_be_certified_by_completed_bar_replay():
+@pytest.mark.parametrize("kind", ["live_quote", "live_bar_close"])
+def test_quote_exit_cannot_be_certified_by_completed_bar_replay(kind):
     trade = saved_trade()
-    trade['daily_marks'][-1]['exit_check']['observation_kind'] = 'live_quote'
-    with pytest.raises(ValueError, match='Live quote exits require tick evidence'):
+    trade['daily_marks'][-1]['exit_check']['observation_kind'] = kind
+    with pytest.raises(ValueError, match='Live quote management requires tick evidence'):
         replay_trade(trade)
+
+
+def test_quote_ratchet_cannot_be_certified_by_daily_bars_even_if_exit_is_on_a_later_bar():
+    trade = saved_trade()
+    trade['paper_protection'] = {'last_quote': {'price': 110}}
+    with pytest.raises(ValueError, match='Live quote management requires tick evidence'):
+        replay_trade(trade)
+
+
+@pytest.mark.parametrize("short", [False, True])
+def test_queued_exit_retains_reason_but_reports_an_opening_gap_through_paper_protection(short):
+    from core.paper_trader import PaperAccount
+    from data.ohlcv_store import OHLCVStore
+    from utils.trade_export import build_paper_account_export
+
+    book = PaperAccount(market="us", txn_cost_pct=.001, slippage_pct=.0005)
+    book.assume_session_open = True
+    store = OHLCVStore()
+    assert book.queue_position(signal(short), candle(100, 100, 100, 100), store)[0]
+    first = candle(100, 101, 99, 100, 1)
+    book.fill_pending("TEST", "1d", first, store)
+    assert book.on_bar("TEST", first, "1d") == []
+    p = book.positions["TEST"][0]
+    assert book.request_exit(p)
+    gap = candle(110, 112, 108, 111, 2) if short else candle(90, 92, 88, 89, 2)
+    assert book.on_bar("TEST", gap, "1d") == [p]
+    trade = build_paper_account_export(book)["books"][0]["closed_trades"][0]
+    row = replay_trade(trade)
+    assert row["exit_reason"] == "kronos_exit"
+    assert row["net_return_pct"] < -3
+    assert row["opening_gap_through_paper_stop"]
+    assert not row["gap_exit"]  # Describes the executed market order, not its safety order.
 
 
 @pytest.mark.parametrize('short', [False, True])

@@ -437,7 +437,8 @@ def build_paper_trade_export(
             " includes the entry cap. Trailing stops are separate orders."
             " paper_protection saves the independent cost-aware 3% net loss"
             " budget and entry-notional giveback; exit_state.paper_protective_stop"
-            " is its current resting trigger. Gaps can exceed the budget.",
+            " is its current resting trigger. Live last_quote and quote_ratchets"
+            " retain observed-price trail evidence. Gaps can exceed the budget.",
             "r is gross price movement / initial risk; net_r includes both"
             " transaction fees and executed slippage for closed trades.",
             "daily_marks[].close is the exit fill on the final row. New marks"
@@ -448,6 +449,10 @@ def build_paper_trade_export(
             " at the observed last price; ohlc is a point observation, not a"
             " completed candle. source_bar identifies the forming candle."
             " A daily-bar replay cannot certify these intraday fills.",
+            "After live quote management, observation_kind='live_bar_close' keeps"
+            " the full completed ohlc for pattern close decisions and resting_ohlc"
+            " as the observed close for resting orders. Earlier daily ranges"
+            " cannot execute an order tightened later in that bar.",
         ],
         "books": books,
     })

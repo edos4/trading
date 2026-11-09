@@ -712,7 +712,15 @@ even after reducing the entry universe or disabling its detector. Held symbols
 remain eligible for feed retries after a dead-symbol flag. These additional
 requests do not create new entry candidates outside the selected universe.
 Both long sells and short buybacks retain the cost-aware 3% net loss budget
-and three-percentage-point trail from the best surviving completed net close.
+and three-percentage-point trail from the best surviving net close or observed
+live price. Each live quote checks the existing orders first, then a surviving
+price can tighten the independent safety trail for subsequent observations.
+The forming bar's high/low cannot ratchet that trail. Quote timestamps and
+ratchets persist across restarts and appear in Export Trades. Stale quotes and
+older bars cannot reuse a new order. When the same bar completes, resting orders
+use its observed close; its earlier range cannot retroactively fill the new
+stop. Pattern close decisions still use the completed candle. Historical replay
+continues to trail from completed closes and cannot certify live quote results.
 Live resting stops are checked when each quote arrives, before waiting for the
 rest of a funded scan. Replay still processes opening orders before full-bar
 exits. A gap or a move between polls can exceed the stop budget.

@@ -1,4 +1,4 @@
-"""Cost-aware paper stops, ratcheted only from completed surviving closes.
+"""Cost-aware paper stops, ratcheted from surviving closes and live prices.
 
 The budget is a fraction of entry notional, not account equity. A stop is
 an order trigger, so a gap can still exceed the budget. Pattern orders remain
@@ -89,6 +89,7 @@ def paper_protective_order(position: BacktestTrade) -> tuple[float, bool, str] |
 
 def check_paper_protection_only(
     position: BacktestTrade, candle: OHLCVCandle, bar_idx: int,
+    *, resting_candle: OHLCVCandle | None = None,
 ) -> tuple[float | None, str]:
     """Keep risk exits executable when a saved pattern engine is unavailable.
 
@@ -98,13 +99,14 @@ def check_paper_protection_only(
     from core.backtester import _gap_aware_trigger_fill
 
     order = paper_protective_order(position)
+    resting_bar = resting_candle if resting_candle is not None else candle
     if order is None:
         raise ValueError("Independent paper protection is required")
     if position.pending_exit_reason:
         position.exit_bar_idx = bar_idx
-        return candle.open, position.pending_exit_reason
+        return resting_bar.open, position.pending_exit_reason
     stop, _, reason = order
-    price = _gap_aware_trigger_fill(candle, stop, is_short=position.action == "SELL", favorable=False)
+    price = _gap_aware_trigger_fill(resting_bar, stop, is_short=position.action == "SELL", favorable=False)
     if price is not None:
         position.exit_bar_idx = bar_idx
         return price, reason
@@ -113,7 +115,11 @@ def check_paper_protection_only(
 
 
 def ratchet_paper_protection(position: BacktestTrade, close: float) -> None:
-    """A surviving close can tighten tomorrow's order; never today's order."""
+    """Tighten only AFTER checking the old order at this observed price.
+
+    A completed close protects the next bar. A live quote protects later
+    observations, with its timestamp/evidence retained by PaperAccount.
+    """
     policy = position.paper_protection
     if policy is None:
         return

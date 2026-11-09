@@ -51,6 +51,9 @@ _CACHE_TTL_SECONDS = 6 * 3600
 # The pre-audit engine uses the identical exit ladder. Recheck this allowance
 # whenever exit helpers change; new entries still require the current runtime.
 _COMPATIBLE_EXIT_ENGINE_HASHES = frozenset({
+    # Observed-price paper trails are additive; ordinary saved OHLC ladders
+    # retain their fills unless a caller supplies live point evidence.
+    "2ed01bd2c22ea083a77adfd98b47d04ff2bce131e259c2f52c41279c445a7ed0",
     # Boundary-anchored objectives affect new signals only; saved exits retain
     # their levels. Paper can also enforce safety when a pattern runtime drifts.
     "40c0c80c62b35a6f71ffb9bd1dac81f10ac02c25800277f5cfe5d604ef10f63e",
@@ -71,6 +74,7 @@ _COMPATIBLE_EXIT_ENGINE_HASHES = frozenset({
 # Entry corrections and an opt-in trail basis preserve these audited engines'
 # existing ladders. Missing basis always means the old reference percentage.
 _COMPATIBLE_CAUSAL_EXIT_ENGINE_HASHES = frozenset({
+    "2ed01bd2c22ea083a77adfd98b47d04ff2bce131e259c2f52c41279c445a7ed0",
     "40c0c80c62b35a6f71ffb9bd1dac81f10ac02c25800277f5cfe5d604ef10f63e",
     "a63bde2d2a4cc481f5c74ee40c355aec2a3946a5c369da9b0ab7c0edeff7753c",
     # The new entry-based trail is opt-in per signal. Old positions keep
@@ -670,7 +674,14 @@ def _time_exit_allowed(position: BacktestTrade, candle: OHLCVCandle) -> bool:
     return not (position._best_pnl_pct is not None and position._best_pnl_pct >= floor)
 
 
-def _check_exit(candle: OHLCVCandle, position: BacktestTrade, bar_idx: int):
+def _check_exit(
+    candle: OHLCVCandle, position: BacktestTrade, bar_idx: int,
+    *, resting_candle: OHLCVCandle | None = None,
+):
+    # Live orders tightened within this bar cannot be tested against its
+    # earlier range. Close decisions and tomorrow's pattern references still
+    # use the completed candle; resting orders use only the observed point.
+    resting_bar = resting_candle if resting_candle is not None else candle
     from core.position_protection import paper_protective_order, ratchet_paper_protection
 
     validate_exit_runtime(position)
@@ -695,19 +706,19 @@ def _check_exit(candle: OHLCVCandle, position: BacktestTrade, bar_idx: int):
                 resting.append((position.take_profit, True, "take_profit"))
             for opening_only in (True, False):
                 for trigger, favorable, reason in resting:
-                    price = _gap_aware_trigger_fill(candle, trigger, is_short=short, favorable=favorable)
-                    gapped = (candle.open <= trigger if short else candle.open >= trigger) if favorable else (
-                        candle.open >= trigger if short else candle.open <= trigger)
+                    price = _gap_aware_trigger_fill(resting_bar, trigger, is_short=short, favorable=favorable)
+                    gapped = (resting_bar.open <= trigger if short else resting_bar.open >= trigger) if favorable else (
+                        resting_bar.open >= trigger if short else resting_bar.open <= trigger)
                     if price is not None and (not opening_only or gapped):
                         position.exit_bar_idx = bar_idx
                         return price, reason
-        result = _check_exit_legacy(candle, position, bar_idx)
+        result = _check_exit_legacy(candle, position, bar_idx, resting_candle=resting_candle)
         if result[0] is None:
             ratchet_paper_protection(position, candle.close)
         return result
     if position.pending_exit_reason:
         position.exit_bar_idx = bar_idx
-        return candle.open, position.pending_exit_reason
+        return resting_bar.open, position.pending_exit_reason
     short = position.action == "SELL"
     stop = _effective_stop(position)
     trail = _trailing_stop_price(position, short)
@@ -728,9 +739,9 @@ def _check_exit(candle: OHLCVCandle, position: BacktestTrade, bar_idx: int):
     # Opening orders precede intrabar touches, including a gap through a target.
     for opening_only in (True, False):
         for trigger, favorable, reason in resting:
-            price = _gap_aware_trigger_fill(candle, trigger, is_short=short, favorable=favorable)
-            gapped = (candle.open <= trigger if short else candle.open >= trigger) if favorable else (
-                candle.open >= trigger if short else candle.open <= trigger)
+            price = _gap_aware_trigger_fill(resting_bar, trigger, is_short=short, favorable=favorable)
+            gapped = (resting_bar.open <= trigger if short else resting_bar.open >= trigger) if favorable else (
+                resting_bar.open >= trigger if short else resting_bar.open <= trigger)
             if price is not None and (not opening_only or gapped):
                 position.exit_bar_idx = bar_idx
                 return price, reason
@@ -775,13 +786,15 @@ def _validate_legacy_exit_runtime(position: BacktestTrade) -> None:
 
 
 def _check_exit_legacy(
-    candle: OHLCVCandle, position: BacktestTrade, bar_idx: int
+    candle: OHLCVCandle, position: BacktestTrade, bar_idx: int,
+    *, resting_candle: OHLCVCandle | None = None,
 ) -> tuple[float | None, str]:
     """Fixed per-pattern exit ladder — see module docstring. No engine overlays."""
     _validate_legacy_exit_runtime(position)
+    resting_bar = resting_candle if resting_candle is not None else candle
     if position.pending_exit_reason:
         position.exit_bar_idx = bar_idx
-        return candle.open, position.pending_exit_reason
+        return resting_bar.open, position.pending_exit_reason
     is_short = position.action == "SELL"
     at_close = position.exit_fill_at_close
     if position.provenance == "patternsv2":
@@ -793,13 +806,13 @@ def _check_exit_legacy(
             stop, reason = trail, "trailing_stop"
         target = position.take_profit
         # A target marketable at the open fills before later intrabar moves.
-        if target is not None and (candle.open <= target if is_short else candle.open >= target):
+        if target is not None and (resting_bar.open <= target if is_short else resting_bar.open >= target):
             position.exit_bar_idx = bar_idx
-            return candle.open, "take_profit"
+            return resting_bar.open, "take_profit"
         for trigger, favorable, exit_reason in ((stop, False, reason), (target, True, "take_profit")):
             if trigger is None:
                 continue
-            fill = _gap_aware_trigger_fill(candle, trigger, is_short=is_short, favorable=favorable)
+            fill = _gap_aware_trigger_fill(resting_bar, trigger, is_short=is_short, favorable=favorable)
             if fill is not None:
                 position.exit_bar_idx = bar_idx
                 return fill, exit_reason
@@ -821,9 +834,9 @@ def _check_exit_legacy(
             return None
         if position.stop_loss_on_close or at_close:
             if (candle.close > s) if is_short else (candle.close < s):
-                return (candle.close if at_close else s), "stop_loss"
-        elif (candle.high >= s) if is_short else (candle.low <= s):
-            return s, "stop_loss"
+                return (candle.close if at_close or resting_candle is not None else s), "stop_loss"
+        elif (resting_bar.high >= s) if is_short else (resting_bar.low <= s):
+            return (resting_bar.close if resting_candle is not None else s), "stop_loss"
         return None
 
     def _chk_target() -> tuple[float, str] | None:
@@ -831,7 +844,7 @@ def _check_exit_legacy(
         if tp is None:
             return None
         if (candle.close <= tp) if is_short else (candle.close >= tp):
-            return (candle.close if at_close else tp), "take_profit"
+            return (candle.close if at_close or resting_candle is not None else tp), "take_profit"
         return None
 
     def _chk_reclaim() -> tuple[float, str] | None:
@@ -850,9 +863,9 @@ def _check_exit_legacy(
             return None
         if position.trailing_stop_on_close or at_close:
             if (candle.close > t) if is_short else (candle.close < t):
-                return (candle.close if at_close else t), "trailing_stop"
-        elif (candle.high >= t) if is_short else (candle.low <= t):
-            return t, "trailing_stop"
+                return (candle.close if at_close or resting_candle is not None else t), "trailing_stop"
+        elif (resting_bar.high >= t) if is_short else (resting_bar.low <= t):
+            return (resting_bar.close if resting_candle is not None else t), "trailing_stop"
         return None
 
     checks = {"stop": _chk_stop, "target": _chk_target,

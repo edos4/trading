@@ -39,6 +39,8 @@ from core.market import (
     apply_lot_rounding,
     format_money,
     get_market,
+    is_swing_timeframe,
+    is_weekly_timeframe,
     may_assume_fill,
     session_label,
 )
@@ -210,17 +212,33 @@ def exit_state(position: BacktestTrade) -> dict[str, Any]:
     return state
 
 
-def _position_bar_is_due(position: BacktestTrade, as_of: datetime) -> bool:
+def _execution_bar_key(timeframe: str, stamp: datetime, market: str | None = None):
+    """Identify the observed period even if a daily feed changes its timestamp.
+
+    Unlike the scanner's last-completed-session key, a forming observation
+    belongs to its actual period. Its stop can be tightened within that period.
+    """
+    if not is_swing_timeframe(timeframe):
+        return stamp
+    date = stamp.astimezone(ZoneInfo(get_market(market).session_tz)).date()
+    return date.isocalendar()[:2] if is_weekly_timeframe(timeframe) else date
+
+
+def _position_bar_is_due(position: BacktestTrade, as_of: datetime, market: str | None = None) -> bool:
     """Only a new range at or after the fill can update a position."""
     # Older paper ledgers may retain the simulation clock only in marks;
     # entry_date is the wall-clock fill time and must not freeze that replay.
     first_mark = next((mark["sim_bar"] for mark in position.position_marks if mark.get("sim_bar")), None)
     entered = position.sim_entry_date or (datetime.fromisoformat(first_mark) if first_mark else position.entry_date)
-    if as_of < entered:
+    key = _execution_bar_key(position.timeframe, as_of, market)
+    if key < _execution_bar_key(position.timeframe, entered, market):
+        return False
+    quote = (position.paper_protection or {}).get("last_quote")
+    if quote and key < _execution_bar_key(position.timeframe, datetime.fromisoformat(quote["source_bar"]), market):
         return False
     last_checked = next((mark.get("sim_bar") for mark in reversed(position.position_marks)
                          if mark.get("exit_check") and mark.get("sim_bar")), None)
-    return last_checked is None or as_of > datetime.fromisoformat(last_checked)
+    return last_checked is None or key > _execution_bar_key(position.timeframe, datetime.fromisoformat(last_checked), market)
 
 
 def _trade_to_dict(t: BacktestTrade) -> dict:
@@ -671,7 +689,8 @@ class PaperAccount:
                 "combined_exit_policy": {
                     'precedence':'nearest resting protection; opening orders before intrabar touches',
                     'paper_loss_budget':'3% of entry notional, net of configured costs',
-                    'paper_giveback':'3 percentage points from best surviving net close; no pattern R activation',
+                    'paper_giveback':'3 percentage points from best surviving net close or observed live price; no pattern R activation',
+                    'live_trail':'observed prices only; never forming high/low; same-bar resting orders use the observed close',
                     'pattern_orders':'structural/ATR stop, measured target and saved activation ladder remain active',
                     'validation':'combined strategy has not been independently validated',
                 },
@@ -1039,6 +1058,13 @@ class PaperAccount:
             )
         except ValueError as exc:
             return False, str(exc)
+        if not self.assume_session_open:
+            # The entry itself is a live price observation. A completed daily
+            # range may include hours before this fill and its new stop.
+            position.paper_protection["last_quote"] = {
+                "source_bar": position.sim_entry_date.isoformat(),
+                "observed_at": position.entry_date.isoformat(), "price": candle.close,
+            }
         self.cash -= position.entry_fee_paid
         notional = position.entry_price * position.qty
         if signal.action == "BUY":
@@ -1193,26 +1219,37 @@ class PaperAccount:
     ) -> list[BacktestTrade]:
         """Protect live positions at a forming bar's observed last price.
 
-        Daily highs/lows may predate entry or the current stop. Never use
-        them to invent an intraday fill, ratchet a close-based trail, or
-        advance the completed-bar clock. Gaps between polls fill at the
-        observed price and can exceed the loss budget.
+        Daily highs/lows may predate entry or the current stop. A surviving
+        observed price tightens the independent safety trail for subsequent
+        observations. Pattern trails still use completed closes. Gaps between
+        polls fill at the observed price and can exceed the loss budget.
         """
         price = candle.close
         if not math.isfinite(price) or price <= 0:
             return []
         now = observed_at or datetime.now(timezone.utc)
+        source_bar = candle.timestamp
+        if (not isinstance(source_bar, datetime) or source_bar.tzinfo is None
+                or now.tzinfo is None or source_bar > now):
+            return []
         with self._lock:
-            self._last_price[symbol] = price
             closed = []
             for position in list(self.positions.get(symbol, [])):
                 if position.timeframe != timeframe or now < position.entry_date:
                     continue
-                from core.position_protection import ensure_paper_protection, paper_protective_order
+                if not _position_bar_is_due(position, source_bar, self.market):
+                    continue
+                last_quote = (position.paper_protection or {}).get("last_quote")
+                if last_quote and now < datetime.fromisoformat(last_quote["observed_at"]):
+                    continue
+                from core.position_protection import (
+                    ensure_paper_protection, paper_protective_order, ratchet_paper_protection,
+                )
                 ensure_paper_protection(
                     position, self.txn_cost_pct, self.slippage_pct,
-                    candle.timestamp or now,
+                    source_bar,
                 )
+                self._last_price[symbol] = price
                 state = exit_state(position)
                 from core.backtester import ExitRuntimeChangedError, validate_exit_runtime
                 runtime_error = None
@@ -1226,8 +1263,9 @@ class PaperAccount:
                 # the first observed price of the next bar, not its close.
                 last_mark = next((m.get("sim_bar") for m in reversed(position.position_marks)
                                   if m.get("sim_bar")), None)
-                if (position.pending_exit_reason and candle.timestamp and last_mark
-                        and candle.timestamp > datetime.fromisoformat(last_mark)):
+                if (position.pending_exit_reason and last_mark
+                        and _execution_bar_key(timeframe, source_bar, self.market)
+                        > _execution_bar_key(timeframe, datetime.fromisoformat(last_mark), self.market)):
                     reason = position.pending_exit_reason
                 resting = [paper_protective_order(position)]
                 resting += [(state[key], False, label) for key, label in (
@@ -1243,6 +1281,18 @@ class PaperAccount:
                         and (price <= target if short else price >= target)):
                     reason = "take_profit"
                 if not reason:
+                    policy = position.paper_protection
+                    before = policy["stop"]
+                    ratchet_paper_protection(position, price)
+                    policy["last_quote"] = {
+                        "source_bar": source_bar.isoformat(), "observed_at": now.isoformat(),
+                        "price": price,
+                    }
+                    if policy["stop"] != before:
+                        policy.setdefault("quote_ratchets", []).append({
+                            **policy["last_quote"], "stop_before": before,
+                            "stop_after": policy["stop"], "peak_net_pct": policy["peak_net_pct"],
+                        })
                     continue
                 fill = price * (1 + self.slippage_pct if short else 1 - self.slippage_pct)
                 # A point observation, not a reconstructed full-bar path.
@@ -1300,7 +1350,7 @@ class PaperAccount:
             return []
         matching = [p for p in self.positions.get(symbol, [])
                     if timeframe is None or p.timeframe == timeframe]
-        if is_new_bar and matching and not any(_position_bar_is_due(p, candle.timestamp) for p in matching):
+        if matching and not any(_position_bar_is_due(p, candle.timestamp, self.market) for p in matching):
             return []
         self._last_price[symbol] = candle.close
         self._last_price_at[symbol] = candle.timestamp.isoformat()
@@ -1342,11 +1392,22 @@ class PaperAccount:
     ) -> BacktestTrade | None:
         # A delayed feed response must not use today's tightened stop against
         # an earlier range, or close a position on a candle preceding its fill.
-        if not _position_bar_is_due(position, now):
+        if not _position_bar_is_due(position, now, self.market):
             return None
         bar_idx = self.bar_count(symbol, position.timeframe)
         from core.position_protection import ensure_paper_protection
         ensure_paper_protection(position, self.txn_cost_pct, self.slippage_pct, now)
+
+        # A quote may have tightened the safety order after this bar opened.
+        # Its earlier high/low cannot execute the new order retroactively.
+        # Retain the full candle for close decisions and pattern references.
+        last_quote = position.paper_protection.get("last_quote")
+        resting_candle = None
+        if (last_quote and _execution_bar_key(position.timeframe, now, self.market)
+                == _execution_bar_key(position.timeframe, datetime.fromisoformat(last_quote["source_bar"]), self.market)):
+            resting_candle = replace(
+                candle, open=candle.close, high=candle.close, low=candle.close,
+            )
 
         # bar_idx is per real new bar (see _bar_count), not per scan cycle, so
         # the exit ladder's bar counting matches the backtester's walk index.
@@ -1359,22 +1420,34 @@ class PaperAccount:
             "ohlc": {key: getattr(candle, key) for key in ("open", "high", "low", "close")},
             "execution_model": position.execution_model,
         }
+        if resting_candle is not None:
+            exit_check.update(
+                observation_kind="live_bar_close",
+                resting_ohlc=dict.fromkeys(("open", "high", "low", "close"), candle.close),
+            )
         _update_neckline_state(position, candle, bar_idx)
         from core.backtester import ExitRuntimeChangedError
         try:
-            exit_price, reason = _check_exit(candle, position, bar_idx)
+            exit_price, reason = _check_exit(
+                candle, position, bar_idx, resting_candle=resting_candle,
+            )
         except ExitRuntimeChangedError as exc:
             from core.position_protection import check_paper_protection_only
             # The independent 3% order must survive a detector/runtime update.
             # Preserve the mismatch in evidence instead of rewriting provenance.
             exit_check["pattern_runtime_error"] = str(exc)
             exit_check["management_mode"] = "paper_protection_only"
-            exit_price, reason = check_paper_protection_only(position, candle, bar_idx)
+            exit_price, reason = check_paper_protection_only(
+                position, candle, bar_idx, resting_candle=resting_candle,
+            )
             log.warning(f"Paper | {symbol}: {exc}; managing independent protection")
         exit_check["raw_fill"] = exit_price
         exit_check["reason"] = reason or None
         from core.exit_evidence import trigger_source
-        exit_check['trigger_source'] = trigger_source(exit_check['orders_before_bar'], position.action, candle, reason)
+        exit_check['trigger_source'] = trigger_source(
+            exit_check['orders_before_bar'], position.action,
+            resting_candle if resting_candle is not None else candle, reason,
+        )
         if exit_price is None:
             _update_prev_hl(position, candle)
         if reason == "time_exit":
