@@ -98,6 +98,41 @@ def test_default_detectors_have_nonempty_causal_and_latest_equivalent_results(na
         assert current == [s for s in full if s["signal"] == n-1], (name, n)
 
 
+@pytest.mark.parametrize("name", sorted(_BOUNDED))
+def test_interior_swings_do_not_have_to_touch_the_boundaries(name):
+    """A partial recovery/pullback inside the rails does not erase a base."""
+    su, sl = _BOUNDED[name]
+    xs = np.array([20, 28, 36, 44, 52, 60, 68, 76])
+    ys = [100 + sl * (t - 20) + 1 if i % 2 == 0
+          else 125 + su * (t - 20) - 1 for i, t in enumerate(xs)]
+    down = name in {"descending_triangle", "descending_channel", "rising_wedge"}
+    end = 100 + sl * 64 - 8 if down else 125 + su * 64 + 8
+    # These extra turns clear the ZigZag reversal threshold, but stay inside
+    # the unchanged rails. The original eight boundary touches remain.
+    c = np.interp(np.arange(95), np.r_[0, xs[:3], 39, 41, xs[3:], 84, 94],
+                  np.r_[90, ys[:3], 119 + su * 19, 108 + sl * 21, ys[3:], end, end])
+    h, l = c + 1, c - 1
+    full = detect(h, l, c)
+    hits = [s for s in full if s["pattern"] == name]
+    assert hits, name
+    # Interior pivots are not mislabeled as boundary touches.
+    assert all(int(p[0]) not in {39, 41} for s in hits for p in s["points"])
+    for n in range(60, len(c) + 1):
+        assert detect(h[:n], l[:n], c[:n]) == [s for s in full if s["signal"] < n]
+        current = detect(h[:n], l[:n], c[:n], latest=n - 1)
+        assert [s for s in current if s["signal"] == n - 1] == [
+            s for s in full if s["signal"] == n - 1]
+
+
+@pytest.mark.parametrize("name", sorted(_BOUNDED))
+def test_supporting_rails_do_not_hide_an_intervening_pierce(name):
+    """An enclosing fit cannot rescue a pattern that already broke its rail."""
+    h, l, c = family_bars(name)
+    assert any(s["pattern"] == name for s in detect(h, l, c))
+    h[48] += 30  # A real out-of-pattern wick, with a still-valid OHLC range.
+    assert not [s for s in detect(h, l, c) if s["pattern"] == name]
+
+
 @pytest.mark.parametrize("bear", [False, True])
 def test_cup_handle_is_frozen_at_breakout_even_if_future_handle_window_has_a_lower_low(bear):
     h, l, c = family_bars("inv_cup_handle" if bear else "cup_handle")

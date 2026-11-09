@@ -2315,6 +2315,8 @@ class MarketScanner:
     async def _flush_kronos_confirm(self) -> None:
         """Resolve pending entry and open-position votes in one worker call."""
         gate = self._kronos_gate
+        if self._kronos_gate is not None:
+            self._kronos_gate.live_decision = self._replay_asof is None and not hasattr(self._tv, "advance_replay")
         if gate is None:
             return
         entry_rows, exit_rows = await asyncio.to_thread(gate.flush_with_exits)
@@ -2616,6 +2618,12 @@ class MarketScanner:
             return
         if getattr(self, "_patterns_v2", False):
             from patterns_v2.signals import Patternsv2Scan
+            from core.pattern_toggles import FIELD_V2, catalog, muted
+
+            disabled = muted(FIELD_V2)
+            enabled = sorted(row["id"] for row in catalog(FIELD_V2)
+                             if row["id"] not in disabled)
+            log.info(f"Patternsv2 | enabled={enabled} | disabled={disabled}")
             self._version_set = {}
             self._patterns = [Patternsv2Scan()]
             self._pattern_files = {}

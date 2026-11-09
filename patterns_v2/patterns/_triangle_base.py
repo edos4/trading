@@ -1,7 +1,8 @@
 """Bounded two-line patterns, Bulkowski identification guidelines.
 
 Converging boundaries, price contained inside them, and at least five distinct
-touches (three on one side and two on the other).
+touches (three on one side and two on the other). Interior swings may fall
+short of a boundary; only actual rail touches are counted and drawn.
 
 Triangles. Ascending: flat top, rising bottom. Descending: flat bottom, falling
 top. A side is flat when it drifts by less than 4% of the pattern's average
@@ -102,8 +103,44 @@ def _fit_side(x, y, ai, touch_atr, upper):
         b -= max(fv - yv for fv, yv in zip(fitted, ys))
         gap = [yv - (s * v + b) for v, yv in zip(span, ys)]
     if max(gap) > touch_atr * ai:
-        return None
+        return _support_side(xs, ys, touch_atr * ai, upper)
     return float(s), float(b), float(x0)
+
+
+def _support_side(xs, ys, tolerance, upper):
+    """Fit an enclosing rail when a partial swing spoils the all-pivot fit.
+
+    Edges of the upper/lower convex hull support every pivot on that side.
+    Rank them by actual touches and their span, without requiring interior
+    pivots to sit on the rail. A hull walk avoids an all-pairs line search.
+    """
+    hull = []
+    sign = 1 if upper else -1
+    for x, y in zip(xs, ys):
+        if hull and x == hull[-1][0]:
+            if sign * y <= sign * hull[-1][1]:
+                continue
+            hull.pop()
+        while len(hull) >= 2:
+            xa, ya = hull[-2]
+            xb, yb = hull[-1]
+            cross = (xb - xa) * (y - ya) - (yb - ya) * (x - xa)
+            if sign * cross < 0:
+                break
+            hull.pop()
+        hull.append((x, y))
+    best = None
+    for (xa, ya), (xb, yb) in zip(hull, hull[1:]):
+        slope = (yb - ya) / (xb - xa)
+        gaps = [sign * (slope * (x - xa) + ya - y) for x, y in zip(xs, ys)]
+        dust = 1e-8 * max(max(abs(y) for y in ys), 1.0)
+        if min(gaps) < -dust:
+            continue
+        touches = [x for x, gap in zip(xs, gaps) if gap <= tolerance]
+        rank = (len(touches), max(touches) - min(touches), -sum(gaps))
+        if best is None or rank > best[0]:
+            best = (rank, (float(slope), float(ya), float(xa)))
+    return best[1] if best is not None else None
 
 
 def _kind(su, sl, w0, w1, span, flat):
@@ -309,7 +346,7 @@ def detect(
         s = k - 4
         while s > 0 and I[k] - I[s - 1] <= max_w:
             s -= 1
-        best = None
+        best = {}
         for start in range(s, k - 3):
             # The backward walk above always keeps the 5-pivot minimum, so that
             # window can be wider than max_w. Enforce the cap here.
@@ -319,18 +356,22 @@ def detect(
                 h, l, c, I, Pr, H, C, start, k, ai, flat, sym_min_w, wait,
                 touch_atr, min_height_atr, kinds, wedge_min_w, channel_min_w, rect_min_w,
             )
-            # Earliest breakout wins, then the longest pair (so a wedge's wide
-            # start cannot outrank it), then score. Ranking by length alone let a
+            # Rank within each family: a wider triangle must not suppress a
+            # channel built from later touches of the same pivot sequence.
+            # Earliest breakout wins, then the longest pair, then score.
+            # Ranking by length alone let a
             # candidate that only breaks out later displace one that already had,
             # so a live scan and a full-history scan disagreed (look-ahead).
-            if cand is not None and (
-                best is None
+            if cand is None:
+                continue
+            prev = best.get(cand["pattern"])
+            if (
+                prev is None
                 or (-cand["signal"], len(cand["points"]), cand["score"])
-                > (-best["signal"], len(best["points"]), best["score"])
+                > (-prev["signal"], len(prev["points"]), prev["score"])
             ):
-                best = cand
-        if best is not None:
-            out.append(best)
+                best[cand["pattern"]] = cand
+        out.extend(best.values())
     return out
 
 
@@ -365,6 +406,20 @@ def _one(
     # A labelled pivot has to sit on its boundary. 12% of the height still
     # left the dot visibly off the line.
     touch_lim = min(touch_atr * ai, 0.08 * avg_w)
+
+    # ZigZag also records partial swings inside a pattern. They remain subject
+    # to containment, but must not bend the rails or be labeled as touches.
+    highs = [(i, x) for i, x in zip(ih, hx) if upper(x) - Pr[i] <= touch_lim]
+    lows = [(i, x) for i, x in zip(il, lx) if Pr[i] - lower(x) <= touch_lim]
+    if len(highs) < 2 or len(lows) < 2 or len(highs) + len(lows) < 5:
+        return None
+    boundary = {i for i, _x in highs + lows}
+    # The candidate window must begin and end on actual touches, not on an
+    # interior turn whose later confirmation could reissue an old setup.
+    if start not in boundary or k not in boundary:
+        return None
+    ih, hx = [i for i, _x in highs], [x for _i, x in highs]
+    il, lx = [i for i, _x in lows], [x for _i, x in lows]
 
     def _on_boundary(xs, ys, line_at, inside_positive):
         for x, y in zip(xs, ys):
@@ -423,6 +478,8 @@ def _one(
     # and the next higher low can both sit on their lines and barely differ in price.
     swings = []
     for i in range(start, k + 1):
+        if i not in boundary:
+            continue
         width = upper(I[i]) - lower(I[i])
         if width <= 0:
             return None
@@ -504,6 +561,8 @@ def _one(
         hi_n = lo_n = 0
         hi_i = lo_i = 0
         for i in range(start, k + 1):
+            if i not in boundary:
+                continue
             if H[i]:
                 hi_n += 1
                 points.append((hx[hi_i], Pr[ih[hi_i]], f"high {hi_n}"))

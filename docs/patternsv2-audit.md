@@ -8,8 +8,8 @@ Prefix verification: `{"checks": 5989, "mismatches": [], "requested": true}`.
 
 | Pattern | Raw | Converted | Volume passed |
 |---|---:|---:|---:|
-| ascending_channel | 0 | 0 | 0 |
-| ascending_triangle | 0 | 0 | 0 |
+| ascending_channel | 1 | 1 | 1 |
+| ascending_triangle | 1 | 1 | 1 |
 | bear_flag | 0 | 0 | 0 |
 | bear_pennant | 0 | 0 | 0 |
 | bull_flag | 0 | 0 | 0 |
@@ -19,32 +19,32 @@ Prefix verification: `{"checks": 5989, "mismatches": [], "requested": true}`.
 | descending_triangle | 0 | 0 | 0 |
 | double_bottom | 7 | 7 | 0 |
 | double_top | 9 | 9 | 3 |
-| falling_wedge | 0 | 0 | 0 |
+| falling_wedge | 3 | 3 | 0 |
 | inv_cup_handle | 0 | 0 | 0 |
 | rectangle | 0 | 0 | 0 |
-| rising_wedge | 0 | 0 | 0 |
-| symmetrical_triangle | 1 | 1 | 1 |
+| rising_wedge | 2 | 2 | 0 |
+| symmetrical_triangle | 6 | 6 | 1 |
 
 Returns enter at the next open; slippage and transaction costs apply on both legs.
 Unmatured horizons are excluded and counted as censored. Counts are events, not independent portfolio trades.
 
 | Pattern / slice | Volume selection | Bars held | Matured | Censored | Mean gross % | Mean net % |
 |---|---|---:|---:|---:|---:|---:|
-| all / all | all | 5 | 16 | 1 | 4.519 | 4.206 |
-| all / all | all | 10 | 16 | 1 | 5.440 | 5.118 |
-| all / all | all | 20 | 15 | 2 | 12.169 | 11.830 |
-| all / all | volume_passed | 5 | 3 | 1 | -3.079 | -3.385 |
-| all / all | volume_passed | 10 | 3 | 1 | -6.430 | -6.743 |
-| all / all | volume_passed | 20 | 3 | 1 | -11.427 | -11.750 |
-| all / earlier | all | 5 | 4 | 0 | 4.495 | 4.204 |
-| all / earlier | all | 10 | 4 | 0 | 1.545 | 1.248 |
-| all / earlier | all | 20 | 4 | 0 | -7.238 | -7.553 |
-| all / earlier | volume_passed | 5 | 2 | 0 | 4.496 | 4.205 |
-| all / earlier | volume_passed | 10 | 2 | 0 | 1.257 | 0.960 |
-| all / earlier | volume_passed | 20 | 2 | 0 | -9.455 | -9.774 |
-| all / later | all | 5 | 12 | 1 | 4.527 | 4.207 |
-| all / later | all | 10 | 12 | 1 | 6.738 | 6.409 |
-| all / later | all | 20 | 11 | 2 | 19.227 | 18.878 |
+| all / all | all | 5 | 28 | 1 | 2.212 | 1.908 |
+| all / all | all | 10 | 27 | 2 | 1.894 | 1.583 |
+| all / all | all | 20 | 25 | 4 | 5.045 | 4.723 |
+| all / all | volume_passed | 5 | 5 | 1 | -2.295 | -2.598 |
+| all / all | volume_passed | 10 | 5 | 1 | -5.378 | -5.683 |
+| all / all | volume_passed | 20 | 5 | 1 | -12.493 | -12.810 |
+| all / earlier | all | 5 | 11 | 0 | 1.317 | 1.019 |
+| all / earlier | all | 10 | 11 | 0 | -1.121 | -1.419 |
+| all / earlier | all | 20 | 11 | 0 | -5.939 | -6.248 |
+| all / earlier | volume_passed | 5 | 4 | 0 | 1.689 | 1.394 |
+| all / earlier | volume_passed | 10 | 4 | 0 | -1.271 | -1.566 |
+| all / earlier | volume_passed | 20 | 4 | 0 | -11.773 | -12.087 |
+| all / later | all | 5 | 17 | 1 | 2.791 | 2.483 |
+| all / later | all | 10 | 16 | 2 | 3.967 | 3.648 |
+| all / later | all | 20 | 14 | 4 | 13.676 | 13.343 |
 | all / later | volume_passed | 5 | 1 | 1 | -18.229 | -18.566 |
 | all / later | volume_passed | 10 | 1 | 1 | -21.806 | -22.150 |
 | all / later | volume_passed | 20 | 1 | 1 | -15.371 | -15.702 |

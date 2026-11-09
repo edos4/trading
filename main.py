@@ -310,6 +310,12 @@ async def run_paper(
         log.info(f"  Scan every: {scan_interval}s")
     log.info(f"  Stream:     {effective_stream_start or ('ON' if use_stream else 'OFF')}")
     log.info(f"  Volume gate:{'ON' if use_volume else 'OFF'}")
+    log.info(f"  DII gate:   {run_settings['dii_gate_mode'].upper()}")
+    log.info(
+        f"  Kronos entry:{run_settings['kronos_gate_mode'].upper()} "
+        f"({run_settings['kronos_gate_samples']} samples)"
+    )
+    log.info(f"  Kronos exits:{run_settings['kronos_exit_mode'].upper()}")
     log.info(f"  Pattern-only:{'ON' if pattern_only else 'OFF'}")
     log.info(
         f"  Collect-first:{'ON top-' + str(cf_n) if cf_on else 'OFF'}"

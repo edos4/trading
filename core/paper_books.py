@@ -149,6 +149,14 @@ def paper_run_settings(
     profile = get_market(market)
     from core.kronos_confirm import _normalize_samples
     from core.entry_policy import resolve_dii_gate_mode
+    enabled_v2: list[str] = []
+    disabled_v2: list[str] = []
+    if patterns_v2 and not indicators_only:
+        from core.pattern_toggles import FIELD_V2, catalog, muted
+
+        disabled_v2 = muted(FIELD_V2)
+        enabled_v2 = sorted(row["id"] for row in catalog(FIELD_V2)
+                            if row["id"] not in disabled_v2)
     pace = (
         "scan-paced replay"
         if use_stream and int(interval_seconds) <= 0
@@ -167,6 +175,8 @@ def paper_run_settings(
         "pattern_only": bool(pattern_only and not indicators_only),
         "indicators_only": bool(indicators_only),
         "patterns_v2": bool(patterns_v2 and not indicators_only),
+        "patternsv2_enabled_patterns": enabled_v2,
+        "patternsv2_disabled_patterns": disabled_v2,
         "collect_first": bool(collect_first),
         "collect_first_top_n": (
             int(collect_first_top_n or 4) if collect_first else None

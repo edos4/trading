@@ -869,6 +869,23 @@ def test_run_settings_indicators_only_wins_over_pattern_flags():
     assert cfg["collect_first_top_n"] == 6
     assert cfg["stream_start"] is None
     assert cfg["duration_days"] == 12
+    assert cfg["patternsv2_enabled_patterns"] == []
+    assert cfg["patternsv2_disabled_patterns"] == []
+
+
+def test_run_settings_capture_effective_patternsv2_toggles(monkeypatch):
+    from config import settings
+
+    monkeypatch.setattr(settings, "disabled_patterns_v2", "double_bottom,double_top,rising_wedge")
+    cfg = paper_run_settings(market="us", n_symbols=2000, use_stream=True,
+                             interval_seconds=0, patterns_v2=True)
+    assert {"double_bottom", "double_top", "rising_wedge", "head_shoulders",
+            "inv_head_shoulders"} <= set(cfg["patternsv2_disabled_patterns"])
+    assert "rectangle" in cfg["patternsv2_enabled_patterns"]
+    assert not set(cfg["patternsv2_enabled_patterns"]) & set(cfg["patternsv2_disabled_patterns"])
+    # The export describes the start of this run, even if settings change.
+    monkeypatch.setattr(settings, "disabled_patterns_v2", "")
+    assert "double_bottom" in cfg["patternsv2_disabled_patterns"]
 
 
 def test_paper_run_inherits_actual_kronos_settings_and_preserves_explicit_off(monkeypatch):
