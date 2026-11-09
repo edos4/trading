@@ -337,6 +337,184 @@ Compare trades, win rate, avg R, expectancy, profit factor, and max drawdown.
 Enable in `.env` only if expectancy / PF improve **and** trade count does not
 collapse. A run that goes to zero trades is not an edge — it is sample death.
 
+## Kronos weekly fine-tuning
+
+The weekly workflow trains **one shared US + PH tokenizer/predictor pair** from
+five rolling calendar years of `stocks_history.daily_bars`. Each run starts from
+the original base weights. Its production schedule is **Saturday at 06:00 PHT
+(`Asia/Manila`, Friday 22:00 UTC)**, using bars strictly before that Saturday.
+
+Run the commands below from the repository root **on the NVIDIA GPU training
+host**. Training uses the isolated `.venv-kronos`; keep the application `.venv`
+torch-free. The host needs CUDA, database access through the existing `.env`,
+upstream Kronos source at `~/Kronos/model`, cached base weights at
+`~/Kronos/weights/Kronos-base` and `~/Kronos/weights/Kronos-Tokenizer-base`, and at
+least 8 GiB of free disk space. See [the setup and training design](docs/kronos-finetune.md)
+for preparing the upstream source and weights.
+
+### Prepare the training environment
+
+If `.venv-kronos` is not already configured:
+
+```bash
+python3 -m venv .venv-kronos
+.venv-kronos/bin/pip install "torch>=2.10" --index-url https://download.pytorch.org/whl/cu128
+.venv-kronos/bin/pip install -r requirements-kronos.txt
+```
+
+If the current Python has no compatible CUDA wheel, create this isolated
+training environment with Python 3.12 instead. The app environment stays separate.
+
+### Update daily bars, then run manually
+
+The weekly trainer **reads the database; it does not update daily bars itself**.
+Keep the existing daily importer running before the Saturday job. For a manual
+refresh, run:
+
+```bash
+.venv/bin/python main.py --update-db
+```
+
+For a deeper historical gap/source audit and repair, use the maintenance command
+below; it can take substantially longer than the regular daily refresh. Set
+`--start` to the beginning of the five-year window you intend to train:
+
+```bash
+.venv/bin/python scripts/repair_daily_bars.py --repair --start 2021-11-07 --workers 8
+# Continue an interrupted repair with the same dates and scope:
+.venv/bin/python scripts/repair_daily_bars.py --repair --start 2021-11-07 --workers 8 --resume
+```
+
+Choose the intended Saturday. This computes the most recent Saturday in PHT;
+override it with a specific past Saturday when recovering a missed run:
+
+```bash
+KRONOS_RUN_DATE="$(.venv/bin/python - <<'PYDATE'
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+today = datetime.now(ZoneInfo("Asia/Manila")).date()
+print(today - timedelta(days=(today.weekday() - 5) % 7))
+PYDATE
+)"
+
+# Inspect the window/settings; no database access, GPU access, or writes.
+.venv/bin/python scripts/kronos_weekly_finetune.py --dry-run --run-date "$KRONOS_RUN_DATE"
+
+# Check CUDA, cached base weights, and free VRAM; does not train or check database freshness.
+.venv-kronos/bin/python scripts/kronos_weekly_finetune.py --preflight --run-date "$KRONOS_RUN_DATE"
+
+# Production run: train, evaluate, activate the accepted pair, and remove old versions.
+.venv-kronos/bin/python scripts/kronos_weekly_finetune.py --run-date "$KRONOS_RUN_DATE"
+```
+
+The last command performs a full production training/evaluation run. Use the
+separate rehearsal workflow below when preparing automatic scheduling. A
+completed production date is idempotent: running that same date
+again returns the active release. Dates must be Saturdays; future dates are
+accepted only with `--dry-run`. On Saturday itself, omitting `--run-date` uses
+that day's PHT date.
+
+Readiness requires **95% of each market's prior completed session** to have the
+expected bar. A Philippine name listed as no-trade on that day's official PSE
+daily quotation is excluded; a missing bar counts only when the quotation shows
+a trade. If that report cannot be downloaded, those names stay in the
+denominator. US freshness does not use a no-trade report. The job does not
+invent bars. See the [data-repair verification](docs/verification/kronos-data-repair-2026-11-09.md)
+for known source limitations.
+
+Training uses a 256-bar lookback. A training or checkpoint window whose lookback
+still contains a close more than ten times the anchor is dropped
+(`post-price-collapse-v2`, the same rule live forecasts use). Promotion scores
+the 400-bar context used by the scanner. One-day and three-day checks each draw
+three independent samples and discard a return outside ±50%. When no sample
+remains, that anchor is an **abstention**: it is not a vote and it is not an
+invalid forecast. Defaults still require **zero invalid candidate forecasts**
+(a scoring or data failure, not an abstention), at least 25 symbols and 50
+windows of held-out coverage in each market and horizon, candidate direction no
+more than 2 points below the base model, return error no more than 10% worse,
+and passing US/PH loader smoke checks. Preflight requires 10,000 MiB free VRAM
+for the default batch of 16.
+
+A tiny `--smoke` staging run is available for installation troubleshooting, but
+does not qualify as a full rehearsal. Training or evaluation failures preserve
+the existing active pair. Historical one-off threshold overrides are not
+scheduled defaults.
+
+### Install and enable Saturday scheduling
+
+The scheduler uses **systemd user units**, not a crontab entry. Install the units
+without enabling automatic runs:
+
+```bash
+.venv/bin/python scripts/install_kronos_weekly.py --install
+```
+
+Run a **full rehearsal with production defaults** before enabling the timer:
+
+```bash
+.venv-kronos/bin/python scripts/kronos_weekly_finetune.py --rehearsal --run-date "$KRONOS_RUN_DATE"
+```
+
+This trains and evaluates a staging pair without activation, old-version deletion,
+or timestamp updates. Take its successful `run_manifest.json` from
+`~/Kronos/weekly/runs/<RUN_ID>/`. Enable user lingering once so the timer can run
+while logged out, then enable using that manifest (replace `<RUN_ID>`). Do this
+before a production activation deletes the staging rehearsal directory:
+
+```bash
+sudo loginctl enable-linger "$(id -un)"
+.venv/bin/python scripts/install_kronos_weekly.py --install --enable \
+  --rehearsal-manifest "$HOME/Kronos/weekly/runs/<RUN_ID>/run_manifest.json"
+systemctl --user list-timers --all kronos-weekly-finetune.timer
+```
+
+The installer rejects smoke runs, failed rehearsals, non-default settings, or a
+source change since rehearsal. Installing alone does not enable the timer. As
+of 2026-11-09 19:41 PHT, the timer is installed and **disabled**, and the active
+release is `~/Kronos/weekly/runs/2026-11-07-05cc4bf3bf01`. Check the timer with
+`systemctl --user is-enabled kronos-weekly-finetune.timer`.
+The host must be online at the scheduled time: missed starts are not replayed
+automatically. Use a dated manual run for recovery.
+
+### Check results and recover
+
+```bash
+# Scheduled-run status and logs:
+systemctl --user status kronos-weekly-finetune.service
+journalctl --user -u kronos-weekly-finetune.service -f
+
+# Active release and last successful fine-tuning completion time:
+readlink -f "$HOME/Kronos/finetuned"
+cat kronos-finetuned-at.txt
+
+# Finish interrupted activation/cleanup without retraining:
+.venv/bin/python scripts/kronos_weekly_finetune.py --recover
+
+# Stop future automatic starts:
+systemctl --user disable --now kronos-weekly-finetune.timer
+```
+
+The active pair is `~/Kronos/finetuned`, an atomic pointer to
+`~/Kronos/weekly/runs/<RUN_ID>`. A successful production run replaces it,
+**deletes previous fine-tuned versions and temporary training data**, and
+replaces the gitignored root `kronos-finetuned-at.txt` with the actual successful
+completion timestamp in PHT. Original base weights and small audit reports are
+retained; there is no previous fine-tuned version retained for rollback. Failed,
+staging-only, or skipped runs do not advance the timestamp.
+
+Per-run manifests and evaluation evidence, including abstentions, live in the
+run directory; small audit reports live in `~/Kronos/weekly/reports/`. An
+interrupted training or evaluation candidate can be resumed with `--resume
+<RUN_ID>` and the same date/settings (include `--rehearsal` again when resuming
+a rehearsal). A retained complete candidate with its dataset can be reevaluated
+using `--evaluate <RUN_ID> --rehearsal`; omitting `--rehearsal` attempts
+production activation after the checks pass. The active release's pruned
+dataset cannot be used for reevaluation.
+
+For the full lifecycle, evaluation gates, locking, and recovery design, see
+[Weekly Kronos fine-tuning](docs/kronos-weekly-finetune.md).
+
 ## Symbol Explorer UI
 
 Authenticated browser UI with the same Explorer / Backtest / Paper surfaces (plus
