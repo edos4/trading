@@ -410,7 +410,7 @@ def _rail(kind, level, start_index=0, confirmed=True, broken=False):
 
 
 @pytest.mark.parametrize("action,kind,bulls", [
-    ("BUY", "support", 30.0),        # inside the BUY band (bullish 17–40)
+    ("BUY", "support", 30.0),        # inside the BUY band (bullish 16–40)
     ("SELL", "resistance", 70.0),    # inside the SELL band (bearish 30 → bulls 70)
 ])
 def test_support_resistance_bounce_inside_dii_band(monkeypatch, action, kind, bulls):
@@ -422,7 +422,7 @@ def test_support_resistance_bounce_inside_dii_band(monkeypatch, action, kind, bu
     store, snap = _store(open_, close + 1, close - 1, close)
     level = 99.5 if action == "BUY" else 100.5
     monkeypatch.setattr(sr, "detect_trendlines", lambda df: [_rail(kind, level)])
-    # The bands are per side now, so a flat frame (50%) only satisfies SELL.
+    # A flat frame reads 50%, outside both 16–40 bands.
     # Control the reading and let the real band constants do the gating.
     monkeypatch.setattr(sr, "dii_consideration", lambda _state: (bulls, 100.0 - bulls))
 
