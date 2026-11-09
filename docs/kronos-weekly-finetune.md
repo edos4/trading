@@ -297,8 +297,9 @@ unreferenced candidates. A cleanup failure after activation is a reported
 success until all previous fine-tuned versions have been deleted. Do not roll
 back after deletion has started. There is no model rollback after full success.
 
-Keep provenance truthful for historical replay: a newly selected model must
-refuse replay decisions that predate `eligible_from`. Separate a live decision's
+Keep provenance truthful for historical replay: a decision before
+`eligible_from` still runs, and its evidence records
+`out_of_sample_eligible=false`. Separate a live decision's
 timestamp from its most recent bar date, so a Monday live forecast anchored on
 Friday is handled explicitly without declaring Friday a historical holdout.
 Deleting previous releases means old backtests cannot reload those models;

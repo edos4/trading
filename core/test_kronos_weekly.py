@@ -443,9 +443,9 @@ def test_live_provenance_cannot_make_historical_replay_eligible(tmp_path, monkey
     checkpoint(release)
     now = datetime.now(timezone.utc)
     monkeypatch.setattr('core.market.last_closed_session_date', lambda *_: date(2026, 11, 6))
-    # A pre-eligibility live timestamp still fails; historical mode always checks its anchor.
-    with pytest.raises(ValueError, match='overlap'):
-        checkpoint_provenance(release, '2026-11-13', required=True)
+    # A date inside the selection window still forecasts, without a holdout claim.
+    early = checkpoint_provenance(release, '2026-11-13', required=True)
+    assert early['identity_verified'] and not early['out_of_sample_eligible']
     with pytest.raises(ValueError, match='latest completed'):
         decision_provenance(release, '2026-11-05', market='us', decision_at=now.isoformat(), required=True)
 
@@ -465,8 +465,8 @@ def test_current_live_decision_can_use_prior_session_without_claiming_holdout(tm
     checkpoint(release)
     weekly.create_selection_manifest(release, 'corpus', date(2026, 11, 7))
     monkeypatch.setattr('core.market.last_closed_session_date', lambda *_: date(2026, 11, 6))
-    with pytest.raises(ValueError, match='overlap'):
-        checkpoint_provenance(release, '2026-11-06', required=True)
+    early = checkpoint_provenance(release, '2026-11-06', required=True)
+    assert early['identity_verified'] and not early['out_of_sample_eligible']
     value = decision_provenance(release, '2026-11-06', market='us',
                                 decision_at=datetime.now(timezone.utc).isoformat(), required=True)
     assert value['identity_verified']

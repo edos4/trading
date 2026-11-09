@@ -40,9 +40,11 @@ def checkpoint_provenance(root: Path, as_of: str | None, *, required: bool = Fal
                     digest.update(chunk)
             if digest.hexdigest()!=expected:
                 raise ValueError(f'Checkpoint identity differs: {component}/{name}')
-    if as_of and date.fromisoformat(as_of)<eligible:
-        raise ValueError(f'Kronos model-selection overlap: {as_of} precedes eligible_from={eligible}')
-    return {'identity_verified':True,'out_of_sample_eligible':bool(as_of),
+    # Replay may score bars inside the selection window. The flag records that
+    # those decisions are not a holdout; it does not stop the forecast.
+    as_of_date = date.fromisoformat(as_of) if as_of else None
+    return {'identity_verified':True,
+            'out_of_sample_eligible':as_of_date is not None and as_of_date>=eligible,
             'eligible_from':eligible.isoformat(),'selection_data_end':selection_end.isoformat(),
             'corpus_sha256':value['corpus_sha256'],
             'manifest_sha256':hashlib.sha256(raw).hexdigest(),

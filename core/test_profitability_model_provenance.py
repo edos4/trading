@@ -1,4 +1,4 @@
-"""Missing, overlapping or replaced model provenance cannot certify a holdout."""
+"""Missing or replaced model provenance cannot certify a holdout."""
 from __future__ import annotations
 
 import hashlib
@@ -24,11 +24,12 @@ def test_missing_metadata_is_explicit_and_strict_mode_refuses_it(tmp_path):
         checkpoint_provenance(tmp_path,'2026-01-01',required=True)
 
 
-def test_verified_identity_rejects_selection_overlap_and_replaced_weights(tmp_path):
+def test_verified_identity_allows_pre_eligibility_dates_and_rejects_replaced_weights(tmp_path):
     manifest(tmp_path)
-    with pytest.raises(ValueError,match='overlap'):
-        checkpoint_provenance(tmp_path,'2025-11-03')
-    assert checkpoint_provenance(tmp_path,'2026-01-01')['identity_verified']
+    early = checkpoint_provenance(tmp_path,'2025-11-03')
+    assert early['identity_verified'] and not early['out_of_sample_eligible']
+    later = checkpoint_provenance(tmp_path,'2026-01-01')
+    assert later['identity_verified'] and later['out_of_sample_eligible']
     (tmp_path/'predictor/best_model/weights.bin').write_bytes(b'replacement')
     with pytest.raises(ValueError,match='identity differs'):
         checkpoint_provenance(tmp_path,'2026-01-01')
