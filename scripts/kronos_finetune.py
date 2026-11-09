@@ -5,10 +5,10 @@ Runs the campaign from docs/kronos-finetune.md: lean dataset build →
 tokenizer + predictor fine-tune. All checkpoints/datasets live under
 ~/Kronos (never in the repo, never deployed).
 
-    .venv-kronos/bin/python scripts/kronos_finetune.py --all-symbols --epochs 10
-    .venv-kronos/bin/python scripts/kronos_finetune.py --all-symbols --epochs 10 --smoke-steps 100
+    .venv-kronos/bin/python scripts/kronos_finetune.py --all-symbols --epochs 10 --output-dir /tmp/kronos-manual
+    .venv-kronos/bin/python scripts/kronos_finetune.py --all-symbols --epochs 10 --output-dir /tmp/kronos-manual --smoke-steps 100
     systemd-run --user --unit=kronos-finetune --collect \\
-      .venv-kronos/bin/python scripts/kronos_finetune.py --all-symbols --epochs 10
+      .venv-kronos/bin/python scripts/kronos_finetune.py --all-symbols --epochs 10 --output-dir /tmp/kronos-manual
 
 Must run inside .venv-kronos (torch cu128+), not the app .venv.
 `main.py` is intentionally untouched — this CLI is the only entrypoint.
@@ -22,7 +22,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.kronos_finetune import DATASET_DIR, run_kronos_finetune  # noqa: E402
+from core.kronos_finetune import run_kronos_finetune  # noqa: E402
 from learn.kronos_dataset import DEFAULT_TRAIN_CUTOFF  # noqa: E402
 
 
@@ -37,7 +37,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-stale-days", type=int, default=None,
                     help="drop symbols whose last bar is older than this "
                          "(default: keep delisted names)")
-    ap.add_argument("--dataset-dir", default=str(DATASET_DIR))
+    ap.add_argument("--output-dir", required=True, help="Isolated checkpoint directory; active model writes are refused")
+    ap.add_argument("--dataset-dir", default=None, help="Corpus directory (default: output-dir/dataset)")
     ap.add_argument("--epochs", type=int, default=10,
                     help="epochs for BOTH stages (overrides the two below)")
     ap.add_argument("--tokenizer-epochs", type=int, default=None)
@@ -99,9 +100,11 @@ def main(argv: list[str] | None = None) -> int:
         smoke_steps=args.smoke_steps,
         resume=args.resume,
         force_rebuild=args.force_rebuild,
+        output_root=args.output_dir,
     )
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from core.kronos_process import locked_main
+    raise SystemExit(locked_main(main))

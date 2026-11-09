@@ -31,6 +31,8 @@ import json
 import random
 import sys
 import time
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -226,21 +228,28 @@ def _save_last(path: Path, *, epoch: int, total_epochs: int, model,
     import torch
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        {
-            "epoch": epoch,  # next epoch to run
-            "total_epochs": total_epochs,
-            "model_state": model.state_dict(),
-            "optim_state": optimizer.state_dict(),
-            "sched_state": scheduler.state_dict(),
-            "best_val_loss": best_val_loss,
-        },
-        str(path),
-    )
+    descriptor, temporary = tempfile.mkstemp(prefix=f'.{path.name}.', suffix='.tmp', dir=path.parent)
+    os.close(descriptor)
+    try:
+        torch.save(
+            {
+                "epoch": epoch,  # next epoch to run
+                "total_epochs": total_epochs,
+                "model_state": model.state_dict(),
+                "optim_state": optimizer.state_dict(),
+                "sched_state": scheduler.state_dict(),
+                "best_val_loss": best_val_loss,
+            },
+            temporary,
+        )
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
 
 
 def _load_last(path: Path, *, model, optimizer, scheduler,
-               total_epochs: int) -> tuple[int, float] | None:
+               total_epochs: int, strict: bool = False) -> tuple[int, float] | None:
     """Returns (start_epoch, best_val_loss), or None if no usable checkpoint."""
     import torch
 
@@ -253,9 +262,13 @@ def _load_last(path: Path, *, model, optimizer, scheduler,
     try:
         ckpt = torch.load(str(path), map_location=dev, weights_only=False)
     except Exception as exc:
+        if strict:
+            raise ValueError("Unreadable weekly resume checkpoint") from exc
         log.warning(f"Kronos-finetune | ignoring unreadable checkpoint {path} ({exc})")
         return None
     if ckpt.get("total_epochs") != total_epochs:
+        if strict:
+            raise ValueError("Weekly resume epoch budget differs")
         log.warning(
             f"Kronos-finetune | checkpoint was for {ckpt.get('total_epochs')} epochs, "
             f"requested {total_epochs} — restarting weights from it with a fresh schedule"
@@ -271,6 +284,8 @@ def _load_last(path: Path, *, model, optimizer, scheduler,
         optimizer.load_state_dict(ckpt["optim_state"])
         scheduler.load_state_dict(ckpt["sched_state"])
     except Exception as exc:
+        if strict:
+            raise ValueError("Weekly resume state differs") from exc
         log.warning(f"Kronos-finetune | state reload failed ({exc}) — from base")
         return None
     return int(ckpt.get("epoch", 0)), float(ckpt.get("best_val_loss", float("inf")))
@@ -383,14 +398,26 @@ def _train_tokenizer(
     *,
     resume: bool = False,
     smoke_steps: int = 0,
+    output_root: Path | None = None,
+    weekly: bool = False,
+    train_steps: int = 2000,
+    val_steps: int = 400,
 ) -> Path:
+    output = (output_root / "tokenizer" / "best_model") if output_root else TOKENIZER_OUT
+    last_state = (output.parent / "last.pt") if output_root else TOKENIZER_LAST
+    dataset_class = LeanWindowDataset
+    if weekly:
+        from learn.kronos_weekly_dataset import WeeklyWindowDataset
+        dataset_class = WeeklyWindowDataset
+    if epochs < 1 or batch_size < 1 or train_steps < 1 or val_steps < 1:
+        raise ValueError("Training budgets must be positive")
     import torch
     import torch.nn.functional as F
     from torch.utils.data import DataLoader
 
     from model import KronosTokenizer
 
-    init_path = TOKENIZER_OUT if (resume and TOKENIZER_OUT.exists()) else TOKENIZER_PATH
+    init_path = output if (resume and output.exists()) else TOKENIZER_PATH
     log.info(f"Kronos-finetune | tokenizer: loading weights from {init_path}")
     model = KronosTokenizer.from_pretrained(str(init_path)).to(device)
 
@@ -404,10 +431,10 @@ def _train_tokenizer(
                             model=model, kind="tokenizer"),
         )
 
-    train_ds = LeanWindowDataset(dataset_dir, lookback, predict_len, clip, seed,
-                                 n_iter=2000 * batch_size, split="train")
-    val_ds = LeanWindowDataset(dataset_dir, lookback, predict_len, clip, seed,
-                               n_iter=400 * batch_size, split="val")
+    train_ds = dataset_class(dataset_dir, lookback, predict_len, clip, seed,
+                                 n_iter=train_steps * batch_size, split="train")
+    val_ds = dataset_class(dataset_dir, lookback, predict_len, clip, seed,
+                               n_iter=val_steps * batch_size, split="val")
     train_loader = DataLoader(train_ds, batch_size=batch_size, num_workers=0, drop_last=True)
     val_loader = DataLoader(val_ds, batch_size=batch_size, num_workers=0)
 
@@ -417,24 +444,30 @@ def _train_tokenizer(
         pct_start=0.03, div_factor=10,
     )
 
+    metrics_path = output.parent / "training_metrics.json"
+    best_market_losses = json.loads(metrics_path.read_text()).get("market_val_losses", {}) if resume and metrics_path.exists() else {}
     best_val_loss = float("inf")
     start_epoch = 0
     if resume:
-        loaded = _load_last(TOKENIZER_LAST, model=model, optimizer=optimizer,
-                            scheduler=scheduler, total_epochs=epochs)
+        if weekly and output.exists() and not last_state.exists():
+            raise ValueError("Weekly checkpoint has weights but no resumable state")
+        loaded = _load_last(last_state, model=model, optimizer=optimizer,
+                            scheduler=scheduler, total_epochs=epochs, strict=weekly)
         if loaded is not None:
             start_epoch, best_val_loss = loaded
             log.info(
                 f"Kronos-finetune | tokenizer resumed at epoch {start_epoch + 1}/{epochs} "
                 f"(best val_loss={best_val_loss:.4f})"
             )
-    TOKENIZER_OUT.parent.mkdir(parents=True, exist_ok=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
 
     steps_per_epoch = len(train_loader)
     steps_total = steps_per_epoch * epochs
     t_run = time.perf_counter()
     for epoch in range(start_epoch, epochs):
         model.train()
+        if weekly:
+            torch.manual_seed(seed + epoch)
         train_ds.set_epoch_seed(epoch)
         t_ep = time.perf_counter()
         for step, (x, _stamp) in enumerate(train_loader):
@@ -444,6 +477,8 @@ def _train_tokenizer(
             recon_loss = F.mse_loss(z_pre, x) + F.mse_loss(z, x)
             loss = (recon_loss + bsq_loss) / 2
 
+            if weekly and not torch.isfinite(loss):
+                raise ValueError("Nonfinite training loss")
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0)
@@ -464,30 +499,48 @@ def _train_tokenizer(
                 )
 
         model.eval()
-        val_ds.set_epoch_seed(0)
-        val_loss_sum, val_n = 0.0, 0
-        with torch.no_grad():
-            for x, _stamp in val_loader:
-                x = x.to(device)
-                zs, _, _, _ = model(x)
-                _, z = zs
-                val_loss_sum += F.mse_loss(z, x).item() * x.size(0)
-                val_n += x.size(0)
-        avg_val_loss = val_loss_sum / val_n if val_n else float("inf")
+        market_losses = {}
+        validation_draws = {"us": 0, "ph": 0}
+        for validation_market in (("us", "ph") if weekly else (None,)):
+            val_ds.set_epoch_seed(0)
+            if weekly:
+                val_ds.market_override = validation_market
+            val_loss_sum, val_n = 0.0, 0
+            with torch.no_grad():
+                for x, _stamp in val_loader:
+                    x = x.to(device)
+                    zs, _, _, _ = model(x)
+                    _, z = zs
+                    val_loss_sum += F.mse_loss(z[:, lookback:] if weekly else z,
+                                                 x[:, lookback:] if weekly else x).item() * x.size(0)
+                    val_n += x.size(0)
+            avg_val_loss = val_loss_sum / val_n if val_n else float("inf")
+            market_losses[str(validation_market)] = avg_val_loss
+            if weekly:
+                for market, count in val_ds.sample_counts.items():
+                    validation_draws[market] += count
+        avg_val_loss = sum(market_losses.values()) / len(market_losses)
         log.info(f"Kronos-finetune | tokenizer epoch {epoch + 1}/{epochs} val_loss={avg_val_loss:.4f}")
 
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
-            model.save_pretrained(str(TOKENIZER_OUT))
+            best_market_losses = market_losses
+            model.save_pretrained(str(output))
             log.info(
                 f"Kronos-finetune | tokenizer checkpoint saved "
-                f"(val_loss={best_val_loss:.4f}) -> {TOKENIZER_OUT}"
+                f"(val_loss={best_val_loss:.4f}) -> {output}"
             )
-        _save_last(TOKENIZER_LAST, epoch=epoch + 1, total_epochs=epochs,
+        _save_last(last_state, epoch=epoch + 1, total_epochs=epochs,
                    model=model, optimizer=optimizer, scheduler=scheduler,
                    best_val_loss=best_val_loss)
 
-    return TOKENIZER_OUT
+    if not np.isfinite(best_val_loss) or not output.exists():
+        raise ValueError("Training produced no finite best checkpoint")
+    if weekly:
+        metrics = {"best_val_loss": best_val_loss, "market_val_losses": best_market_losses, "train_draws_last_epoch": train_ds.sample_counts,
+                   "val_draws": validation_draws if "validation_draws" in locals() else {}}
+        (output.parent / "training_metrics.json").write_text(json.dumps(metrics, indent=2))
+    return output
 
 
 def _train_predictor(
@@ -496,13 +549,25 @@ def _train_predictor(
     clip: float, seed: int, *,
     resume: bool = False,
     smoke_steps: int = 0,
+    output_root: Path | None = None,
+    weekly: bool = False,
+    train_steps: int = 2000,
+    val_steps: int = 400,
 ) -> Path:
+    output = (output_root / "predictor" / "best_model") if output_root else PREDICTOR_OUT
+    last_state = (output.parent / "last.pt") if output_root else PREDICTOR_LAST
+    dataset_class = LeanWindowDataset
+    if weekly:
+        from learn.kronos_weekly_dataset import WeeklyWindowDataset
+        dataset_class = WeeklyWindowDataset
+    if epochs < 1 or batch_size < 1 or train_steps < 1 or val_steps < 1:
+        raise ValueError("Training budgets must be positive")
     import torch
     from torch.utils.data import DataLoader
 
     from model import Kronos, KronosTokenizer
 
-    init_pred = PREDICTOR_OUT if (resume and PREDICTOR_OUT.exists()) else MODEL_PATH
+    init_pred = output if (resume and output.exists()) else MODEL_PATH
     log.info(
         f"Kronos-finetune | predictor: loading weights from {init_pred}, "
         f"tokenizer from {tokenizer_path}"
@@ -522,10 +587,10 @@ def _train_predictor(
                             kind="predictor"),
         )
 
-    train_ds = LeanWindowDataset(dataset_dir, lookback, predict_len, clip, seed,
-                                 n_iter=2000 * batch_size, split="train")
-    val_ds = LeanWindowDataset(dataset_dir, lookback, predict_len, clip, seed,
-                               n_iter=400 * batch_size, split="val")
+    train_ds = dataset_class(dataset_dir, lookback, predict_len, clip, seed,
+                                 n_iter=train_steps * batch_size, split="train")
+    val_ds = dataset_class(dataset_dir, lookback, predict_len, clip, seed,
+                               n_iter=val_steps * batch_size, split="val")
     train_loader = DataLoader(train_ds, batch_size=batch_size, num_workers=0, drop_last=True)
     val_loader = DataLoader(val_ds, batch_size=batch_size, num_workers=0)
 
@@ -535,25 +600,32 @@ def _train_predictor(
         pct_start=0.03, div_factor=10,
     )
 
+    metrics_path = output.parent / "training_metrics.json"
+    best_market_losses = json.loads(metrics_path.read_text()).get("market_val_losses", {}) if resume and metrics_path.exists() else {}
     best_val_loss = float("inf")
     start_epoch = 0
     if resume:
-        loaded = _load_last(PREDICTOR_LAST, model=model, optimizer=optimizer,
-                            scheduler=scheduler, total_epochs=epochs)
+        if weekly and output.exists() and not last_state.exists():
+            raise ValueError("Weekly checkpoint has weights but no resumable state")
+        loaded = _load_last(last_state, model=model, optimizer=optimizer,
+                            scheduler=scheduler, total_epochs=epochs, strict=weekly)
         if loaded is not None:
             start_epoch, best_val_loss = loaded
             log.info(
                 f"Kronos-finetune | predictor resumed at epoch {start_epoch + 1}/{epochs} "
                 f"(best val_loss={best_val_loss:.4f})"
             )
-    PREDICTOR_OUT.parent.mkdir(parents=True, exist_ok=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
 
-    def _step_loss(x, x_stamp):
+    def _step_loss(x, x_stamp, *, heldout=False):
         with torch.no_grad():
             tok0, tok1 = tokenizer.encode(x, half=True)
         tok_in = [tok0[:, :-1], tok1[:, :-1]]
         tok_out = [tok0[:, 1:], tok1[:, 1:]]
         logits = model(tok_in[0], tok_in[1], x_stamp[:, :-1, :])
+        if heldout and weekly:
+            logits = [value[:, lookback - 1:] for value in logits]
+            tok_out = [value[:, lookback - 1:] for value in tok_out]
         loss, _, _ = model.head.compute_loss(logits[0], logits[1], tok_out[0], tok_out[1])
         return loss
 
@@ -562,12 +634,16 @@ def _train_predictor(
     t_run = time.perf_counter()
     for epoch in range(start_epoch, epochs):
         model.train()
+        if weekly:
+            torch.manual_seed(seed + epoch)
         train_ds.set_epoch_seed(epoch)
         t_ep = time.perf_counter()
         for step, (x, x_stamp) in enumerate(train_loader):
             x, x_stamp = x.to(device), x_stamp.to(device)
             loss = _step_loss(x, x_stamp)
 
+            if weekly and not torch.isfinite(loss):
+                raise ValueError("Nonfinite training loss")
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=3.0)
@@ -588,28 +664,45 @@ def _train_predictor(
                 )
 
         model.eval()
-        val_ds.set_epoch_seed(0)
-        val_loss_sum, val_batches = 0.0, 0
-        with torch.no_grad():
-            for x, x_stamp in val_loader:
-                x, x_stamp = x.to(device), x_stamp.to(device)
-                val_loss_sum += _step_loss(x, x_stamp).item()
-                val_batches += 1
-        avg_val_loss = val_loss_sum / val_batches if val_batches else float("inf")
+        market_losses = {}
+        validation_draws = {"us": 0, "ph": 0}
+        for validation_market in (("us", "ph") if weekly else (None,)):
+            val_ds.set_epoch_seed(0)
+            if weekly:
+                val_ds.market_override = validation_market
+            val_loss_sum, val_batches = 0.0, 0
+            with torch.no_grad():
+                for x, x_stamp in val_loader:
+                    x, x_stamp = x.to(device), x_stamp.to(device)
+                    val_loss_sum += _step_loss(x, x_stamp, heldout=True).item()
+                    val_batches += 1
+            avg_val_loss = val_loss_sum / val_batches if val_batches else float("inf")
+            market_losses[str(validation_market)] = avg_val_loss
+            if weekly:
+                for market, count in val_ds.sample_counts.items():
+                    validation_draws[market] += count
+        avg_val_loss = sum(market_losses.values()) / len(market_losses)
         log.info(f"Kronos-finetune | predictor epoch {epoch + 1}/{epochs} val_loss={avg_val_loss:.4f}")
 
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
-            model.save_pretrained(str(PREDICTOR_OUT))
+            best_market_losses = market_losses
+            model.save_pretrained(str(output))
             log.info(
                 f"Kronos-finetune | predictor checkpoint saved "
-                f"(val_loss={best_val_loss:.4f}) -> {PREDICTOR_OUT}"
+                f"(val_loss={best_val_loss:.4f}) -> {output}"
             )
-        _save_last(PREDICTOR_LAST, epoch=epoch + 1, total_epochs=epochs,
+        _save_last(last_state, epoch=epoch + 1, total_epochs=epochs,
                    model=model, optimizer=optimizer, scheduler=scheduler,
                    best_val_loss=best_val_loss)
 
-    return PREDICTOR_OUT
+    if not np.isfinite(best_val_loss) or not output.exists():
+        raise ValueError("Training produced no finite best checkpoint")
+    if weekly:
+        metrics = {"best_val_loss": best_val_loss, "market_val_losses": best_market_losses, "train_draws_last_epoch": train_ds.sample_counts,
+                   "val_draws": validation_draws if "validation_draws" in locals() else {}}
+        (output.parent / "training_metrics.json").write_text(json.dumps(metrics, indent=2))
+    return output
 
 
 def run_kronos_finetune(
@@ -630,11 +723,24 @@ def run_kronos_finetune(
     all_symbols: bool = True,
     train_cutoff: str = kd.DEFAULT_TRAIN_CUTOFF,
     max_stale_days: int | None = None,
-    dataset_dir: str | Path = DATASET_DIR,
+    dataset_dir: str | Path | None = None,
     smoke_steps: int = 0,
     resume: bool = False,
     force_rebuild: bool = False,
+    output_root: str | Path | None = None,
 ) -> None:
+    if output_root is None:
+        raise ValueError("Fine-tuning requires an isolated --output-dir; use the weekly CLI for activation")
+    output_root = Path(output_root).resolve()
+    active = FINETUNE_DIR.resolve()
+    if output_root == active or output_root.is_relative_to(active) or active.is_relative_to(output_root):
+        raise ValueError("Cannot train into the active model tree")
+    dataset_dir = Path(dataset_dir).resolve() if dataset_dir is not None else output_root / "dataset"
+    if dataset_dir == active or dataset_dir.is_relative_to(active):
+        raise ValueError("Cannot rebuild a dataset in the active model tree")
+    for protected in (TOKENIZER_PATH.resolve(), MODEL_PATH.resolve()):
+        if output_root == protected or output_root.is_relative_to(protected) or protected.is_relative_to(output_root):
+            raise ValueError("Cannot overwrite original pretrained weights")
     import torch
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -660,20 +766,21 @@ def run_kronos_finetune(
     )
 
     tokenizer_path = Path(TOKENIZER_PATH)
-    if skip_tokenizer and not base_tokenizer and TOKENIZER_OUT.exists():
-        tokenizer_path = TOKENIZER_OUT
+    tokenizer_output = output_root / "tokenizer" / "best_model"
+    if skip_tokenizer and not base_tokenizer and tokenizer_output.exists():
+        tokenizer_path = tokenizer_output
         log.info(f"Kronos-finetune | predictor: reusing fine-tuned tokenizer {tokenizer_path}")
     if not skip_tokenizer:
         tokenizer_path = _train_tokenizer(
             d, device, tokenizer_epochs, batch_size, tokenizer_lr,
             lookback, predict_len, clip, seed,
-            resume=resume, smoke_steps=smoke_steps,
+            resume=resume, smoke_steps=smoke_steps, output_root=output_root,
         )
 
     predictor_path = _train_predictor(
         d, tokenizer_path, device, predictor_epochs, batch_size,
         predictor_lr, lookback, predict_len, clip, seed,
-        resume=resume, smoke_steps=smoke_steps,
+        resume=resume, smoke_steps=smoke_steps, output_root=output_root,
     )
 
     print()
@@ -682,5 +789,5 @@ def run_kronos_finetune(
     print("=" * 60)
     print(f"  tokenizer -> {tokenizer_path}")
     print(f"  predictor -> {predictor_path}")
-    print("  Run scripts/kronos_eval_test.py --use-finetuned to compare accuracy.")
+    print("  Staged checkpoints only. Use scripts/kronos_weekly_finetune.py for validated activation.")
     print()

@@ -40,6 +40,9 @@ def load_symbol_df(symbol: str, as_of: str | None = None, market: str = "us") ->
     yet; without the cutoff the worker sees the live series.
     """
     from data.db import get_conn
+    if market == "ph":
+        from core.market import ph_history_symbol
+        symbol = ph_history_symbol(symbol)
 
     conn = get_conn()
     try:
@@ -75,6 +78,11 @@ def _prep_1d_frame(df: pd.DataFrame, lookback: int):
     if use < MIN_BARS:
         return None
     work = work.iloc[-use:].copy()
+    from core.kronos_input import prepare_context
+    try:
+        work = prepare_context(work, use).frame
+    except ValueError:
+        return None
     columns = ["open", "high", "low", "close", "volume"]
     if any(col not in work for col in columns) or not isinstance(work.index, pd.DatetimeIndex):
         return None
@@ -103,6 +111,12 @@ def _seed(symbol: str, anchor_date: str, sample_index: int) -> int:
     return zlib.crc32(raw) & 0x7FFFFFFF
 
 
+def _reported_anchor_close(anchor_close: float) -> float:
+    """Keep four-decimal quotes without turning a sub-penny close into zero."""
+    rounded = round(float(anchor_close), 4)
+    return rounded if rounded > 0 else float(anchor_close)
+
+
 def _credible_close(predicted_close: float, anchor_close: float) -> bool:
     """Whether a sampled close may stand as a one-day forecast.
 
@@ -124,13 +138,16 @@ def forecast_returns(
 ) -> dict:
     from core.kronos_confirm import atr_pct_from_frame
 
-    prepared = _prep_1d_frame(df, lookback)
+    from core.kronos_input import prepare_context
+    if df is None or len(df) < MIN_BARS:
+        raise ValueError(f"only {0 if df is None else len(df)} bars; need {MIN_BARS}")
+    selection = prepare_context(df, lookback)
+    prepared = _prep_1d_frame(selection.frame, lookback)
     if prepared is None:
-        if df is None or len(df) < MIN_BARS:
-            raise ValueError(f"only {0 if df is None else len(df)} bars; need {MIN_BARS}")
         raise ValueError("Invalid OHLC context: require finite positive prices, valid ranges and nonnegative volume")
     x_df, x_timestamp, y_timestamp, anchor_close, anchor_ts = prepared
     anchor_date = anchor_ts.date().isoformat()
+    model_context = selection.evidence()
     use_seed = callable(getattr(predictor, "set_seed", None))
     returns: list[float] = []
     predicted: list[float] = []
@@ -172,7 +189,8 @@ def forecast_returns(
     # (symbol, anchor date); the surviving count travels in the payload instead.
     return {
         "symbol": symbol.upper(),
-        "anchor_close": round(anchor_close, 4),
+        "model_context": model_context,
+        "anchor_close": _reported_anchor_close(anchor_close),
         "anchor_date": anchor_date,
         "atr_pct": atr_pct_from_frame(x_df, anchor_close),
         "predicted": predicted,
@@ -191,13 +209,14 @@ def _parse_symbols(raw: list[str]) -> list[str]:
     return seen
 
 
-def load_confirmation_predictor(model: str):
+def load_confirmation_predictor(model: str, model_root: Path | None = None):
     """Confirmation must never silently substitute base for selected weights."""
     if model == "finetuned":
         from core.kronos_finetune import PREDICTOR_OUT, TOKENIZER_OUT
         if not (PREDICTOR_OUT.exists() and TOKENIZER_OUT.exists()):
             raise ValueError("Selected fine-tuned Kronos checkpoints are missing; confirmation unavailable")
-    predictor, device = load_predictor(use_finetuned=model == "finetuned")
+    extra = {"model_root": model_root} if model_root is not None else {}
+    predictor, device = load_predictor(use_finetuned=model == "finetuned", **extra)
     for component in (getattr(predictor, "model", None), getattr(predictor, "tokenizer", None)):
         if callable(getattr(component, "eval", None)):
             component.eval()
@@ -216,6 +235,7 @@ def main(argv: list[str] | None = None) -> int:
         help="ignore bars after this ISO date (historical replay anchor)",
     )
     ap.add_argument("--out", required=True)
+    ap.add_argument('--decision-at', default=None, help='Current live decision timestamp; replay omits this')
     ap.add_argument('--require-provenance',action='store_true')
     ap.add_argument('--contexts',default=None,help='Content-addressed daily snapshots supplied by the scanner')
     args = ap.parse_args(argv)
@@ -226,14 +246,15 @@ def main(argv: list[str] | None = None) -> int:
     samples = max(1, min(int(args.samples), 9))
     samples = samples if samples % 2 else max(1, samples - 1)
 
-    from core.kronos_provenance import checkpoint_provenance
+    from core.kronos_provenance import decision_provenance
     from core.kronos_finetune import FINETUNE_DIR
-    provenance=(checkpoint_provenance(FINETUNE_DIR,args.as_of,required=args.require_provenance)
+    model_root = FINETUNE_DIR.resolve() if args.model == "finetuned" else None
+    provenance=(decision_provenance(model_root,args.as_of,market=args.market,decision_at=args.decision_at,required=args.require_provenance)
                 if args.model=='finetuned' else {'identity_verified':False,'out_of_sample_eligible':False,
                                                 'reason':'base model training/selection boundary unavailable'})
     if args.require_provenance and not provenance['identity_verified']:
         raise ValueError(provenance['reason'])
-    predictor, device = load_confirmation_predictor(args.model)
+    predictor, device = load_confirmation_predictor(args.model, model_root)
     log.info(f"Kronos-confirm | device={device}")
     results = []
     contexts=json.loads(Path(args.contexts).read_text()) if args.contexts else None
@@ -259,6 +280,7 @@ def main(argv: list[str] | None = None) -> int:
 
     payload = {
         'model_provenance':provenance,
+        'model_identity': provenance.get('manifest_sha256', f'legacy:{model_root}') if args.model == 'finetuned' else 'base',
         "market": args.market,
         "model": args.model,
         "samples": samples,
@@ -273,4 +295,5 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from core.kronos_process import locked_main
+    raise SystemExit(locked_main(main))

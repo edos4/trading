@@ -131,6 +131,38 @@ def test_database_query_scopes_market_and_historical_cutoff(monkeypatch):
     result = worker.load_symbol_df("TEST", "2026-10-30", "ph")
     sql, params = cur.execute.call_args.args
     assert "s.market = %s" in sql and "b.bar_date <= %s" in sql
-    assert params == ["TEST", "ph", "2026-10-30"]
+    assert params == ["TEST.PS", "ph", "2026-10-30"]
     assert result.index[-1] == pd.Timestamp("2026-10-30")
     conn.close.assert_called_once()
+
+
+def test_worker_passes_only_post_collapse_prices_and_reports_context():
+    data=frame(256)
+    data.iloc[-70:,data.columns.get_indexer(['open','high','low','close'])] *= .000001
+    predictor=SimpleNamespace(set_seed=lambda _:None,
+        predict=Mock(return_value=pd.DataFrame({'close':[.000101]})))
+    row=worker.forecast_returns(predictor,'COLLAPSE',data,1,256)
+    assert len(predictor.predict.call_args.kwargs['df'])==70
+    assert row['model_context']['trimmed_bars']==186
+    assert row['model_context']['policy']=='post-price-collapse-v2'
+    assert row['returns']==[.01]
+
+
+def test_sub_penny_anchor_close_is_not_rounded_to_zero():
+    data = frame()
+    data[['open', 'high', 'low', 'close']] *= .0000001
+    predictor = SimpleNamespace(set_seed=lambda _: None,
+                                predict=Mock(return_value=pd.DataFrame({'close': [.0000105]})))
+    row = worker.forecast_returns(predictor, 'PEMTF', data, 1)
+    assert row['anchor_close'] > 0
+    assert row['anchor_close'] == pytest.approx(.00001)
+    assert row['returns'] == [pytest.approx(.05)]
+
+
+def test_recent_collapse_abstention_keeps_specific_reason_and_skips_predictor():
+    data=frame(256)
+    data.iloc[-30:,data.columns.get_indexer(['open','high','low','close'])] *= .000001
+    predictor=SimpleNamespace(predict=Mock())
+    with pytest.raises(ValueError,match='Insufficient post-price-break context: 30 bars'):
+        worker.forecast_returns(predictor,'COLLAPSE',data,1,256)
+    predictor.predict.assert_not_called()

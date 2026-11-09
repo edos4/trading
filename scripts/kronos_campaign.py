@@ -152,6 +152,7 @@ def ensure_env(args, facts: dict, log_path: Path) -> None:
 def run_finetune(args, facts: dict, log_path: Path) -> None:
     """P1–P3 via scripts/kronos_finetune.py (dataset cached ⇒ resumes training)."""
     cmd = [facts["kronos_py"], "scripts/kronos_finetune.py",
+           "--output-dir", str(args.output_dir),
            "--all-symbols", "--epochs", str(args.epochs),
            "--train-cutoff", args.train_cutoff, "--min-bars", str(args.min_bars),
            "--batch-size", str(args.batch_size), "--lookback", str(args.lookback)]
@@ -171,7 +172,7 @@ def run_finetune(args, facts: dict, log_path: Path) -> None:
 def run_eval(args, facts: dict, log_path: Path) -> Path:
     """P4: base + fine-tuned eval over identical windows; prints verdict table."""
     outs = {}
-    for tag, extra in (("base", []), ("ft", ["--use-finetuned"])):
+    for tag, extra in (("base", []), ("ft", ["--use-finetuned", "--model-root", str(args.output_dir)])):
         out = args.eval_out / f"kronos_{tag}.md"
         js = args.eval_out / f"kronos_{tag}.json"
         sh([facts["kronos_py"], "scripts/kronos_eval_test.py",
@@ -209,6 +210,8 @@ def run_eval(args, facts: dict, log_path: Path) -> Path:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--root", type=Path, default=DEFAULT_ROOT)
+    ap.add_argument("--output-dir", type=Path, default=KRONOS_REPO / "manual-finetunes" / "campaign",
+                    help="Isolated training outputs; never the active model tree")
     ap.add_argument("--epochs", type=int, default=10)
     ap.add_argument("--predictor-epochs", type=int, default=None)
     ap.add_argument("--predictor-lr", type=float, default=None)

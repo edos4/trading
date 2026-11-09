@@ -479,6 +479,7 @@ def run(
     out_path: Path = DEFAULT_OUT,
     train_cutoff: str = DEFAULT_TRAIN_CUTOFF,
     json_out: Path | None = None,
+    model_root: Path | None = None,
 ) -> Path:
     # Structural no-leak guard (P4-02): scored windows must start strictly
     # after the fine-tune train cutoff. Refuse instead of warning — a
@@ -519,7 +520,8 @@ def run(
         raise SystemExit("kronos-eval | no eligible tickers — check stocks_history / start_date")
 
     log.info(f"kronos-eval | evaluating {len(candidates)} symbols")
-    predictor = _load_predictor(device=device, use_finetuned=use_finetuned)
+    extra = {"model_root": model_root} if model_root is not None and use_finetuned else {}
+    predictor = _load_predictor(device=device, use_finetuned=use_finetuned, **extra)
 
     all_results: list[WindowResult] = []
     for symbol, df in candidates:
@@ -653,6 +655,7 @@ def main() -> None:
     p.add_argument("--train-cutoff", type=str, default=DEFAULT_TRAIN_CUTOFF,
                    help="fine-tune split point; --start-date earlier than this is refused")
     p.add_argument("--use-finetuned", action="store_true")
+    p.add_argument("--model-root", type=Path, default=None, help="Explicit staged fine-tuned pair")
     p.add_argument(
         "--min-move",
         type=float,
@@ -687,8 +690,10 @@ def main() -> None:
         n_boot=args.n_boot,
         out_path=out,
         json_out=args.json_out,
+        model_root=args.model_root,
     )
 
 
 if __name__ == "__main__":
-    main()
+    from core.kronos_process import locked_main
+    locked_main(main)

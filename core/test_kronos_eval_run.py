@@ -173,3 +173,18 @@ def test_load_predictor_does_not_swallow_other_errors(monkeypatch):
     monkeypatch.setattr(ke, "_load_predictor", boom)
     with pytest.raises(RuntimeError, match="weights are corrupt"):
         ke.load_predictor()
+
+
+def test_explicit_staged_root_is_used_for_finetuned_evaluation(tmp_path, monkeypatch):
+    mod = _load_script_module()
+    calls = []
+    monkeypatch.setattr(mod, '_select_candidates', lambda *_: [('AAA', _aware_frame(seed=11))])
+    def load(**kwargs):
+        calls.append(kwargs)
+        return _FakePredictor()
+    monkeypatch.setattr(mod, '_load_predictor', load)
+    staged = tmp_path / 'candidate'
+    mod.run(n_symbols=1, windows_per_symbol=1, lookback=60, min_bars=50,
+            device='cpu', start_date='2026-06-01', train_cutoff='2026-01-01',
+            use_finetuned=True, model_root=staged, n_boot=10, out_path=tmp_path / 'report.md')
+    assert calls == [{'device': 'cpu', 'use_finetuned': True, 'model_root': staged}]

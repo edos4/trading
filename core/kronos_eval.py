@@ -75,7 +75,8 @@ def _prep_3d_frame(df: pd.DataFrame, lookback: int):
     if df is None or len(df) < 60:
         return None
     try:
-        work = df.copy()
+        from core.kronos_input import prepare_context
+        work = prepare_context(df, lookback).frame
         idx = _naive_datetime_index(work.index)
         if idx is None:
             return None
@@ -417,14 +418,15 @@ def select_device(preferred: str | None = None) -> str:
     return "cuda"
 
 
-def load_predictor(device: str | None = None, *, use_finetuned: bool = False):
+def load_predictor(device: str | None = None, *, use_finetuned: bool = False, model_root: Path | None = None):
     """Load one predictor on the selected device, falling back to CPU on OOM.
 
     Returns ``(predictor, device)`` so a worker can report where it actually ran.
     """
     chosen = select_device(device)
+    extra = {"model_root": model_root} if model_root is not None else {}
     try:
-        return _load_predictor(device=chosen, use_finetuned=use_finetuned), chosen
+        return _load_predictor(device=chosen, use_finetuned=use_finetuned, **extra), chosen
     except Exception as exc:
         if chosen != "cuda" or not _is_cuda_oom(exc):
             raise
@@ -435,23 +437,21 @@ def load_predictor(device: str | None = None, *, use_finetuned: bool = False):
         torch.cuda.empty_cache()
     except Exception:
         pass
-    return _load_predictor(device="cpu", use_finetuned=use_finetuned), "cpu"
+    return _load_predictor(device="cpu", use_finetuned=use_finetuned, **extra), "cpu"
 
 
-def _load_predictor(device: str = "cpu", use_finetuned: bool = False):
+def _load_predictor(device: str = "cpu", use_finetuned: bool = False, *, model_root: Path | None = None):
     from model import Kronos, KronosPredictor, KronosTokenizer
 
     tokenizer_path, model_path = TOKENIZER_PATH, MODEL_PATH
     if use_finetuned:
-        from core.kronos_finetune import PREDICTOR_OUT, TOKENIZER_OUT
-
-        if TOKENIZER_OUT.exists() and PREDICTOR_OUT.exists():
-            tokenizer_path, model_path = TOKENIZER_OUT, PREDICTOR_OUT
-        else:
-            log.warning(
-                f"Kronos | use_finetuned=True but no checkpoint at {PREDICTOR_OUT} — "
-                "falling back to base weights. Run `scripts/kronos_finetune.py --all-symbols` first (.venv-kronos)."
-            )
+        from core.kronos_finetune import FINETUNE_DIR
+        # Resolve once: the tokenizer and predictor always belong to one release.
+        root = Path(model_root or FINETUNE_DIR).resolve(strict=True)
+        tokenizer_path = root / "tokenizer" / "best_model"
+        model_path = root / "predictor" / "best_model"
+        if not tokenizer_path.is_dir() or not model_path.is_dir():
+            raise ValueError(f"Selected fine-tuned checkpoint pair is missing: {root}")
 
     log.info(f"Kronos | loading {model_path} on {device} ...")
     tokenizer = KronosTokenizer.from_pretrained(str(tokenizer_path))

@@ -47,3 +47,36 @@ def checkpoint_provenance(root: Path, as_of: str | None, *, required: bool = Fal
             'corpus_sha256':value['corpus_sha256'],
             'manifest_sha256':hashlib.sha256(raw).hexdigest(),
             'scope':'file identity and operator-declared selection boundary; not independent training certification'}
+
+
+def active_model_identity() -> str:
+    """Cheap manifest identity for cache invalidation; verification occurs in workers."""
+    from core.kronos_finetune import FINETUNE_DIR
+    root = FINETUNE_DIR.resolve()
+    manifest = root / 'selection_manifest.json'
+    if manifest.is_file():
+        return hashlib.sha256(manifest.read_bytes()).hexdigest()
+    return f'legacy:{root}'
+
+
+def decision_provenance(root: Path, as_of: str | None, *, market: str,
+                        decision_at: str | None = None, required: bool = False) -> dict:
+    """Distinguish present-time decisions from historical anchor eligibility."""
+    if decision_at is None:
+        return checkpoint_provenance(root, as_of, required=required)
+    from datetime import datetime, timezone, timedelta
+    from core.market import last_closed_session_date
+    from learn.kronos_weekly_dataset import is_session
+    now = datetime.now(timezone.utc)
+    decision = datetime.fromisoformat(decision_at)
+    if decision.tzinfo is None or abs((now - decision).total_seconds()) > 300:
+        raise ValueError('Live decision timestamp must be current and timezone aware')
+    expected = last_closed_session_date(market, decision)
+    while not is_session(expected, market):
+        expected -= timedelta(days=1)
+    if as_of != expected.isoformat():
+        raise ValueError('Live decision anchor must be the latest completed market session')
+    from zoneinfo import ZoneInfo
+    value = checkpoint_provenance(root, decision.astimezone(ZoneInfo('Asia/Manila')).date().isoformat(), required=required)
+    value.update(out_of_sample_eligible=False, forecast_mode='live', decision_at=decision.isoformat(), anchor_date=as_of)
+    return value

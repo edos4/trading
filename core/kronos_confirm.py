@@ -70,6 +70,7 @@ class Forecast:
     error: str | None = None
     provenance: dict | None = None
     context_sha256: str | None = None
+    model_context: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,7 @@ class PendingConfirm:
     band_pct: float
     model_provenance: dict | None = None
     context: dict | None = None
+    model_context: dict | None = None
 
     @property
     def symbol(self) -> str:
@@ -100,6 +102,7 @@ class PendingExit:
     band_pct: float
     model_provenance: dict | None = None
     context: dict | None = None
+    model_context: dict | None = None
 
 
 def _finite(value) -> bool:
@@ -284,6 +287,8 @@ class KronosConfirmGate:
         self.pending_exits: list[PendingExit] = []
         # Device the last worker call actually used (cuda or cpu fallback).
         self.last_device: str | None = None
+        self._model_identity: str | None = None
+        self.live_decision = False
 
     # ── pending batch ────────────────────────────────────────────────────
     def prepare(self, signal, candle, df: pd.DataFrame | None) -> PendingConfirm | None:
@@ -364,8 +369,9 @@ class KronosConfirmGate:
 
     # ── cache ────────────────────────────────────────────────────────────
     def _cache_key(self, pending: PendingConfirm | PendingExit) -> tuple:
+        from core.kronos_input import POLICY_VERSION
         return (self.market, pending.symbol, pending.anchor_date, pending.anchor_close,
-                self.model, self.samples, (pending.context or {}).get('sha256'))
+                self.model, self.samples, (pending.context or {}).get('sha256'), self._model_identity, POLICY_VERSION)
 
     def _cache_get(self, key: tuple) -> Forecast | None:
         if self.cache_minutes <= 0:
@@ -396,6 +402,9 @@ class KronosConfirmGate:
             "--model", self.model,
             "--market", self.market,
         ]
+        if self.live_decision:
+            from datetime import datetime, timezone
+            args += ["--decision-at", datetime.now(timezone.utc).isoformat()]
         if as_of:
             # A replay date is a hard information boundary. Without it the
             # worker loads the live series and the vote sees future bars.
@@ -416,6 +425,9 @@ class KronosConfirmGate:
         finally:
             if context_path is not None:
                 context_path.unlink(missing_ok=True)
+        received_identity = payload.get("model_identity")
+        if received_identity is not None and received_identity != self._model_identity:
+            raise KronosError("Kronos deployed model identity changed during the batch; retry")
         device = payload.get("device")
         if isinstance(device, str) and device:
             self.last_device = device
@@ -446,7 +458,7 @@ class KronosConfirmGate:
                 float(row["anchor_close"]) if _finite(row.get("anchor_close")) else 0,
                 float(row["atr_pct"]) if _finite(row.get("atr_pct")) else float("nan"),
                 provenance=payload.get('model_provenance'),
-                context_sha256=row.get('context_sha256'),
+                context_sha256=row.get('context_sha256'), model_context=row.get('model_context'),
             )
         return out
 
@@ -463,6 +475,11 @@ class KronosConfirmGate:
         list[tuple[object, ConfirmVerdict, dict]],
     ]:
         """Resolve entry votes and open-position votes in one worker call."""
+        from core.kronos_provenance import active_model_identity
+        identity = active_model_identity() if self.model == "finetuned" else "base"
+        if identity != self._model_identity:
+            self._cache.clear()
+            self._model_identity = identity
         entries = list(self.pending)
         exits = list(self.pending_exits)
         self.pending.clear()
@@ -548,6 +565,13 @@ class KronosConfirmGate:
                 if forecast.returns:
                     self._cache_put(key, forecast)
 
+        if self.model == "finetuned" and active_model_identity() != self._model_identity:
+            resolved.clear()
+            fetched.clear()
+            self._cache.clear()
+            for item in all_items:
+                failures[self._cache_key(item)] = "Kronos model identity changed during the batch; retry"
+
         def _miss_reason(item: PendingConfirm | PendingExit) -> str:
             key = self._cache_key(item)
             if key in over_cap:
@@ -609,7 +633,7 @@ class KronosConfirmGate:
         return returns, False
 
     def _forecast_context(self, item, forecast: Forecast):
-        return replace(item, model_provenance=forecast.provenance, atr_pct=forecast.atr_pct, band_pct=sideways_band_pct(
+        return replace(item, model_provenance=forecast.provenance, model_context=forecast.model_context, atr_pct=forecast.atr_pct, band_pct=sideways_band_pct(
             forecast.atr_pct, k=self.sideways_atr,
             min_pct=self.sideways_min_pct, max_pct=self.sideways_max_pct,
         ))
@@ -656,6 +680,8 @@ def _evidence(
         "mode": gate.mode if scope == "entry" else gate.exit_mode,
         "scope": scope,
         "model": gate.model,
+        "model_identity": gate._model_identity,
+        "model_context": item.model_context,
         "model_provenance": item.model_provenance or {'identity_verified':False,'out_of_sample_eligible':False},
         "context_sha256": (item.context or {}).get('sha256'),
         "context_source": 'scanner_snapshot' if item.context else 'provider_history',

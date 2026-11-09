@@ -80,6 +80,7 @@ def run_worker(
     # subprocess, so forward its device choice explicitly. An operator's
     # exported KRONOS_DEVICE wins over the .env value.
     env = os.environ.copy()
+    env["KRONOS_GPU_LOCK_HELD"] = "1"
     if "KRONOS_DEVICE" not in env:
         try:
             from config import settings
@@ -127,3 +128,12 @@ def run_worker(
             tmp_path.unlink()
         except OSError:
             pass
+
+
+def locked_main(main):
+    """Protect direct CLI invocations; worker subprocesses inherit the parent's lock."""
+    if os.environ.get("KRONOS_GPU_LOCK_HELD") == "1":
+        return main()
+    from core.kronos_weekly import exclusive_lock
+    with exclusive_lock(GPU_LOCK_FILE):
+        return main()

@@ -86,7 +86,8 @@ def forecast_series(
     predictor, df: pd.DataFrame, days: int, lookback: int, sample_count: int,
 ) -> list[dict]:
     """Forecast ``days`` business days past the last bar; list of {time,value}."""
-    ctx = with_amount(df.tail(lookback))
+    from core.kronos_input import prepare_context
+    ctx = with_amount(prepare_context(df, lookback).frame)
     if len(ctx) < 60:
         raise ValueError(f"only {len(ctx)} context bars (need >= 60)")
     last = pd.Timestamp(ctx.index[-1])
@@ -253,4 +254,5 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from core.kronos_process import locked_main
+    raise SystemExit(locked_main(main))
