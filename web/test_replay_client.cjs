@@ -24,17 +24,20 @@ let saved = null, replayGeneration = 0;
 const corrections = [{id:'drawn',kind:'pattern',label:'correct trough',points:[
   {time:'2024-01-02',value:10,pane:'price'}, {time:'2024-01-08',value:9.5,pane:'price'}]}];
 const drawMounts = [];
-const requests = [], lines = [];
+const requests = [], lines = [], candleSeries = [];
+let crosshairHandler;
 const series = () => ({attachPrimitive(){}, detachPrimitive(){}, setData(data){this.data=data;}, applyOptions(){}, priceScale(){return {applyOptions(){}};}, createPriceLine(){}, setMarkers(markers){this.markers=markers;}});
-const chart = {addCandlestickSeries:series, addHistogramSeries:series, addLineSeries(options){const s=series();s.options=options;lines.push(s);return s;}, subscribeCrosshairMove(){}, unsubscribeCrosshairMove(){},
+const chart = {addCandlestickSeries(options){const s=series();s.options=options;candleSeries.push(s);return s;}, addHistogramSeries:series, addLineSeries(options){const s=series();s.options=options;lines.push(s);return s;}, subscribeCrosshairMove(handler){crosshairHandler=handler;}, unsubscribeCrosshairMove(){},
   priceScale(){return {width:()=>40,options:()=>({minimumWidth:40})};},
   paneSize(){return {width:800,height:460};},
   timeScale(){return {fitContent(){}, subscribeVisibleLogicalRangeChange(){}, unsubscribeVisibleLogicalRangeChange(){}, setVisibleLogicalRange(){}, getVisibleLogicalRange:()=>null, subscribeSizeChange(){}, unsubscribeSizeChange(){}};}, remove(){}};
 const window = {TB_PAGE:'replay', location:{}, innerWidth:1200, innerHeight:800,
   ChartDraw:{attach(options){drawMounts.push(options);if(options.leading)options.host.appendChild(options.leading);return {snapshot:()=>corrections,pending:()=>false,destroy(){}}}}};
 const stored = new Map();
+const preferences = new Map();
+const localStorage = {getItem:key=>preferences.get(key),setItem:(key,value)=>preferences.set(key,value)};
 const sessionStorage = {getItem:key=>stored.get(key),setItem:(key, value)=>stored.set(key,value)};
-const context = vm.createContext({window, document, sessionStorage, console, FormData, LightweightCharts:{createChart:()=>chart,CrosshairMode:{Normal:0},LineStyle:{Dashed:2,Dotted:1,Solid:0}}, fetch: async (url, opts) => {
+const context = vm.createContext({window, document, sessionStorage, localStorage, console, FormData, LightweightCharts:{createChart:()=>chart,CrosshairMode:{Normal:0},LineStyle:{Dashed:2,Dotted:1,Solid:0}}, fetch: async (url, opts) => {
   let data = {};
   if (url.endsWith('/load')) data = {replay:saved};
   if (url.endsWith('/upload')) { saved = JSON.parse(opts.body); saved.correction_replay_id = 'replay-' + (++replayGeneration); data = {replay_id:saved.correction_replay_id}; }
@@ -175,9 +178,12 @@ vm.runInContext(fs.readFileSync('web/static/app.js','utf8'),context);
   window.TVChart.mount(get('replay-chart-host'), {...data, dii}, {readOnly:true});
   assert.equal(get('replay-chart-host').children.length, 4); // price, RSI, DII, view toggles
   assert.match(get('replay-chart-host').children[2].children[0].textContent, /DII \(60, 40\).*last displayed bar.*Bulls 60.0%.*Bears 40.0%/);
+  context.vwapReadout = {vwap: [{time: "2024-01-04", value: 12.345}]};
+  assert.match(vm.runInContext('fmtIndicators(vwapReadout, "2024-01-04")', context), /VWAP 12.35/);
+  assert.match(vm.runInContext('fmtIndicators(vwapReadout, "2024-01-02")', context), /VWAP —/);
   context.diiReadout = {dii};
-  assert.match(vm.runInContext('fmtRsi(diiReadout, "2024-01-02")', context), /Up — Down — Bulls — Bears —/);
-  assert.match(vm.runInContext('fmtRsi(diiReadout, "2024-01-04")', context), /Up 21 Down 14 Bulls 60.0% Bears 40.0%/);
+  assert.match(vm.runInContext('fmtIndicators(diiReadout, "2024-01-02")', context), /Up — Down — Bulls — Bears —/);
+  assert.match(vm.runInContext('fmtIndicators(diiReadout, "2024-01-04")', context), /Up 21 Down 14 Bulls 60.0% Bears 40.0%/);
   // View toggles: each click re-mounts the same payload without that overlay.
   const toggles = get('replay-chart-host').children.at(-1);
   assert.deepEqual(toggles.children.map(button => button.textContent), ['Patterns', 'RSI', 'DII']);
@@ -196,5 +202,86 @@ vm.runInContext(fs.readFileSync('web/static/app.js','utf8'),context);
   assert.equal(lines.length, added); // no overlay series, no correction layer
   assert.equal(drawMounts.length, draws);
   window.TVChart.unmount();
+  const vwapData = {candles: data.candles, vwap: [
+    {time:'2024-01-02'}, {time:'2024-01-03',value:10.2}, {time:'2024-01-04',value:10.4},
+  ]};
+  added = lines.length;
+  const candleCount = candleSeries.length;
+  const hovered = [];
+  window.TVChart.mount(get('replay-chart-host'), vwapData, {readOnly:true, onCandle: bar => hovered.push(bar)});
+  assert.equal(candleSeries.length, candleCount + 1); // candles remain under VWAP
+  assert.deepEqual(candleSeries.at(-1).data, vwapData.candles);
+  crosshairHandler({time:'2024-01-03', seriesData:new Map([[candleSeries.at(-1), vwapData.candles[1]], [lines.at(-1), vwapData.vwap[1]]])});
+  assert.equal(hovered.at(-1).close, data.candles[1].close);
+  assert.equal(hovered.at(-1).time, '2024-01-03');
+  crosshairHandler({time:'2024-01-02', seriesData:new Map([[candleSeries.at(-1), vwapData.candles[0]]])});
+  assert.equal(hovered.at(-1).close, data.candles[0].close);
+  assert.equal(lines.length - added, 1);
+  assert.equal(lines.at(-1).options.title, 'VWAP');
+  assert.equal(lines.at(-1).options.color, '#ff9800');
+  assert.deepEqual(lines.at(-1).data, vwapData.vwap);
+  const vwapToggle = get('replay-chart-host').children.at(-1).children[0];
+  assert.equal(vwapToggle.textContent, 'VWAP');
+  assert.equal(vwapToggle['aria-pressed'], 'true');
+  added = lines.length;
+  vwapToggle.events.click();
+  assert.equal(lines.length, added);
+  assert.equal(get('replay-chart-host').children.at(-1).children[0]['aria-pressed'], 'false');
+  assert.equal(candleSeries.length, candleCount + 2);
+  assert.deepEqual(candleSeries.at(-1).data, vwapData.candles);
+  get('replay-chart-host').children.at(-1).children[0].events.click();
+  assert.equal(candleSeries.length, candleCount + 3);
+  assert.equal(lines.at(-1).options.title, 'VWAP');
+  window.TVChart.unmount();
+  const combined = {...data, ...vwapData, dii};
+  window.TVChart.mount(get('replay-chart-host'), combined, {readOnly:true});
+  assert.deepEqual(get('replay-chart-host').children.at(-1).children.map(button => button.textContent),
+    ['Patterns', 'VWAP', 'RSI', 'DII']);
+  for (const label of ['RSI', 'DII']) {
+    const button = get('replay-chart-host').children.at(-1).children.find(button => button.textContent === label);
+    assert.equal(button['aria-pressed'], 'false');
+    button.events.click();
+  }
+  assert.equal(get('replay-chart-host').children.length, 4); // price, RSI, DII, toggles
+  context.combinedReadout = combined;
+  assert.match(vm.runInContext('fmtIndicators(combinedReadout, "2024-01-04")', context),
+    /VWAP 10.40.*RSI 40.0.*DII.*Bulls 60.0%/);
+  assert.ok(candleSeries.at(-1).data.length);
+  window.TVChart.unmount();
+  const modes = {candles: data.candles, vwap: data.candles.map(bar => ({time:bar.time,value:bar.close})),
+    vwap_variants: {
+      session: {label:'Session VWAP (HLC3 approx.)', description:'Daily approximation', data:[{time:'2024-01-04',value:10}]},
+      anchored: {label:'Anchored VWAP (pattern start 2024-01-03)', description:'Pattern start', data:[{time:'2024-01-04',value:10.3}]},
+      rolling: {label:'Rolling VWAP (20 bars)', description:'20 bars', data:[{time:'2024-01-04',value:10.5}]},
+    }};
+  context.modeReadout = modes;
+  let modeChanges = 0;
+  const modeCandles = candleSeries.length;
+  window.TVChart.mount(get('replay-chart-host'), modes, {readOnly:true, onCandle: () => modeChanges++});
+  assert.equal(lines.at(-1).options.title, modes.vwap_variants.session.label);
+  assert.equal(get('replay-chart-host').children.at(-1).children.at(-1).value, 'session');
+  for (const mode of ['rolling', 'anchored', 'session']) {
+    const select = get('replay-chart-host').children.at(-1).children.at(-1);
+    assert.equal(select['aria-label'], 'VWAP calculation');
+    assert.deepEqual(select.children.map(option => option.value), ['session', 'anchored', 'rolling']);
+    select.value = mode;
+    select.events.change();
+    assert.equal(preferences.get("chart-vwap-mode"), mode);
+    assert.equal(lines.at(-1).options.title, modes.vwap_variants[mode].label);
+    assert.deepEqual(lines.at(-1).data, modes.vwap_variants[mode].data);
+    assert.equal(get('replay-chart-host').children.at(-1).children.at(-1).title, modes.vwap_variants[mode].description);
+    const readout = vm.runInContext('fmtIndicators(modeReadout, "2024-01-04")', context);
+    assert.ok(readout.includes(modes.vwap_variants[mode].label));
+    assert.ok(readout.includes(modes.vwap_variants[mode].data[0].value.toFixed(2)));
+  }
+  assert.equal(modeChanges, 3);
+  assert.equal(candleSeries.length, modeCandles + 4); // candles survive each calculation change
+  window.TVChart.unmount();
+  preferences.set('chart-vwap-mode', 'rolling');
+  vm.runInContext(fs.readFileSync('web/static/tv_chart.js','utf8'),context);
+  assert.equal(window.TVChart.vwapSelection(modes).label, modes.vwap_variants.rolling.label);
+  preferences.set('chart-vwap-mode', 'invalid');
+  vm.runInContext(fs.readFileSync('web/static/tv_chart.js','utf8'),context);
+  assert.equal(window.TVChart.vwapSelection(modes).label, modes.vwap_variants.session.label);
   console.log('Replay upload, reload, open/closed double-click, and pattern line rendering passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});

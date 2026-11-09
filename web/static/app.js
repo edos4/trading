@@ -28,17 +28,19 @@ async function api(url, opts = {}) {
   return data;
 }
 
-/* RSI(14) suffix for the hover OHLC line, from the payload's rsi14 series —
- * the same readout the desktop viewer shows. */
-function fmtRsi(data, time) {
+/* Indicator suffix for the hover OHLC line. */
+function fmtIndicators(data, time) {
+  const selected = window.TVChart?.vwapSelection?.(data) || {label: "VWAP", data: data.vwap || []};
+  const vwapValue = selected.data.find(row => row.time === time)?.value;
+  const vwap = (data.vwap || data.vwap_variants) ? `    ${selected.label} ${Number.isFinite(vwapValue) ? vwapValue.toFixed(2) : "—"}` : "";
   const row = (data.rsi14 || []).find((r) => r.time === time);
   const rsi = row == null ? "" : `    RSI ${Number(row.value).toFixed(1)}`;
-  if (!data.dii) return rsi;
+  if (!data.dii) return vwap + rsi;
   const value = (field, percent = false) => {
     const number = (data.dii[field] || []).find(point => point.time === time)?.value;
     return Number.isFinite(number) ? number.toFixed(percent ? 1 : 0) + (percent ? "%" : "") : "—";
   };
-  return rsi + `    DII (${data.dii.length}, ${data.dii.period}) Up ${value("up")} Down ${value("down")} Bulls ${value("bulls", true)} Bears ${value("bears", true)}`;
+  return vwap + rsi + `    DII (${data.dii.length}, ${data.dii.period}) Up ${value("up")} Down ${value("down")} Bulls ${value("bulls", true)} Bears ${value("bears", true)}`;
 }
 
 function downloadText(filename, text, mime) {
@@ -1063,7 +1065,7 @@ function initPaper() {
       `O ${Number(o.open).toFixed(2)}  H ${Number(o.high).toFixed(2)}  ` +
       `L ${Number(o.low).toFixed(2)}  C ${Number(o.close).toFixed(2)}  ` +
       `${sign}${Number(o.change).toFixed(2)} (${sign}${Number(o.change_pct).toFixed(2)}%)` +
-      (data.dii ? `    Last displayed bar${fmtRsi(data, data.candles?.at(-1)?.time)}` : "")
+      ((data.vwap?.length || data.dii) ? `    Last displayed bar${fmtIndicators(data, data.candles?.at(-1)?.time)}` : "")
     );
   }
 
@@ -1125,11 +1127,11 @@ function initPaper() {
             const change = bar.close - prevClose;
             const pct = prevClose ? (change / prevClose) * 100 : 0;
             const sign = change >= 0 ? "+" : "";
-            const rsi = fmtRsi(data, bar.time);
+            const indicatorText = fmtIndicators(data, bar.time);
             chartOhlc.textContent =
               `${bar.time}  O ${Number(bar.open).toFixed(2)}  H ${Number(bar.high).toFixed(2)}  ` +
               `L ${Number(bar.low).toFixed(2)}  C ${Number(bar.close).toFixed(2)}  ` +
-              `${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)` + rsi;
+              `${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)` + indicatorText;
             chartOhlc.classList.toggle("gain", change >= 0);
             chartOhlc.classList.toggle("loss", change < 0);
           },
@@ -1706,7 +1708,7 @@ function initReplay() {
       `O ${Number(o.open).toFixed(2)}  H ${Number(o.high).toFixed(2)}  ` +
       `L ${Number(o.low).toFixed(2)}  C ${Number(o.close).toFixed(2)}  ` +
       `${sign}${Number(o.change).toFixed(2)} (${sign}${Number(o.change_pct).toFixed(2)}%)` +
-      (data.dii ? `    Last displayed bar${fmtRsi(data, data.candles?.at(-1)?.time)}` : "")
+      ((data.vwap?.length || data.dii) ? `    Last displayed bar${fmtIndicators(data, data.candles?.at(-1)?.time)}` : "")
     );
   }
   function closeTradeChart() {
@@ -1762,11 +1764,11 @@ function initReplay() {
           const change = bar.close - prevClose;
           const pct = prevClose ? (change / prevClose) * 100 : 0;
           const sign = change >= 0 ? "+" : "";
-          const rsi = fmtRsi(data, bar.time);
+          const indicatorText = fmtIndicators(data, bar.time);
           chartOhlc.textContent =
             `${bar.time}  O ${Number(bar.open).toFixed(2)}  H ${Number(bar.high).toFixed(2)}  ` +
             `L ${Number(bar.low).toFixed(2)}  C ${Number(bar.close).toFixed(2)}  ` +
-            `${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)` + rsi;
+            `${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)` + indicatorText;
           chartOhlc.classList.toggle("gain", change >= 0);
           chartOhlc.classList.toggle("loss", change < 0);
         },

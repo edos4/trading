@@ -376,3 +376,28 @@ def test_payload_daily_weekly_daily_preserves_native_rails():
             key: value for key, value in original.items() if key != "data"}
         assert rail["data"][0]["value"] == pytest.approx(original["data"][0]["value"])
         assert rail["data"][-1]["value"] == pytest.approx(original["data"][-1]["value"])
+
+
+@pytest.mark.parametrize("zero_volume", [False, True])
+def test_png_and_viewer_share_vwap_without_indicator_panes(monkeypatch, zero_volume):
+    df = _frame(320)
+    if zero_volume:
+        df["volume"] = 0
+    payload = build_trade_viewer_payload(df, symbol="TEST")
+
+    def inspect_figure(self, fig, buf, symbol, timeframe, frame, indicators=None):
+        assert len(fig.axes) == 4  # price and volume, each with a secondary axis
+        assert set(indicators) == {"vwap"}
+        values = indicators["vwap"]
+        lines = [line for line in fig.axes[0].lines if line.get_label() == "Session VWAP (daily HLC3 approximation)"]
+        if zero_volume:
+            assert values.isna().all()
+            assert not lines
+        else:
+            assert len(lines) == 1
+            assert list(lines[0].get_ydata()) == pytest.approx([row["value"] for row in payload["vwap"]])
+        plt.close(fig)
+        return b""
+
+    monkeypatch.setattr(ChartRenderer, "_save_figure", inspect_figure)
+    ChartRenderer().render("TEST", "1d", df)

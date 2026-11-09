@@ -759,24 +759,34 @@ away, otherwise 2R.
 For daily context, try `bulls > bears` or `bulls > 50`, first as an **After /
 Shadow** filter scoped to the intended pattern. These are evaluation examples,
 not established profitable thresholds. Saving a rule does not activate it.
-Paper and Replay trade-row charts always show the default DII count pane,
-orange/blue dominance shading, end-of-line percentages, `+1` extreme-event
-labels and price bands, including ordinary pattern trades. The displayed
-settings are independent of saved rule settings; hover reports the cursor bar,
-and the resting readout is the last displayed bar. Short history shows warmup /
-unavailable. Weekly charts work; weekly rule preview/backtest still loads daily
-history and must not be interpreted as weekly evaluation. Other replay execution
-limitations and the complete example payload are in
-[the implementation notes](docs/indicators/directional_imbalance_index.md).
+Interactive charts overlay **VWAP** on candlesticks alongside volume bars and
+trade/pattern annotations. The VWAP calculation selector offers:
 
-Every trade-row chart also has **Patterns / RSI / DII** toggles at the start of
-its drawing toolbar (top-left). **Patterns** hides the detected-pattern overlays
-(rails, labels, markers and the correction drawing layer) without discarding
-them; **RSI** hides the Wilder RSI(14) pane; **DII** hides the Directional
-Imbalance Index pane. A toggle is only offered when the payload carries that
-overlay, the choice is remembered in `localStorage` under `chart-view` and
-applies to every chart, and hiding a pane re-mounts the chart in place so the
-current zoom and any saved corrections survive.
+- **Session VWAP (default):** daily OHLCV approximation, `(high + low + close) / 3`
+  for each positive-volume session. This is one daily HLC3 sample per session,
+  not the actual VWAP calculated from intraday trades. Weekly/monthly bars do
+  not contain session data, so Session VWAP is unavailable on those charts.
+- **Anchored VWAP:** cumulative volume-weighted HLC3 from the displayed pattern
+  start, falling back to the entry session. The selector names the anchor date;
+  without a pattern start or entry session, this mode is unavailable.
+- **Rolling VWAP (20 bars):** volume-weighted HLC3 over the latest 20 bars,
+  matching the existing Rolling VWAP indicator. Calculation precedes the visible
+  crop; the first 19 history bars have no value. Weekly charts use 20 weekly bars.
+
+Missing or nonpositive volume adds no weight. Zero-volume windows have no value.
+PNGs use the Session VWAP approximation and label it explicitly.
+
+Trade-row charts offer **Patterns / VWAP / RSI / DII** toggles at the start of the
+drawing toolbar. **VWAP** shows or hides the selected overlay; candlesticks remain
+visible. **RSI** and **DII** independently show or hide their panes. Toggle choices
+persist under `chart-view`, and the calculation choice under `chart-vwap-mode`
+in `localStorage`. Changes retain zoom and saved corrections; line labels and
+hover/resting readouts identify the selected calculation.
+
+Weekly rule preview/backtest still loads daily history and must not be interpreted
+as weekly evaluation. Other replay execution limitations and the complete DII
+example payload are in
+[the implementation notes](docs/indicators/directional_imbalance_index.md).
 
 Python translation of [**© BigBeluga’s original indicator**](https://www.tradingview.com/script/WSvRZ0j0-Directional-Imbalance-Index-BigBeluga/), licensed
 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/), with stricter

@@ -41,10 +41,7 @@ TV_TEXT = "#d1d4dc"
 TV_TEXT_DIM = "#787b86"
 TV_UP = "#26a69a"
 TV_DOWN = "#ef5350"
-TV_RSI = "#7e57c2"
-RSI_PERIOD = 14
-RSI_OVERBOUGHT = 70.0
-RSI_OVERSOLD = 30.0
+TV_VWAP = "#ff9800"
 
 # Points of clearance between a part label and the reason printed under it.
 NOTE_LINE_PT = 13
@@ -97,7 +94,10 @@ class ChartRenderer:
         source = ohlcv_df.copy()
         position_key = object()
         source[position_key] = np.arange(len(source))
-        df = self._trim_to_visible(self._prepare_df(source, timeframe), timeframe)
+        prepared = self._prepare_df(source, timeframe)
+        vwap = _session_chart_vwap(prepared, timeframe)
+        df = self._trim_to_visible(prepared, timeframe)
+        vwap = vwap.reindex(df.index)
         source_positions = df.pop(position_key).to_numpy(dtype=int)
         if df.empty:
             raise ValueError(f"no valid bars for {symbol} {timeframe}")
@@ -143,7 +143,7 @@ class ChartRenderer:
             style=style,
             volume=True,
             figsize=(14, 9.2),
-            panel_ratios=(4, 1, 1.35),
+            panel_ratios=(4, 1),
             tight_layout=True,
             returnfig=True,
             warn_too_much_data=2500,
@@ -157,26 +157,25 @@ class ChartRenderer:
             volume_alpha=0.55,
             ylabel="",
         )
-        rsi = _rsi_sma(df["Close"], RSI_PERIOD)
         plots = [align_plot(plot) for plot in add_plots or []]
         self._append_series_plot(
-            plots, rsi, panel=2, color=TV_RSI, width=1.0, ylabel="RSI",
+            plots, vwap, panel=0, color=TV_VWAP, width=1.2,
+            secondary_y=False, label="Session VWAP (daily HLC3 approximation)",
         )
-        self._append_series_plot(
-            plots, pd.Series(RSI_OVERBOUGHT, index=df.index),
-            panel=2, color=TV_TEXT_DIM, width=0.7, linestyle="dashed",
-        )
-        self._append_series_plot(
-            plots, pd.Series(RSI_OVERSOLD, index=df.index),
-            panel=2, color=TV_TEXT_DIM, width=0.7, linestyle="dashed",
-        )
-        plot_kwargs["addplot"] = plots
+        if plots:
+            plot_kwargs["addplot"] = plots
         indicators = {name: align_overlay(values) for name, values in (indicators or {}).items()}
-        indicators["rsi_14"] = rsi
+        indicators["vwap"] = vwap
         fig, axes = mpf.plot(df, **plot_kwargs)
         self._polish_axes(axes, timeframe)
         self._format_xaxis_months(axes, df, timeframe)
         self._draw_tradingview_header(fig, axes, symbol, timeframe, df)
+        axes[0].text(
+            0.01, 0.98,
+            "Session VWAP · daily HLC3 approximation" if timeframe == "1d"
+            else "Session VWAP unavailable · requires session data",
+            transform=axes[0].transAxes, ha="left", va="top", fontsize=8, color=TV_VWAP,
+        )
         self._draw_last_price_line(axes[0], df)
         if annotations:
             self._draw_annotations(axes[0], df, annotations, timeframe=timeframe)
@@ -724,14 +723,58 @@ def _viewer_bar_time(idx) -> str:
     return ts.strftime("%Y-%m-%d")
 
 
-def _rsi_sma(close: pd.Series, period: int = RSI_PERIOD) -> pd.Series:
-    """SMA-smoothed RSI — same formula as IndicatorEngine.rsi()."""
+def _rsi_sma(close: pd.Series, period: int = 14) -> pd.Series:
+    """Rolling-mean RSI with defined flat and all-gain windows."""
     delta = close.diff()
     gain = delta.clip(lower=0).rolling(period).mean()
     loss = (-delta.clip(upper=0)).rolling(period).mean()
     rs = gain / loss.replace(0, np.nan)
     result = 100 - (100 / (1 + rs))
     return result.mask((loss == 0) & (gain > 0), 100.0).mask((loss == 0) & (gain == 0), 50.0)
+
+
+def _chart_vwap(df: pd.DataFrame) -> pd.Series:
+    """20-bar rolling typical-price VWAP, calculated before the visible crop.
+
+    Require a complete 20-bar window. Unavailable or nonpositive volume adds
+    no weight; a window with no positive volume has no VWAP value.
+    """
+    typical = (df["High"] + df["Low"] + df["Close"]) / 3
+    volume = df["Volume"].where(np.isfinite(df["Volume"]) & (df["Volume"] > 0), 0.0)
+    numerator = (typical * volume).rolling(20).sum()
+    denominator = volume.rolling(20).sum()
+    return numerator / denominator.replace(0, np.nan)
+
+
+def _session_chart_vwap(df: pd.DataFrame, timeframe: str) -> pd.Series:
+    """Daily-bar session approximation; weekly/monthly bars lack session data.
+
+    One daily HLC3 sample per session reduces sum(price*volume)/sum(volume)
+    to HLC3. This is not the session's actual trade/intraday-weighted VWAP.
+    """
+    if timeframe != "1d":
+        return pd.Series(np.nan, index=df.index, dtype=float)
+    typical = (df["High"] + df["Low"] + df["Close"]) / 3
+    return typical.where(np.isfinite(df["Volume"]) & (df["Volume"] > 0))
+
+
+def _anchored_chart_vwap(df: pd.DataFrame, anchor: str | None) -> pd.Series:
+    """Accumulate from an explicitly identified pattern or entry session."""
+    if anchor is None:
+        return pd.Series(np.nan, index=df.index, dtype=float)
+    typical = (df["High"] + df["Low"] + df["Close"]) / 3
+    volume = df["Volume"].where(np.isfinite(df["Volume"]) & (df["Volume"] > 0), 0.0)
+    volume = volume.where(df.index >= pd.Timestamp(anchor), 0.0)
+    return (typical * volume).cumsum() / volume.cumsum().replace(0, np.nan)
+
+
+def _vwap_points(values: pd.Series, times: list[str]) -> list[dict]:
+    """Align indicator points with displayed candles, retaining missing values."""
+    points = []
+    for time in times:
+        value = _viewer_finite(values.get(pd.Timestamp(time)))
+        points.append({"time": time, **({"value": value} if value is not None else {})})
+    return points
 
 
 def _viewer_finite(value) -> float | None:
@@ -1029,6 +1072,10 @@ def build_trade_viewer_payload(
     dii_values = {key: pd.Series(value.to_numpy(), index=calculation_frame.index)
                   for key, value in dii_values.items()}
     df = renderer._prepare_df(ohlcv_df, timeframe)
+    rsi_values = _rsi_sma(df["Close"])
+    full_frame = df
+    rolling_values = _chart_vwap(df)
+    vwap_values = _session_chart_vwap(df, timeframe)
     raw_annotations = annotations or []
     annotations = _align_weekly_annotations(raw_annotations, df.index, timeframe, session_tz)
     # Recover old ledger geometry only at the entry event, never from a newer setup.
@@ -1038,10 +1085,10 @@ def build_trade_viewer_payload(
 
     candles = []
     volume = []
+    vwap = []
     rsi14 = []
     dii = {"length": 20, "period": 40, **{key: [] for key in dii_values}}
     valid_positions: list[int] = []
-    rsi = _rsi_sma(df["Close"], RSI_PERIOD)
     for position, (idx, row) in enumerate(df.iterrows()):
         t = _viewer_bar_time(idx)
         o = _viewer_finite(row["Open"])
@@ -1056,15 +1103,17 @@ def build_trade_viewer_payload(
         for key, values in dii_values.items():
             value = _viewer_finite(values.get(idx))
             dii[key].append({"time": t, **({"value": value} if value is not None else {})})
+        rsi_value = _viewer_finite(rsi_values.loc[idx])
+        if rsi_value is not None:
+            rsi14.append({"time": t, "value": rsi_value})
         up = c >= o
         volume.append({
             "time": t,
             "value": v,
             "color": "rgba(38,166,154,0.55)" if up else "rgba(239,83,80,0.55)",
         })
-        rsi_val = _viewer_finite(rsi.loc[idx])
-        if rsi_val is not None:
-            rsi14.append({"time": t, "value": rsi_val})
+        value = _viewer_finite(vwap_values.loc[idx])
+        vwap.append({"time": t, **({"value": value} if value is not None else {})})
 
     if len(candles) < 2:
         raise ValueError(f"not enough valid bars for {symbol} {timeframe}")
@@ -1187,6 +1236,29 @@ def build_trade_viewer_payload(
             "text": f"Pattern start {start_time}",
             "reason": "",
         })
+    anchor = started[0] if started else entry_bar
+    anchor_kind = "Pattern start" if started else "Entry"
+    times = [bar["time"] for bar in candles]
+    vwap_variants = {
+        "session": {
+            "label": "Session VWAP (HLC3 approx.)" if timeframe == "1d" else "Session VWAP (unavailable)",
+            "description": ("Daily OHLCV approximation: HLC3 per positive-volume session; intraday prints are unavailable."
+                            if timeframe == "1d" else "Session VWAP unavailable: daily or intraday session data is required."),
+            "data": vwap,
+        },
+        "anchored": {
+            "label": f"Anchored VWAP ({anchor_kind.lower()} {anchor})" if anchor else "Anchored VWAP (unavailable)",
+            "description": f"{anchor_kind}: {anchor}. Volume-weighted HLC3 accumulated from this session." if anchor else "No pattern-start or entry session is available.",
+            "anchor": anchor,
+            "data": _vwap_points(_anchored_chart_vwap(full_frame, anchor), times),
+        },
+        "rolling": {
+            "label": "Rolling VWAP (20 bars)",
+            "description": "Volume-weighted HLC3 over the latest 20 bars; requires 20 history bars.",
+            "period": 20,
+            "data": _vwap_points(rolling_values, times),
+        },
+    }
     markers.sort(key=lambda marker: marker["time"])
     trendline_segments = []
     if trendlines:
@@ -1251,6 +1323,8 @@ def build_trade_viewer_payload(
         },
         "candles": candles,
         "volume": volume,
+        "vwap": vwap,
+        "vwap_variants": vwap_variants,
         "rsi14": rsi14,
         "dii": dii,
         "levels": levels,

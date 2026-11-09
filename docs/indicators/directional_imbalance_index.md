@@ -1,5 +1,11 @@
 # Directional Imbalance Index integration plan
 
+**Chart display update (2026-11-10):** Interactive charts provide independent
+Patterns, VWAP, RSI, and DII toggles. VWAP overlays the candlesticks using a
+Session (daily HLC3 approximation, default), Anchored, or Rolling (20 bars)
+calculation; RSI and DII have separate panes below. See
+[chart defaults](../../README.md).
+
 Status: local implementation completed on 2026-10-26; automated verification passes.
 Calculation, Builder catalog, rule consumers, and default Paper/Replay chart display
 are implemented. Manual browser checks, database-backed save/load/preview, and

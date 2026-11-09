@@ -189,6 +189,10 @@ def test_viewer_payload_has_candles_and_levels() -> None:
     assert payload["rsi14"]
     assert payload["rsi14"][-1]["time"] == payload["candles"][-1]["time"]
     assert all(0.0 <= row["value"] <= 100.0 for row in payload["rsi14"])
+    assert payload["dii"]["length"] == 20
+    assert len(payload["dii"]["up"]) == len(payload["candles"])
+    assert [row["time"] for row in payload["vwap"]] == [row["time"] for row in payload["candles"]]
+    assert payload["vwap"][-1]["value"] == pytest.approx(close.iloc[-1] - 0.1 / 3)
     titles = {level["title"] for level in payload["levels"]}
     assert titles == {"entry", "stop", "target", "last"}
     assert payload["markers"]
@@ -334,41 +338,55 @@ def test_legacy_trade_without_anchors_does_not_redetect():
 
 
 @pytest.mark.parametrize('timeframe,freq', [('1d', 'B'), ('1W', 'W-FRI')])
-def test_dii_precrop_alignment_and_future_causality(timeframe, freq):
-    from analysis.indicator_engine import IndicatorEngine
+def test_vwap_precrop_alignment_and_future_causality(timeframe, freq):
     idx = pd.date_range('2018-01-01', periods=400, freq=freq)
     values = np.arange(400.) + 100
-    df = pd.DataFrame(dict(open=values, high=values+1, low=values-1, close=values, volume=100), index=idx)
+    df = pd.DataFrame(dict(open=values, high=values+2, low=values-1,
+                           close=values, volume=np.arange(400.)+1), index=idx)
     df.loc[idx[200], 'high'] = np.inf
     original = df.copy()
     payload = build_trade_viewer_payload(df, symbol='TEST', timeframe=timeframe)
-    direct = IndicatorEngine(df).directional_imbalance_index()
-    assert payload['dii']['length'] == 20 and payload['dii']['period'] == 40
-    for field, series in direct.items():
-        points = payload['dii'][field]
-        assert [row['time'] for row in points] == [row['time'] for row in payload['candles']]
-        for point in points:
-            expected = series.iloc[idx.get_loc(pd.Timestamp(point['time']))]
-            if np.isfinite(expected): assert point['value'] == expected
-            else: assert 'value' not in point
-    assert 'value' in payload['dii']['bulls'][0]  # warmup precedes visible crop
+    valid = df.replace([np.inf, -np.inf], np.nan).dropna()
+    typical = (valid.high + valid.low + valid.close) / 3
+    expected = (typical * valid.volume).rolling(20).sum() / valid.volume.rolling(20).sum()
+    assert len(payload['candles']) < len(valid)
+    assert [row['time'] for row in payload['vwap_variants']['rolling']['data']] == [row['time'] for row in payload['candles']]
+    for point in payload['vwap_variants']['rolling']['data']:
+        assert point['value'] == pytest.approx(expected.loc[point['time']])
     prefix = build_trade_viewer_payload(df.iloc[:350], symbol='TEST', timeframe=timeframe)
-    for field in direct:
-        full = {row['time']: row for row in payload['dii'][field]}
-        assert all(row == full[row['time']] for row in prefix['dii'][field] if row['time'] in full)
+    full = {row['time']: row for row in payload['vwap_variants']['rolling']['data']}
+    assert all(row == full[row['time']] for row in prefix['vwap_variants']['rolling']['data'] if row['time'] in full)
     import json
     json.dumps(payload, allow_nan=False)
     pd.testing.assert_frame_equal(df, original)
 
 
-def test_dii_session_dedup_prefers_valid_reprint():
+def test_vwap_session_dedup_prefers_valid_reprint():
     idx = pd.bdate_range('2024-01-01', periods=120)
     df = pd.DataFrame(dict(open=10., high=11., low=9., close=10., volume=100), index=idx)
     bad = df.iloc[[50]].copy()
     bad.index += pd.Timedelta(hours=4)
     bad['high'] = np.nan
     actual = build_trade_viewer_payload(pd.concat([df, bad]), symbol='TEST')
-    assert actual['dii'] == build_trade_viewer_payload(df, symbol='TEST')['dii']
+    assert actual['vwap'] == build_trade_viewer_payload(df, symbol='TEST')['vwap']
+
+
+def test_vwap_unavailable_volume_has_finite_serializable_points():
+    import json
+
+    idx = pd.bdate_range('2024-01-01', periods=46)
+    prices = np.arange(1., 47.)
+    volumes = np.zeros(46)
+    volumes[19:26] = [100., 0., np.nan, -10., np.inf, 0., 300.]
+    df = pd.DataFrame(dict(open=prices, high=prices+1, low=prices-1,
+                           close=prices, volume=volumes), index=idx)
+    payload = build_trade_viewer_payload(df, symbol='TEST')
+    assert all('value' not in row for row in payload['vwap_variants']['rolling']['data'][:19])
+    assert [row['value'] for row in payload['vwap_variants']['rolling']['data'][19:25]] == [20.] * 6
+    assert payload['vwap_variants']['rolling']['data'][25]['value'] == pytest.approx(24.5)
+    assert payload['vwap_variants']['rolling']['data'][39]['value'] == 26.  # first weighted bar leaves the window
+    assert 'value' not in payload['vwap_variants']['rolling']['data'][45]  # all positive volume has expired
+    json.dumps(payload, allow_nan=False)
 
 
 def test_detection_chart_enables_rails_using_only_the_detection_tape():
@@ -442,3 +460,101 @@ def test_legacy_weekly_rounding_marker_is_aligned_before_geometry_recovery():
     daily = build_trade_viewer_payload(df, symbol="TEST", timeframe="1d",
                                        pattern="pattern_004_rounding_bottom", annotations=[marker])
     assert daily["segments"] == [] and daily["markers"] == []
+
+
+def test_chart_vwap_matches_catalog_and_short_history_warmup():
+    from analysis.chart_renderer import _chart_vwap
+    from analysis.rule_catalog import _vwap
+
+    idx = pd.bdate_range("2024-01-01", periods=60)
+    close = np.arange(60.) + 10
+    df = pd.DataFrame(dict(open=close, high=close+3, low=close-1, close=close,
+                           volume=np.arange(60.)+1), index=idx)
+    expected = _vwap(df, {"period": 20})["value"]
+    pd.testing.assert_series_equal(_chart_vwap(df.rename(columns=str.title)), expected)
+    payload = build_trade_viewer_payload(df.iloc[:19], symbol="TEST")
+    assert len(payload["vwap_variants"]["rolling"]["data"]) == 19
+    assert all("value" not in row for row in payload["vwap_variants"]["rolling"]["data"])
+
+
+@pytest.mark.parametrize('timeframe,freq', [('1d', 'B'), ('1W', 'W-FRI')])
+def test_dii_precrop_alignment_and_future_causality(timeframe, freq):
+    from analysis.indicator_engine import IndicatorEngine
+    idx = pd.date_range('2018-01-01', periods=400, freq=freq)
+    values = np.arange(400.) + 100
+    df = pd.DataFrame(dict(open=values, high=values+1, low=values-1, close=values, volume=100), index=idx)
+    df.loc[idx[200], 'high'] = np.inf
+    original = df.copy()
+    payload = build_trade_viewer_payload(df, symbol='TEST', timeframe=timeframe)
+    direct = IndicatorEngine(df).directional_imbalance_index()
+    assert payload['dii']['length'] == 20 and payload['dii']['period'] == 40
+    for field, series in direct.items():
+        points = payload['dii'][field]
+        assert [row['time'] for row in points] == [row['time'] for row in payload['candles']]
+        for point in points:
+            expected = series.iloc[idx.get_loc(pd.Timestamp(point['time']))]
+            if np.isfinite(expected): assert point['value'] == expected
+            else: assert 'value' not in point
+    assert 'value' in payload['dii']['bulls'][0]  # warmup precedes visible crop
+    prefix = build_trade_viewer_payload(df.iloc[:350], symbol='TEST', timeframe=timeframe)
+    for field in direct:
+        full = {row['time']: row for row in payload['dii'][field]}
+        assert all(row == full[row['time']] for row in prefix['dii'][field] if row['time'] in full)
+    import json
+    json.dumps(payload, allow_nan=False)
+    pd.testing.assert_frame_equal(df, original)
+
+
+def test_dii_session_dedup_prefers_valid_reprint():
+    idx = pd.bdate_range('2024-01-01', periods=120)
+    df = pd.DataFrame(dict(open=10., high=11., low=9., close=10., volume=100), index=idx)
+    bad = df.iloc[[50]].copy()
+    bad.index += pd.Timedelta(hours=4)
+    bad['high'] = np.nan
+    actual = build_trade_viewer_payload(pd.concat([df, bad]), symbol='TEST')
+    assert actual['dii'] == build_trade_viewer_payload(df, symbol='TEST')['dii']
+
+
+@pytest.mark.parametrize("timeframe", ["1d", "1W"])
+def test_session_vwap_is_daily_hlc3_and_unavailable_for_weekly(timeframe):
+    idx = pd.bdate_range("2024-01-01", periods=30) if timeframe == "1d" else pd.date_range("2024-01-05", periods=30, freq="W-FRI")
+    close = np.arange(30.) + 10
+    df = pd.DataFrame(dict(open=close, high=close+3, low=close-1, close=close,
+                           volume=np.arange(30.)+1), index=idx)
+    df.loc[idx[5], "volume"] = 0
+    payload = build_trade_viewer_payload(df, symbol="TEST", timeframe=timeframe)
+    session = payload["vwap_variants"]["session"]
+    assert session["data"] == payload["vwap"]
+    if timeframe == "1d":
+        assert "approx." in session["label"]
+        for i, point in enumerate(session["data"]):
+            if i == 5:
+                assert "value" not in point
+            else:
+                assert point["value"] == pytest.approx(close[i] + 2/3)
+    else:
+        assert all("value" not in point for point in session["data"])
+        assert "unavailable" in session["description"]
+
+
+def test_anchored_vwap_starts_at_pattern_and_ignores_prior_volume():
+    idx = pd.bdate_range("2024-01-01", periods=40)
+    prices = np.arange(40.) + 10
+    df = pd.DataFrame(dict(open=prices, high=prices+1, low=prices-1,
+                           close=prices, volume=np.arange(40.)+1), index=idx)
+    start = idx[10].date().isoformat()
+    payload = build_trade_viewer_payload(df, symbol="TEST", entry_time=idx[20], annotations=[{
+        "type": "marker", "date": start, "price": prices[10], "label": "low 1",
+    }])
+    anchored = payload["vwap_variants"]["anchored"]
+    assert anchored["anchor"] == start
+    assert "pattern start" in anchored["label"]
+    points = anchored["data"]
+    assert all("value" not in point for point in points[:10])
+    expected = (df.close.iloc[10:] * df.volume.iloc[10:]).cumsum() / df.volume.iloc[10:].cumsum()
+    assert [point["value"] for point in points[10:]] == pytest.approx(expected.tolist())
+    entry_only = build_trade_viewer_payload(df, symbol="TEST", entry_time=idx[20])
+    assert entry_only["vwap_variants"]["anchored"]["anchor"] == idx[20].date().isoformat()
+    no_anchor = build_trade_viewer_payload(df, symbol="TEST")
+    assert no_anchor["vwap_variants"]["anchored"]["anchor"] is None
+    assert all("value" not in point for point in no_anchor["vwap_variants"]["anchored"]["data"])

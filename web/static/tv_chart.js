@@ -35,13 +35,25 @@ window.TVChart = (function () {
    * panes, so hiding a pane and re-mounting the chart are the same operation
    * and the choice sticks for every chart opened afterwards, including after a
    * reload or a jump to another tab. */
-  const view = { patterns: true, rsi: true, dii: true };
+  const view = { patterns: true, vwap: true, rsi: true, dii: true };
   try {
     const saved = JSON.parse(localStorage.getItem("chart-view") || "null");
     for (const key of Object.keys(view)) {
       if (typeof saved?.[key] === "boolean") view[key] = saved[key];
     }
   } catch (_) { /* storage unavailable: start with every overlay shown */ }
+  let vwapMode = "session";
+  try {
+    const saved = localStorage.getItem("chart-vwap-mode");
+    if (["session", "anchored", "rolling"].includes(saved)) vwapMode = saved;
+  } catch (_) { /* use the session default */ }
+
+  function vwapSelection(data) {
+    return data.vwap_variants?.[vwapMode] || {
+      label: "VWAP", data: data.vwap || [], description: "VWAP from saved chart data",
+    };
+  }
+
   let lastMount = null;
 
   function unmount() {
@@ -241,9 +253,10 @@ window.TVChart = (function () {
     mount(target.el, target.data, target.hooks, range);
   }
 
-  function viewToggles(host, available) {
+  function viewToggles(host, available, data) {
     const items = [
       ["patterns", "Patterns", "Show or hide pattern overlays and corrections", available.patterns],
+      ["vwap", "VWAP", "Show or hide the selected VWAP overlay", available.vwap],
       ["rsi", "RSI", "Show or hide the RSI(14) pane", available.rsi],
       ["dii", "DII", "Show or hide the Directional Imbalance Index pane", available.dii],
     ].filter(item => item[3]);
@@ -264,6 +277,32 @@ window.TVChart = (function () {
       button.addEventListener("click", () => toggleView(key));
       bar.appendChild(button);
     }
+    if (data.vwap_variants) {
+      const select = host.ownerDocument.createElement("select");
+      select.setAttribute("aria-label", "VWAP calculation");
+      select.className = "btn";
+      select.style.cssText = "font:11px sans-serif;padding:2px 6px;max-width:300px";
+      for (const [mode, variant] of Object.entries(data.vwap_variants)) {
+        const option = host.ownerDocument.createElement("option");
+        option.value = mode;
+        option.textContent = variant.label;
+        option.title = variant.description;
+        select.appendChild(option);
+      }
+      select.value = vwapMode;
+      select.title = vwapSelection(data).description;
+      select.addEventListener("change", () => {
+        if (!data.vwap_variants[select.value]) return;
+        const target = lastMount;
+        if (!target) return;
+        const range = chart ? chart.timeScale().getVisibleLogicalRange() : null;
+        vwapMode = select.value;
+        try { localStorage.setItem("chart-vwap-mode", vwapMode); } catch (_) { /* page-only choice */ }
+        mount(target.el, target.data, target.hooks, range);
+        if (typeof target.hooks?.onCandle === "function") target.hooks.onCandle(null);
+      });
+      bar.appendChild(select);
+    }
     return bar;
   }
 
@@ -282,6 +321,7 @@ window.TVChart = (function () {
     el.style.flexDirection = "";
     el.style.position = "relative";
     const rsi = data.rsi14 || [];
+    const selectedVwap = vwapSelection(data);
     const identity = data.trade_id || data.entry_time;
     const draftKey = identity ? 'pattern-draft-' + JSON.stringify([
       data.replay_id || 'paper', data.market, data.symbol, data.timeframe,
@@ -354,9 +394,10 @@ window.TVChart = (function () {
     const toggles = viewToggles(el, {
       patterns: !!((data.segments || []).length || (data.trendlines || []).length
         || (data.markers || []).length || (data.manual_corrections || []).length || data.pattern),
+      vwap: !!data.vwap_variants || (data.vwap || []).some(row => Number.isFinite(row.value)),
       rsi: rsi.length > 0,
       dii: !!data.dii,
-    });
+    }, data);
     chart = LightweightCharts.createChart(priceEl, {
       autoSize: true,
       layout: {
@@ -390,16 +431,22 @@ window.TVChart = (function () {
       handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
     });
 
-    const candleSeries = chart.addCandlestickSeries({
+    const showVwap = view.vwap && selectedVwap.data.some(row => Number.isFinite(row.value));
+    const priceSeries = chart.addCandlestickSeries({
       upColor: UP,
       downColor: DOWN,
       wickUpColor: UP,
       wickDownColor: DOWN,
       borderVisible: false,
     });
-    candleSeries.setData(candles);
-
-
+    priceSeries.setData(candles);
+    if (showVwap) {
+      const vwapSeries = chart.addLineSeries({
+        title: selectedVwap.label, color: "#ff9800", lineWidth: 2,
+        priceLineVisible: false, lastValueVisible: true,
+      });
+      vwapSeries.setData(selectedVwap.data);
+    }
 
     const volumeSeries = chart.addHistogramSeries({
       priceFormat: { type: "volume" },
@@ -409,7 +456,7 @@ window.TVChart = (function () {
     volumeSeries.setData(data.volume || []);
 
     for (const level of data.levels || []) {
-      candleSeries.createPriceLine({
+      priceSeries.createPriceLine({
         price: level.price,
         color: level.color,
         lineWidth: 1,
@@ -419,7 +466,7 @@ window.TVChart = (function () {
       });
     }
     if (view.patterns && (data.markers || []).length) {
-      candleSeries.setMarkers(data.markers.filter(marker => marker.price == null));
+      priceSeries.setMarkers(data.markers.filter(marker => marker.price == null));
       for (const marker of data.markers.filter(marker => marker.price != null)) {
         const pivot = chart.addLineSeries({
           color: marker.color, lineVisible: false,
@@ -434,7 +481,7 @@ window.TVChart = (function () {
 
     if (view.patterns && window.PatternNotes) {
       const notes = window.PatternNotes.collect(data);
-      if (notes.length) candleSeries.attachPrimitive(window.PatternNotes.create(notes, PRICE_BAND));
+      if (notes.length) priceSeries.attachPrimitive(window.PatternNotes.create(notes, PRICE_BAND));
     }
 
     const automaticRails = new Set(view.patterns ? data.trendlines || [] : []);
@@ -521,12 +568,13 @@ window.TVChart = (function () {
         hooks.onCandle(null);
         return;
       }
-      const bar = param.seriesData.get(candleSeries) || (predSeries && param.seriesData.get(predSeries));
+      const actualBar = param.seriesData.get(priceSeries);
+      const bar = actualBar || (predSeries && param.seriesData.get(predSeries));
       if (!bar) {
         hooks.onCandle(null);
         return;
       }
-      const predicted = !!(predSeries && param.seriesData.get(predSeries) && !param.seriesData.get(candleSeries));
+      const predicted = !!(predSeries && param.seriesData.get(predSeries) && !actualBar);
       hooks.onCandle({
         time: fmtTime(param.time),
         open: bar.open,
@@ -648,7 +696,7 @@ window.TVChart = (function () {
       });
       const extrema = Object.fromEntries(["upper", "lower"].map(field =>
         [field, new Map((dii[field] || []).map(row => [row.time, row.value]))]));
-      attachPainter(candleSeries, ({context}) => {
+      attachPainter(priceSeries, ({context}) => {
         context.font = "10px sans-serif";
         context.textAlign = "center";
         // Like Pine's last-bar labels, mark only events in the displayed calculation period.
@@ -660,7 +708,7 @@ window.TVChart = (function () {
             ["down", bar.low, extrema.lower.get(bar.time), 14],
           ]) {
             if (!Number.isFinite(extreme) || price !== extreme) continue;
-            const y = candleSeries.priceToCoordinate(price);
+            const y = priceSeries.priceToCoordinate(price);
             if (y == null) continue;
             context.fillStyle = colors[field]; context.fillText("+1", x, y + offset);
           }
@@ -695,7 +743,7 @@ window.TVChart = (function () {
             for (const target of paneCharts) {
               if (target === source) continue;
               if (!bar) target.clearCrosshairPosition();
-              else if (target === chart) target.setCrosshairPosition(bar.close, time, candleSeries);
+              else if (target === chart) target.setCrosshairPosition(bar.close, time, priceSeries);
               else if (target === rsiChart) target.setCrosshairPosition(rsiValues.get(time) ?? 50, time, rsiSeries);
               else target.setCrosshairPosition((dii.up || []).find(row => row.time === time)?.value ?? 0, time, countSeries.up);
             }
@@ -707,7 +755,7 @@ window.TVChart = (function () {
     }
 
     if (window.ChartDraw && view.patterns) {
-      const panes = [{ el: priceEl, chart, series: candleSeries, pane: "price" }];
+      const panes = [{ el: priceEl, chart, series: priceSeries, pane: "price" }];
       if (rsiSeries) panes.push({ el: rsiEl, chart: rsiChart, series: rsiSeries, pane: "rsi" });
       let saved = data.manual_corrections || [];
       if (!hooks?.readOnly && draftKey) {
@@ -781,5 +829,5 @@ window.TVChart = (function () {
     if (currentDraftKey || !count) return true;
     return window.confirm('This chart has no stable identity. Discard its corrections?');
   }
-  return { mount, unmount, capture, canClose };
+  return { mount, unmount, capture, canClose, vwapSelection };
 })();
