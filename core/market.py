@@ -392,12 +392,13 @@ def _observed_holiday(day: date) -> date:
 def _us_holiday_dates(year: int) -> frozenset[date]:
     """NYSE/Nasdaq full-day closures for one year — computed, not tabled."""
     return frozenset((
-        _observed_holiday(date(year, 1, 1)),      # New Year's Day
+        # A Saturday New Year does not close the prior year-end cash session.
+        date(year, 1, 1) if date(year, 1, 1).weekday() == 5 else _observed_holiday(date(year, 1, 1)),
         _nth_weekday(year, 1, 0, 3),              # MLK Day
         _nth_weekday(year, 2, 0, 3),              # Washington's Birthday
         _easter_sunday(year) - timedelta(days=2),  # Good Friday
         _last_weekday(year, 5, 0),                # Memorial Day
-        _observed_holiday(date(year, 6, 19)),     # Juneteenth
+        *([_observed_holiday(date(year, 6, 19))] if year >= 2022 else []),  # Juneteenth since 2022
         _observed_holiday(date(year, 7, 4)),      # Independence Day
         _nth_weekday(year, 9, 0, 1),              # Labor Day
         _nth_weekday(year, 11, 3, 4),             # Thanksgiving
@@ -415,9 +416,12 @@ def is_us_holiday(day: date) -> bool:
     bars for ~120 of the 2,000-symbol US universe — foreign/OTC listings still
     printing — while every cash-session name has none.
 
-    Adjacent years are consulted because observance can cross a year boundary
-    (a Saturday 1 January closes the previous 31 December).
+    A Saturday New Year leaves the previous year-end session open. One-off
+    mourning closures are explicit, in addition to recurring holidays.
     """
+    # Nasdaq Equity Trader Alert ETA2024-87: President Carter mourning closure.
+    if day == date(2025, 1, 9):
+        return True
     return any(
         day in _us_holiday_dates(year)
         for year in (day.year - 1, day.year, day.year + 1)

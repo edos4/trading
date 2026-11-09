@@ -35,9 +35,9 @@ _FETCH_WORKERS = 3
 
 def _last_trading_date(now: datetime | None = None, market: str = "us") -> date:
     """Most recent *closed* cash session for `market` (US 16:00 ET, PSE 15:00 PHT)."""
-    from core.market import last_closed_session_date
+    from core.history_maintenance import closed_sessions
 
-    return last_closed_session_date(market, now)
+    return closed_sessions(now)[market]
 
 
 def _target_ts(market: str, now: datetime | None = None) -> int:
@@ -60,10 +60,12 @@ def _candles_to_rows(candles) -> list[tuple]:
 def _fetch_symbol(conn, symbol: str, market: str, *, fill_all: bool = False) -> int:
     candles = []
     market = (market or "us").lower()
+    end = _last_trading_date(market=market)
     if market == "ph":
         from data.pse_edge import fetch_daily, fetch_daily_chunked
 
-        candles = fetch_daily_chunked(symbol) if fill_all else fetch_daily(symbol)
+        from datetime import timedelta
+        candles = fetch_daily_chunked(symbol, end=end) if fill_all else fetch_daily(symbol, start=end-timedelta(days=800), end=end)
     elif fill_all:
         from data.tv_client import fetch_yahoo_daily_max
 
@@ -74,26 +76,24 @@ def _fetch_symbol(conn, symbol: str, market: str, *, fill_all: bool = False) -> 
         tv = TVClient(screener="america", exchange="NASDAQ")
         candles = tv._fetch_history_chart(symbol, "1d", live=True)
 
-    rows = _candles_to_rows(candles)
+    from core.history_maintenance import merge_provider_rows, valid_ohlcv
+    closed = [c for c in candles if c.timestamp is not None
+              and db.bar_date_from_ts(int(c.timestamp.timestamp()), market) <= end
+              and valid_ohlcv((c.open,c.high,c.low,c.close,c.volume))]
+    rows = _candles_to_rows(closed)
     if not rows:
         return 0
-    if fill_all:
-        db.upsert_bars(conn, symbol, rows, market=market)
-        db.refresh_symbol_meta(conn, symbol)
-        return len(rows)
-    last_ts = db.max_ts(conn, symbol) or 0
-    new = [r for r in rows if r[0] > last_ts]
-    if new:
-        db.upsert_bars(conn, symbol, new, market=market)
-    db.refresh_symbol_meta(conn, symbol)
-    return len(new)
+    start = min(db.bar_date_from_ts(row[0], market) for row in rows)
+    result = merge_provider_rows(conn, symbol, market, rows, start, end)
+    return result['inserted_sessions']
 
 
 def _fetch_fallback(conn, symbols, *, fetch_limit: int | None) -> tuple[int, int]:
     stale = []
+    targets = {market: _target_ts(market) for market in ("us", "ph")}
     for s in symbols:
         market = (s.get("market") or "us").lower()
-        target_ts = _target_ts(market)
+        target_ts = targets[market]
         if (s["last_bar_ts"] or 0) < target_ts:
             stale.append(s)
     stale.sort(key=lambda s: s["last_bar_ts"] or 0, reverse=True)

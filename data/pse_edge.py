@@ -198,6 +198,10 @@ def fetch_directory(*, force: bool = False) -> dict[str, tuple[str, str]]:
 def resolve_ids(symbol: str) -> tuple[str, str] | None:
     """Map bot ticker BDO → Edge (company_id, security_id). Cached to disk."""
     sym = _norm_symbol(symbol)
+    # Same fund/security, renamed effective 2026-10-12 (PSE C07269-2026):
+    # https://edge.pse.com.ph/downloadHtml.do?file_id=1975521
+    # Preserve the existing stocks_history key while resolving the current source.
+    sym = {'FMETF': 'AETF'}.get(sym, sym)
     if not sym:
         return None
     mapping = _load_dir_cache()
@@ -229,6 +233,10 @@ def resolve_ids(symbol: str) -> tuple[str, str] | None:
         return None
     found = _parse_directory_html(html)
     exact = found.get(sym)
+    if exact is None:
+        # Broad one-letter searches (I, T) may not show the exact symbol on page 1.
+        mapping = fetch_directory(force=True)
+        exact = mapping.get(sym)
     if exact is None:
         log.warning(f"PSE Edge | {sym} not in directory keyword results")
         return None

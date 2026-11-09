@@ -7,12 +7,16 @@ data/__pycache__
 .venv-browseruse
 .venv-kronos
 .venv-laya
+# Local timestamp of the last successful Kronos fine-tuning run
+/kronos-finetuned-at.txt
+/.kronos-finetuned-at.*.tmp
 # cf CLI project-local cache (account id/name)
 .cloudflare
 logs/*.log
 logs/bot.log
 logs/db_update.log
 logs/update-db.lock
+logs/kronos-weekly.lock
 logs/paper_signals_*.jsonl
 logs/stocks_history_updated.txt
 logs/stocks_history_updated.txt.tmp
@@ -44,3 +48,7 @@ web/static/designer
 /pattern_versions/
 /data/pattern_edit/
 .commandcode
+
+# Source-verified daily-bar maintenance reports
+logs/daily-bars-*.json
+logs/.daily-bars-*.tmp

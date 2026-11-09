@@ -130,8 +130,10 @@ def test_us_holiday_calendar_covers_floating_and_observed_days():
     assert is_us_holiday(date(2026, 7, 3))     # Sat 4 July observed Friday
     assert is_us_holiday(date(2026, 9, 7))     # Labor Day
     assert is_us_holiday(date(2026, 11, 26))   # Thanksgiving (4th Thursday)
-    # Observance can cross a year boundary: Sat 1 Jan 2022 closed Fri 31 Dec 2021.
-    assert is_us_holiday(date(2021, 12, 31))
+    # Cash exchanges remained open on the year-end Friday before Saturday New Year.
+    assert not is_us_holiday(date(2021, 12, 31))
+    assert not is_us_holiday(date(2021, 6, 18))  # First Juneteenth cash closure was 2022.
+    assert is_us_holiday(date(2025, 1, 9))       # Carter national day of mourning.
     assert not is_us_holiday(date(2026, 1, 20))
     assert not is_us_holiday(date(2026, 7, 6))
     # A US holiday is not a PSE holiday.

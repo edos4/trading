@@ -311,3 +311,18 @@ def test_us_adv_floor_falls_back_to_ten_day_dollar_volume(monkeypatch):
         2, "america", order_by="value", min_value=20_000_000,
     )
     assert [s for s, _ex in rows] == ["LIQ"]  # $100M passes, $50k does not
+
+
+def test_renamed_etf_uses_current_source_security_without_changing_history_key(monkeypatch):
+    from data import pse_edge
+    monkeypatch.setattr(pse_edge,'_load_dir_cache',lambda:{'AETF':('649','592')})
+    assert pse_edge.resolve_ids('FMETF.PS')==('649','592')
+    assert pse_edge.resolve_ids('AETF.PS')==('649','592')
+
+
+def test_one_letter_ticker_resolves_beyond_first_keyword_results_page(monkeypatch):
+    monkeypatch.setattr(pse_edge,'_load_dir_cache',lambda:{})
+    monkeypatch.setattr(pse_edge,'_request',lambda *a,**kw:BDO_DIR_HTML.encode())
+    monkeypatch.setattr(pse_edge,'fetch_directory',lambda **kw:{'I':('613','538')})
+    monkeypatch.setattr(pse_edge,'_save_dir_cache',lambda *_:None)
+    assert pse_edge.resolve_ids('I.PS')==('613','538')

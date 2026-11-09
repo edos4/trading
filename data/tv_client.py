@@ -17,6 +17,7 @@ import asyncio
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -180,10 +181,18 @@ _CHART_UA = "trading-bot/2.0 chart-history"
 
 
 def _yahoo_chart_payload(
-    chart_symbol: str, interval: str, range_: str, *, timeout: int = 20
+    chart_symbol: str, interval: str, range_: str, *, timeout: int = 20,
+    start_ts: int | None = None, end_ts: int | None = None,
 ) -> dict | None:
     """GET Yahoo v8 chart JSON. Retry on HTTP 429 with exponential backoff."""
-    url = f"{_CHART_API}/{chart_symbol}?interval={interval}&range={range_}"
+    if (start_ts is None) != (end_ts is None):
+        raise ValueError("Both Yahoo period bounds are required")
+    params = {"interval": interval}
+    if start_ts is not None:
+        params.update(period1=str(start_ts), period2=str(end_ts))
+    else:
+        params["range"] = range_
+    url = f"{_CHART_API}/{urllib.parse.quote(chart_symbol, safe='')}?{urllib.parse.urlencode(params)}"
     delay = 2.0
     last_exc: Exception | None = None
     for attempt in range(7):
