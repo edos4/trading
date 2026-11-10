@@ -531,6 +531,39 @@ document.createElement = name => name === 'canvas' ? {
 assert.equal(window.TVChart.capture(), 'data:image/png');
 assert.deepEqual(drawCalls, [0, 170, 340]);
 document.createElement = originalCreate;
+// A second renderer can export every pane without unmounting or changing the
+// modal. Header wrapping and DII text use the screenshot's actual pixel ratio.
+const modalRange = diiPrice.scale.getVisibleLogicalRange();
+const exporter = window.TVChart.create();
+const exportHost = new Element(document);
+exporter.mount(exportHost, {...payload, dii}, {readOnly: true, priceHeight: 600});
+flushLayouts();
+assert.equal(exportHost.style.height, '990px');
+charts.at(-3).chartElement = () => ({clientWidth: 440}); // 880px screenshot at 2x
+const headerPaint = [], headerShots = [];
+document.createElement = name => name === 'canvas' ? {
+  getContext: () => ({
+    measureText: text => ({width: text.length * 14}), fillRect() {},
+    drawImage: (shot, x, y) => headerShots.push(y),
+    fillText(text, x, y) { headerPaint.push({text, x, y, font: this.font}); },
+  }),
+  toDataURL() { assert.equal(this.width, 880); assert.ok(this.height > 510); return 'data:image/png'; },
+} : originalCreate(name);
+assert.equal(exporter.capture([
+  {text: 'IOT 1D · symmetrical_triangle · BUY', bold: true, size: 16},
+  {text: 'Yellow: detected pattern. Rail state: support broken. '.repeat(4), color: '#ffeb3b'},
+]), 'data:image/png');
+assert.equal(headerPaint[0].font, 'bold 32px sans-serif');
+assert.equal(headerPaint[0].x, 24);
+assert.ok(headerPaint.filter(row => row.text.includes('Rail')).length > 1);
+assert.ok(headerShots[0] > 0);
+assert.equal(headerShots[1] - headerShots[0], 170);
+assert.equal(headerShots[2] - headerShots[1], 170);
+assert.equal(headerPaint.at(-1).font, '22px sans-serif');
+exporter.unmount();
+assert.deepEqual(diiPrice.scale.getVisibleLogicalRange(), modalRange);
+assert.ok(diiPrice.subscriptions().range > 0);
+document.createElement = originalCreate;
 window.TVChart.unmount();
 for (const pane of [diiPrice, diiRsi, diiCounts]) {
   assert.deepEqual(pane.subscriptions(), {range: 0, size: 0});

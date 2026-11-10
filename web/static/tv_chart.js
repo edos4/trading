@@ -1,6 +1,6 @@
 /* TradingView Lightweight Charts wrapper for paper trade rows. */
 
-window.TVChart = (function () {
+window.TVChart = (function createTVChart(preferences = {}) {
   const BG = "#131722";
   const GRID = "#2a2e39";
   const TEXT = "#d1d4dc";
@@ -30,7 +30,7 @@ window.TVChart = (function () {
   let tools = null;
   let currentDraftKey = null;
   let preview = false;
-  const drafts = new Map();
+  const drafts = preferences.drafts || new Map();
   /* Overlays the reader can hide. The state lives here rather than in the
    * panes, so hiding a pane and re-mounting the chart are the same operation
    * and the choice sticks for every chart opened afterwards, including after a
@@ -47,6 +47,8 @@ window.TVChart = (function () {
     const saved = localStorage.getItem("chart-vwap-mode");
     if (["session", "anchored", "rolling"].includes(saved)) vwapMode = saved;
   } catch (_) { /* use the session default */ }
+  if (preferences.view) Object.assign(view, preferences.view);
+  if (preferences.vwapMode) vwapMode = preferences.vwapMode;
 
   function vwapSelection(data) {
     return data.vwap_variants?.[vwapMode] || {
@@ -368,6 +370,9 @@ window.TVChart = (function () {
      * chart under the price chart. Only split the host when a pane is shown. */
     const showRsi = view.rsi && rsi.length > 0;
     const showDii = view.dii && !!data.dii;
+    if (hooks?.priceHeight) {
+      el.style.height = `${hooks.priceHeight + (showRsi ? RSI_PANE_HEIGHT : 0) + (showDii ? 220 : 0)}px`;
+    }
     let priceEl = el;
     let rsiEl = null;
     let diiEl = null;
@@ -758,7 +763,7 @@ window.TVChart = (function () {
       const panes = [{ el: priceEl, chart, series: priceSeries, pane: "price" }];
       if (rsiSeries) panes.push({ el: rsiEl, chart: rsiChart, series: rsiSeries, pane: "rsi" });
       let saved = data.manual_corrections || [];
-      if (!hooks?.readOnly && draftKey) {
+      if ((!hooks?.readOnly || hooks?.includeDrafts) && draftKey) {
         try { saved = JSON.parse(sessionStorage.getItem(draftKey)) || drafts.get(draftKey) || saved; }
         catch (_) { saved = drafts.get(draftKey) || saved; }
       }
@@ -805,21 +810,63 @@ window.TVChart = (function () {
     if (restoreRange) chart.timeScale().setVisibleLogicalRange(restoreRange);
   }
 
-  /* Both panes stacked, so a capture still shows the whole chart. */
-  function capture() {
+  /* Stack every visible pane, including primitives, with optional export text. */
+  function captureCanvas(header = []) {
     const shots = [chart, rsiChart, diiChart].filter(Boolean).map(pane => pane.takeScreenshot());
+    if (!shots.length) throw new Error("No chart is mounted");
     const out = document.createElement("canvas");
     out.width = Math.max(...shots.map(shot => shot.width));
-    out.height = shots.reduce((height, shot) => height + shot.height, 0);
     const ctx = out.getContext("2d");
-    let y = 0;
+    const cssWidth = chart.chartElement?.().clientWidth;
+    const scale = cssWidth ? shots[0].width / cssWidth : 1;
+    const lines = [];
+    for (const row of header.filter(row => row.text)) {
+      const font = `${row.bold ? "bold " : ""}${(row.size || 13) * scale}px sans-serif`;
+      ctx.font = font;
+      let line = "";
+      for (const word of String(row.text).split(/\s+/)) {
+        const next = line ? `${line} ${word}` : word;
+        if (line && ctx.measureText(next).width > out.width - 24 * scale) {
+          lines.push({...row, text: line, font});
+          line = word;
+        } else line = next;
+      }
+      if (line) lines.push({...row, text: line, font});
+    }
+    const headerHeight = lines.length
+      ? (20 + lines.reduce((height, row) => height + (row.size || 13) + 7, 0)) * scale : 0;
+    out.height = headerHeight + shots.reduce((height, shot) => height + shot.height, 0);
+    if (headerHeight) {
+      ctx.fillStyle = BG;
+      ctx.fillRect(0, 0, out.width, headerHeight);
+      ctx.textBaseline = "top";
+      let top = 12 * scale;
+      for (const row of lines) {
+        ctx.fillStyle = row.color || TEXT;
+        ctx.font = row.font;
+        ctx.fillText(row.text, 12 * scale, top);
+        top += ((row.size || 13) + 7) * scale;
+      }
+      ctx.textBaseline = "alphabetic";
+    }
+    let y = headerHeight;
     for (const shot of shots) { ctx.drawImage(shot, 0, y); y += shot.height; }
     if (diiLegend) {
-      const top = shots.slice(0, -1).reduce((height, shot) => height + shot.height, 0);
-      ctx.fillStyle = TEXT; ctx.font = "11px sans-serif";
-      ctx.fillText(diiLegend.textContent, 8, top + 14);
+      const top = headerHeight + shots.slice(0, -1).reduce((height, shot) => height + shot.height, 0);
+      ctx.fillStyle = TEXT; ctx.font = `${11 * scale}px sans-serif`;
+      ctx.fillText(diiLegend.textContent, 8 * scale, top + 14 * scale);
     }
-    return out.toDataURL("image/png");
+    return out;
+  }
+
+  function capture(header) {
+    return captureCanvas(header).toDataURL("image/png");
+  }
+
+  function captureBlob(header) {
+    return new Promise((resolve, reject) => captureCanvas(header).toBlob(
+      blob => blob ? resolve(blob) : reject(new Error("Could not encode chart image")), "image/png",
+    ));
   }
 
   function canClose() {
@@ -829,5 +876,7 @@ window.TVChart = (function () {
     if (currentDraftKey || !count) return true;
     return window.confirm('This chart has no stable identity. Discard its corrections?');
   }
-  return { mount, unmount, capture, canClose, vwapSelection };
+  // An export gets its own charts and lifecycle, leaving the modal intact.
+  const create = () => createTVChart({view: {...view}, vwapMode, drafts});
+  return { mount, unmount, capture, captureBlob, canClose, vwapSelection, create };
 })();

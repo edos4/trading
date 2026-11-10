@@ -526,6 +526,13 @@ symbols — comma-separated (`AAPL, NVDA, MSFT`, spaces ignored) — or for the
 **top X NASDAQ stocks** by dollar volume (enter X), and draws one chart per
 symbol.
 
+On **Paper**, **Download Charts** saves a ZIP with one PNG per filtered row in
+open positions, latest trades, and the signal log, including the inactive tab.
+Images use the same chart data and selected overlays as the double-click view,
+with the title, OHLC values, pattern notes, and saved corrections. The ZIP groups
+images by table and includes `report.json` with row identities and any failures.
+Progress and cancellation are available; cancelling keeps completed images.
+
 ```bash
 # Required in .env — server refuses to start if WEB_UI_PASSWORD is empty
 WEB_UI_USERNAME=admin

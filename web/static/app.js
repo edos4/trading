@@ -412,6 +412,17 @@ function initPaper() {
   let closedRows = [];
   let closedSort = { col: "closed", desc: true };
   let lastEnvelope = { books: {} };
+  const chartRows = {open: [], closed: [], log: []};
+
+  function chartRow(side, row, index = null) {
+    return {
+      side, market: row.market, symbol: row.symbol, index,
+      logTime: side === "log" ? row.ts : null,
+      tradeId: side === "log" ? null : row.trade_id,
+      pattern: row.pattern, action: row.action, status: row.status, reason: row.reason,
+      eventTime: side === "log" ? row.ts : side === "closed" ? row.closed : row.opened,
+    };
+  }
 
   BOOKS.forEach((id) => {
     const stream = document.getElementById(`${id}-stream`);
@@ -800,6 +811,7 @@ function initPaper() {
 
   function renderClosed() {
     if (!closedBody) return;
+    chartRows.closed = [];
     let rows = closedRows.slice();
     const sf = (closedSymbol?.value || "").trim().toLowerCase();
     const rf = (closedReason?.value || "").trim();
@@ -855,6 +867,7 @@ function initPaper() {
       tr.classList.toggle("loss-row", cls === "loss");
       const srcIdx = (lastEnvelope.books[t.market]?.closed || []).indexOf(t);
       const idx = srcIdx < 0 ? closedRows.indexOf(t) : srcIdx;
+      chartRows.closed.push(chartRow("closed", t, idx));
       const sym = (lastEnvelope.books[t.market] || {}).currency_symbol || "$";
       tr.innerHTML =
         `<td><span class="pill mkt-${esc(t.market)}">${esc((t.market || "").toUpperCase())}</span></td>` +
@@ -877,6 +890,7 @@ function initPaper() {
 
   function renderPositions() {
     if (!posBody) return;
+    chartRows.open = [];
     posBody.innerHTML = "";
     const rows = [];
     for (const book of visibleBooks()) {
@@ -895,6 +909,7 @@ function initPaper() {
       return;
     }
     for (const p of rows) {
+      chartRows.open.push(chartRow("open", p));
       const tr = document.createElement("tr");
       const cls = p.unrl_pct > 0 ? "gain" : p.unrl_pct < 0 ? "loss" : "";
       tr.classList.add(`book-${p.market || "us"}`);
@@ -918,6 +933,7 @@ function initPaper() {
 
   function renderLogs() {
     if (!logsBody) return;
+    chartRows.log = [];
     logsBody.innerHTML = "";
     const lfSymbol = (logSymbol?.value || "").trim().toLowerCase();
     const lfPattern = (logPattern?.value || "").trim().toLowerCase();
@@ -939,6 +955,7 @@ function initPaper() {
       return true;
     });
     for (const row of logRows) {
+      chartRows.log.push(chartRow("log", row));
       const tr = document.createElement("tr");
       tr.classList.add(`book-${row.market || "us"}`);
       tr.title = "Double-click to open chart";
@@ -1077,6 +1094,16 @@ function initPaper() {
     if (chartOhlc) chartOhlc.textContent = "";
   }
 
+  function tradeChartUrl({side, market, symbol, index, logTime, tradeId}, timeframe) {
+    const params = new URLSearchParams({side, market: market || ""});
+    if (symbol) params.set("symbol", symbol);
+    if (index != null) params.set("index", String(index));
+    if (logTime) params.set("log_time", logTime);
+    if (tradeId) params.set("trade_id", tradeId);
+    if (timeframe && timeframe !== "1d") params.set("timeframe", timeframe);
+    return `/api/paper/chart?${params.toString()}`;
+  }
+
   async function openTradeChart(side, market, symbol, index, logTime, tradeId, timeframe) {
     if (!chartModal) return;
     chartArgs = { side, market, symbol, index, logTime, tradeId };
@@ -1091,14 +1118,8 @@ function initPaper() {
       chartStatus.classList.remove("pattern-note");
       chartStatus.textContent = "Loading…";
     }
-    const params = new URLSearchParams({ side, market: market || "" });
-    if (symbol) params.set("symbol", symbol);
-    if (index != null) params.set("index", String(index));
-    if (logTime) params.set("log_time", logTime);
-    if (tradeId) params.set("trade_id", tradeId);
-    if (chartTimeframe !== "1d") params.set("timeframe", chartTimeframe);
     try {
-      const data = await api(`/api/paper/chart?${params.toString()}`);
+      const data = await api(tradeChartUrl(chartArgs, chartTimeframe));
       if (data.timeframe) {
         chartTimeframe = data.timeframe === "1W" ? "1W" : "1d";
         if (weeklyBtn) {
@@ -1273,6 +1294,54 @@ function initPaper() {
       );
     } catch (e) {
       window.alert(String(e.message || e));
+    }
+  });
+
+  const downloadCharts = document.getElementById("paper-download-charts");
+  const cancelCharts = document.getElementById("paper-cancel-charts");
+  const exportStatus = document.getElementById("paper-charts-status");
+  let chartDownload = null;
+  cancelCharts?.addEventListener("click", () => {
+    chartDownload?.abort();
+    cancelCharts.disabled = true;
+  });
+  downloadCharts?.addEventListener("click", async () => {
+    if (chartDownload) return;
+    // Snapshot all three filtered tables, including the inactive tab. Polling
+    // or sorting during a download must not change its row identities.
+    const rows = [...chartRows.open, ...chartRows.closed, ...chartRows.log];
+    if (!rows.length) {
+      exportStatus.textContent = "No rows match the current filters.";
+      return;
+    }
+    chartDownload = new AbortController();
+    downloadCharts.disabled = true;
+    cancelCharts.hidden = false;
+    cancelCharts.disabled = false;
+    try {
+      if (!window.ChartExport) throw new Error("Chart exporter is not loaded; reload the page");
+      const result = await window.ChartExport.download({
+        rows, label: marketFilter, signal: chartDownload.signal,
+        loadChart: (row, signal) => api(tradeChartUrl(row), {signal}),
+        header: (data, row) => [
+          {text: data.title || row.symbol, bold: true, size: 16},
+          {text: fmtTvOhlc(data), color: Number(data.ohlc?.change) < 0 ? "#ef5350" : "#26a69a", size: 12},
+          {text: [String(row.market).toUpperCase(), {open: "Open position", closed: "Latest trade", log: "Signal log"}[row.side], row.eventTime, row.status, row.side === "log" ? row.reason : null].filter(Boolean).join(" · "), color: "#a8b3c5", size: 12},
+          {text: [data.pattern_note, data.trendline_note].filter(Boolean).join(" · "), color: data.pattern_note ? "#ffeb3b" : "#a8b3c5"},
+        ],
+        onProgress: (message, canCancel = true) => {
+          exportStatus.textContent = message;
+          cancelCharts.disabled = !canCancel || chartDownload.signal.aborted;
+        },
+      });
+      exportStatus.textContent = `${result.cancelled ? "Cancelled. " : ""}${result.exported} of ${result.requested} charts downloaded${result.downloaded ? " in a ZIP" : ""}.` +
+        (result.failed ? ` ${result.failed} failed; see report.json in the ZIP.` : "");
+    } catch (err) {
+      exportStatus.textContent = `Chart download failed: ${String(err.message || err)}`;
+    } finally {
+      chartDownload = null;
+      downloadCharts.disabled = false;
+      cancelCharts.hidden = true;
     }
   });
 

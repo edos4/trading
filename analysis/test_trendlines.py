@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import warnings
 from pathlib import Path
 
@@ -44,6 +45,97 @@ def test_confirmed_close_break_survives_recovery(high, breaches, expected):
     # Old price action before this independently fitted rail cannot break it.
     close[:2] = projected[:2] + (10. if high else -10.)
     assert _rail_broken(close, 3, projected[3], .5, high, atr=2.) is expected
+
+
+@pytest.mark.parametrize("high", [False, True])
+def test_a_large_single_close_break_survives_recovery(high):
+    close = np.full(100, 102. if not high else 98.)
+    close[55] = 97.5 if not high else 102.5
+
+    assert _rail_broken(close, 10, 100., 0., high, atr=2.)
+
+
+@pytest.mark.parametrize("high", [False, True])
+@pytest.mark.parametrize("new_touches", [False, True])
+def test_a_confirmed_break_separates_touch_sequences(high, new_touches):
+    # Two closes below support cannot be diluted by a long clean history or
+    # erased by a recovery. Later lows form a new line requiring new anchors.
+    n = 100
+    points = [(10, 100.), (40, 100.), (80, 100.)]
+    if new_touches:
+        points.append((90, 100.))
+    bars = np.full(n, 101.)
+    bodies = np.full(n, 102.)
+    close = bodies.copy()
+    bars[[i for i, _ in points]] = 100.
+    close[55:57] = bodies[55:57] = 99.1
+    bars[55:57] = 98.9
+    if high:
+        bars, bodies, close = 200. - bars, 200. - bodies, 200. - close
+
+    selected = _select_line(
+        points, bars, bodies, high, tol=.4, n=n, min_span=6,
+        last_close=float(close[-1]), end_tolerance=12., atr=2., close=close,
+    )
+
+    if new_touches:
+        assert selected is not None
+        assert selected[1:] == ([80, 90], 90)
+    else:
+        assert selected is None
+
+
+@pytest.mark.parametrize("high", [False, True])
+@pytest.mark.parametrize("breaches,depth,extends", [
+    ([75], .9, True), ([75, 76], .9, False), ([75], 2.5, False),
+])
+def test_stale_extensions_cannot_bridge_a_recovered_break(high, breaches, depth, extends):
+    n = 100
+    points = [(10, 100.), (40, 100.), (70, 100.)]
+    bars, bodies = np.full(n, 101.), np.full(n, 102.)
+    close = bodies.copy()
+    bars[[i for i, _ in points]] = 100.
+    close[breaches] = bodies[breaches] = 100. - depth
+    bars[breaches] = 99.8 - depth
+    if high:
+        bars, bodies, close = 200. - bars, 200. - bodies, 200. - close
+
+    selected = _select_line(
+        points, bars, bodies, high, tol=.4, n=n, min_span=6,
+        last_close=float(close[-1]), end_tolerance=12., atr=2., close=close,
+    )
+
+    assert (selected is not None) is extends
+    if extends:
+        assert selected[1:] == ([10, 40, 70], n - 1)
+
+
+@pytest.mark.parametrize("symbol,kind,start,end,pivots,broken", [
+    ("MORN", "support", "2026-10-05", "2026-10-28", 2, False),
+    ("JKHY", "support", "2026-10-02", "2026-10-29", 3, False),
+    ("JKHY", "resistance", "2026-09-03", "2026-10-26", 3, True),
+    ("GTES", "resistance", "2026-10-06", "2026-10-28", 2, False),
+])
+def test_november_chart_rails_refit_after_breaks(symbol, kind, start, end, pivots, broken):
+    # These exported charts joined old and new touches across a breakdown:
+    # MORN July→October support, JKHY June→October support / January→October
+    # resistance, and GTES August→October resistance. Keep the exact tapes
+    # offline so the regressions do not depend on a running API or new prices.
+    fixture = json.loads((Path(__file__).parents[1] / "tests/fixtures/trendline_regimes.json").read_text())
+    df = pd.DataFrame(fixture["symbols"][symbol], columns=fixture["columns"])
+    df.index = pd.DatetimeIndex(df.pop("date"))
+
+    line = next(line for line in detect_trendlines(df) if line["kind"] == kind)
+
+    assert df.index[line["start_index"]].date().isoformat() == start
+    assert df.index[line["end_index"]].date().isoformat() == end
+    assert line["pivots"] == pivots
+    assert line["confirmed"] is (pivots >= 3)
+    assert line["broken"] is broken
+    payload = build_trade_viewer_payload(df, symbol=symbol, trendlines=True)
+    segment = next(rail for rail in payload["trendlines"] if rail["kind"] == kind)
+    assert [point["time"] for point in segment["data"]] == [start, end]
+    assert segment["style"] == ("--" if broken else (":" if pivots < 3 else "-"))
 
 
 def test_detect_trendlines_returns_blue_support_and_resistance() -> None:
@@ -433,7 +525,7 @@ def test_stale_refit_can_choose_a_lower_scoring_current_rail(offset: int) -> Non
 
     selected = _select_line(
         points, bars, bodies, False,
-        tol=.4, n=n, min_span=6, last_close=112., end_tolerance=112. * .12, atr=2.,
+        tol=.4, n=n, min_span=6, last_close=112., end_tolerance=112. * .12, atr=2., close=bodies,
     )
 
     assert selected is not None
@@ -500,7 +592,7 @@ def test_later_clean_bars_do_not_hide_cuts_in_the_drawn_anchor_span(high: bool, 
 
     assert _select_line(
         points, bars, bodies, high,
-        tol=.4, n=n, min_span=6, last_close=98. if high else 102., end_tolerance=12., atr=2.,
+        tol=.4, n=n, min_span=6, last_close=98. if high else 102., end_tolerance=12., atr=2., close=bodies,
     ) is None
 
 
@@ -521,7 +613,7 @@ def test_a_stale_rail_only_extends_across_clean_wicks(high: bool, penetrating_wi
 
     selected = _select_line(
         points, bars, bodies, high,
-        tol=.4, n=n, min_span=16, last_close=98.5 if high else 101.5, end_tolerance=12., atr=2.,
+        tol=.4, n=n, min_span=16, last_close=98.5 if high else 101.5, end_tolerance=12., atr=2., close=bodies,
     )
 
     if penetrating_wicks:
@@ -583,7 +675,7 @@ def test_pivots_before_a_line_start_do_not_count_as_violations() -> None:
     bars = np.full(50, 60.0)
     result = _evaluate(
         points, 20, 55.0, 30, 54.0, bars, bars, False,
-        tol=1.0, n=50, last_close=54.0, end_tolerance=100.0, atr=1.0,
+        tol=1.0, n=50, last_close=54.0, end_tolerance=100.0, atr=1.0, close=bars,
     )
 
     assert result is not None
@@ -596,7 +688,7 @@ def test_body_penetration_rejects_a_rail_cutting_candles() -> None:
     bodies = np.full(50, 50.0)  # candle bodies cut through it
     result = _evaluate(
         points, 20, 55.0, 30, 54.0, bars, bodies, False,
-        tol=1.0, n=50, last_close=54.0, end_tolerance=100.0, atr=1.0,
+        tol=1.0, n=50, last_close=54.0, end_tolerance=100.0, atr=1.0, close=bodies,
     )
 
     assert result is None

@@ -111,7 +111,10 @@
     <button type="button" class="pill-btn" data-filter="ph">PH</button>
   </div>
   <p class="muted small" id="paper-sort-note">P&amp;L sort is per market — pick US or PH.</p>
+  <button type="button" class="btn" id="paper-download-charts" title="Download a ZIP with one PNG per filtered row in open positions, latest trades, and the signal log">Download Charts</button>
+  <button type="button" class="btn" id="paper-cancel-charts" hidden>Cancel download</button>
 </div>
+<p class="muted small" id="paper-charts-status" role="status" aria-live="polite">Downloads one PNG per row in open positions, latest trades, and the signal log as a ZIP. Uses current market and table filters and chart overlays.</p>
 
 <div class="tabs" role="tablist">
   <button type="button" class="tab active" data-tab="positions" role="tab" aria-selected="true">Positions</button>
@@ -260,9 +263,10 @@
 {% endblock %}
 {% block scripts %}
 <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
-<script src="/static/tv_chart.js?v=24"></script>
+<script src="/static/tv_chart.js?v=25"></script>
 <script src="/static/pattern_notes.js?v=3"></script>
 <script src="/static/chart_draw.js?v=11"></script>
+<script src="/static/chart_export.js?v=1"></script>
 <script>
   window.TB_PAGE = "paper";
   window.TB_MARKETS = {{ markets | tojson }};

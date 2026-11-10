@@ -4,7 +4,8 @@ A rail is drawn through two confirmed swing points and is only extended when
 the projection stays close to price without cutting through candle bodies. If
 its anchors are stale, the rail is refit on the recent regime; if that also
 fails, the rail is dropped rather than projected through unrelated price
-action. Support and resistance are selected independently.
+action. A confirmed close break separates touch sequences, even if price
+later recovers. Support and resistance are selected independently.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ EXTENSION_WRONG_SIDE_MAX = 0.20
 MIN_CHANNEL_OVERLAP = 10
 CLOSE_PAIR_ATR = 0.5
 BROKEN_SIDE_ATR = 0.25
+SINGLE_CLOSE_BREAK_ATR = 1.0
 
 
 def _column(df: pd.DataFrame, *names: str) -> np.ndarray:
@@ -89,14 +91,19 @@ def _line_value(index: int, i0: int, p0: float, slope: float) -> float:
 
 
 def _rail_broken(close: np.ndarray, start: int, price: float, slope: float,
-                 high: bool, atr: float) -> bool:
+                 high: bool, atr: float, *, warn_current: bool = True) -> bool:
     """Keep a confirmed close break even after price recovers above the rail."""
     projected = price + slope * (np.arange(start, len(close)) - start)
     beyond = (close[start:] - projected) if high else (projected - close[start:])
     breached = beyond > BROKEN_SIDE_ATR * atr
-    # Preserve the current-close warning; historical breaks require two
-    # consecutive closes, so a wick or isolated recovered close is insufficient.
-    return bool(breached[-1] or np.any(breached[:-1] & breached[1:]))
+    # Two closes beyond 0.25 ATR or one beyond a full ATR end the regime.
+    # A small isolated recovered close remains noise. The final close also
+    # warns about an emerging break, but cannot invalidate earlier anchors.
+    return bool(
+        (warn_current and breached[-1])
+        or np.any(breached[:-1] & breached[1:])
+        or np.any(beyond > SINGLE_CLOSE_BREAK_ATR * atr)
+    )
 
 
 def _evaluate(
@@ -113,6 +120,8 @@ def _evaluate(
     last_close: float,
     end_tolerance: float,
     atr: float,
+    *,
+    close: np.ndarray,
 ) -> dict | None:
     """Score a candidate line: confirming touches versus wick/body violations."""
     slope = (p1 - p0) / (i1 - i0)
@@ -143,6 +152,13 @@ def _evaluate(
 
     span_bars = max(1, n - i0)
     last_touch = max(touches)
+    # Percentages over a long history can hide a short, decisive breakdown.
+    # A touch after a confirmed break belongs to a new regime and must not
+    # confirm this candidate, even when the line later returns to price.
+    if _rail_broken(
+        close[:last_touch + 1], i0, p0, slope, high, atr, warn_current=False,
+    ):
+        return None
     # Recent overhead resistance can remain valid after a selloff, as can
     # underlying support after a rally. Distance alone does not invalidate
     # their anchored spans. Distant stale rails and wrong-side projections
@@ -212,6 +228,8 @@ def _best_line(
     start_floor: int = 0,
     require_current: bool = False,
     plateau_ends: dict[int, int] | None = None,
+    *,
+    close: np.ndarray,
 ) -> dict | None:
     best: dict | None = None
     last_points = [(plateau_ends.get(i, i), price) for i, price in points] if plateau_ends else points
@@ -239,7 +257,7 @@ def _best_line(
                 continue
             candidate = _evaluate(
                 candidate_points, i0, p0, i1, p1, bars, bodies, high, tol, n,
-                last_close, end_tolerance, atr,
+                last_close, end_tolerance, atr, close=close,
             )
             if candidate is None:
                 continue
@@ -249,6 +267,7 @@ def _best_line(
                 and n - 1 - max(candidate["touches"]) > MAX_STALE_BARS
                 and not _can_extend(
                     candidate, candidate["touches"], bars, bodies, high, tol, n, last_close, atr,
+                    close=close,
                 )
             ):
                 # A stale high-scoring rail must not hide a lower-scoring
@@ -269,8 +288,12 @@ def _can_extend(
     n: int,
     last_close: float,
     atr: float,
+    *,
+    close: np.ndarray,
 ) -> bool:
     """Only draw past the last touch across clean, nearby price action."""
+    if _rail_broken(close, best["i0"], best["p0"], best["slope"], high, atr):
+        return False
     end = max(touches)
     if end >= n - 1:
         return True
@@ -306,6 +329,8 @@ def _select_line(
     end_tolerance: float,
     atr: float,
     plateau_ends: dict[int, int] | None = None,
+    *,
+    close: np.ndarray,
 ) -> tuple[dict, list[int], int] | None:
     """Pick a rail, extending or refitting it when its anchors are stale."""
     best = _best_line(
@@ -315,6 +340,7 @@ def _select_line(
         # may still need its first anchor before the recent refit window.
         require_current=True,
         plateau_ends=plateau_ends,
+        close=close,
     )
     recent_min_span = min(min_span, max(6, int(min(n, RECENT_BARS) * MIN_SPAN_FRACTION)))
     if best is not None:
@@ -322,7 +348,7 @@ def _select_line(
         end = touches[-1]
         if n - 1 - end <= MAX_STALE_BARS:
             return best, touches, end
-        if _can_extend(best, touches, bars, bodies, high, tol, n, last_close, atr):
+        if _can_extend(best, touches, bars, bodies, high, tol, n, last_close, atr, close=close):
             return best, touches, n - 1
     elif recent_min_span == min_span:
         # Searching a subset with the same span cannot rescue a missing fit.
@@ -336,13 +362,14 @@ def _select_line(
         start_floor=max(0, n - RECENT_BARS),
         require_current=True,
         plateau_ends=plateau_ends,
+        close=close,
     )
     if recent is not None:
         recent_touches = sorted(recent["touches"])
         recent_end = recent_touches[-1]
         if n - 1 - recent_end <= MAX_STALE_BARS:
             return recent, recent_touches, recent_end
-        if _can_extend(recent, recent_touches, bars, bodies, high, tol, n, last_close, atr):
+        if _can_extend(recent, recent_touches, bars, bodies, high, tol, n, last_close, atr, close=close):
             return recent, recent_touches, n - 1
     # No current rail: drop it rather than project an old regime.
     return None
@@ -392,6 +419,7 @@ def detect_trendlines(
 
     Each rail is clipped to its last confirming pivot, extended only across
     clean nearby price action, and refit on the recent regime when stale.
+    Touches separated by a confirmed close break cannot form the same rail.
     Lines are independent, so a channel is never forced. Incomplete or
     inconsistent OHLC frames cannot validate a rail and return no lines.
     """
@@ -428,6 +456,7 @@ def detect_trendlines(
             points, bars, bodies, high, tolerance, n, min_span,
             last_close, end_tolerance, atr,
             plateau_ends=_plateau_endpoints(bars, points),
+            close=close,
         )
         if selected is None:
             continue
