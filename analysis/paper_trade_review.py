@@ -276,7 +276,11 @@ def replay_trade(trade: dict, *, target_max_r: float | None = None,
 
 
 def boundary_objective_comparison(trades: list[dict], **replay_options) -> dict:
-    """Saved-entry diagnostic; never claim a rescan or alternative portfolio."""
+    """Correct only explicitly versioned close-anchored objectives, once.
+
+    Unversioned historical targets cannot be diagnosed from a target and a
+    boundary alone: subtracting overshoot again may corrupt a correct target.
+    """
     rows, excluded, targets = [], [], []
     for trade in trades:
         requested = trade.get("requested_rules") or {}
@@ -291,10 +295,24 @@ def boundary_objective_comparison(trades: list[dict], **replay_options) -> dict:
         if not math.isclose(requested["take_profit"], resolved["take_profit"], abs_tol=.0001, rel_tol=0):
             excluded.append({"trade_id": trade["trade_id"], "reason": "execution already changed the requested objective"})
             continue
-        # The old adapter measured from the signal close. Keep the original
-        # pattern height, shifting only that anchor to the saved boundary.
-        target = resolved["take_profit"] + next(iter(levels)) - requested["price"]
         sign = -1 if trade["action"] == "SELL" else 1
+        evidence = trade.get('pattern_evidence') or requested.get('pattern_evidence') or {}
+        policy = evidence.get('objective_policy')
+        height = evidence.get('measured_height')
+        level = next(iter(levels))
+        if policy not in ('boundary-measured-v1', 'signal-close-measured-v1'):
+            excluded.append({'trade_id': trade['trade_id'], 'reason': 'unverified objective policy; no correction inferred'})
+            continue
+        if (isinstance(height, bool) or not isinstance(height, (int, float)) or not math.isfinite(height)
+                or height <= 0 or evidence.get('direction') != sign
+                or not math.isclose(evidence.get('breakout_level', 0), level, abs_tol=.000001, rel_tol=0)):
+            excluded.append({'trade_id': trade['trade_id'], 'reason': 'invalid objective evidence'})
+            continue
+        anchor = level if policy == 'boundary-measured-v1' else requested['price']
+        if not math.isclose(requested['take_profit'], anchor+sign*height, abs_tol=.00006, rel_tol=0):
+            excluded.append({'trade_id': trade['trade_id'], 'reason': 'saved target differs from objective evidence'})
+            continue
+        target = level+sign*height
         if target <= 0 or sign * (target - resolved["price"]) <= 0:
             excluded.append({"trade_id": trade["trade_id"], "reason": "objective exhausted before entry"})
             continue
@@ -307,7 +325,8 @@ def boundary_objective_comparison(trades: list[dict], **replay_options) -> dict:
     return {
         "scope": "same saved entries, quantities, costs and external exit decisions; observed OHLC only",
         "closed": summarize([row for row in rows if row["exit_reason"] != "open"]),
-        "total_liquidation_pnl": sum(row["pnl"] for row in rows),
+        "total_liquidation_pnl": sum(row["pnl"] for row in rows) if rows else None,
+        "verified_objective_policies": len(rows),
         "excluded": excluded, "targets": targets, "rows": rows,
     }
 

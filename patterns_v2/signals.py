@@ -321,6 +321,8 @@ def _to_signal(df: pd.DataFrame, raw: dict, *, symbol: str, timeframe: str, late
             "entry_boundary_policy": "frozen-breakout-v1",
             "breakout_level": float(raw["level"]),
             "direction": direction,
+            "objective_policy": "boundary-measured-v1",
+            "measured_height": abs(target-float(raw["level"])),
         },
         signal_bar_idx=idx,
     )

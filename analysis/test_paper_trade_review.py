@@ -30,6 +30,8 @@ def test_boundary_objective_comparison_uses_saved_geometry_and_keeps_input(short
     trade["requested_rules"] = {"price": 100 + sign * 25,
                                "take_profit": trade["resolved_rules"]["take_profit"]}
     trade["chart_annotations"] = [{"type": "hline", "label": "level", "price": 100}]
+    trade['pattern_evidence'] = {'objective_policy': 'signal-close-measured-v1',
+                                 'breakout_level': 100, 'direction': sign, 'measured_height': 5}
     original = deepcopy(trade)
     result = boundary_objective_comparison([trade])
     assert not result["excluded"]
@@ -37,7 +39,27 @@ def test_boundary_objective_comparison_uses_saved_geometry_and_keeps_input(short
     assert result["rows"][0]["exit"] == (95 if short else 105)
     assert trade == original
     trade["requested_rules"]["price"] = 100 + sign * 31
-    assert boundary_objective_comparison([trade])["excluded"][0]["reason"] == "objective exhausted before entry"
+    assert boundary_objective_comparison([trade])["excluded"][0]["reason"] == "saved target differs from objective evidence"
+
+
+@pytest.mark.parametrize('short', [False, True])
+def test_already_boundary_anchored_target_is_never_shifted_again(short):
+    trade = saved_trade(short)
+    sign = -1 if short else 1
+    trade['chart_annotations'] = [{'type': 'hline', 'label': 'level', 'price': 100}]
+    trade['requested_rules'] = {'price': 100+sign*5, 'take_profit': trade['resolved_rules']['take_profit']}
+    trade['pattern_evidence'] = {'objective_policy': 'boundary-measured-v1',
+                                 'breakout_level': 100, 'direction': sign, 'measured_height': 30}
+    original = deepcopy(trade)
+    result = boundary_objective_comparison([trade])
+    assert not result['excluded']
+    assert result['targets'][0]['boundary_target'] == trade['resolved_rules']['take_profit']
+    assert result['rows'][0]['pnl'] == pytest.approx(trade['pnl'])
+    assert trade == original
+    del trade['pattern_evidence']
+    result = boundary_objective_comparison([trade])
+    assert not result['rows'] and result['total_liquidation_pnl'] is None
+    assert 'unverified objective policy' in result['excluded'][0]['reason']
 
 
 def test_review_flags_unrelated_logs_instead_of_explaining_scan_rejections_with_them():
