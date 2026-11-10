@@ -674,6 +674,114 @@ def test_deep_recovered_body_crossing_requires_new_anchors(high):
     assert selected[1:] == ([70, 80, 90], 90)
 
 
+@pytest.mark.parametrize("high", [False, True])
+@pytest.mark.parametrize("first_cut", [55, 75])
+@pytest.mark.parametrize("offsets", [(0,), (0, 2), (0, 1)])
+def test_consecutive_recovered_bodies_cannot_bridge_anchors_or_extensions(high, first_cut, offsets):
+    # Each open is only .45 ATR past the line, with every close recovering.
+    # Two consecutive bodies must not disappear into a long clean history;
+    # one isolated crossing or separated small crossings remain tolerable.
+    n = 100
+    points = [(10, 100.), (40, 100.), (70, 100.)]
+    bars, bodies = np.full(n, 101.), np.full(n, 102.)
+    close = bodies.copy()
+    bars[[i for i, _ in points]] = 100.
+    cuts = [first_cut + offset for offset in offsets]
+    bars[cuts], bodies[cuts] = 98.9, 99.1
+    if high:
+        bars, bodies, close = 200. - bars, 200. - bodies, 200. - close
+
+    selected = _select_line(
+        points, bars, bodies, high, tol=.4, n=n, min_span=6,
+        last_close=float(close[-1]), end_tolerance=12., atr=2., close=close,
+    )
+
+    if offsets == (0, 1):
+        assert selected is None
+    else:
+        assert selected is not None
+        assert selected[1:] == ([10, 40, 70], n - 1)
+
+
+@pytest.mark.parametrize("high", [False, True])
+def test_consecutive_recovered_bodies_require_new_anchors(high):
+    n = 100
+    points = [(10, 100.), (40, 100.), (70, 100.), (80, 100.), (90, 100.)]
+    bars, bodies = np.full(n, 101.), np.full(n, 102.)
+    close = bodies.copy()
+    bars[[i for i, _ in points]] = 100.
+    bars[55:57], bodies[55:57] = 98.9, 99.1
+    if high:
+        bars, bodies, close = 200. - bars, 200. - bodies, 200. - close
+
+    selected = _select_line(
+        points, bars, bodies, high, tol=.4, n=n, min_span=6,
+        last_close=float(close[-1]), end_tolerance=12., atr=2., close=close,
+    )
+
+    assert selected is not None
+    assert selected[1:] == ([70, 80, 90], 90)
+
+
+@pytest.mark.parametrize("high", [False, True])
+@pytest.mark.parametrize("cuts,depth,broken", [([79], .9, False), ([78, 79], .9, True), ([79], 2.5, True)])
+def test_recent_clipped_rail_reports_recovered_body_breaks(high, cuts, depth, broken):
+    # Final-bar moves have no confirmed swing yet, so they change the state
+    # of the existing anchored segment instead of supplying new anchors.
+    n = 80
+    df = pd.DataFrame({"open": np.full(n, 102.), "high": 103., "low": 101., "close": 102., "volume": 1000.},
+                      index=pd.bdate_range("2024-01-02", periods=n))
+    df.loc[df.index[[10, 40, 70]], "low"] = 100.
+    df.loc[df.index[cuts], "open"] = 100. - depth
+    df.loc[df.index[cuts], "low"] = 99.8 - depth
+    if high:
+        original = df.copy()
+        df["open"], df["close"] = 200. - original["open"], 200. - original["close"]
+        df["high"], df["low"] = 200. - original["low"], 200. - original["high"]
+    kind = "resistance" if high else "support"
+
+    line = next(line for line in detect_trendlines(df) if line["kind"] == kind)
+
+    assert (line["start_index"], line["end_index"], line["pivots"]) == (10, 70, 3)
+    assert line["broken"] is broken
+    segment = next(line for line in build_trade_viewer_payload(df, symbol="TEST", trendlines=True)["trendlines"]
+                   if line["kind"] == kind)
+    assert segment["style"] == ("--" if broken else "-")
+
+
+@pytest.mark.parametrize("symbol,kind,start,end,pivots,broken", [
+    ("NVMI", "support", "2026-03-30", "2026-10-23", 5, True),
+    ("KNSL", "resistance", "2026-01-08", "2026-10-22", 4, False),
+    ("WTRG", "resistance", "2025-11-14", "2026-10-23", 4, True),
+    ("DVN", "resistance", "2026-05-05", "2026-10-30", 3, False),
+])
+def test_reviewed_charts_do_not_dilute_consecutive_body_cuts(symbol, kind, start, end, pivots, broken):
+    fixture = json.loads((Path(__file__).parents[1] / "tests/fixtures/trendline_body_clusters.json").read_text())
+    df = pd.DataFrame(fixture["symbols"][symbol], columns=fixture["columns"])
+    df.index = pd.DatetimeIndex(df.pop("date"))
+
+    lines = detect_trendlines(df)
+    line = next(line for line in lines if line["kind"] == kind)
+
+    assert str(df.index[line["start_index"]].date()) == start
+    assert str(df.index[line["end_index"]].date()) == end
+    assert line["pivots"] == pivots
+    assert line["broken"] is broken
+    if symbol == "DVN":
+        # The exported support crossed two recovered opens on Nov 6 and 9.
+        # No replacement with two clean anchors is available yet.
+        assert all(line["kind"] != "support" for line in lines)
+    for line in lines:
+        positions = np.arange(line["start_index"], line["end_index"] + 1)
+        projected = line["start_price"] + line["slope"] * (positions - positions[0])
+        bodies = df[["open", "close"]]
+        depth = (bodies.max(axis=1).to_numpy()[positions] - projected
+                 if line["kind"] == "resistance"
+                 else projected - bodies.min(axis=1).to_numpy()[positions])
+        cuts = depth > max(_atr(df) * .4, df["close"].median() * .002)
+        assert not np.any(cuts[:-1] & cuts[1:])
+
+
 @pytest.mark.parametrize("resistance", [False, True])
 def test_prim_gap_refits_on_either_side_without_crossing_deep_bodies(resistance):
     fixture = json.loads((Path(__file__).parents[1] / "tests/fixtures/trendline_regimes.json").read_text())

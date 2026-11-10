@@ -5,9 +5,9 @@ the projection stays close to price without cutting through candle bodies. If
 its anchors are stale, the rail is refit on the recent regime; if that also
 fails, the rail is dropped rather than projected through unrelated price
 action. A confirmed close break separates touch sequences, even if price
-later recovers. A deep candle-body crossing also invalidates the drawn span,
-even when that candle recovers by its close. Support and resistance are
-selected independently.
+later recovers. A deep candle-body crossing or consecutive body crossings
+also invalidate the drawn span, even when those candles recover by their
+closes. Support and resistance are selected independently.
 """
 
 from __future__ import annotations
@@ -109,6 +109,18 @@ def _rail_broken(close: np.ndarray, start: int, price: float, slope: float,
     )
 
 
+def _body_broken(bodies: np.ndarray, start: int, price: float, slope: float,
+                 high: bool, tol: float, atr: float) -> bool:
+    """Deep or repeated body cuts end a regime even when closes recover."""
+    projected = price + slope * (np.arange(start, len(bodies)) - start)
+    depth = bodies[start:] - projected if high else projected - bodies[start:]
+    penetrated = depth > tol
+    return bool(
+        np.any(depth > max(tol, MAX_BODY_PENETRATION_ATR * atr))
+        or np.any(penetrated[:-1] & penetrated[1:])
+    )
+
+
 def _evaluate(
     points: list[tuple[int, float]],
     i0: int,
@@ -160,7 +172,7 @@ def _evaluate(
     # confirm this candidate, even when the line later returns to price.
     if _rail_broken(
         close[:last_touch + 1], i0, p0, slope, high, atr, warn_current=False,
-    ):
+    ) or _body_broken(bodies[:last_touch + 1], i0, p0, slope, high, tol, atr):
         return None
     # Recent overhead resistance can remain valid after a selloff, as can
     # underlying support after a rally. Distance alone does not invalidate
@@ -175,7 +187,6 @@ def _evaluate(
     body_penetrated = 0
     anchor_wick_penetrated = 0
     anchor_body_penetrated = 0
-    body_depth_limit = max(tol, MAX_BODY_PENETRATION_ATR * atr)
     for i in range(i0, n):
         value = _line_value(i, i0, p0, slope)
         if (bars[i] > value + tol) if high else (bars[i] < value - tol):
@@ -183,11 +194,6 @@ def _evaluate(
             if i <= last_touch:
                 anchor_wick_penetrated += 1
         body_depth = bodies[i] - value if high else value - bodies[i]
-        # A gap opening far past the boundary may recover by the close, so
-        # close-break checks alone miss it. A long clean history must not
-        # dilute one decisive body crossing between confirming touches.
-        if i <= last_touch and body_depth > body_depth_limit:
-            return None
         if body_depth > tol:
             body_penetrated += 1
             if i <= last_touch:
@@ -304,6 +310,8 @@ def _can_extend(
     """Only draw past the last touch across clean, nearby price action."""
     if _rail_broken(close, best["i0"], best["p0"], best["slope"], high, atr):
         return False
+    if _body_broken(bodies, best["i0"], best["p0"], best["slope"], high, tol, atr):
+        return False
     end = max(touches)
     if end >= n - 1:
         return True
@@ -315,12 +323,9 @@ def _can_extend(
     wrong = 0
     wick_wrong = 0
     total = n - 1 - end
-    body_depth_limit = max(tol, MAX_BODY_PENETRATION_ATR * atr)
     for i in range(end + 1, n):
         value = _line_value(i, i0, p0, slope)
         body_depth = bodies[i] - value if high else value - bodies[i]
-        if body_depth > body_depth_limit:
-            return False
         if body_depth > tol:
             wrong += 1
         if (bars[i] > value + tol) if high else (bars[i] < value - tol):
@@ -435,7 +440,8 @@ def detect_trendlines(
     clean nearby price action, and refit on the recent regime when stale.
     Touches separated by a confirmed close break cannot form the same rail.
     A candle body more than one ATR past a rail (or the touch tolerance,
-    if larger) cannot lie inside its anchored span or extension.
+    if larger), or two consecutive bodies past the touch tolerance, cannot
+    lie inside its anchored span or extension, even if their closes recover.
     Lines are independent, so a channel is never forced. Incomplete or
     inconsistent OHLC frames cannot validate a rail and return no lines.
     """
@@ -481,7 +487,10 @@ def detect_trendlines(
         start = touches[0]
         start_price = _line_value(start, best["i0"], best["p0"], slope)
         end_price = _line_value(end, best["i0"], best["p0"], slope)
-        broken = _rail_broken(close, start, start_price, slope, high, atr)
+        broken = (
+            _rail_broken(close, start, start_price, slope, high, atr)
+            or _body_broken(bodies, start, start_price, slope, high, tolerance, atr)
+        )
         lines.append({
             "kind": kind,
             "start_index": start,
