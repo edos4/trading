@@ -8,7 +8,7 @@
 | Inconsistent target R and risk labels | Fixed: `target_risk_basis=pattern|paper_initial` shares one cap formula between paper execution and review; fills export gross distances and the separate net budget. Default remains pattern and cap remains off. Tests reproduce both original diagnostic totals and verify mirrored fill/export/replay agreement. |
 | Boundary diagnostic shifts already correct targets | Fixed: new V2 signals save boundary/objective policy and measured height. The diagnostic leaves verified boundary targets unchanged, corrects only explicitly identified close-anchored objectives, and excludes unversioned history rather than guessing. |
 | Volatility/holding-objective mismatch | Implemented: new V2 signals preserve unclamped signal-time ATR; fills record actual initial-stop/ATR fit. `paper_v2_min_stop_atr` can reject budget-incompatible entries before fees, using no execution-day range. Default 0 records evidence; explicit target-risk controls permit coherent target experiments. Profitability and a minimum threshold still require separate evaluation. |
-| Kronos selection is not a holdout / incomplete policy comparisons | Pending: enforce evaluation eligibility and compare complete frozen runs. |
+| Kronos selection is not a holdout / incomplete policy comparisons | Implemented: review explicitly assesses every saved forecast's model boundary. `analysis.paper_policy_evaluation` registers frozen experiment plans and compares independently executed funded runs only when sources, tape, universe, costs, controls, journal coverage, and model eligibility agree. Missing/ineligible evidence suppresses a claimed improvement. New uninspected data is still needed for a profitability conclusion. |
 | Falling-wedge/DII cohort losses | Pending: reproducible cohort attribution and temporally separate evaluation, rather than historical winner selection. |
 | Export loses manifest and exit-decision history | Fixed: web/CLI exports retain the existing source manifest, resolved non-secret thresholds, entry-universe identity, execution assumptions, and detected runtime control changes. Every held-position Kronos result—including deferred/retry decisions—has a deep-copied history surviving save/load/export. |
 | Misleading inactive-gate comments and confidence semantics | Pending: align documentation and exported labels with active V2 behavior. |
@@ -350,6 +350,15 @@ This export's observed win rate has a descriptive Wilson 95% interval of approxi
 The evidence supports prioritizing opening-thesis checks and trustworthy risk/analysis semantics, followed by a complete frozen-policy evaluation. It does not support a claim that changing one trailing parameter, removing shorts, enabling DII, or selecting a smaller target already solves the losses.
 
 **14. Reproduction and calculation notes**
+
+The repaired policy evaluator operates on complete exports from separate funded runs. A plan can be registered from two policy snapshots immediately after scanner construction, before scanning the future evaluation window. For example:
+
+```bash
+.venv/bin/python -m analysis.paper_policy_evaluation baseline-policy.json candidate-policy.json --register --plan experiment.json --start 2026-11-11 --end 2026-12-11 --change active_controls.kronos_entry --model-identity CHECKPOINT_ID
+.venv/bin/python -m analysis.paper_policy_evaluation baseline-run.json candidate-run.json --plan experiment.json --output comparison.json
+```
+
+Use an actual later, previously uninspected window and the frozen checkpoint identity. The example files are inputs to prepare, not results produced by this review. Registration refuses an elapsed window or overwriting an existing plan. The plan pins source and evaluator identity, the universe, fixed controls, and the intended arm values. Scoring requires matching full observed-price fingerprints, complete opportunity journals and compatible model selection boundaries. Historical files lacking that evidence receive explicit eligibility issues and no claimed policy-improvement total.
 
 From the repository root, baseline execution verification and the existing bounded diagnostics can be regenerated without loading runtime ledgers:
 

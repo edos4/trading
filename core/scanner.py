@@ -435,12 +435,13 @@ class MarketScanner:
             symbols = sorted(set(self._symbols))
             self._paper.run_manifest['entry_universe'] = {
                 'symbols': symbols, 'sha256': hashlib.sha256(json.dumps(symbols).encode()).hexdigest()}
+            self._paper.run_manifest['exit_journal_policy'] = 'all-decisions-v1'
             self._paper.run_manifest['execution'] = {
                 'initial_capital': self._paper.initial_capital, 'txn_cost_pct': self._paper.txn_cost_pct,
                 'slippage_pct': self._paper.slippage_pct, 'max_daily_loss': self._paper.max_daily_loss,
                 'position_notional': ENGINE.position_notional, 'risk_pct': ENGINE.risk_pct,
                 'stream_end': stream_end, 'patterns_v2': self._patterns_v2,
-                'kronos_samples': self._kronos_gate.samples if self._kronos_gate else None,
+                'kronos_samples': self._kronos_gate.samples if self._kronos_gate else settings.kronos_gate_samples,
                 'collect_first_top_n': self._collect_first_top_n,
                 'volume_gate_rvol_min': self._volume_gate_rvol_min,
                 'volume_gate_obv_bars': self._volume_gate_obv_bars,
@@ -450,7 +451,13 @@ class MarketScanner:
                     'sideways_atr': self._kronos_gate.sideways_atr,
                     'sideways_min_pct': self._kronos_gate.sideways_min_pct,
                     'sideways_max_pct': self._kronos_gate.sideways_max_pct,
-                } if self._kronos_gate else None,
+                } if self._kronos_gate else {
+                    'entry_min_agree': settings.kronos_gate_min_agree,
+                    'exit_min_agree': settings.kronos_exit_min_agree,
+                    'sideways_atr': settings.kronos_gate_sideways_atr,
+                    'sideways_min_pct': settings.kronos_gate_sideways_min_pct,
+                    'sideways_max_pct': settings.kronos_gate_sideways_max_pct,
+                },
             }
 
     def _load_rule_filter(self) -> None:

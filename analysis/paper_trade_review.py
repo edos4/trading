@@ -453,6 +453,7 @@ def review_export(path: Path, *, allow_inconsistent_ohlc: bool = False) -> dict:
     """Publish comparisons only after verifying every baseline trade in a book."""
     raw = path.read_bytes()
     export = json.loads(raw)
+    from analysis.paper_policy_evaluation import model_holdout_evidence
     result = {"export_sha256": hashlib.sha256(raw).hexdigest(),
               "exported_at": export["exported_at"], "engine_sha256": engine_hash(),
               "scope": "saved entries and OHLC through original exits/latest open marks; no rescanning",
@@ -486,6 +487,7 @@ def review_export(path: Path, *, allow_inconsistent_ohlc: bool = False) -> dict:
             return r["entry_date"][:4] + "Q" + str((int(r["entry_date"][5:7])-1)//3+1)
         result["books"].append({
             "market": book["market"], "currency": book["currency"],
+            "model_evaluation": model_holdout_evidence(book),
             "run_completion": {
                 "termination_reason": (book.get("scan_stats") or {}).get("termination_reason"),
                 "scan_complete": (book.get("scan_stats") or {}).get("scan_complete"),
