@@ -27,7 +27,7 @@ def payload(value):
                  else deepcopy(getattr(value,key,None))) for key in
             ('trade_id','signal_id','pattern_version_id','provenance','requested_rules','resolved_rules',
              'execution_model','decision_date','entry_fee_paid','rule_evidence')}
-    for key in ('pattern_evidence', 'execution_risk'):
+    for key in ('pattern_evidence', 'execution_risk', 'kronos_exit_history'):
         if getattr(value, key, None) is not None:
             result[key] = deepcopy(getattr(value, key))
     if getattr(value, 'paper_protection', None) is not None:
@@ -39,7 +39,7 @@ def row_payload(value):
     result = {key:deepcopy(value.get(key)) for key in
             ('trade_id','signal_id','pattern_version_id','provenance','requested_rules','resolved_rules',
              'execution_model','decision_date','entry_fee_paid','rule_evidence')}
-    for key in ('pattern_evidence', 'execution_risk'):
+    for key in ('pattern_evidence', 'execution_risk', 'kronos_exit_history'):
         if value.get(key) is not None:
             result[key] = deepcopy(value[key])
     if value.get('paper_protection') is not None:

@@ -52,6 +52,7 @@ _CACHE_TTL_SECONDS = 6 * 3600
 # The pre-audit engine uses the identical exit ladder. Recheck this allowance
 # whenever exit helpers change; new entries still require the current runtime.
 _COMPATIBLE_EXIT_ENGINE_HASHES = frozenset({
+    "88225ff16b3d2005a74d08ea9d5184036523f1c4b5c609f6fc1a2b254d6d6c30",
     "c924745b62323b0188b3675c02d51b335cfd472cb9dd062e52eebeee0c239740",
     # Entry-boundary validation and additive detector evidence leave saved exits unchanged.
     "f1d110291fcca45cd4214612081660feba4b18ff195f47343ff4ea22c0d8e3d3",
@@ -78,6 +79,7 @@ _COMPATIBLE_EXIT_ENGINE_HASHES = frozenset({
 # Entry corrections and an opt-in trail basis preserve these audited engines'
 # existing ladders. Missing basis always means the old reference percentage.
 _COMPATIBLE_CAUSAL_EXIT_ENGINE_HASHES = frozenset({
+    "88225ff16b3d2005a74d08ea9d5184036523f1c4b5c609f6fc1a2b254d6d6c30",
     "c924745b62323b0188b3675c02d51b335cfd472cb9dd062e52eebeee0c239740",
     "f1d110291fcca45cd4214612081660feba4b18ff195f47343ff4ea22c0d8e3d3",
     "2ed01bd2c22ea083a77adfd98b47d04ff2bce131e259c2f52c41279c445a7ed0",
@@ -200,6 +202,7 @@ class BacktestTrade:
     kronos_evidence: dict | None = None
     # Open-position Kronos vote stamped by the scanner before a protective exit.
     kronos_exit_evidence: dict | None = None
+    kronos_exit_history: list[dict] = field(default_factory=list)
 
     execution_model: str = "legacy"
     pending_exit_reason: str = ""

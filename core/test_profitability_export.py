@@ -27,7 +27,9 @@ def test_export_retains_full_journal_and_health(monkeypatch,tmp_path):
     assert export['scan_stats']==health
     assert len(export['signal_logs'])==2101
     assert export['signal_logs'][0]['decision_context']==[{'close':100}]
-    assert 'run_manifest' not in export['execution_context']
+    assert export['execution_context']['run_manifest'] == book.run_manifest
+    export['execution_context']['run_manifest']['resolved_controls']['target_max_r'] = 999
+    assert book.run_manifest['resolved_controls']['target_max_r'] != 999
     assert book.run_manifest['source_sha256']
     export['scan_stats']['snapshot_errors']=0
     assert health['snapshot_errors']==5

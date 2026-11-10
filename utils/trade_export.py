@@ -167,8 +167,6 @@ def _book_export(snap: dict[str, Any]) -> dict[str, Any]:
     metrics = dict(snap.get("metrics") or {})
     metrics.pop("equity_png_b64", None)
     execution_context = deepcopy(snap.get("execution_context"))
-    if isinstance(execution_context, dict):
-        execution_context.pop("run_manifest", None)
     return {
         "market": snap.get("market"),
         "label": snap.get("label"),

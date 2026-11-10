@@ -431,6 +431,27 @@ class MarketScanner:
                 'liquidity_history_required':settings.paper_require_liquidity_history,
                 'max_daily_share_participation':settings.paper_max_volume_participation,
             }
+            import hashlib, json
+            symbols = sorted(set(self._symbols))
+            self._paper.run_manifest['entry_universe'] = {
+                'symbols': symbols, 'sha256': hashlib.sha256(json.dumps(symbols).encode()).hexdigest()}
+            self._paper.run_manifest['execution'] = {
+                'initial_capital': self._paper.initial_capital, 'txn_cost_pct': self._paper.txn_cost_pct,
+                'slippage_pct': self._paper.slippage_pct, 'max_daily_loss': self._paper.max_daily_loss,
+                'position_notional': ENGINE.position_notional, 'risk_pct': ENGINE.risk_pct,
+                'stream_end': stream_end, 'patterns_v2': self._patterns_v2,
+                'kronos_samples': self._kronos_gate.samples if self._kronos_gate else None,
+                'collect_first_top_n': self._collect_first_top_n,
+                'volume_gate_rvol_min': self._volume_gate_rvol_min,
+                'volume_gate_obv_bars': self._volume_gate_obv_bars,
+                'kronos_vote_policy': {
+                    'entry_min_agree': self._kronos_gate.min_agree,
+                    'exit_min_agree': self._kronos_gate.exit_min_agree,
+                    'sideways_atr': self._kronos_gate.sideways_atr,
+                    'sideways_min_pct': self._kronos_gate.sideways_min_pct,
+                    'sideways_max_pct': self._kronos_gate.sideways_max_pct,
+                } if self._kronos_gate else None,
+            }
 
     def _load_rule_filter(self) -> None:
         from core.rule_contracts import RulePayload
@@ -1035,6 +1056,14 @@ class MarketScanner:
         uses its own MCP session so there is no contention on the stdio pipe.
         """
         scan_start = time.monotonic()
+        if self._paper is not None:
+            from core.run_manifest import resolved_controls
+            manifest = self._paper.run_manifest
+            current = resolved_controls()
+            if current != manifest.get('resolved_controls'):
+                changes = manifest.setdefault('control_changes', [])
+                if not changes or changes[-1]['values'] != current:
+                    changes.append({'observed_at': datetime.now(timezone.utc).isoformat(), 'values': current})
         self._scan_started_monotonic = scan_start
         self.stats["scan_started_at"] = datetime.now(timezone.utc).isoformat()
         self.stats["scan_finished_at"] = None
@@ -1403,6 +1432,13 @@ class MarketScanner:
         new_closed_daily = False
         if is_new_bar:
             self._rule_filter_cache.clear()
+            manifest = getattr(self._paper, 'run_manifest', None)
+            if isinstance(manifest, dict):
+                from core.run_manifest import record_observation
+                key = f'{symbol}|{timeframe}'
+                context = (self._store.copy_candles(symbol, timeframe)
+                           if key not in manifest.get('observation_fingerprints', {}) else None)
+                record_observation(manifest, symbol, timeframe, candle, context)
         if is_new_bar and bar_ts is not None:
             self.stats["new_bars"] += 1
             if is_swing_timeframe(timeframe) and not is_weekly_timeframe(timeframe):
@@ -2340,6 +2376,7 @@ class MarketScanner:
         for position, verdict, evidence in exit_rows:
             if self._defer_replay_kronos(position,evidence):
                 position.kronos_exit_evidence=evidence
+                self._record_kronos_exit_decision(position, evidence)
                 continue
             self._handle_kronos_exit(position, verdict, evidence)
 
@@ -2369,6 +2406,22 @@ class MarketScanner:
         return True
 
     def _handle_kronos_exit(self, position, verdict, evidence: dict) -> None:
+        """Record every position decision after its final action is known."""
+        if self._kronos_gate is None:
+            return
+        try:
+            self._apply_kronos_exit(position, verdict, evidence)
+        finally:
+            self._record_kronos_exit_decision(position, evidence)
+
+    def _record_kronos_exit_decision(self, position, evidence: dict) -> None:
+        history = getattr(position, 'kronos_exit_history', None)
+        if history is None:
+            history = position.kronos_exit_history = []
+        history.append({'recorded_at': datetime.now(timezone.utc).isoformat(),
+                        'evidence': deepcopy(evidence)})
+
+    def _apply_kronos_exit(self, position, verdict, evidence: dict) -> None:
         """Apply one open-position vote: record it, and exit on `oppose`."""
         gate = self._kronos_gate
         if gate is None:
