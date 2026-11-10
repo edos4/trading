@@ -13,6 +13,27 @@
 | Export loses manifest and exit-decision history | Fixed: web/CLI exports retain the existing source manifest, resolved non-secret thresholds, entry-universe identity, execution assumptions, and detected runtime control changes. Every held-position Kronos result—including deferred/retry decisions—has a deep-copied history surviving save/load/export. |
 | Misleading inactive-gate comments and confidence semantics | Fixed: scanner comments identify inactive compatibility hooks and actual controls. Settings label fixed-stop/trail knobs as legacy/indicator-only. V2 evidence preserves raw geometry score and explicitly uncalibrated confidence semantics; model samples are described as stochastic draws from one checkpoint. |
 
+**Final remediation verification — 10 November 2026.** Each issue was checked with focused tests and the combined changes were checked with the full non-slow suite. Commit mapping:
+
+| Issue | Commit |
+| --- | --- |
+| Opening breakout preservation | `e8808e7` |
+| Shared, explicit target-risk basis | `6d66b3a`, with applicability edge cases in `b3bfd73` |
+| Objective-policy verification | `d0d26f4` |
+| Causal volatility/budget-fit evidence and optional admission | `6e5e548` |
+| Complete provenance, tape fingerprints, and position-decision history | `4661658` |
+| Frozen, complete-run model/policy evaluation | `9183fb1` |
+| V2 cohort attribution | `a88550f` |
+| Accurate V2 controls and confidence labels | `3d12238` |
+
+The complete non-slow test run reports **2,934 passed, 155 skipped, 10 deselected, and one pre-existing failure**, plus five passing subtests. Full output: [paper-trade-2026-11-10-tests.txt](/home/engine-33ai/codes/trading/docs/verification/paper-trade-2026-11-10-tests.txt). The failure is `data/test_ensure_history.py::test_fetch_symbol_fill_all_upserts_entire_series`: its `_FakeConn` lacks `cursor()`. It reproduces with the exact starting-revision `data/update.py` and `core/history_maintenance.py` loaded from Git into memory; those files and the test are unchanged. Protected `data/` code was not edited.
+
+The earlier localhost/asyncio test restrictions were resolved by running tests with local socket access: the three localhost cases and all 71 cases from the selected Kronos entry/exit/integration files, including their asynchronous cases, pass. JavaScript syntax (`node --check web/static/app.js`) and whitespace checks also pass.
+
+The final original-export replay still verifies **35/35 trades, -$5,201.677895567155 net P&L, and $691.3889724244322 fees**. The two explicitly labeled target-cap diagnostics still reproduce -$4,052.17 (pattern risk) and -$2,910.71 (initial paper risk). The input export's SHA-256 remains unchanged, and it is excluded from every commit. No collaborator/co-author trailer was added to the remediation commits.
+
+Implementation defects and missing evaluation infrastructure are addressed. **A profitable entry/exit policy and model edge still require the newly supported, preregistered evaluation on later uninspected data.** The optional volatility minimum remains in shadow by default and target capping remains off; this review's observed losses do not establish profitable replacement thresholds.
+
 **Detector scope: Patternsv2 (`patterns_v2/`).** All 35 closed trades explicitly save `provenance="patternsv2"`; all 35 matching filled journal rows and all 961 journal rows have the same provenance. Each trade also has a saved chart entry annotation tagged `patternsv2`, and the run settings have `patterns_v2=true` and `indicators_only=false`. There are zero legacy `patterns/` trades in this analysis. References below to a “pattern,” “pattern risk,” or “pattern trail” mean the Patternsv2 formation or its saved execution rules. The shared scanner, paper account, and exit engine execute those V2 rules. `pattern_only=false` is a separate gate-mode setting and does not select the legacy detector family. The null `pattern_version_id` values are expected for this V2 path, which does not use pinned legacy pattern versions.
 
 **The losses come from an unsuccessful combination of entries, forecast selection, and exit distances. The saved accounting and long/short exit arithmetic reproduce correctly.** We repeatedly enter breakouts that fail quickly, protect them with a stop smaller than their normal daily range, and retain targets much farther away than the positions usually survive. Kronos rejects most opportunities but has not demonstrated a profitable selected subset in this export.
@@ -380,7 +401,7 @@ Additional diagnostics are reproducible with these definitions:
 - Production-basis 2R diagnostic: choose the nearer saved structural/ATR stop, compute twice its distance from the executed entry, cap the original target at that level, round to four decimals, and call `replay_trade(trade, target_price=target)`.
 - DII subset: join shadow rows beginning `DII` to filled trades by `signal_id`; count one trade once. This evaluates observed fill subsets, not newly funded alternative portfolios.
 
-Focused verification passed **91 existing tests**: 58 analysis-replay/risk-geometry/Patternsv2-exit cases, 22 protection-recovery cases, and 11 synchronous Kronos exit-policy cases. The full Kronos exit test file stalled in its first asynchronous test at `asyncio.run()` and was interrupted; its remaining asynchronous cases are not claimed as passing. No new trading rules were implemented as part of this report.
+The initial analysis passed 91 focused tests; its asynchronous checks were blocked by the execution sandbox. The remediation verification recorded above supersedes that initial test limitation and includes the full non-slow suite. Historical trade results in the analysis remain those of the original export, not a rescan with the repaired entry rules.
 
 **15. All observed trades**
 
