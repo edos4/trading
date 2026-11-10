@@ -46,9 +46,8 @@ MIN_BARS = 60
 # `TRAIL_ARM_R * stop_pct` in favour. Expressing the trail as a multiple of the
 # stop keeps the give-back in R constant when the stop distance changes, which
 # the old 2.5%-price/5%-activation pair did not (it gave back a fixed 0.83R).
-# Arm 2R / give back 2R leaves the trail at gross breakeven when first armed and as
-# a disaster brake only; 1R/1.5R put its floor at -0.5R and cut winners early
-# (see the module docstring for the measured sweep).
+# This is the research ladder, not a validated optimum. Independent paper
+# protection may dominate both its risk distance and trailing order.
 STOP_ATR_MULT = 1.5
 STOP_PCT_FLOOR = 0.03
 STOP_PCT_CEIL = 0.08
@@ -327,6 +326,8 @@ def _to_signal(df: pd.DataFrame, raw: dict, *, symbol: str, timeframe: str, late
             "measured_height": abs(target-float(raw["level"])),
             "atr_price": atr_price_for(df, idx),
             "atr_as_of": _bar_date(df, idx),
+            "geometry_score": score,
+            "confidence_semantics": "uncalibrated_geometric_strength",
         },
         signal_bar_idx=idx,
     )

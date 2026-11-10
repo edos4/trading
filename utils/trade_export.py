@@ -20,6 +20,10 @@ Rules:
 - Judge by R-multiple, exit-reason mix, hold time, pattern, side, and sample size.
 - Open positions include daily_marks (one row per session close while held).
 - Call out overfitting. A handful of trades is not an edge.
+- Patternsv2 confidence is clipped geometric strength, not win probability;
+  raw geometry_score and confidence_semantics are saved in pattern_evidence.
+- Read run_manifest.active_controls for active gates. Legacy fixed-stop trail
+  settings do not configure the Patternsv2 ladder or independent paper trail.
 - Prefer changes the operator can actually ship (pattern filters, gate knobs,
   stops/targets, time-exits, universe size) over vague advice.
 """

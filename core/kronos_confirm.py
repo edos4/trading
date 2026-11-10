@@ -1,6 +1,7 @@
 """core/kronos_confirm.py — 1-day Kronos entry confirmation (docs/kronos-3-preds.md).
 
-Every surviving entry signal is confirmed by N independent one-day forecasts.
+Every surviving entry signal is assessed by N stochastic one-day draws from
+one checkpoint; agreement is not a calibrated probability or model ensemble.
 Each simulated close is classified up/down/flat against an ATR-scaled band,
 and the vote is compared with the signal's direction. Pure logic stays
 torch-free and injectable; the model is reached through a batched subprocess

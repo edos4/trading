@@ -103,7 +103,7 @@ def _score_row(anchor: dict, horizon: int, actual: float, forecast: float, *, er
 def evaluate_model(predictor, dataset: Path, anchors: list[dict], *, seed: int = 42) -> dict:
     """Score the scanner's 1-day votes and the evaluator's 3-day forecast.
 
-    One-day uses three independent confirmation draws. Three-day uses one
+    One-day uses three stochastic draws from one checkpoint. Three-day uses one
     evaluator call. Labels are the next stored sessions; each path supplies
     the timestamps that path uses in production.
     """

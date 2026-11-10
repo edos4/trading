@@ -60,6 +60,8 @@ def test_adapts_breakout_into_trade_signal():
     assert sig.stop_loss == 120.0
     assert sig.take_profit == 180.0
     assert sig.provenance == "patternsv2"
+    assert sig.pattern_evidence['confidence_semantics'] == 'uncalibrated_geometric_strength'
+    assert sig.pattern_evidence['geometry_score'] == _raw()['score']
     assert isinstance(sig.stop_loss_pct_cap, float)
     assert sig.stop_loss_pct_cap >= 0.03
     assert sig.trailing_stop_pct == pytest.approx(TRAIL_GIVEBACK_R * sig.stop_loss_pct_cap)

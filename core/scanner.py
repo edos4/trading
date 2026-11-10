@@ -5,12 +5,11 @@ and the webhook server from the previous architecture.
 Every SCAN_INTERVAL_SECONDS it:
   1. Fetches fresh data from TradingView MCP for every (symbol, timeframe) pair
   2. Pushes the new candle into OHLCVStore
-  3. Runs each registered pattern's analyze() method
-  4. If a signal is returned:
-        a. Renders a chart (if vision is enabled)
-        b. Asks Claude vision to confirm the pattern
-        c. Risk gates (ATR trail / R:R) then vision; queue pending
-           for next closed bar fill (same deferral as the backtester)
+  3. Runs the selected legacy, indicator, or Patternsv2 detector path
+  4. Applies direction/geometry and explicitly configured DII, volume, visual
+     rule, vision, Laya, and Kronos controls; their modes are exported
+  5. Queues completed-bar decisions for retrospective next-open execution;
+     paper admission rechecks the observed open, costs, funding, and V2 budget
 
 Concurrency: symbols are processed in parallel across N feed sessions
 (one session per worker, controlled by scanner_concurrency). Paper stream
@@ -49,10 +48,9 @@ from core.paper_trader import PaperAccount
 from core.engine_defaults import ENGINE
 
 
-# ── 2026-09 refactor: the live scan path now mirrors the offline backtester —
-# a pattern's own analyze() is the only filter; there is no ML/confidence/
-# regime/cooldown/volume/vision gauntlet. These stubs keep the (now dead)
-# gate call sites harmless without a wider rewrite of this file.
+# Compatibility hooks: confidence, SMA200 regime, post-loss cooldown and
+# generic reward/risk are inactive. Explicit DII/volume/model controls below
+# remain active according to their run modes; see run_manifest.active_controls.
 def structure_filters_enabled(_pattern_only=None) -> bool:
     return False
 
@@ -297,10 +295,8 @@ class MarketScanner:
         self._preprocessed_fills: set[tuple[str,str]] = set()
         self._kronos_retry_tries: dict[tuple, int] = {}
         self._kronos_failure_seen: set[tuple] = set()
-        # Same (symbol, pattern) → (exit_bar_count, was_loss) cooldown map the
-        # backtester uses — without this, paper re-entered losers immediately
-        # while backtests waited cooldown_bars. Seed from the persisted ledger
-        # so a scanner restart does not forget a just-stopped name.
+        # Retained for compatibility/injected hooks. The shipped cooldown
+        # helper is inactive; this map does not enforce an admission delay.
         self._cooldown_tracker: dict[tuple[str, str], tuple[int, bool]] = {}
         if self._paper is not None:
             seed_cooldown_from_trades(self._cooldown_tracker, self._paper.closed)
@@ -1975,11 +1971,7 @@ class MarketScanner:
             self._append_signal_log(signal, status="rejected", reason=reason)
             return
 
-        # Post-loss cooldown — enforced regardless of Pattern-only. Pattern-only
-        # isolates raw pattern edge from *signal-quality* filters below, but the
-        # cooldown is a basic account-risk control, not a pattern-quality
-        # opinion: skipping it allowed same-session re-entry into a name that
-        # had just stopped out. It still applies when Pattern-only is checked.
+        # Compatibility hook; the shipped implementation imposes no cooldown.
         bar_idx = (
             self._paper.bar_count(signal.symbol, signal.timeframe)
             if self._paper is not None else 0
@@ -1996,12 +1988,8 @@ class MarketScanner:
             self._append_signal_log(signal, status="rejected", reason=cooldown_reason)
             return
 
-        # Step 0 — Same entry gates the backtester applies before volume
-        # (min_confidence + SMA200 regime). Without these, paper/live took
-        # trades the "validated" backtest would have skipped. Pattern-only
-        # skips confidence for all patterns, but the regime gate stays on
-        # for REGIME_REQUIRED_PATTERNS (006/007) even in Pattern-only — see
-        # regime_filter_required() / REGIME_REQUIRED_PATTERNS.
+        # Compatibility confidence/regime hooks are inactive in the shipped
+        # scanner. They are not evidence of extra confirmation for a V2 fill.
         if structure_filters_enabled(self._pattern_only):
             if not passes_min_confidence(signal):
                 reason = describe_confidence_rejection(signal)

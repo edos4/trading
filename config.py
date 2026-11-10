@@ -75,12 +75,8 @@ class Settings(BaseSettings):
     # from the signal price (BUY below, SELL above). 0 disables the override
     # and leaves each pattern's own structural stop in place.
     stop_loss_pct: float = 0.03
-    # Trail geometry for the fixed stop, in R of the executed stop distance.
-    # Patterns derive their own trail from the ATR stop; once the scanner
-    # replaces that stop with STOP_LOSS_PCT those values are 4-5x too wide and
-    # the trail never arms (2026-11 export: 0 trailing exits in 18 trades).
-    # Give back one R, not two: a 2R/2R ladder parked the trail at breakeven, so
-    # every armed trade returned its whole gain unless it hit target first.
+    # Legacy/indicator fixed-stop trail only. Patternsv2 retains its own saved
+    # ATR ladder; independent paper protection is a separate net-budget trail.
     stop_loss_trail_r: float = 1.0
     stop_loss_arm_r: float = 1.75
     # Cancel a next-open fill when an adverse gap leaves less than this
@@ -88,17 +84,14 @@ class Settings(BaseSettings):
     stop_loss_min_risk_frac: float = 0.5
     # Optional measured-target cap. The basis is explicit: pattern stop or
     # nearest initial paper/structural stop, both measured as gross distance.
-    # Disabled by default: a saved-entry replay of the 2026-11-05 13:27Z export
-    # with a 2R cap preempted every trail and turned +$1,683 into -$1,038.
-    # Preserve the measured target; a positive value explicitly requests a cap.
+    # Disabled by default; a positive value explicitly requests an experiment.
     target_max_r: float = 0.0
     target_risk_basis: Literal['pattern', 'paper_initial'] = 'pattern'
     # Optional V2 paper admission rule, measured from causal signal ATR to
     # the actual nearest initial trigger. 0 records evidence without a veto.
     paper_v2_min_stop_atr: float = 0.0
-    # Reject US pattern entries below this price (0 disables). Off by default:
-    # the current ledger's sub-$10 cohort is +$2,989 and holds the two biggest
-    # winners (UPXI, RUM).
+    # Optional US entry price floor; 0 disables. Historical cohort P&L alone
+    # is not evidence for selecting a threshold.
     min_signal_price_usd: float = 0.0
     # Enable US paper short research through the same causal entry/exit path.
     # PH remains long-only. False blocks new pattern shorts, never protection
@@ -228,7 +221,8 @@ class Settings(BaseSettings):
     # off = gate absent; shadow = stamp evidence but never block; confirm =
     # queue an entry only when a majority of one-day forecasts agree.
     kronos_gate_mode: str = "confirm"
-    # Independent one-day simulations per symbol (odd, 1–9).
+    # Stochastic one-day draws from one checkpoint (odd, 1–9), not an ensemble
+    # of independently trained models or a calibrated confidence estimate.
     kronos_gate_samples: int = 3
     # Which checkpoint the GPU worker loads (never both).
     kronos_gate_model: str = "finetuned"

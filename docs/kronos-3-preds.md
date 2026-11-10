@@ -2,7 +2,7 @@
 
 Status: implemented. Last revised 2026-11-06.
 
-With entry mode `confirm`, every scanner entry is preceded by **3 independent one-day Kronos forecasts**. The trade
+With entry mode `confirm`, every scanner entry is preceded by **3 stochastic one-day draws from one Kronos checkpoint**. Agreement is not a calibrated win probability or an ensemble of independently trained models. The trade
 opens only when a majority of those forecasts point the signal's way: Kronos is a
 confirmation step made before the entry, not a post-hoc filter and not a pivot-only
 tie-breaker.
@@ -14,7 +14,7 @@ A new optional scanner gate, `kronos_gate_mode = off | shadow | confirm`:
 1. A pattern signal reaches `_finish_signal` on a completed daily bar and clears the
    existing entry gates (volume, rule filter, vision, Laya).
 2. Before the entry is queued — and therefore before the next session's open — `.venv-kronos`
-   runs **3 independent 1-day forecasts** for that symbol.
+   runs **3 stochastic 1-day forecast draws** for that symbol.
 3. Each simulated close is classified `up`, `down`, or `sideways` against an ATR-scaled band.
 4. The vote is compared with the signal's direction. In `shadow` mode it is recorded on the
    signal and never blocks. In `confirm` mode the entry is queued **only when the vote

@@ -56,7 +56,9 @@ ANN_REF    = ANN_PATTERN  # reference points (channel start, etc.)
 class TradeSignal:
     """
     Returned by a pattern's analyze() when it detects a valid setup.
-    confidence: 0.0–1.0 — how strongly the indicators support the trade.
+    confidence: 0.0–1.0 ranking score; not a calibrated win probability.
+    Patternsv2 clips geometric strength to this range and preserves the raw
+    shape score in pattern_evidence.
     If confidence < settings.vision_min_indicator_confidence, vision check is skipped.
 
     chart_annotations: optional list of drawable elements the chart renderer

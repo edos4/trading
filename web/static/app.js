@@ -180,7 +180,7 @@ function initExplorer() {
         const tr = document.createElement("tr");
         tr.innerHTML =
           `<td>${s.pattern}</td><td>${s.action}</td><td>${s.timeframe}</td>` +
-          `<td>${s.confidence.toFixed(2)}</td><td>${s.price.toFixed(2)}</td><td>${s.notes || ""}</td>`;
+          `<td title="Ranking strength; not a win probability">${s.confidence.toFixed(2)}</td><td>${s.price.toFixed(2)}</td><td>${s.notes || ""}</td>`;
         tbody.appendChild(tr);
       }
       savePng.disabled = false;
@@ -968,7 +968,7 @@ function initPaper() {
         `<td>${esc(row.timeframe)}</td>` +
         `<td>${esc(row.action)}</td>` +
         `<td>${esc(row.pattern)}</td>` +
-        `<td>${row.confidence == null ? "—" : Number(row.confidence).toFixed(2)}</td>` +
+        `<td title="${row.provenance === "patternsv2" ? "V2 geometric strength; not a win probability" : "Signal ranking score"}">${row.confidence == null ? "—" : Number(row.confidence).toFixed(2)}</td>` +
         `<td>${row.price == null ? "—" : Number(row.price).toFixed(2)}</td>` +
         `<td class="${stCls}">${esc(row.status)}</td>` +
         `<td title="${esc(row.reason)}">${esc(row.reason)}</td>`;
