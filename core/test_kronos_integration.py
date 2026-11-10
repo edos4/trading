@@ -184,6 +184,8 @@ def test_saved_confirmations_are_validated_at_fill_without_new_forecasts(monkeyp
     scanner._kronos_gate._fetch_fn = Mock(side_effect=_vote(*returns))
     s, decision = _signal(action=action), _candle()
     s.provenance = "patternsv2"
+    s.pattern_evidence = {'entry_boundary_policy': 'frozen-breakout-v1',
+                          'breakout_level': 100, 'direction': -1 if action == 'SELL' else 1}
     s.stop_loss, s.take_profit = (120, 80) if action == "SELL" else (80, 120)
     asyncio.run(scanner._finish_signal(s, None, decision))
     asyncio.run(scanner._flush_kronos_confirm())
@@ -218,6 +220,8 @@ def test_safety_stop_closes_without_kronos_permission_or_worker(monkeypatch, act
     book.assume_session_open = True
     s, initial = _signal(action=action), _candle()
     s.provenance = "patternsv2"
+    s.pattern_evidence = {'entry_boundary_policy': 'frozen-breakout-v1',
+                          'breakout_level': 100, 'direction': -1 if action == 'SELL' else 1}
     s.stop_loss, s.take_profit = (120, 80) if action == "SELL" else (80, 120)
     assert book.open_position(s, initial, OHLCVStore())[0]
     scanner = MarketScanner(symbols=["TEST"], market="us", paper_account=book,

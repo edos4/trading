@@ -388,6 +388,8 @@ def test_patternsv2_paper_open_skips_pattern_catalog(monkeypatch):
         symbol="FGBI", action="BUY", pattern="falling_wedge", timeframe="1d",
         confidence=0.92, price=8.42, qty=0.0, setup_key=(10, 40, 50),
         provenance="patternsv2",
+        pattern_evidence={'entry_boundary_policy': 'frozen-breakout-v1',
+                          'breakout_level': 8.4, 'direction': 1},
     )
     ok, msg = acct.open_position(signal, candle, store=None)
     assert ok, msg

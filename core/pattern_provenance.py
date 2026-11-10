@@ -8,7 +8,7 @@ RULE_FIELDS = ('stop_loss','stop_loss_on_close','take_profit','trailing_stop_pct
                'exit_fill_at_close','trailing_ref_after_check','exit_order','neckline',
                'neckline_break_direction','exit_bars_after_neckline_break','exit_bars_after_entry',
                'trailing_activation_pct','time_exit_only_unfavorable','time_exit_min_mfe_pct','execution_model',
-               'trailing_stop_basis')
+    'trailing_stop_basis', 'pattern_evidence')
 
 
 def engine_hash():
@@ -26,7 +26,7 @@ def payload(value):
     result = {key:(getattr(value, key).isoformat() if key == 'decision_date' and getattr(value, key, None)
                  else deepcopy(getattr(value,key,None))) for key in
             ('trade_id','signal_id','pattern_version_id','provenance','requested_rules','resolved_rules',
-             'execution_model','decision_date','entry_fee_paid','rule_evidence')}
+             'execution_model','decision_date','entry_fee_paid','rule_evidence','pattern_evidence')}
     if getattr(value, 'paper_protection', None) is not None:
         result['paper_protection'] = deepcopy(value.paper_protection)
     return result
@@ -35,7 +35,7 @@ def payload(value):
 def row_payload(value):
     result = {key:deepcopy(value.get(key)) for key in
             ('trade_id','signal_id','pattern_version_id','provenance','requested_rules','resolved_rules',
-             'execution_model','decision_date','entry_fee_paid','rule_evidence')}
+             'execution_model','decision_date','entry_fee_paid','rule_evidence','pattern_evidence')}
     if value.get('paper_protection') is not None:
         result['paper_protection'] = deepcopy(value['paper_protection'])
     return result

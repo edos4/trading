@@ -37,6 +37,9 @@ def candidate(short: bool) -> TradeSignal:
         stop_loss_pct_cap=.06, trailing_stop_pct=.12, trailing_activation_pct=.12,
         trailing_stop_mode="lowest_close" if short else "highest_close",
         signal_bar_timestamp=bar(100).timestamp, provenance="patternsv2",
+        pattern_evidence={'entry_boundary_policy': 'frozen-breakout-v1',
+                          'breakout_level': 110 if short else 90,
+                          'direction': -1 if short else 1},
     )
 
 
@@ -88,7 +91,7 @@ def test_bad_directional_geometry_never_opens_or_consumes_a_setup(short, level, 
     assert not book.positions and not book.pending_entries and not book.consumed_anchors
 
 
-@pytest.mark.parametrize("price,reason", [(121, "structural stop"), (69, "target"), (119, "Opening gap left")])
+@pytest.mark.parametrize("price,reason", [(121, "structural stop"), (69, "target"), (119, "breakout boundary")])
 def test_short_opening_gap_is_rejected_before_fees_or_a_position(price, reason):
     book = PaperAccount(market="us", txn_cost_pct=.001)
     book.assume_session_open = True

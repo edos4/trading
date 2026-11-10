@@ -22,7 +22,10 @@ def signal(short=False):
                        stop_loss_pct_cap=.05, trailing_stop_pct=.05,
                        trailing_activation_pct=.05, trailing_ref_after_check=True,
                        trailing_stop_mode='lowest_close' if short else 'highest_close',
-                       provenance='patternsv2')
+                       provenance='patternsv2', pattern_evidence={
+                           'entry_boundary_policy': 'frozen-breakout-v1',
+                           'breakout_level': 110 if short else 90,
+                           'direction': -1 if short else 1})
 
 
 @pytest.mark.parametrize('short', [False, True])

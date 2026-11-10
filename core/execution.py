@@ -84,6 +84,25 @@ def validate_entry_geometry(signal, price: float, *, opening: bool = False) -> N
         raise ValueError(f"{prefix} crossed the structural stop")
     if signal.take_profit is not None and (price <= signal.take_profit if short else price >= signal.take_profit):
         raise ValueError(f"{prefix} crossed the target")
+    if signal.provenance == 'patternsv2':
+        evidence = getattr(signal, 'pattern_evidence', None) or {}
+        policy = evidence.get('entry_boundary_policy')
+        if policy is not None and policy != 'frozen-breakout-v1':
+            raise ValueError('Unknown Patternsv2 entry-boundary policy')
+        boundary = evidence.get('breakout_level')
+        if boundary is None and policy is None:
+            # Older pending V2 orders already contain their frozen level.
+            levels = {a.get('price') for a in signal.chart_annotations
+                      if a.get('type') == 'hline' and a.get('label') == 'level'}
+            if len(levels) == 1:
+                boundary = next(iter(levels))
+        if (isinstance(boundary, bool) or not isinstance(boundary, (int, float))
+                or not math.isfinite(boundary) or boundary <= 0):
+            raise ValueError('Patternsv2 breakout boundary evidence is required')
+        if evidence.get('direction', -1 if short else 1) != (-1 if short else 1):
+            raise ValueError('Patternsv2 breakout direction differs from the entry')
+        if (price > boundary if short else price < boundary):
+            raise ValueError(f'{prefix} returned inside the Patternsv2 breakout boundary')
 
 
 def opening_candidate(signal, candle, notional, market, slippage=0):
@@ -109,6 +128,8 @@ def opening_candidate(signal, candle, notional, market, slippage=0):
     if saved_engine is not None and saved_engine != engine_hash():
         raise ValueError("Pending entry runtime changed; candidate rejected")
     price = candle.open * (1 - slippage if signal.action == "SELL" else 1 + slippage)
+    # Adverse slippage cannot turn an unconfirmed raw open into a breakout.
+    validate_entry_geometry(signal, candle.open, opening=True)
     validate_entry_geometry(signal, price, opening=True)
     short = signal.action == 'SELL'
     from config import settings

@@ -127,6 +127,7 @@ def test_one_failed_signal_does_not_drop_the_rest():
         return TradeSignal(
             symbol=symbol, action="BUY", pattern=pattern, timeframe="1d",
             confidence=0.9, price=8.42, qty=0.0, provenance="patternsv2",
+            pattern_evidence={'breakout_level': 8.4},
         )
 
     asyncio.run(scanner._emit_signals(snap, [

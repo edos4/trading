@@ -28,6 +28,7 @@ import math
 import multiprocessing as mp
 import os
 from collections import defaultdict
+from copy import deepcopy
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -51,6 +52,8 @@ _CACHE_TTL_SECONDS = 6 * 3600
 # The pre-audit engine uses the identical exit ladder. Recheck this allowance
 # whenever exit helpers change; new entries still require the current runtime.
 _COMPATIBLE_EXIT_ENGINE_HASHES = frozenset({
+    # Entry-boundary validation and additive detector evidence leave saved exits unchanged.
+    "f1d110291fcca45cd4214612081660feba4b18ff195f47343ff4ea22c0d8e3d3",
     # Observed-price paper trails are additive; ordinary saved OHLC ladders
     # retain their fills unless a caller supplies live point evidence.
     "2ed01bd2c22ea083a77adfd98b47d04ff2bce131e259c2f52c41279c445a7ed0",
@@ -74,6 +77,7 @@ _COMPATIBLE_EXIT_ENGINE_HASHES = frozenset({
 # Entry corrections and an opt-in trail basis preserve these audited engines'
 # existing ladders. Missing basis always means the old reference percentage.
 _COMPATIBLE_CAUSAL_EXIT_ENGINE_HASHES = frozenset({
+    "f1d110291fcca45cd4214612081660feba4b18ff195f47343ff4ea22c0d8e3d3",
     "2ed01bd2c22ea083a77adfd98b47d04ff2bce131e259c2f52c41279c445a7ed0",
     "40c0c80c62b35a6f71ffb9bd1dac81f10ac02c25800277f5cfe5d604ef10f63e",
     "a63bde2d2a4cc481f5c74ee40c355aec2a3946a5c369da9b0ab7c0edeff7753c",
@@ -167,6 +171,7 @@ class BacktestTrade:
     signal_id: str | None = None
     pattern_version_id: str | None = None
     provenance: str = "legacy_unknown"
+    pattern_evidence: dict | None = None
     requested_rules: dict | None = None
     resolved_rules: dict | None = None
     time_exit_only_unfavorable: bool = False
@@ -1001,6 +1006,7 @@ def _open_trade(
         execution_model=execution_model,
         decision_date=signal.signal_bar_timestamp,
         chart_annotations=[dict(a) for a in signal.chart_annotations],
+        pattern_evidence=deepcopy(signal.pattern_evidence),
         symbol=signal.symbol,
         timeframe=signal.timeframe,
         pattern=signal.pattern,
@@ -1059,7 +1065,6 @@ def _open_trade(
             position.neckline_break_bar_idx = bar_idx
         elif position.neckline_break_direction == "above" and candle.close > position.neckline:
             position.neckline_break_bar_idx = bar_idx
-    from copy import deepcopy
     from core.pattern_provenance import rules
     position.pattern_version_id = signal.pattern_version_id
     position.signal_id = signal.signal_id

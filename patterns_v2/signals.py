@@ -317,6 +317,11 @@ def _to_signal(df: pd.DataFrame, raw: dict, *, symbol: str, timeframe: str, late
         notes=notes,
         chart_annotations=_annotations(df, raw, idx, entry, stop, target),
         provenance="patternsv2",
+        pattern_evidence={
+            "entry_boundary_policy": "frozen-breakout-v1",
+            "breakout_level": float(raw["level"]),
+            "direction": direction,
+        },
         signal_bar_idx=idx,
     )
 

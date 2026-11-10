@@ -4,7 +4,7 @@
 
 | Issue | Implementation status |
 | --- | --- |
-| Opening price returns inside the V2 breakout | Pending: preserve boundary policy and reject invalidated openings. |
+| Opening price returns inside the V2 breakout | Fixed: frozen V2 boundary/direction evidence survives queue, restart, fill, and export. Both raw open and slipped entry must preserve the breakout; older orders require a unique saved level. Mirrored tests and original-export replay verify admission and historical exit compatibility. |
 | Inconsistent target R and risk labels | Pending: explicit risk basis shared by execution and diagnostics. |
 | Boundary diagnostic shifts already correct targets | Pending: require objective-policy evidence. |
 | Volatility/holding-objective mismatch | Pending: causal budget-fit evidence and configurable research controls; no outcome-fitted default. |
