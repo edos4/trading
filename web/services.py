@@ -17,6 +17,7 @@ from data.history import fetch_ohlcv_candles
 from patterns.base_pattern import TradeSignal
 from patterns.chart_scan import latest_signals_over_lookback
 from patterns_v2.signals import MIN_BARS as PATTERNS_V2_MIN_BARS, detect_trade_signals
+from utils.logger import log
 
 TIMEFRAMES = ["1d", "1W"]
 
@@ -88,6 +89,29 @@ class ExplorerService:
             rows = [(ph_history_symbol(s), ex) for s, ex in rows]
         return [{"symbol": s, "exchange": ex} for s, ex in rows]
 
+    def _scan_detectors(self, indicators_only: bool) -> tuple[list, Optional[str]]:
+        """Detectors for a browse scan, plus why the pinned catalog cannot run.
+
+        The explorer is a chart surface first: a pinned pattern catalog the
+        engine refuses to execute (detector-interface drift, an empty catalog)
+        is reported alongside the chart instead of failing the whole request,
+        because drawing a symbol does not depend on pattern resolution.
+        Editor-database outages are still raised — web/app.py maps those to 503.
+        """
+        from core.pattern_edit_store import (
+            DatabaseUnavailable, EditError, MigrationRequired,
+        )
+
+        if indicators_only:
+            return self.indicators, None
+        try:
+            return self.patterns, None
+        except (DatabaseUnavailable, MigrationRequired):
+            raise
+        except EditError as exc:
+            log.warning(f"Explorer | pinned pattern catalog unavailable: {exc}")
+            return [], str(exc)
+
     def load_symbol(
         self,
         symbol: str,
@@ -143,6 +167,7 @@ class ExplorerService:
         use_volume = settings.volume_gate_enabled if volume_gate is None else volume_gate
 
         signals: list[TradeSignal] = []
+        scan_error: Optional[str] = None
         if scanning:
             if patterns_v2:
                 try:
@@ -153,8 +178,8 @@ class ExplorerService:
                 except (ImportError, FileNotFoundError) as exc:
                     raise ValueError(str(exc)) from exc
             else:
-                detectors = self.indicators if indicators_only else self.patterns
-                raw = latest_signals_over_lookback(
+                detectors, scan_error = self._scan_detectors(indicators_only)
+                raw = [] if scan_error else latest_signals_over_lookback(
                     detectors, symbol, timeframe, candles,
                     session_tz=profile.session_tz,
                 )
@@ -213,6 +238,9 @@ class ExplorerService:
                 "indicators" if indicators_only
                 else ("patternsv2" if patterns_v2 else ("patterns" if run_patterns else "none"))
             ),
+            # Present only when a requested scan could not run at all (a pinned
+            # catalog the engine refuses); the chart is still returned.
+            "scan_error": scan_error,
             "signals": [
                 {
                     "pattern": s.pattern,

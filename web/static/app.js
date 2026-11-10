@@ -192,7 +192,20 @@ function initExplorer() {
       if (heading) heading.textContent = indicatorScan ? "Detected indicators" : "Detected patterns";
       if (col) col.textContent = indicatorScan ? "Indicator" : "Pattern";
       const noun = indicatorScan ? "indicator" : (patternsV2Scan ? "patternsv2" : "pattern");
-      status.textContent = `${data.symbol}: ${data.bars} bars, ${data.signals.length} ${noun}(s).`;
+      if (data.scan_error) {
+        // The chart does not depend on pattern resolution: a catalog the
+        // engine refuses is reported beside it, never instead of it.
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.colSpan = 6;
+        cell.className = "muted";
+        cell.textContent = data.scan_error;
+        row.appendChild(cell);
+        tbody.appendChild(row);
+        status.textContent = `${data.symbol}: ${data.bars} bars — pattern scan unavailable: ${data.scan_error}`;
+      } else {
+        status.textContent = `${data.symbol}: ${data.bars} bars, ${data.signals.length} ${noun}(s).`;
+      }
     } catch (err) {
       status.textContent = String(err.message || err);
       header.textContent = "Error";
