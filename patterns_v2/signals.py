@@ -57,22 +57,17 @@ TRAIL_GIVEBACK_R = 2.0
 TRAIL_ARM_R = 2.0
 
 
-def stop_pct_for(df: pd.DataFrame, idx: int, price: float) -> float:
-    """Initial stop distance as a fraction of ``price``, from ATR14 at ``idx``.
-
-    Only bars at or before ``idx`` are used, so the value is causal. A short or
-    degenerate series falls back to the floor rather than widening the stop
-    blind.
-    """
-    if df is None or price <= 0 or idx < 1:
-        return STOP_PCT_FLOOR
+def atr_price_for(df: pd.DataFrame, idx: int) -> float | None:
+    """Unclamped decision-time ATR in price units; never uses a later bar."""
+    if df is None or idx < 1 or idx >= len(df):
+        return None
     lo = max(0, idx - STOP_ATR_PERIOD)
     window = df.iloc[lo : idx + 1]
     high = window["high"].to_numpy(dtype=float)
     low = window["low"].to_numpy(dtype=float)
     close = window["close"].to_numpy(dtype=float)
     if len(close) < 2:
-        return STOP_PCT_FLOOR
+        return None
     prev_close = close[:-1]
     tr = [
         max(h - l, abs(h - pc), abs(l - pc))
@@ -80,8 +75,15 @@ def stop_pct_for(df: pd.DataFrame, idx: int, price: float) -> float:
     ]
     tr = [v for v in tr if math.isfinite(v) and v > 0]
     if not tr:
+        return None
+    return sum(tr) / len(tr)
+
+
+def stop_pct_for(df: pd.DataFrame, idx: int, price: float) -> float:
+    """Causal ATR14 risk cap; preserve the historical 3%–8% clamps."""
+    atr = atr_price_for(df, idx)
+    if atr is None or price <= 0:
         return STOP_PCT_FLOOR
-    atr = sum(tr) / len(tr)
     return min(max(STOP_ATR_MULT * atr / price, STOP_PCT_FLOOR), STOP_PCT_CEIL)
 
 
@@ -323,6 +325,8 @@ def _to_signal(df: pd.DataFrame, raw: dict, *, symbol: str, timeframe: str, late
             "direction": direction,
             "objective_policy": "boundary-measured-v1",
             "measured_height": abs(target-float(raw["level"])),
+            "atr_price": atr_price_for(df, idx),
+            "atr_as_of": _bar_date(df, idx),
         },
         signal_bar_idx=idx,
     )

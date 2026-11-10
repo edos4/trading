@@ -93,6 +93,9 @@ class Settings(BaseSettings):
     # Preserve the measured target; a positive value explicitly requests a cap.
     target_max_r: float = 0.0
     target_risk_basis: Literal['pattern', 'paper_initial'] = 'pattern'
+    # Optional V2 paper admission rule, measured from causal signal ATR to
+    # the actual nearest initial trigger. 0 records evidence without a veto.
+    paper_v2_min_stop_atr: float = 0.0
     # Reject US pattern entries below this price (0 disables). Off by default:
     # the current ledger's sub-$10 cohort is +$2,989 and holds the two biggest
     # winners (UPXI, RUM).
@@ -550,7 +553,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "stop_loss_trail_r", "stop_loss_arm_r", "stop_loss_min_risk_frac",
-        "target_max_r", "min_signal_price_usd", "kronos_exit_min_adverse_atr",
+        "target_max_r", "paper_v2_min_stop_atr", "min_signal_price_usd", "kronos_exit_min_adverse_atr",
     )
     @classmethod
     def _clamp_non_negative(cls, value: float) -> float:

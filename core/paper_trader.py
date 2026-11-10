@@ -699,6 +699,7 @@ class PaperAccount:
                 "stop_loss_min_risk_frac": settings.stop_loss_min_risk_frac,
                 "target_max_r": settings.target_max_r,
                 "target_risk_basis": settings.target_risk_basis,
+                "paper_v2_min_stop_atr": settings.paper_v2_min_stop_atr,
                 "reported_r_units": "gross initial stop distance; net R includes costs",
                 "execution_coverage": {
                     'verified': not self.execution_gaps,
@@ -984,6 +985,10 @@ class PaperAccount:
             signal.execution_risk = apply_target_cap(
                 signal, entry_price, float(settings.target_max_r or 0), settings.target_risk_basis,
                 paper_costs=(self.txn_cost_pct, self.slippage_pct))
+            if signal.provenance == 'patternsv2':
+                from core.paper_budget_fit import budget_fit
+                signal.execution_risk['budget_fit'] = budget_fit(
+                    signal, signal.execution_risk, settings.paper_v2_min_stop_atr)
             from core.entry_economics import validate_target_reward
             validate_target_reward(signal, entry_price, self.txn_cost_pct, self.slippage_pct)
         except ValueError as exc:
