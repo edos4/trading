@@ -115,12 +115,15 @@ def test_stale_extensions_cannot_bridge_a_recovered_break(high, breaches, depth,
     ("JKHY", "support", "2026-10-02", "2026-10-29", 3, False),
     ("JKHY", "resistance", "2026-09-03", "2026-10-26", 3, True),
     ("GTES", "resistance", "2026-10-06", "2026-10-28", 2, False),
+    ("PRIM", "support", "2026-09-14", "2026-10-23", 3, False),
 ])
 def test_november_chart_rails_refit_after_breaks(symbol, kind, start, end, pivots, broken):
     # These exported charts joined old and new touches across a breakdown:
     # MORN July→October support, JKHY June→October support / January→October
-    # resistance, and GTES August→October resistance. Keep the exact tapes
-    # offline so the regressions do not depend on a running API or new prices.
+    # resistance, and GTES August→October resistance. PRIM's December→October
+    # support cut through a deep June gap body that nearly recovered by close.
+    # Keep the exact tapes offline so the regressions do not depend on a
+    # running API or new prices.
     fixture = json.loads((Path(__file__).parents[1] / "tests/fixtures/trendline_regimes.json").read_text())
     df = pd.DataFrame(fixture["symbols"][symbol], columns=fixture["columns"])
     df.index = pd.DatetimeIndex(df.pop("date"))
@@ -623,6 +626,81 @@ def test_a_stale_rail_only_extends_across_clean_wicks(high: bool, penetrating_wi
         assert selected[2] == n - 1
 
 
+@pytest.mark.parametrize("high", [False, True])
+@pytest.mark.parametrize("gap_bar", [55, 75])
+@pytest.mark.parametrize("body_depth", [0., .8, 2., 2.5])
+def test_deep_body_crossings_cannot_hide_in_a_long_clean_rail(high, gap_bar, body_depth):
+    # A gap can open well past the rail and recover by the close. One such
+    # body must invalidate an anchored span or extension even though its
+    # percentage is small. An isolated deep wick or shallow body remains noise.
+    n = 100
+    points = [(10, 100.), (40, 100.), (70, 100.)]
+    bars, bodies = np.full(n, 101.), np.full(n, 102.)
+    close = bodies.copy()
+    bars[[i for i, _ in points]] = 100.
+    bars[gap_bar] = 97.3
+    if body_depth:
+        bodies[gap_bar] = 100. - body_depth
+    if high:
+        bars, bodies, close = 200. - bars, 200. - bodies, 200. - close
+
+    selected = _select_line(
+        points, bars, bodies, high, tol=.4, n=n, min_span=6,
+        last_close=float(close[-1]), end_tolerance=12., atr=2., close=close,
+    )
+
+    assert (selected is not None) is (body_depth <= 2.)
+    if selected is not None:
+        assert selected[1:] == ([10, 40, 70], n - 1)
+
+
+@pytest.mark.parametrize("high", [False, True])
+def test_deep_recovered_body_crossing_requires_new_anchors(high):
+    n = 100
+    points = [(10, 100.), (40, 100.), (70, 100.), (80, 100.), (90, 100.)]
+    bars, bodies = np.full(n, 101.), np.full(n, 102.)
+    close = bodies.copy()
+    bars[[i for i, _ in points]] = 100.
+    bars[55], bodies[55] = 97.3, 97.5
+    if high:
+        bars, bodies, close = 200. - bars, 200. - bodies, 200. - close
+
+    selected = _select_line(
+        points, bars, bodies, high, tol=.4, n=n, min_span=6,
+        last_close=float(close[-1]), end_tolerance=12., atr=2., close=close,
+    )
+
+    assert selected is not None
+    assert selected[1:] == ([70, 80, 90], 90)
+
+
+@pytest.mark.parametrize("resistance", [False, True])
+def test_prim_gap_refits_on_either_side_without_crossing_deep_bodies(resistance):
+    fixture = json.loads((Path(__file__).parents[1] / "tests/fixtures/trendline_regimes.json").read_text())
+    df = pd.DataFrame(fixture["symbols"]["PRIM"], columns=fixture["columns"])
+    df.index = pd.DatetimeIndex(df.pop("date"))
+    if resistance:
+        original = df.copy()
+        df["open"], df["close"] = 300. - original["open"], 300. - original["close"]
+        df["high"], df["low"] = 300. - original["low"], 300. - original["high"]
+    kind = "resistance" if resistance else "support"
+    line = next(line for line in detect_trendlines(df) if line["kind"] == kind)
+    start, end = line["start_index"], line["end_index"]
+
+    assert df.index[start] > pd.Timestamp("2026-06-23")
+    assert line["confirmed"] and not line["broken"]
+    projected = line["start_price"] + np.arange(end - start + 1) * line["slope"]
+    bodies = (df[["open", "close"]].max(axis=1) if resistance
+              else df[["open", "close"]].min(axis=1)).iloc[start:end + 1].to_numpy()
+    depth = bodies - projected if resistance else projected - bodies
+    assert np.max(depth) <= _atr(df)
+    payload = build_trade_viewer_payload(df, symbol="PRIM", trendlines=True)
+    segment = next(rail for rail in payload["trendlines"] if rail["kind"] == kind)
+    assert segment["data"][0]["time"] == "2026-09-14"
+    assert segment["data"][-1]["time"] == "2026-10-23"
+    assert segment["cut_through_pct"] == 0.
+
+
 def test_seeded_ohlc_rails_preserve_geometry_and_price_scale() -> None:
     # Use binary fractions so these stock-split-like changes in price units
     # introduce no rounding differences or changes in the underlying swings.
@@ -658,6 +736,8 @@ def test_seeded_ohlc_rails_preserve_geometry_and_price_scale() -> None:
             assert line["start_price"] == bars[0]
             assert np.mean(wick_cuts) <= MAX_WICK_PENETRATION_RATIO
             assert np.mean(body_cuts) <= MAX_BODY_PENETRATION_RATIO
+            body_depth = bodies - projected if line["kind"] == "resistance" else projected - bodies
+            assert np.max(body_depth) <= max(tolerance, _atr(df))
             assert line["body_penetration"] == pytest.approx(np.mean(body_cuts))
         for factor in (2. ** -20, 2. ** 20):
             scaled = detect_trendlines(df * factor)

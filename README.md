@@ -998,6 +998,13 @@ What the web UI supports:
 and volume-gate code as the scanner. Backtest / Paper Trading are not toy
 modes — they call the real `Backtester` / `MarketScanner`.
 
+Blue support/resistance lines join confirmed swing lows/highs independently of
+the yellow detected-pattern boundaries. A deep candle-body crossing invalidates
+the span even if the candle recovers by its close. The depth limit is the larger
+of one ATR and the touch tolerance; isolated wick spikes retain the existing
+tolerance. The detector refits with clean anchors or omits the line, and applies
+the same body-depth limit to extensions beyond the final touch.
+
 ## Operate via MCP (AI agent)
 
 Full guide to the bot's **MCP (Model Context Protocol) server**. It lets an AI
