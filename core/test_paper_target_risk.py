@@ -53,3 +53,16 @@ def test_target_cap_preserves_a_nearer_measured_objective(basis):
     s.take_profit = 101
     apply_target_cap(s, 100, 2, basis, paper_costs=(.001, .0005))
     assert s.take_profit == 101
+
+
+def test_large_short_cap_does_not_reject_an_already_nearer_positive_target():
+    s = signal(True)
+    apply_target_cap(s, 100, 100, 'pattern')
+    assert s.take_profit == 70
+
+
+def test_optional_cap_does_not_invent_target_or_risk_when_both_are_absent():
+    s = signal()
+    s.take_profit = s.stop_loss = s.stop_loss_pct_cap = None
+    geometry = apply_target_cap(s, 100, 2, 'pattern')
+    assert s.take_profit is None and geometry['target_risk_distance'] is None

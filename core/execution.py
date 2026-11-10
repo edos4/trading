@@ -92,16 +92,16 @@ def apply_target_cap(signal, price: float, max_r: float, basis: str, *,
         raise ValueError('Target cap must be finite and nonnegative')
     geometry = entry_risk_geometry(signal, price, paper_costs=paper_costs)
     distance = geometry[basis + '_distance']
-    if max_r > 0:
+    if max_r > 0 and signal.take_profit is not None:
         if basis == 'paper_initial' and paper_costs is None:
             raise ValueError('Paper-initial target R requires paper execution costs')
         if distance is None or distance <= 0:
             raise ValueError('Target cap requires positive initial risk')
         sign = -1 if signal.action == 'SELL' else 1
         target = price + sign * max_r * distance
-        if target <= 0:
-            raise ValueError('Target cap would produce a nonpositive target')
-        if signal.take_profit is not None and sign*(signal.take_profit-target) > 0:
+        if sign*(signal.take_profit-target) > 0:
+            if target <= 0:
+                raise ValueError('Target cap would produce a nonpositive target')
             signal.take_profit = round(target, 4)
     geometry.update(target_risk_basis=basis, target_risk_distance=distance, target_max_r=max_r)
     return geometry
