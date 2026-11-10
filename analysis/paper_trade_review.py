@@ -80,6 +80,7 @@ def _verify_orders(actual: dict, saved: dict) -> None:
 
 
 def replay_trade(trade: dict, *, target_max_r: float | None = None,
+                 target_risk_basis: str | None = None,
                  target_price: float | None = None,
                  trailing_stop_basis: str | None = None,
                  paper_loss_protection: bool = False,
@@ -155,9 +156,12 @@ def replay_trade(trade: dict, *, target_max_r: float | None = None,
     if target_max_r is not None:
         if not math.isfinite(target_max_r) or target_max_r <= 0 or not risk:
             raise ValueError("Target cap requires positive finite R and initial risk")
-        target = entry + sign * target_max_r * risk / qty
-        if position.take_profit is not None and sign*(position.take_profit-target) > 0:
-            position.take_profit = round(target, 4)
+        from core.execution import apply_target_cap
+        basis = target_risk_basis or (rules.get('execution_risk') or {}).get('target_risk_basis', 'pattern')
+        if basis == 'paper_initial' and not (saved_policy and saved_policy.get('initial_stop') is not None):
+            raise ValueError('Paper-initial target R requires saved entry-time paper protection')
+        cap_geometry = apply_target_cap(position, entry, target_max_r, basis,
+                                        paper_costs=(fee, slip) if saved_policy else None)
     armed, paper_armed, ambiguous, gap_fill, best_close_r = False, False, [], False, 0.0
     opening_gap_through_protection = False
     for index, (bar, mark) in enumerate(zip(bars, marks), 1):
@@ -249,6 +253,9 @@ def replay_trade(trade: dict, *, target_max_r: float | None = None,
         "activation_r": position.trailing_activation_pct*entry*qty/risk
         if position.trailing_activation_pct is not None and risk else None,
         "entry": entry, "qty": qty, "exit": position.exit_price if closed else None,
+        "initial_r_units": "gross initial stop distance; net R includes costs",
+        "target_cap_risk_basis": cap_geometry['target_risk_basis'] if target_max_r is not None else None,
+        "target_cap_risk_distance": cap_geometry['target_risk_distance'] if target_max_r is not None else None,
         "txn_cost_pct_per_side": fee, "slippage_pct_per_side": slip,
         "fees_paid": (entry+position.exit_price)*qty*fee if closed else entry*qty*fee,
         "marked_open_pnl": marked if not closed else 0,
@@ -448,6 +455,9 @@ def review_export(path: Path, *, allow_inconsistent_ohlc: bool = False) -> dict:
             _equal(sum(r["marked_open_pnl"] for r in opened), metrics["unrealized_pnl_dollars"], "open total", .02)
             _equal(sum(r["fees_paid"] for r in rows), metrics["fees"], "total fees", .02)
         cap = [replay_trade(t, target_max_r=2, **replay_options) for t in trades]
+        paper_cap = ([replay_trade(t, target_max_r=2, target_risk_basis='paper_initial', **replay_options)
+                      for t in trades] if all((t.get('paper_protection') or {}).get('initial_stop') is not None
+                                             for t in trades) else None)
         fixed = [replay_trade(t, trailing_stop_basis="entry", **replay_options) for t in trades]
         protected = [replay_trade(t, paper_loss_protection=True, **replay_options) for t in trades]
         anomalies = [{"trade_id": r["trade_id"], "symbol": r["symbol"], **anomaly}
@@ -513,6 +523,12 @@ def review_export(path: Path, *, allow_inconsistent_ohlc: bool = False) -> dict:
                 if r["target_r"] is not None and r["activation_r"] is not None
                 and r["target_r"] <= r["activation_r"]],
             "comparisons": {
+                "target_cap_scope": "saved production target-risk basis; legacy snapshots default to pattern",
+                "paper_initial_target_cap_2r": {
+                    "risk_basis": "paper_initial", "rows": paper_cap,
+                    "closed": summarize(paper_cap) if paper_cap is not None else None,
+                    "unavailable_reason": None if paper_cap is not None else "missing entry-time paper protection",
+                },
                 "boundary_objectives": boundary_objective_comparison(trades, **replay_options),
                 "target_cap_2r_closed": summarize([r for r in cap if r["exit_reason"] != "open"]),
                 "target_cap_2r_total_liquidation_pnl": sum(r["pnl"] for r in cap),

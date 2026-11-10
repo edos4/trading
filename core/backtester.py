@@ -52,6 +52,7 @@ _CACHE_TTL_SECONDS = 6 * 3600
 # The pre-audit engine uses the identical exit ladder. Recheck this allowance
 # whenever exit helpers change; new entries still require the current runtime.
 _COMPATIBLE_EXIT_ENGINE_HASHES = frozenset({
+    "c924745b62323b0188b3675c02d51b335cfd472cb9dd062e52eebeee0c239740",
     # Entry-boundary validation and additive detector evidence leave saved exits unchanged.
     "f1d110291fcca45cd4214612081660feba4b18ff195f47343ff4ea22c0d8e3d3",
     # Observed-price paper trails are additive; ordinary saved OHLC ladders
@@ -77,6 +78,7 @@ _COMPATIBLE_EXIT_ENGINE_HASHES = frozenset({
 # Entry corrections and an opt-in trail basis preserve these audited engines'
 # existing ladders. Missing basis always means the old reference percentage.
 _COMPATIBLE_CAUSAL_EXIT_ENGINE_HASHES = frozenset({
+    "c924745b62323b0188b3675c02d51b335cfd472cb9dd062e52eebeee0c239740",
     "f1d110291fcca45cd4214612081660feba4b18ff195f47343ff4ea22c0d8e3d3",
     "2ed01bd2c22ea083a77adfd98b47d04ff2bce131e259c2f52c41279c445a7ed0",
     "40c0c80c62b35a6f71ffb9bd1dac81f10ac02c25800277f5cfe5d604ef10f63e",
@@ -172,6 +174,7 @@ class BacktestTrade:
     pattern_version_id: str | None = None
     provenance: str = "legacy_unknown"
     pattern_evidence: dict | None = None
+    execution_risk: dict | None = None
     requested_rules: dict | None = None
     resolved_rules: dict | None = None
     time_exit_only_unfavorable: bool = False
@@ -1007,6 +1010,7 @@ def _open_trade(
         decision_date=signal.signal_bar_timestamp,
         chart_annotations=[dict(a) for a in signal.chart_annotations],
         pattern_evidence=deepcopy(signal.pattern_evidence),
+        execution_risk=deepcopy(signal.execution_risk),
         symbol=signal.symbol,
         timeframe=signal.timeframe,
         pattern=signal.pattern,

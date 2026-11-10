@@ -698,6 +698,8 @@ class PaperAccount:
                 "stop_loss_arm_r": settings.stop_loss_arm_r,
                 "stop_loss_min_risk_frac": settings.stop_loss_min_risk_frac,
                 "target_max_r": settings.target_max_r,
+                "target_risk_basis": settings.target_risk_basis,
+                "reported_r_units": "gross initial stop distance; net R includes costs",
                 "execution_coverage": {
                     'verified': not self.execution_gaps,
                     'unresolved_intervals': list(self.execution_gaps.values()),
@@ -851,7 +853,8 @@ class PaperAccount:
                 if candle.timestamp <= signal.signal_bar_timestamp:
                     continue
                 try:
-                    candidate = opening_candidate(signal, candle, ENGINE.position_notional, self.market, self.slippage_pct)
+                    candidate = opening_candidate(signal, candle, ENGINE.position_notional, self.market, self.slippage_pct,
+                                                  paper_costs=(self.txn_cost_pct, self.slippage_pct))
                     if candidate is None:
                         continue
                     if entry_check is not None:
@@ -874,7 +877,8 @@ class PaperAccount:
                         # returning it to the scanner's filled-event logger.
                         position = self.positions[symbol][-1]
                         for field in ("trade_id", "signal_id", "resolved_rules", "execution_model",
-                                      "decision_date", "entry_fee_paid", "kronos_evidence", "laya_assessment"):
+                                      "decision_date", "entry_fee_paid", "kronos_evidence", "laya_assessment",
+                                      "execution_risk"):
                             setattr(signal, field, deepcopy(getattr(position, field, None)))
                         signal.price, signal.qty = position.entry_price, position.qty
                 except Exception as exc:
@@ -976,6 +980,10 @@ class PaperAccount:
         from core.execution import validate_entry_geometry
         try:
             validate_entry_geometry(signal, entry_price)
+            from core.execution import apply_target_cap
+            signal.execution_risk = apply_target_cap(
+                signal, entry_price, float(settings.target_max_r or 0), settings.target_risk_basis,
+                paper_costs=(self.txn_cost_pct, self.slippage_pct))
             from core.entry_economics import validate_target_reward
             validate_target_reward(signal, entry_price, self.txn_cost_pct, self.slippage_pct)
         except ValueError as exc:

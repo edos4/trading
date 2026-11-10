@@ -30,8 +30,18 @@ def _net_return(position: BacktestTrade, raw_price: float) -> float:
 
 def _trigger(position: BacktestTrade, floor: float) -> float:
     policy = position.paper_protection
-    entry, fee, slip = position.entry_price, policy["txn_cost_pct"], policy["slippage_pct"]
-    if position.action == "SELL":
+    return paper_stop_price(position.entry_price, position.action, policy['txn_cost_pct'],
+                            policy['slippage_pct'], floor)
+
+
+def paper_stop_price(entry: float, action: str, fee: float, slip: float,
+                     floor: float = -LOSS_LIMIT_PCT) -> float:
+    """Raw trigger for a net return floor, shared by entry and exit arithmetic."""
+    if (action not in ('BUY', 'SELL') or not math.isfinite(entry) or entry <= 0
+            or not math.isfinite(floor) or not math.isfinite(fee) or not 0 <= fee < 1
+            or not math.isfinite(slip) or not 0 <= slip < 1):
+        raise ValueError('Invalid paper stop economics')
+    if action == "SELL":
         return entry * (1 - fee - floor) / ((1 + fee) * (1 + slip))
     return entry * (1 + fee + floor) / ((1 - fee) * (1 - slip))
 

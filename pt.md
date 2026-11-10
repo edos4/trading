@@ -5,7 +5,7 @@
 | Issue | Implementation status |
 | --- | --- |
 | Opening price returns inside the V2 breakout | Fixed: frozen V2 boundary/direction evidence survives queue, restart, fill, and export. Both raw open and slipped entry must preserve the breakout; older orders require a unique saved level. Mirrored tests and original-export replay verify admission and historical exit compatibility. |
-| Inconsistent target R and risk labels | Pending: explicit risk basis shared by execution and diagnostics. |
+| Inconsistent target R and risk labels | Fixed: `target_risk_basis=pattern|paper_initial` shares one cap formula between paper execution and review; fills export gross distances and the separate net budget. Default remains pattern and cap remains off. Tests reproduce both original diagnostic totals and verify mirrored fill/export/replay agreement. |
 | Boundary diagnostic shifts already correct targets | Pending: require objective-policy evidence. |
 | Volatility/holding-objective mismatch | Pending: causal budget-fit evidence and configurable research controls; no outcome-fitted default. |
 | Kronos selection is not a holdout / incomplete policy comparisons | Pending: enforce evaluation eligibility and compare complete frozen runs. |

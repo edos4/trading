@@ -66,6 +66,47 @@ def _planned_risk_frac(signal):
     return abs(signal.price - stop) / signal.price
 
 
+def entry_risk_geometry(signal, price: float, *, paper_costs: tuple[float, float] | None = None) -> dict:
+    """Describe gross trigger risk separately from the cost-aware net budget."""
+    from core.position_protection import LOSS_LIMIT_PCT, paper_stop_price
+
+    pattern = _effective_stop_for(signal, price)
+    paper = paper_stop_price(price, signal.action, *paper_costs) if paper_costs is not None else None
+    levels = [stop for stop in (pattern, paper) if stop is not None]
+    initial = (min(levels) if signal.action == 'SELL' else max(levels)) if levels else None
+    return {'schema_version': 1, 'risk_units': 'gross_price_distance',
+            'pattern_stop': pattern, 'paper_initial_stop': paper, 'initial_gross_stop': initial,
+            'pattern_distance': abs(price-pattern) if pattern is not None else None,
+            'paper_initial_distance': abs(price-initial) if initial is not None else None,
+            'paper_net_loss_budget_pct': LOSS_LIMIT_PCT if paper is not None else None,
+            'fee_per_side': paper_costs[0] if paper_costs is not None else None,
+            'slippage_per_side': paper_costs[1] if paper_costs is not None else None}
+
+
+def apply_target_cap(signal, price: float, max_r: float, basis: str, *,
+                     paper_costs: tuple[float, float] | None = None) -> dict:
+    """Apply the same explicit R definition in execution and counterfactuals."""
+    if basis not in ('pattern', 'paper_initial'):
+        raise ValueError('Unknown target risk basis')
+    if not math.isfinite(max_r) or max_r < 0:
+        raise ValueError('Target cap must be finite and nonnegative')
+    geometry = entry_risk_geometry(signal, price, paper_costs=paper_costs)
+    distance = geometry[basis + '_distance']
+    if max_r > 0:
+        if basis == 'paper_initial' and paper_costs is None:
+            raise ValueError('Paper-initial target R requires paper execution costs')
+        if distance is None or distance <= 0:
+            raise ValueError('Target cap requires positive initial risk')
+        sign = -1 if signal.action == 'SELL' else 1
+        target = price + sign * max_r * distance
+        if target <= 0:
+            raise ValueError('Target cap would produce a nonpositive target')
+        if signal.take_profit is not None and sign*(signal.take_profit-target) > 0:
+            signal.take_profit = round(target, 4)
+    geometry.update(target_risk_basis=basis, target_risk_distance=distance, target_max_r=max_r)
+    return geometry
+
+
 def validate_entry_geometry(signal, price: float, *, opening: bool = False) -> None:
     """Reject inverted protection instead of silently opening an unprotected bet."""
     if signal.action not in ("BUY", "SELL"):
@@ -105,7 +146,7 @@ def validate_entry_geometry(signal, price: float, *, opening: bool = False) -> N
             raise ValueError(f'{prefix} returned inside the Patternsv2 breakout boundary')
 
 
-def opening_candidate(signal, candle, notional, market, slippage=0):
+def opening_candidate(signal, candle, notional, market, slippage=0, *, paper_costs=None):
     """Fixed structural levels; cancel gaps beyond them rather than erase risk."""
     from core.backtester import _apply_notional_sizing
     from zoneinfo import ZoneInfo
@@ -167,13 +208,8 @@ def opening_candidate(signal, candle, notional, market, slippage=0):
                 value = getattr(signal, field)
                 if value is not None:
                     setattr(fill, field, round(value * risk / basis, 6))
-        max_r = float(settings.target_max_r or 0.0)
-        if max_r > 0 and fill.take_profit is not None:
-            cap_dist = max_r * risk * price
-            if fill.action == "BUY" and fill.take_profit - price > cap_dist:
-                fill.take_profit = round(price + cap_dist, 4)
-            elif fill.action == "SELL" and price - fill.take_profit > cap_dist:
-                fill.take_profit = round(price - cap_dist, 4)
+    fill.execution_risk = apply_target_cap(fill, price, float(settings.target_max_r or 0),
+                                           settings.target_risk_basis, paper_costs=paper_costs)
     _apply_notional_sizing(fill, notional, fractional=is_fractional_qty(fill.pattern))
     profile = get_market(market)
     if profile.long_only and short:

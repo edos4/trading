@@ -86,11 +86,13 @@ class Settings(BaseSettings):
     # Cancel a next-open fill when an adverse gap leaves less than this
     # fraction of the planned stop distance. 0 disables the guard.
     stop_loss_min_risk_frac: float = 0.5
-    # Optional cap on a pattern's measured target, in executed initial R.
+    # Optional measured-target cap. The basis is explicit: pattern stop or
+    # nearest initial paper/structural stop, both measured as gross distance.
     # Disabled by default: a saved-entry replay of the 2026-11-05 13:27Z export
     # with a 2R cap preempted every trail and turned +$1,683 into -$1,038.
     # Preserve the measured target; a positive value explicitly requests a cap.
     target_max_r: float = 0.0
+    target_risk_basis: Literal['pattern', 'paper_initial'] = 'pattern'
     # Reject US pattern entries below this price (0 disables). Off by default:
     # the current ledger's sub-$10 cohort is +$2,989 and holds the two biggest
     # winners (UPXI, RUM).

@@ -159,6 +159,7 @@ class TradeSignal:
     # Immutable detector evidence; V2 entry policies never infer a new rail
     # from the execution candle or from today's mutable detector.
     pattern_evidence: dict | None = None
+    execution_risk: dict | None = None
     requested_rules: dict | None = None
     resolved_rules: dict | None = None
     laya_assessment: dict | None = None
