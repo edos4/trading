@@ -124,6 +124,7 @@ def model_holdout_evidence(book: dict, expected_identity: str | None = None) -> 
 def compare_books(baseline: dict, candidate: dict, plan: dict) -> dict:
     """A strategy comparison requires full, independently executed account runs."""
     from analysis.paper_trade_review import replay_trade, signal_evidence, summarize
+    from analysis.paper_cohorts import cohort_review
 
     errors = []
     if (plan.get('schema_version') != 1 or plan.get('evaluation_policy_sha256')
@@ -210,7 +211,8 @@ def compare_books(baseline: dict, candidate: dict, plan: dict) -> dict:
             if abs(sum(r['pnl'] for r in closed)-book['metrics']['realized_pnl_dollars']) > .02:
                 raise ValueError('realized total does not reconcile')
             outcome = {'closed': summarize(closed), 'liquidation_pnl': sum(r['pnl'] for r in rows),
-                       'open_positions': sum(r['exit_reason'] == 'open' for r in rows)}
+                       'open_positions': sum(r['exit_reason'] == 'open' for r in rows),
+                       'cohorts': cohort_review(book, rows)}
         except (KeyError, TypeError, ValueError) as exc:
             errors.append(f'{label}: saved execution does not reproduce: {exc}')
             outcome = None

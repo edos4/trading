@@ -454,6 +454,7 @@ def review_export(path: Path, *, allow_inconsistent_ohlc: bool = False) -> dict:
     raw = path.read_bytes()
     export = json.loads(raw)
     from analysis.paper_policy_evaluation import model_holdout_evidence
+    from analysis.paper_cohorts import cohort_review
     result = {"export_sha256": hashlib.sha256(raw).hexdigest(),
               "exported_at": export["exported_at"], "engine_sha256": engine_hash(),
               "scope": "saved entries and OHLC through original exits/latest open marks; no rescanning",
@@ -488,6 +489,7 @@ def review_export(path: Path, *, allow_inconsistent_ohlc: bool = False) -> dict:
         result["books"].append({
             "market": book["market"], "currency": book["currency"],
             "model_evaluation": model_holdout_evidence(book),
+            "cohort_attribution": cohort_review(book, rows),
             "run_completion": {
                 "termination_reason": (book.get("scan_stats") or {}).get("termination_reason"),
                 "scan_complete": (book.get("scan_stats") or {}).get("scan_complete"),
