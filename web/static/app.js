@@ -43,6 +43,42 @@ function fmtIndicators(data, time) {
   return vwap + rsi + `    DII (${data.dii.length}, ${data.dii.period}) Up ${value("up")} Down ${value("down")} Bulls ${value("bulls", true)} Bears ${value("bears", true)}`;
 }
 
+/* Whole-window OHLC summary for a viewer chart. */
+function fmtTvOhlc(data) {
+  const o = data && data.ohlc;
+  if (!o) return "";
+  const sign = o.change >= 0 ? "+" : "";
+  return (
+    `O ${Number(o.open).toFixed(2)}  H ${Number(o.high).toFixed(2)}  ` +
+    `L ${Number(o.low).toFixed(2)}  C ${Number(o.close).toFixed(2)}  ` +
+    `${sign}${Number(o.change).toFixed(2)} (${sign}${Number(o.change_pct).toFixed(2)}%)` +
+    ((data.vwap?.length || data.dii) ? `    Last displayed bar${fmtIndicators(data, data.candles?.at(-1)?.time)}` : "")
+  );
+}
+
+/* Write the hover line: the whole-window summary, or one bar with its
+ * indicators while the crosshair moves. Shared by every viewer mount. */
+function applyViewerOhlc(el, data, bar) {
+  if (!el) return;
+  let change = Number(data && data.ohlc && data.ohlc.change);
+  if (bar) {
+    const candles = data.candles || [];
+    const index = candles.findIndex((c) => c.time === bar.time);
+    const prevClose = index > 0 ? candles[index - 1].close : bar.open;
+    change = bar.close - prevClose;
+    const pct = prevClose ? (change / prevClose) * 100 : 0;
+    const sign = change >= 0 ? "+" : "";
+    el.textContent =
+      `${bar.time}  O ${Number(bar.open).toFixed(2)}  H ${Number(bar.high).toFixed(2)}  ` +
+      `L ${Number(bar.low).toFixed(2)}  C ${Number(bar.close).toFixed(2)}  ` +
+      `${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)` + fmtIndicators(data, bar.time);
+  } else {
+    el.textContent = fmtTvOhlc(data);
+  }
+  el.classList.toggle("gain", change >= 0);
+  el.classList.toggle("loss", change < 0);
+}
+
 function downloadText(filename, text, mime) {
   const blob = new Blob([text], { type: mime || "text/plain" });
   const a = document.createElement("a");
@@ -82,6 +118,10 @@ function initExplorer() {
   const header = document.getElementById("header");
   const chart = document.getElementById("chart");
   const placeholder = document.getElementById("chart-placeholder");
+  const chartWrap = document.getElementById("chart-wrap");
+  const chartHost = document.getElementById("chart-host");
+  const chartTools = document.getElementById("chart-tools");
+  const chartOhlc = document.getElementById("chart-ohlc");
   const tbody = document.querySelector("#signals tbody");
   const indicatorsOnly = document.getElementById("indicators-only");
   const runPatterns = document.getElementById("run-patterns");
@@ -145,6 +185,52 @@ function initExplorer() {
     status.textContent = `${rows.length} symbols loaded.`;
   }
 
+  /* Draw with the same viewer the paper tab opens on a row double-click. The
+   * server PNG stays as the fallback: an older payload, or a viewer that fails
+   * to mount, must still leave a chart on screen. Returns a status suffix for
+   * the caller — the caller writes the status line after this returns. */
+  function showChart(data) {
+    const viewer = data.viewer;
+    if (viewer && window.TVChart && chartHost) {
+      try {
+        window.TVChart.mount(chartHost, viewer, {
+          // The viewer's own toolbar (overlay toggles, VWAP mode). No
+          // chart_draw.js here: a browse surface has no trade identity, so a
+          // correction drawn on it could never be kept.
+          toolbarHost: chartTools,
+          onCandle(bar) { applyViewerOhlc(chartOhlc, viewer, bar); },
+        });
+        applyViewerOhlc(chartOhlc, viewer, null);
+        if (chartWrap) chartWrap.classList.add("viewer");
+        if (chartTools) chartTools.hidden = false;
+        chartHost.hidden = false;
+        if (chartOhlc) chartOhlc.hidden = false;
+        chart.hidden = true;
+        placeholder.hidden = true;
+        return "";
+      } catch (err) {
+        if (window.TVChart.unmount) window.TVChart.unmount();
+        if (chartWrap) chartWrap.classList.remove("viewer");
+        if (chartTools) chartTools.hidden = true;
+        chartHost.hidden = true;
+        if (chartOhlc) chartOhlc.hidden = true;
+        chart.src = `data:image/png;base64,${data.chart_png_b64}`;
+        chart.hidden = false;
+        placeholder.hidden = true;
+        return ` — chart viewer unavailable (${err.message || err}); showing the rendered chart.`;
+      }
+    }
+    if (window.TVChart) window.TVChart.unmount();
+    if (chartWrap) chartWrap.classList.remove("viewer");
+    if (chartTools) chartTools.hidden = true;
+    if (chartHost) chartHost.hidden = true;
+    if (chartOhlc) chartOhlc.hidden = true;
+    chart.src = `data:image/png;base64,${data.chart_png_b64}`;
+    chart.hidden = false;
+    placeholder.hidden = true;
+    return "";
+  }
+
   async function loadSymbol(row) {
     selected = row;
     renderList();
@@ -159,6 +245,7 @@ function initExplorer() {
       patterns_v2: !!(patternsV2 && patternsV2.checked && !(indicatorsOnly && indicatorsOnly.checked)),
       volume_gate: document.getElementById("volume-gate").checked,
       market: (document.getElementById("market") || {}).value || "",
+      include_viewer: true,
     };
     try {
       const data = await api("/api/symbol", {
@@ -172,9 +259,7 @@ function initExplorer() {
         `O ${o.open.toFixed(2)}  H ${o.high.toFixed(2)}  L ${o.low.toFixed(2)}  ` +
         `C ${o.close.toFixed(2)}  ${o.change >= 0 ? "+" : ""}${o.change.toFixed(2)} ` +
         `(${o.change_pct >= 0 ? "+" : ""}${o.change_pct.toFixed(2)}%)  bars=${data.bars}`;
-      chart.src = `data:image/png;base64,${data.chart_png_b64}`;
-      chart.hidden = false;
-      placeholder.hidden = true;
+      const chartNote = showChart(data);
       tbody.innerHTML = "";
       for (const s of data.signals) {
         const tr = document.createElement("tr");
@@ -202,9 +287,9 @@ function initExplorer() {
         cell.textContent = data.scan_error;
         row.appendChild(cell);
         tbody.appendChild(row);
-        status.textContent = `${data.symbol}: ${data.bars} bars — pattern scan unavailable: ${data.scan_error}`;
+        status.textContent = `${data.symbol}: ${data.bars} bars — pattern scan unavailable: ${data.scan_error}${chartNote}`;
       } else {
-        status.textContent = `${data.symbol}: ${data.bars} bars, ${data.signals.length} ${noun}(s).`;
+        status.textContent = `${data.symbol}: ${data.bars} bars, ${data.signals.length} ${noun}(s).${chartNote}`;
       }
     } catch (err) {
       status.textContent = String(err.message || err);
@@ -1108,18 +1193,6 @@ function initPaper() {
   let chartArgs = null;
   let chartTimeframe = "1d";
 
-  function fmtTvOhlc(data) {
-    const o = data && data.ohlc;
-    if (!o) return "";
-    const sign = o.change >= 0 ? "+" : "";
-    return (
-      `O ${Number(o.open).toFixed(2)}  H ${Number(o.high).toFixed(2)}  ` +
-      `L ${Number(o.low).toFixed(2)}  C ${Number(o.close).toFixed(2)}  ` +
-      `${sign}${Number(o.change).toFixed(2)} (${sign}${Number(o.change_pct).toFixed(2)}%)` +
-      ((data.vwap?.length || data.dii) ? `    Last displayed bar${fmtIndicators(data, data.candles?.at(-1)?.time)}` : "")
-    );
-  }
-
   function closeTradeChart() {
     if (!chartModal || chartModal.hidden) return;
     if (window.TVChart?.canClose && !window.TVChart.canClose()) return;
@@ -1161,35 +1234,11 @@ function initPaper() {
         }
       }
       if (chartTitle) chartTitle.textContent = data.title || symbol || "Chart";
-      if (chartOhlc) {
-        chartOhlc.textContent = fmtTvOhlc(data);
-        chartOhlc.classList.toggle("gain", Number(data.ohlc && data.ohlc.change) >= 0);
-        chartOhlc.classList.toggle("loss", Number(data.ohlc && data.ohlc.change) < 0);
-      }
+      applyViewerOhlc(chartOhlc, data, null);
       if (window.TVChart && chartHost) {
         window.TVChart.mount(chartHost, data, {
           toolbarHost: chartTools,
-          onCandle(bar) {
-            if (!chartOhlc) return;
-            if (!bar) {
-              chartOhlc.textContent = fmtTvOhlc(data);
-              chartOhlc.classList.toggle("gain", Number(data.ohlc && data.ohlc.change) >= 0);
-              chartOhlc.classList.toggle("loss", Number(data.ohlc && data.ohlc.change) < 0);
-              return;
-            }
-            const prev = (data.candles || []).findIndex((c) => c.time === bar.time);
-            const prevClose = prev > 0 ? data.candles[prev - 1].close : bar.open;
-            const change = bar.close - prevClose;
-            const pct = prevClose ? (change / prevClose) * 100 : 0;
-            const sign = change >= 0 ? "+" : "";
-            const indicatorText = fmtIndicators(data, bar.time);
-            chartOhlc.textContent =
-              `${bar.time}  O ${Number(bar.open).toFixed(2)}  H ${Number(bar.high).toFixed(2)}  ` +
-              `L ${Number(bar.low).toFixed(2)}  C ${Number(bar.close).toFixed(2)}  ` +
-              `${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)` + indicatorText;
-            chartOhlc.classList.toggle("gain", change >= 0);
-            chartOhlc.classList.toggle("loss", change < 0);
-          },
+          onCandle(bar) { applyViewerOhlc(chartOhlc, data, bar); },
         });
       }
       if (chartStatus) {
@@ -1803,17 +1852,6 @@ function initReplay() {
   const chartTools = document.getElementById("replay-chart-tools");
   const chartHost = document.getElementById("replay-chart-host");
 
-  function fmtTvOhlc(data) {
-    const o = data && data.ohlc;
-    if (!o) return "";
-    const sign = o.change >= 0 ? "+" : "";
-    return (
-      `O ${Number(o.open).toFixed(2)}  H ${Number(o.high).toFixed(2)}  ` +
-      `L ${Number(o.low).toFixed(2)}  C ${Number(o.close).toFixed(2)}  ` +
-      `${sign}${Number(o.change).toFixed(2)} (${sign}${Number(o.change_pct).toFixed(2)}%)` +
-      ((data.vwap?.length || data.dii) ? `    Last displayed bar${fmtIndicators(data, data.candles?.at(-1)?.time)}` : "")
-    );
-  }
   function closeTradeChart() {
     if (!chartModal || chartModal.hidden) return;
     if (window.TVChart?.canClose && !window.TVChart.canClose()) return;
@@ -1846,35 +1884,11 @@ function initReplay() {
   }
   function renderTradeChartData(data) {
     if (chartTitle) chartTitle.textContent = data.title || "Chart";
-    if (chartOhlc) {
-      chartOhlc.textContent = fmtTvOhlc(data);
-      chartOhlc.classList.toggle("gain", Number(data.ohlc && data.ohlc.change) >= 0);
-      chartOhlc.classList.toggle("loss", Number(data.ohlc && data.ohlc.change) < 0);
-    }
+    applyViewerOhlc(chartOhlc, data, null);
     if (window.TVChart && chartHost) {
       window.TVChart.mount(chartHost, data, {
         toolbarHost: chartTools,
-        onCandle(bar) {
-          if (!chartOhlc) return;
-          if (!bar) {
-            chartOhlc.textContent = fmtTvOhlc(data);
-            chartOhlc.classList.toggle("gain", Number(data.ohlc && data.ohlc.change) >= 0);
-            chartOhlc.classList.toggle("loss", Number(data.ohlc && data.ohlc.change) < 0);
-            return;
-          }
-          const prev = (data.candles || []).findIndex((c) => c.time === bar.time);
-          const prevClose = prev > 0 ? data.candles[prev - 1].close : bar.open;
-          const change = bar.close - prevClose;
-          const pct = prevClose ? (change / prevClose) * 100 : 0;
-          const sign = change >= 0 ? "+" : "";
-          const indicatorText = fmtIndicators(data, bar.time);
-          chartOhlc.textContent =
-            `${bar.time}  O ${Number(bar.open).toFixed(2)}  H ${Number(bar.high).toFixed(2)}  ` +
-            `L ${Number(bar.low).toFixed(2)}  C ${Number(bar.close).toFixed(2)}  ` +
-            `${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)` + indicatorText;
-          chartOhlc.classList.toggle("gain", change >= 0);
-          chartOhlc.classList.toggle("loss", change < 0);
-        },
+        onCandle(bar) { applyViewerOhlc(chartOhlc, data, bar); },
       });
     }
     if (chartStatus) {

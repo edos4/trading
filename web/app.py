@@ -80,6 +80,9 @@ class SymbolRequest(BaseModel):
     patterns_v2: bool = False
     volume_gate: Optional[bool] = None
     market: Optional[str] = None
+    # Interactive viewer payload for the browser client. MCP callers leave it
+    # off: they read ``chart_png_b64`` and do not need the candle arrays.
+    include_viewer: bool = False
 
 
 class PaperStartRequest(BaseModel):
@@ -764,6 +767,7 @@ def create_app() -> FastAPI:
                 patterns_v2=payload.patterns_v2,
                 volume_gate=payload.volume_gate,
                 market=payload.market,
+                include_viewer=payload.include_viewer,
             )
         except (DatabaseUnavailable, MigrationRequired) as exc:
             # Pattern resolution needs the editor database; that is a server

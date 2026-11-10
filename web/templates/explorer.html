@@ -34,9 +34,12 @@
   </aside>
   <div class="panel grow">
     <h2 id="header">Select a symbol</h2>
+    <p id="chart-ohlc" class="tv-ohlc" hidden></p>
     <div id="chart-wrap" class="chart-wrap">
       <p class="muted" id="chart-placeholder">No chart yet</p>
       <img id="chart" alt="chart" hidden />
+      <div id="chart-tools" class="tv-chart-tools" hidden></div>
+      <div id="chart-host" class="tv-chart-host" hidden></div>
     </div>
     <h3 id="signals-heading">Detected patterns</h3>
     <div class="table-wrap">
@@ -54,6 +57,9 @@
 <p id="status" class="status">Ready.</p>
 {% endblock %}
 {% block scripts %}
+<script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+<script src="/static/tv_chart.js?v=25"></script>
+<script src="/static/pattern_notes.js?v=3"></script>
 <script>
   window.TB_PAGE = "explorer";
   window.TB_DEFAULTS = {

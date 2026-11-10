@@ -10,7 +10,7 @@ from analysis.chart_renderer import ChartRenderer
 from analysis.price_volume import volume_confirm_gate
 from config import PATTERN_SCAN_HISTORY_BARS, settings, disabled_pattern_names
 from core.engine_defaults import passes_min_confidence, passes_regime_filter
-from core.market import get_market
+from core.market import MarketProfile, get_market
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
 from data.tv_client import TVClient
 from data.history import fetch_ohlcv_candles
@@ -123,6 +123,7 @@ class ExplorerService:
         patterns_v2: bool = False,
         volume_gate: bool | None = None,
         market: str | None = None,
+        include_viewer: bool = False,
     ) -> dict[str, Any]:
         if timeframe not in TIMEFRAMES:
             raise ValueError(f"Unsupported timeframe: {timeframe}")
@@ -213,6 +214,9 @@ class ExplorerService:
             symbol, timeframe, df, annotations=annotations or None,
             trendlines=True,
         )
+        viewer = self._viewer_payload(
+            df, symbol, timeframe, profile, annotations, include_viewer,
+        )
         last = df.iloc[-1]
         prev = df.iloc[-2] if len(df) > 1 else last
         change = float(last["close"] - prev["close"])
@@ -254,7 +258,43 @@ class ExplorerService:
             ],
             "chart_png_b64": base64.b64encode(png).decode("ascii"),
             "csv": csv_buf.getvalue(),
+            # Same payload the paper/replay modals mount, for the browser's
+            # interactive viewer. None unless the client asked for it.
+            "viewer": viewer,
         }
+
+    def _viewer_payload(
+        self,
+        df,
+        symbol: str,
+        timeframe: str,
+        profile: MarketProfile,
+        annotations: list[dict],
+        include_viewer: bool,
+    ) -> Optional[dict[str, Any]]:
+        """Candles, indicators, pattern geometry and rails for the viewer.
+
+        The explorer renders the same chart component as the paper tab, so the
+        load carries the payload instead of making the browser fetch it again
+        (a second request would re-run the pattern scan).
+        """
+        if not include_viewer:
+            return None
+        from analysis.chart_renderer import build_trade_viewer_payload
+
+        try:
+            return build_trade_viewer_payload(
+                df, symbol=symbol, timeframe=timeframe, market=profile.id,
+                session_tz=profile.session_tz,
+                annotations=annotations or None, trendlines=True,
+            )
+        except ValueError as exc:
+            # The rendered PNG already covers this symbol; a window too short
+            # for the viewer must not fail the whole load.
+            log.warning(
+                f"Explorer | viewer payload unavailable for {symbol} {timeframe}: {exc}"
+            )
+            return None
 
 
 _explorer: Optional[ExplorerService] = None

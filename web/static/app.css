@@ -128,6 +128,10 @@ button { cursor: pointer; }
   margin: 0.75rem 0 1rem;
 }
 .chart-wrap img { max-width: 100%; height: auto; display: block; }
+/* Explorer hosts the same interactive viewer the paper modal opens on a row
+ * double-click, so the wrapper drops its image centring when it is mounted. */
+.chart-wrap.viewer { display: block; place-items: unset; }
+.chart-wrap.viewer #chart-host { height: min(62vh, 600px); }
 
 .table-wrap { overflow: auto; max-height: 360px; }
 .table-wrap.tall { max-height: 60vh; }
