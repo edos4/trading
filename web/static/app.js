@@ -674,6 +674,10 @@ function initPaper() {
   }
 
   const scanTiming = {};
+  // Set when the last /api/paper/status poll failed: the figures on screen are
+  // then the last good envelope and must not be presented as live.
+  let statusStale = false;
+  let statusStaleAt = null;
 
   function fmtDur(seconds) {
     const s = Number(seconds);
@@ -686,7 +690,7 @@ function initPaper() {
     return `${h}h ${String(m % 60).padStart(2, "0")}m`;
   }
 
-  function scanClockText(id) {
+  function scanClockText(id, frozen = false) {
     const t = scanTiming[id];
     if (!t) return "";
     const scans = Number(t.scans_completed || 0);
@@ -694,7 +698,7 @@ function initPaper() {
     if (!scans && !total && !t.scan_in_progress) return "";
     // The account persists this clock, so it covers every scan of the book
     // (all Start/Stop runs), not just the last cycle.
-    if (t.scan_in_progress) {
+    if (t.scan_in_progress && !frozen) {
       let live = Number(t.scan_elapsed_s || 0);
       const scanStartMs = Date.parse(t.scan_started_at || "");
       if (Number.isFinite(scanStartMs)) {
@@ -712,7 +716,18 @@ function initPaper() {
 
   function renderScanClock(id) {
     const el = document.getElementById(`${id}-scan-clock`);
-    if (el) el.textContent = scanClockText(id);
+    if (!el) return;
+    const body = scanClockText(id, statusStale);
+    if (!statusStale) {
+      el.textContent = body;
+      return;
+    }
+    // Never let a dead status endpoint look like a running scan: render the
+    // frozen stamps and say why they stopped moving.
+    const when = statusStaleAt
+      ? `last good update ${statusStaleAt}`
+      : "no successful update since this page loaded";
+    el.textContent = `Status unavailable — ${when}.${body ? `   ${body}` : ""}`;
   }
 
   function renderCard(id, snap) {
@@ -1057,8 +1072,14 @@ function initPaper() {
     let running = true;
     try {
       const s = await refresh();
+      statusStale = false;
+      statusStaleAt = new Date().toLocaleTimeString();
       running = Object.values(s.books || {}).some((b) => b.running);
     } catch (err) {
+      // Keep retrying fast, and let the scan clocks say the figures are old.
+      statusStale = true;
+      renderScanClock("us");
+      renderScanClock("ph");
       console.error(err);
     }
     if (pollTimer) clearTimeout(pollTimer);

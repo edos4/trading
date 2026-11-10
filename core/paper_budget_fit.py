@@ -25,11 +25,18 @@ def budget_fit(signal: TradeSignal, geometry: dict, minimum: float) -> dict:
     except (KeyError, TypeError, ValueError):
         valid = False
     distance = geometry['paper_initial_distance']
-    ratio = distance/atr if valid and distance is not None else None
-    result = {'policy': 'prior-atr-budget-fit-v1', 'atr_price': atr if valid else None,
+    atr_price = float(atr) if valid and atr is not None else None
+    # The recorded evidence is persisted with the ledger and served to the
+    # paper tab, so every value must be a JSON-native type. A numpy.bool_
+    # (numpy>=2 is not a subclass of bool) survives neither json.dumps in
+    # PaperAccount.save nor FastAPI's encoder in /api/paper/status, which
+    # stops the ledger persisting and blanks the tab.
+    ratio = (float(distance) / atr_price
+             if atr_price is not None and distance is not None else None)
+    result = {'policy': 'prior-atr-budget-fit-v1', 'atr_price': atr_price,
               'atr_as_of': evidence.get('atr_as_of'), 'initial_stop_atr': ratio,
-              'minimum_stop_atr': minimum, 'mode': 'filter' if minimum > 0 else 'shadow',
-              'verified': valid, 'passed': ratio is not None and ratio >= minimum}
+              'minimum_stop_atr': float(minimum), 'mode': 'filter' if minimum > 0 else 'shadow',
+              'verified': bool(valid), 'passed': bool(ratio is not None and ratio >= minimum)}
     if minimum > 0 and not valid:
         raise ValueError('Paper V2 budget fit requires saved decision-time ATR')
     if minimum > 0 and not result['passed']:

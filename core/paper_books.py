@@ -1212,7 +1212,14 @@ class PaperBook:
             log.exception(f"PaperBook | {profile.id} scanner crashed")
             error_msg = "Scanner crashed. Check server logs for details."
         finally:
-            self.account.save()
+            try:
+                self.account.save()
+            except BaseException:
+                # The run is already over; report the failed write instead of
+                # letting it escape as an opaque thread failure that leaves the
+                # desk's status lying about the book.
+                log.exception(f"PaperBook | {profile.id} ledger save failed")
+                error_msg = error_msg or "Ledger save failed. Check server logs for details."
             loop.close()
             sim_days = 0
             with self.lock:

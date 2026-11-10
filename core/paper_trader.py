@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import numpy as np
+
 from config import settings
 from core.backtester import (
     BacktestResult,
@@ -239,6 +241,22 @@ def _position_bar_is_due(position: BacktestTrade, as_of: datetime, market: str |
     last_checked = next((mark.get("sim_bar") for mark in reversed(position.position_marks)
                          if mark.get("exit_check") and mark.get("sim_bar")), None)
     return last_checked is None or key > _execution_bar_key(position.timeframe, datetime.fromisoformat(last_checked), market)
+
+
+def _ledger_json_default(value: Any) -> Any:
+    """Serialise the few non-JSON scalars a live ledger can hold.
+
+    numpy.bool_ / numpy.int64 are not subclasses of bool / int, so a single
+    leaked scalar otherwise aborts the whole ledger write (json.dumps) and the
+    run's state is never persisted.
+    """
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    raise TypeError(
+        f"Paper ledger value is not JSON serializable: {type(value).__name__}"
+    )
 
 
 def _trade_to_dict(t: BacktestTrade) -> dict:
@@ -1649,7 +1667,8 @@ class PaperAccount:
             p = Path(path) if path is not None else get_market(self.market).paper_account_path
             p.parent.mkdir(parents=True, exist_ok=True)
             from core.pattern_edit_store import atomic_write
-            atomic_write(p, json.dumps(payload, indent=2).encode())
+            atomic_write(p, json.dumps(
+                payload, indent=2, default=_ledger_json_default).encode())
 
     @classmethod
     def load(cls, path: str | Path | None = None, *, market: str | None = None) -> "PaperAccount":
