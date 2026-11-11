@@ -74,14 +74,14 @@
           <option value="filter">Filter</option>
         </select>
       </label>
-      <label class="check" title="Confirm requires a majority of Kronos forecasts before entry. Shadow records forecasts without blocking. Stops and targets always remain active.">
+      <label class="check" title="Kronos checks direction only: up confirms longs, down confirms shorts, flat blocks entries. Shadow records without blocking.">
         Kronos entries <select id="{{ book.id }}-kronos-mode">
           {% for mode in ['confirm', 'shadow', 'off'] %}
           <option value="{{ mode }}" {% if mode == kronos_gate_mode %}selected{% endif %}>{{ mode|capitalize }}</option>
           {% endfor %}
         </select>
       </label>
-      <span class="muted small">Kronos exits: {{ kronos_exit_mode|upper }}</span>
+      <span class="muted small" title="Opposing direction queues a next-open exit; matching direction or flat holds.">Kronos exits: {{ kronos_exit_mode|upper }}</span>
       <label class="check">
         <input type="checkbox" id="{{ book.id }}-collect-first" /> Collect-first
         <input type="number" id="{{ book.id }}-collect-first-top-n" value="4" min="1" max="50" step="1" style="width:3.2em" />

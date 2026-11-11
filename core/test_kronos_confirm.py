@@ -95,6 +95,22 @@ def test_min_agree_ties_withhold_opinion():
     assert _verdict((0.01, 0.02, -0.01), min_agree=2).decision == "confirm"
 
 
+@pytest.mark.parametrize("returns,direction", [
+    ((0.01, 0.02, -0.40), "up"),
+    ((-0.01, -0.02, 0.40), "down"),
+    ((0.0, 0.001, 0.40), "flat"),
+    ((0.01, 0.0, -0.01), None),
+    ((), None),
+])
+@pytest.mark.parametrize("action", ["BUY", "SELL"])
+def test_direction_is_explicit_and_independent_of_side_or_mean_return(returns, direction, action):
+    gate = KronosConfirmGate(mode="confirm", fetch_fn=lambda symbols: {"TEST": returns})
+    gate.queue(_signal(action=action), _candle(), None)
+    _, _, verdict, evidence = gate.flush()[0]
+    assert verdict.direction == evidence["direction"] == direction
+    assert evidence["decision_basis"] == "direction_only"
+
+
 def test_too_few_usable_simulations_is_no_opinion():
     verdict = _verdict((0.01,), min_agree=2)
     assert verdict.decision == "no_opinion"
@@ -155,6 +171,7 @@ def test_unavailable_is_no_opinion():
     gate.queue(_signal(), _candle(), None)
     rows = gate.flush()
     assert rows[0][2].decision == "no_opinion"
+    assert rows[0][3]["direction"] is None
     assert "unavailable" in rows[0][3]["reason"].lower()
 
 

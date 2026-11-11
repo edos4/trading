@@ -18,7 +18,7 @@ CONTROL_FIELDS = (
     'paper_require_liquidity_history', 'disabled_patterns_v2', 'vision_confirmation_enabled',
     'vision_min_indicator_confidence', 'kronos_gate_model', 'kronos_gate_sideways_atr',
     'kronos_gate_sideways_min_pct', 'kronos_gate_sideways_max_pct', 'kronos_gate_min_agree',
-    'kronos_exit_min_agree', 'kronos_exit_min_adverse_atr',
+    'kronos_exit_min_agree',
 )
 
 

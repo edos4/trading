@@ -1,12 +1,11 @@
-"""Gap fills need positive net reward and a still-useful saved forecast."""
+"""Gap fills keep target economics separate from Kronos direction checks."""
 from __future__ import annotations
 
-from dataclasses import replace
+from copy import deepcopy
 from unittest.mock import Mock
 
 import pytest
 
-from core.kronos_confirm import KronosConfirmGate
 from core.paper_trader import PaperAccount
 from core.scanner import MarketScanner
 from core.test_short_execution_pipeline import bar, candidate
@@ -30,24 +29,28 @@ def test_target_that_loses_after_friction_is_rejected_without_fees(short, slip):
 
 
 @pytest.mark.parametrize('short', [False, True])
-@pytest.mark.parametrize('opening,allowed', [(100,True), (105,False)])
-def test_saved_forecast_rebased_at_open_without_new_model_call(short, opening, allowed):
+@pytest.mark.parametrize('opening', [100, 105])
+@pytest.mark.parametrize('move', [.003, .04])
+@pytest.mark.parametrize('fee,slip', [(0, 0), (.005, .002)])
+def test_saved_direction_survives_gaps_and_costs_without_new_model_call(short, opening, move, fee, slip):
     s = candidate(short)
     opening = 200-opening if short else opening
-    book = PaperAccount(market='us',txn_cost_pct=.001,slippage_pct=0)
+    book = PaperAccount(market='us',txn_cost_pct=fee,slippage_pct=slip)
     book.assume_session_open = True
     scanner = MarketScanner(symbols=['TEST'],market='us',paper_account=book,
                             kronos_gate_mode='confirm',kronos_exit_mode='off')
-    fetch = Mock(return_value={'TEST':[-.04]*3 if short else [.04]*3})
+    fetch = Mock(return_value={'TEST':[-move]*3 if short else [move]*3})
     scanner._kronos_gate._fetch_fn = fetch
     scanner._kronos_gate.queue(s,bar(100),None)
     s.kronos_evidence = scanner._kronos_gate.flush()[0][3]
+    saved_evidence = deepcopy(s.kronos_evidence)
     store=OHLCVStore()
     assert book.queue_position(s,bar(100),store)[0]
     outcome=book.fill_pending('TEST','1d',bar(opening,1),store,entry_check=scanner._check_kronos_entry)[0]
-    assert outcome[1] is allowed
+    assert outcome[1], outcome[2]
     assert fetch.call_count==1
-    if allowed:
-        assert book.open_for('TEST')[0].kronos_evidence['opening_check']['decision']=='confirm'
-    else:
-        assert 'execution price' in outcome[2] and book.cash==book.initial_capital
+    evidence = book.open_for('TEST')[0].kronos_evidence
+    assert {k: v for k, v in evidence.items() if k != 'opening_check'} == saved_evidence
+    assert evidence['opening_check']['decision'] == 'confirm'
+    assert evidence['opening_check']['direction'] == ('down' if short else 'up')
+    assert evidence['opening_check']['decision_basis'] == 'direction_only'

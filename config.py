@@ -251,11 +251,8 @@ class Settings(BaseSettings):
     kronos_exit_mode: str = "exit"
     # Votes needed to oppose an open position.
     kronos_exit_min_agree: int = 2
-    # Only honour an exit vote when price is at least this many ATRs from
-    # entry, in either direction. A one-day forecast otherwise cuts a swing
-    # trade inside its normal daily range (NBR 2026-08-12 exited at -1.8%,
-    # then rallied ~8% before rolling over). Keep the existing setting name
-    # for compatibility; profitable positions outside the band can also exit.
+    # Deprecated compatibility field: paper Kronos uses direction only and
+    # ignores this former entry-displacement threshold.
     kronos_exit_min_adverse_atr: float = 0.5
 
     # ── Vision ────────────────────────────────────────────────────────────

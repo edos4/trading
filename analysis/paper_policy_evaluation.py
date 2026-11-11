@@ -19,7 +19,6 @@ ALLOWED_EXPERIMENTS = frozenset({
     'resolved_controls.target_max_r', 'resolved_controls.target_risk_basis',
     'resolved_controls.paper_v2_min_stop_atr', 'resolved_controls.disabled_patterns_v2',
     'resolved_controls.kronos_gate_min_agree', 'resolved_controls.kronos_exit_min_agree',
-    'resolved_controls.kronos_exit_min_adverse_atr',
     'execution.kronos_vote_policy.entry_min_agree', 'execution.kronos_vote_policy.exit_min_agree',
 })
 

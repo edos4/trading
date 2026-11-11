@@ -172,7 +172,7 @@ def test_missing_bar_context_cannot_bypass_entry_confirmation():
 
 
 @pytest.mark.parametrize("action", ["BUY", "SELL"])
-@pytest.mark.parametrize("corruption", [None, "missing", "shadow", "date", "action", "market", "votes"])
+@pytest.mark.parametrize("corruption", [None, "missing", "shadow", "date", "action", "market", "votes", "direction"])
 def test_saved_confirmations_are_validated_at_fill_without_new_forecasts(monkeypatch, tmp_path, action, corruption):
     monkeypatch.setattr(settings, "short_entries_enabled", True)
     book = PaperAccount(market="us", txn_cost_pct=.001)
@@ -196,6 +196,7 @@ def test_saved_confirmations_are_validated_at_fill_without_new_forecasts(monkeyp
     elif corruption:
         key, value = {"shadow": ("mode", "shadow"), "date": ("anchor_date", "2026-10-29"),
                       "action": ("action", "CLOSE"), "market": ("market", "ph"),
+                      "direction": ("direction", "flat"),
                       "votes": ("returns", [-v for v in returns])}[corruption]
         pending.kronos_evidence[key] = value
     path = tmp_path / "paper.json"

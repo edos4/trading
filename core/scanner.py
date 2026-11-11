@@ -422,6 +422,7 @@ class MarketScanner:
                 'dii_mode':self._dii_gate_mode,
                 'vision':settings.vision_confirmation_enabled,'collect_first':self._collect_first,
                 'kronos_entry':self._kronos_mode,'kronos_exit':self._kronos_exit_mode,
+                'kronos_decision_policy': 'direction_only',
                 'inactive_compatibility_gates':['minimum_confidence','SMA200_regime','post_loss_cooldown','generic_RR'],
                 'geometry_and_net_target_checks':True,
                 'liquidity_history_required':settings.paper_require_liquidity_history,
@@ -2290,7 +2291,7 @@ class MarketScanner:
         #     self._orders.close_position(signal.symbol, signal.qty, signal.pattern)
 
     def _check_kronos_entry(self, signal: TradeSignal) -> None:
-        """Honor this run's confirm mode at fill, using the saved decision only.
+        """Validate the saved direction in confirm mode before filling.
 
         Forecasting from the fill session's completed candle would look ahead.
         A queue left by an off/shadow run cannot silently bypass confirmation.
@@ -2323,24 +2324,14 @@ class MarketScanner:
                                signal.action, min_agree=gate.min_agree)
         except (KeyError, TypeError, ValueError):
             valid, verdict = False, None
-        if not valid or verdict.decision != "confirm":
+        if (not valid or verdict.decision != "confirm"
+                or evidence.get("direction", verdict.direction) != verdict.direction):
             raise ValueError("Kronos saved forecasts do not confirm this queued entry")
-        from core.entry_economics import net_direction_return
-        price = float(signal.price)
-        book = self._paper
-        fee = book.txn_cost_pct if book is not None else get_market(self._market).txn_cost_pct
-        slip = book.slippage_pct if book is not None else 0.0
-        rebased = [net_direction_return(
-            price, evidence['anchor_close'] * (1 + float(value)), signal.action, fee, slip,
-        ) for value in returns]
-        opening_vote = evaluate(summarize(price, evidence['band_pct'], rebased),
-                                signal.action, min_agree=gate.min_agree)
-        if opening_vote.decision != 'confirm':
-            raise ValueError('Kronos saved forecasts do not confirm net return from the execution price')
-        # Keep the decision evidence immutable and add the executable vote.
+        # A gap or execution costs cannot change the completed-bar direction.
+        # Geometry and target economics are checked separately by paper fills.
         signal.kronos_evidence = {**evidence, 'opening_check': {
-            'entry_price': price, 'fee_per_side': fee, 'slippage_pct': slip,
-            'net_direction_returns': rebased, 'decision': opening_vote.decision,
+            'entry_price': float(signal.price), 'decision_basis': 'direction_only',
+            'direction': verdict.direction, 'decision': verdict.decision,
         }}
 
     async def _flush_kronos_confirm(self) -> None:
@@ -2436,34 +2427,6 @@ class MarketScanner:
         if getattr(position, "pending_exit_reason", ""):
             evidence["exit_action"] = "exit_already_pending"
             return
-        # A one-day forecast is noisy relative to a swing trade's daily range.
-        # Defer inside a noise band around entry on either side. Measuring
-        # only losses used to defer every profitable position, even one far
-        # outside the band, until its gain had become a loss.
-        min_atr = float(settings.kronos_exit_min_adverse_atr or 0.0)
-        anchor = float((evidence or {}).get("anchor_close") or 0.0)
-        atr_pct = float((evidence or {}).get("atr_pct") or 0.0)
-        entry = float(getattr(position, "entry_price", 0.0) or 0.0)
-        if min_atr > 0 and anchor > 0 and atr_pct > 0 and entry > 0:
-            adverse = (
-                (anchor - entry) if position.action == "SELL" else (entry - anchor)
-            ) / entry
-            # ATR% is measured at the forecast anchor; express that dollar
-            # range as a fraction of ENTRY before comparing displacement.
-            floor = min_atr * (atr_pct / 100.0) * anchor / entry
-            displacement = abs(adverse)
-            evidence["entry_displacement_pct"] = displacement * 100
-            evidence["noise_band_pct"] = floor * 100
-            if displacement < floor:
-                evidence["exit_action"] = "deferred_noise_band"
-                self.stats["kronos_exit_deferred"] = (
-                    self.stats.get("kronos_exit_deferred", 0) + 1
-                )
-                log.info(
-                    f"Kronos EXIT deferred | {position.symbol} {position.pattern} | "
-                    f"{displacement:.2%} move < {floor:.2%} ({min_atr:g} ATR) threshold"
-                )
-                return
         if self._paper is None or not self._paper.request_exit(position, "kronos_exit"):
             evidence["exit_action"] = "position_not_open"
             log.warning(

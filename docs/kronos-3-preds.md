@@ -1,6 +1,22 @@
-# Kronos 3-prediction, 1-day entry confirmation
+# Kronos 3-prediction, 1-day paper direction checks
 
-Status: implemented. Last revised 2026-11-06.
+Status: implemented. Last revised 2026-11-11.
+
+Paper Kronos supplies **direction only: `up`, `down`, or `flat`**. Prices from
+the worker are used to classify samples against their completed-bar anchor;
+paper decisions use the direction vote, not a predicted price or profit.
+
+| Direction | Entry (`confirm` mode) | Open long (`exit` mode) | Open short (`exit` mode) |
+|---|---|---|---|
+| `up` | Allow long; block short | Hold | Queue next-open exit |
+| `down` | Allow short; block long | Queue next-open exit | Hold |
+| `flat` | Block entry | Hold | Hold |
+
+Missing forecasts or votes without a required majority have `direction: null`,
+not a fabricated flat prediction. They block entries in Confirm mode and do
+not request an exit. Shadow records evidence; Off skips the relevant check.
+Stops, pattern targets, position sizing and target execution economics remain
+independent of Kronos.
 
 With entry mode `confirm`, every scanner entry is preceded by **3 stochastic one-day draws from one Kronos checkpoint**. Agreement is not a calibrated win probability or an ensemble of independently trained models. The trade
 opens only when a majority of those forecasts point the signal's way: Kronos is a
@@ -15,7 +31,7 @@ A new optional scanner gate, `kronos_gate_mode = off | shadow | confirm`:
    existing entry gates (volume, rule filter, vision, Laya).
 2. Before the entry is queued — and therefore before the next session's open — `.venv-kronos`
    runs **3 stochastic 1-day forecast draws** for that symbol.
-3. Each simulated close is classified `up`, `down`, or `sideways` against an ATR-scaled band.
+3. Each simulated close is classified `up`, `down`, or `flat` against an ATR-scaled band.
 4. The vote is compared with the signal's direction. In `shadow` mode it is recorded on the
    signal and never blocks. In `confirm` mode the entry is queued **only when the vote
    confirms**; both `oppose` and `no_opinion` block it.
@@ -93,6 +109,7 @@ class ConfirmSummary:
 class ConfirmVerdict:
     decision: Literal["confirm", "oppose", "no_opinion"]
     reason: str
+    direction: Literal["up", "down", "flat"] | None = None
 
 def evaluate(summary, action, *, min_agree: int = 2) -> ConfirmVerdict
 ```
@@ -112,6 +129,8 @@ default 3 samples, BUY shown; SELL mirrors it):
 
 - `confirm` iff votes for the signal's direction reach the required majority.
 - `oppose` iff votes against it reach the required majority.
+- `direction` records the majority class, including `flat`; no majority or
+  insufficient usable samples leaves it `null`.
 - The required count is at least `N // 2 + 1`, and can be raised by `min_agree`
   (up to N). Missing/invalid simulations never lower the configured majority.
   With five samples, two `up` and three `down` oppose a BUY, even when
@@ -251,7 +270,7 @@ and `CLOSE`/exit handling are unaffected in every mode.
 
 | Setting | Env var | Default | Meaning |
 |---|---|---|---|
-| `kronos_gate_mode` | `KRONOS_GATE_MODE` | `off` | `off` / `shadow` / `confirm` |
+| `kronos_gate_mode` | `KRONOS_GATE_MODE` | `confirm` | `off` / `shadow` / `confirm` |
 | `kronos_gate_samples` | `KRONOS_GATE_SAMPLES` | `3` | Simulations per symbol (odd, 1–9) |
 | `kronos_gate_model` | `KRONOS_GATE_MODEL` | `finetuned` | `base` or `finetuned` |
 | `kronos_device` | `KRONOS_DEVICE` | `auto` | `auto` / `cuda` / `cpu` — see §5 |
@@ -270,8 +289,8 @@ CLI: `--kronos-gate-mode {off,shadow,confirm}` and `--kronos-gate-samples N`, wi
 `MarketScanner(...)` constructions in `main.py`. Web paper scans pass it through
 `web/app.py::PaperStartRequest` → `core/paper_books.py` → `MarketScanner`.
 
-Existing behaviour is untouched: the default is `off`, and `shadow` is the intended first
-rollout.
+Entry mode defaults to `confirm`; `shadow` records the same direction evidence
+while allowing entries through this gate.
 
 ## 7. Evidence and measurement
 
@@ -283,6 +302,8 @@ The verdict is stamped on the signal as a new `TradeSignal.kronos_evidence` fiel
   "anchor_close": 128.1, "atr_pct": 1.6, "band_pct": 0.56,
   "returns": [0.0104, -0.0088, 0.0016],
   "votes": {"up": 1, "down": 1, "flat": 1},
+  "direction": null,
+  "decision_basis": "direction_only",
   "decision": "no_opinion",
   "reason": "no majority of 2 in either direction",
   "mode": "confirm",
@@ -411,9 +432,9 @@ The exit vote uses `KRONOS_EXIT_MIN_AGREE` (default 2) and the same samples, mod
 band, cache, timeout, and GPU lock as the entry gate. `confirm`/`no_opinion` never force an
 exit; only an active disagreement does.
 
-An opposing vote is deferred inside the configured entry-displacement noise band
-(`KRONOS_EXIT_MIN_ADVERSE_ATR`, default 0.5 ATR). Outside it, profitable and losing
-positions can both queue an exit. The name is retained for compatibility.
+An opposing direction queues an exit regardless of profit, loss, or distance
+from entry. `KRONOS_EXIT_MIN_ADVERSE_ATR` is retained as an ignored compatibility
+setting. ATR is used only to define the flat class, not to delay an opposing exit.
 Already queued exits retain their reason. Stops, trailing stops and targets execute
 before the new Kronos batch and never need model permission; missing forecasts
 cannot disable the independent 3% paper protection.
@@ -434,7 +455,7 @@ the actual normalized odd count used by the gate.
 The worker queries the requested market and daily history through the decision
 date, validates its model input, and returns date/close/daily ATR. The gate verifies
 market, selected model, sample count and anchor before using or caching a result.
-The band and exit noise threshold use daily ATR even for a weekly signal, matching
+The direction-classification band uses daily ATR even for a weekly signal, matching
 the one-day forecast horizon. A missing fine-tuned checkpoint fails confirmation;
 it cannot silently load base weights under a fine-tuned label.
 
@@ -450,9 +471,8 @@ results, unavailable models, queued fills after reload, both long/short directio
 Paper/MCP defaults and protective exits while Kronos is unavailable. These are
 integration checks, not a claim that the model improves trading expectancy.
 
-The ATR noise threshold now converts ATR% at the forecast anchor into dollars
-before comparing it with entry-normalized displacement. This avoids a different
-effective ATR threshold merely because price moved away from entry.
+The former exit-displacement threshold was removed on November 11. Open-position
+checks now act only on an opposing majority direction.
 
 Validation: **2,377 passed, 154 skipped, 10 deselected**, plus five subtests,
 in an isolated checkout of the proposed commit with synthetic configuration,
@@ -486,3 +506,22 @@ to vote") and blocks the entry exactly as the failure table says it should —
 without a `ValueError` in the log. AAPL and MSFT votes are unchanged by the
 change, and the credibility bound is a single constant,
 `core.kronos_confirm.MAX_CREDIBLE_RETURN`.
+
+## 13. November 11 direction-only paper policy
+
+The next-open entry check revalidates the saved direction and its symbol, side,
+market, timeframe, date, model and sample identity. It does not rebase simulated
+prices to the fill price or demand a positive net forecast return after costs.
+A gap cannot reverse the earlier direction vote. Independent geometry and target
+economics can still reject an unexecutable entry.
+
+Position checks use the same directional votes. An opposing majority queues a
+next-open exit even at breakeven or within the former ATR displacement band.
+Matching direction, flat and unresolved votes hold. Independent protective exits
+still execute before the new Kronos batch.
+
+Evidence carries `direction` and `decision_basis: "direction_only"`; run manifests
+record `active_controls.kronos_decision_policy: "direction_only"`. Saved evidence
+from earlier runs is revalidated from its original votes without a fill-session
+forecast. The ignored legacy exit threshold is excluded from resolved controls
+and from the list of supported experiment changes.

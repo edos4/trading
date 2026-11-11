@@ -77,6 +77,7 @@ def test_oppose_queues_a_next_open_exit(action, returns):
 @pytest.mark.parametrize("returns", [
     (0.01, 0.02, -0.01),   # confirms a long
     (0.01, 0.0, -0.01),    # no opinion
+    (0.0, 0.001, -0.001),  # flat
 ])
 def test_confirm_and_no_opinion_hold(returns):
     position = _position("BUY")
@@ -93,73 +94,21 @@ def _oppose():
         decision="oppose", reason="2/3 forecasts against the BUY (need 2)")
 
 
-def test_shallow_loss_defers_a_kronos_exit(monkeypatch):
-    monkeypatch.setattr(settings, "kronos_exit_min_adverse_atr", 0.5)
-    position = _position("BUY")
-    position.entry_price = 89.78
-    scanner = _scanner("exit", None, [position])
-    scanner._handle_kronos_exit(position, _oppose(), {
-        "anchor_close": 88.17, "atr_pct": 4.93, "decision": "oppose",
-    })
-    assert scanner._paper.requests == []
-    assert scanner.stats["kronos_exit_deferred"] == 1
-    assert position.pending_exit_reason == ""
-
-
-@pytest.mark.parametrize('action,entry,close', [
-    ('BUY', 100, 101), ('SELL', 100, 99),
-])
-def test_small_profit_is_inside_the_noise_band(monkeypatch, action, entry, close):
-    monkeypatch.setattr(settings, "kronos_exit_min_adverse_atr", 0.5)
-    position = _position(action)
-    position.entry_price = entry
-    scanner = _scanner("exit", None, [position])
-    scanner._handle_kronos_exit(position, _oppose(), {
-        "anchor_close": close, "atr_pct": 4.0, "decision": "oppose",
-    })
-    assert scanner._paper.requests == []
-    assert scanner.stats["kronos_exit_deferred"] == 1
-    assert position.kronos_exit_evidence['exit_action'] == 'deferred_noise_band'
-
-
-@pytest.mark.parametrize('action,close', [('BUY', 106), ('SELL', 94)])
-def test_oppose_can_close_a_profitable_position_outside_noise_band(monkeypatch, action, close):
-    monkeypatch.setattr(settings, 'kronos_exit_min_adverse_atr', .5)
+@pytest.mark.parametrize("action", ["BUY", "SELL"])
+@pytest.mark.parametrize("anchor", [94, 99.9, 100, 100.1, 106])
+def test_opposing_direction_exits_regardless_of_profit_or_distance(monkeypatch, action, anchor):
+    # A legacy configuration must not delay the new direction-only policy.
+    monkeypatch.setattr(settings, "kronos_exit_min_adverse_atr", 100)
     position = _position(action)
     position.entry_price = 100
-    scanner = _scanner('exit', None, [position])
-    scanner._handle_kronos_exit(position, _oppose(), {
-        'anchor_close': close, 'atr_pct': 4, 'decision': 'oppose',
-    })
-    assert scanner._paper.requests == [(position, 'kronos_exit')]
-    assert position.kronos_exit_evidence['exit_action'] == 'queued_next_open'
-    assert position.kronos_exit_evidence['entry_displacement_pct'] == pytest.approx(6)
-
-
-def test_deep_loss_still_honours_the_exit(monkeypatch):
-    monkeypatch.setattr(settings, "kronos_exit_min_adverse_atr", 0.5)
-    position = _position("BUY")
-    position.entry_price = 100.0
-    scanner = _scanner("exit", None, [position])
-    scanner._handle_kronos_exit(position, _oppose(), {
-        "anchor_close": 94.0, "atr_pct": 4.0, "decision": "oppose",
-    })
+    returns = (-.01, -.02, .01) if action == "BUY" else (.01, .02, -.01)
+    scanner = _scanner("exit", _vote(*returns), [position])
+    scanner._queue_kronos_exits("TEST", "1d", _candle(anchor))
+    asyncio.run(scanner._flush_kronos_confirm())
     assert scanner._paper.requests == [(position, "kronos_exit")]
     assert scanner.stats["kronos_exits"] == 1
-
-
-@pytest.mark.parametrize("action", ["BUY", "SELL"])
-@pytest.mark.parametrize("anchor,queues", [(104, False), (96, True)])
-def test_noise_band_uses_atr_dollars_at_the_forecast_anchor(monkeypatch, action, anchor, queues):
-    monkeypatch.setattr(settings, "kronos_exit_min_adverse_atr", .5)
-    position = _position(action)
-    position.entry_price = 100
-    scanner = _scanner("exit", None, [position])
-    scanner._handle_kronos_exit(position, _oppose(), {
-        "anchor_close": anchor, "atr_pct": 8, "decision": "oppose",
-    })
-    assert bool(scanner._paper.requests) is queues
-    assert position.kronos_exit_evidence["noise_band_pct"] == pytest.approx(anchor * .04)
+    assert position.kronos_exit_evidence["direction"] == ("down" if action == "BUY" else "up")
+    assert position.kronos_exit_evidence["exit_action"] == "queued_next_open"
 
 
 def test_exit_disabled_and_already_pending_exit_cannot_be_overridden():

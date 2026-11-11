@@ -1,4 +1,4 @@
-"""Opening-price economics using only saved forecasts and observed quotes."""
+"""Opening-price target economics using observed quotes and execution costs."""
 from __future__ import annotations
 
 import math

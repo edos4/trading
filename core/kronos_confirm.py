@@ -60,6 +60,7 @@ class ConfirmSummary:
 class ConfirmVerdict:
     decision: Decision
     reason: str
+    direction: Direction | None = None
 
 
 @dataclass(frozen=True)
@@ -194,7 +195,7 @@ def evaluate(
     *,
     min_agree: int = 2,
 ) -> ConfirmVerdict:
-    """Confirm/oppose only on a majority; everything else is no_opinion."""
+    """Use only the majority direction; unresolved votes have no direction."""
     usable = len(summary.returns)
     need = max(1, int(min_agree), usable // 2 + 1)
     if usable < need:
@@ -204,9 +205,9 @@ def evaluate(
         )
 
     if action == "BUY":
-        direction, against = "up", summary.down
+        direction, opposite, against = "up", "down", summary.down
     elif action == "SELL":
-        direction, against = "down", summary.up
+        direction, opposite, against = "down", "up", summary.up
     else:
         return ConfirmVerdict("no_opinion", f"{action} is not an entry signal")
 
@@ -215,11 +216,19 @@ def evaluate(
         return ConfirmVerdict(
             "confirm",
             f"{votes_for}/{usable} forecasts {direction} (need {need})",
+            direction,
         )
     if against >= need:
         return ConfirmVerdict(
             "oppose",
             f"{against}/{usable} forecasts against the {action} (need {need})",
+            opposite,
+        )
+    if summary.flat >= need:
+        return ConfirmVerdict(
+            "no_opinion",
+            f"{summary.flat}/{usable} forecasts flat (need {need})",
+            "flat",
         )
     return ConfirmVerdict(
         "no_opinion",
@@ -676,6 +685,8 @@ def _evidence(
         "band_pct": item.band_pct,
         "returns": list(summary.returns),
         "votes": {"up": summary.up, "down": summary.down, "flat": summary.flat},
+        "direction": verdict.direction,
+        "decision_basis": "direction_only",
         "decision": verdict.decision,
         "reason": verdict.reason,
         "mode": gate.mode if scope == "entry" else gate.exit_mode,

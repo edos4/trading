@@ -97,6 +97,14 @@ the market quotes (US ≈7.9k, PH ≈244) and the screener returns what it has.
 Existing liquidity/ADV floors still trim the tradeable set. The web Paper tab's
 **Symbols** field honors the same range.
 
+Paper Kronos uses **direction only: up, down, or flat**. With entry mode
+`confirm`, up permits a long, down permits a short, and flat blocks a new
+entry. With position mode `exit`, an opposing direction queues a next-open
+exit; matching direction or flat holds. Forecast price targets, net forecast
+returns at the opening price, and distance from entry do not govern these
+Kronos decisions. The ATR band defines flat; stops, pattern targets, sizing,
+and execution-cost checks remain separate. See [the Kronos paper policy](docs/kronos-3-preds.md).
+
 Historical replay (markets closed, or a dated walk-forward) uses `--stream`.
 That flag starts the paper-trade stream server if needed, then the scanner
 reads bars from it instead of live TradingView. Dates are **US `MM/DD/YYYY`**

@@ -22,7 +22,7 @@ def test_all_exit_decisions_survive_restart_export_and_later_mutation(tmp_path):
         evidence['returns'].append(999)
     assert len(position.kronos_exit_history) == 3
     assert [row['evidence'].get('exit_action') for row in position.kronos_exit_history] == [
-        None, 'deferred_noise_band', 'queued_next_open']
+        None, 'queued_next_open', 'exit_already_pending']
     assert position.kronos_exit_history[0]['evidence']['returns'] == [1, 2, 3]
     path = tmp_path/'paper.json'
     book.save(path)
@@ -42,6 +42,8 @@ def test_cli_and_web_exports_keep_source_controls_and_universe():
     assert cli == web == book.run_manifest
     assert cli['entry_universe']['symbols'] == ['A', 'B']
     assert cli['execution']['patterns_v2'] is True
+    assert cli['active_controls']['kronos_decision_policy'] == 'direction_only'
+    assert 'kronos_exit_min_adverse_atr' not in cli['resolved_controls']
     assert 'patterns_v2/signals.py' in cli['source_sha256']
     assert cli['resolved_controls']['target_risk_basis'] == 'pattern'
     assert not any('password' in key or 'token' in key or 'dsn' in key for key in cli['resolved_controls'])
