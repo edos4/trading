@@ -4,7 +4,7 @@
   const GRID = "#2a2e39";
   const TEXT = "#d1d4dc";
   const DIM = "#787b86";
-  const ACTUAL = "#d1d4dc";
+  const ACTUAL = "#ffffff";
   const BASE = "#2962ff";
   const FT = "#ef5350";
 
@@ -256,6 +256,9 @@
       symbolEl.value = data.symbols.join(", ");
     }
   }
+
+  // Experiment 3 reuses the same chart renderer with its own saved data.
+  window.KronosCharts = { drawChart, makePanel, saveChart };
 
   if (form) form.addEventListener("submit", submit);
   if (topForm) topForm.addEventListener("submit", submitTop);

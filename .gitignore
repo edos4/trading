@@ -52,3 +52,7 @@ web/static/designer
 # Source-verified daily-bar maintenance reports
 logs/daily-bars-*.json
 logs/.daily-bars-*.tmp
+# Experiment 3 runtime process lock (remove with the experiment).
+logs/kronos_experiment3.lock
+logs/kronos_experiment3_direction_report.md
+logs/.kronos_experiment3_direction_report.*.tmp

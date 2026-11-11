@@ -1,0 +1,510 @@
+{
+  "as_of": "2026-11-10",
+  "captured_at": "2026-11-10T19:04:01.842018-05:00",
+  "source": "TradingView america screener, completed regular session",
+  "ranking": "Value.Traded descending (session dollar volume)",
+  "filter": "NASDAQ; type stock or dr (includes ADRs; excludes ETFs)",
+  "eligible_count": 3533,
+  "stocks": [
+    {
+      "symbol": "NVDA",
+      "rank": 1,
+      "name": "NVIDIA Corporation",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 168.89,
+      "volume": 427508539,
+      "dollar_volume": 72201917151.70999
+    },
+    {
+      "symbol": "AMD",
+      "rank": 2,
+      "name": "Advanced Micro Devices, Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 515.21,
+      "volume": 46994192,
+      "dollar_volume": 24211887964.52
+    },
+    {
+      "symbol": "MU",
+      "rank": 3,
+      "name": "Micron Technology, Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 725.11,
+      "volume": 28294896,
+      "dollar_volume": 20516912038.56
+    },
+    {
+      "symbol": "MSFT",
+      "rank": 4,
+      "name": "Microsoft Corporation",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 533.16,
+      "volume": 26913064,
+      "dollar_volume": 14348969202.24
+    },
+    {
+      "symbol": "SNDK",
+      "rank": 5,
+      "name": "Sandisk Corporation",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 859.99,
+      "volume": 13722634,
+      "dollar_volume": 11801328013.66
+    },
+    {
+      "symbol": "SPCX",
+      "rank": 6,
+      "name": "Space Exploration Technologies Corp",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 143.09,
+      "volume": 81833841,
+      "dollar_volume": 11709604308.69
+    },
+    {
+      "symbol": "AMZN",
+      "rank": 7,
+      "name": "Amazon.com, Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 270.87,
+      "volume": 38892646,
+      "dollar_volume": 10534851022.02
+    },
+    {
+      "symbol": "AAPL",
+      "rank": 8,
+      "name": "Apple Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 348.51,
+      "volume": 29728787,
+      "dollar_volume": 10360779557.369999
+    },
+    {
+      "symbol": "AVGO",
+      "rank": 9,
+      "name": "Broadcom Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 331.98,
+      "volume": 28308798,
+      "dollar_volume": 9397954760.04
+    },
+    {
+      "symbol": "TSLA",
+      "rank": 10,
+      "name": "Tesla, Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 379.78,
+      "volume": 23937351,
+      "dollar_volume": 9090927162.779999
+    },
+    {
+      "symbol": "META",
+      "rank": 11,
+      "name": "Meta Platforms, Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 641.39,
+      "volume": 13010406,
+      "dollar_volume": 8344744304.34
+    },
+    {
+      "symbol": "GOOGL",
+      "rank": 12,
+      "name": "Alphabet Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 287.38,
+      "volume": 28332464,
+      "dollar_volume": 8142183504.32
+    },
+    {
+      "symbol": "INTC",
+      "rank": 13,
+      "name": "Intel Corporation",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 58.13,
+      "volume": 100581813,
+      "dollar_volume": 5846820789.690001
+    },
+    {
+      "symbol": "GOOG",
+      "rank": 14,
+      "name": "Alphabet Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 284.92,
+      "volume": 15077305,
+      "dollar_volume": 4295825740.6
+    },
+    {
+      "symbol": "CRWV",
+      "rank": 15,
+      "name": "CoreWeave, Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 48.73,
+      "volume": 87965663,
+      "dollar_volume": 4286566757.99
+    },
+    {
+      "symbol": "MRVL",
+      "rank": 16,
+      "name": "Marvell Technology, Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 154.39,
+      "volume": 24652834,
+      "dollar_volume": 3806151041.2599998
+    },
+    {
+      "symbol": "PLTR",
+      "rank": 17,
+      "name": "Palantir Technologies Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 168.82,
+      "volume": 19545757,
+      "dollar_volume": 3299714696.74
+    },
+    {
+      "symbol": "FOXA",
+      "rank": 18,
+      "name": "Fox Corporation",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 67.37,
+      "volume": 46941341,
+      "dollar_volume": 3162438143.17
+    },
+    {
+      "symbol": "MRNA",
+      "rank": 19,
+      "name": "Moderna, Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 250.83,
+      "volume": 11131641,
+      "dollar_volume": 2792149512.03
+    },
+    {
+      "symbol": "LITE",
+      "rank": 20,
+      "name": "Lumentum Holdings Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 585.57,
+      "volume": 4759742,
+      "dollar_volume": 2787162122.94
+    },
+    {
+      "symbol": "NBIS",
+      "rank": 21,
+      "name": "Nebius Group N.V.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 134.0,
+      "volume": 20469382,
+      "dollar_volume": 2742900538.0
+    },
+    {
+      "symbol": "STX",
+      "rank": 22,
+      "name": "Seagate Technology Holdings PLC",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 501.62,
+      "volume": 5293665,
+      "dollar_volume": 2655408237.3
+    },
+    {
+      "symbol": "LRCX",
+      "rank": 23,
+      "name": "Lam Research Corporation",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 222.39,
+      "volume": 11591082,
+      "dollar_volume": 2577740725.98
+    },
+    {
+      "symbol": "AMAT",
+      "rank": 24,
+      "name": "Applied Materials, Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 372.53,
+      "volume": 6327864,
+      "dollar_volume": 2357319175.9199996
+    },
+    {
+      "symbol": "ASML",
+      "rank": 25,
+      "name": "ASML Holding N.V. - New York Registry Shares",
+      "exchange": "NASDAQ",
+      "type": "dr",
+      "close": 1507.85,
+      "volume": 1522060,
+      "dollar_volume": 2295038171.0
+    },
+    {
+      "symbol": "WMT",
+      "rank": 26,
+      "name": "Walmart Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 125.55,
+      "volume": 17717694,
+      "dollar_volume": 2224456481.7
+    },
+    {
+      "symbol": "APP",
+      "rank": 27,
+      "name": "Applovin Corporation",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 395.51,
+      "volume": 5447880,
+      "dollar_volume": 2154691018.7999997
+    },
+    {
+      "symbol": "SKHY",
+      "rank": 28,
+      "name": "SK hynix Inc.",
+      "exchange": "NASDAQ",
+      "type": "dr",
+      "close": 129.66,
+      "volume": 15596504,
+      "dollar_volume": 2022242708.6399999
+    },
+    {
+      "symbol": "RKLB",
+      "rank": 29,
+      "name": "Rocket Lab Corporation",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 62.71,
+      "volume": 32049671,
+      "dollar_volume": 2009834868.41
+    },
+    {
+      "symbol": "AKAM",
+      "rank": 30,
+      "name": "Akamai Technologies, Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 83.71,
+      "volume": 23423099,
+      "dollar_volume": 1960747617.29
+    },
+    {
+      "symbol": "TTWO",
+      "rank": 31,
+      "name": "Take-Two Interactive Software, Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 224.64,
+      "volume": 8435048,
+      "dollar_volume": 1894849182.7199998
+    },
+    {
+      "symbol": "WDC",
+      "rank": 32,
+      "name": "Western Digital Corporation",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 289.2,
+      "volume": 6523228,
+      "dollar_volume": 1886517537.6
+    },
+    {
+      "symbol": "TXN",
+      "rank": 33,
+      "name": "Texas Instruments Incorporated",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 300.52,
+      "volume": 6121168,
+      "dollar_volume": 1839533407.36
+    },
+    {
+      "symbol": "MSTR",
+      "rank": 34,
+      "name": "Strategy Inc",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 121.07,
+      "volume": 15101281,
+      "dollar_volume": 1828312090.6699998
+    },
+    {
+      "symbol": "KLAC",
+      "rank": 35,
+      "name": "KLA Corporation",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 152.99,
+      "volume": 11409977,
+      "dollar_volume": 1745612381.23
+    },
+    {
+      "symbol": "CSCO",
+      "rank": 36,
+      "name": "Cisco Systems, Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 98.15,
+      "volume": 17765313,
+      "dollar_volume": 1743665470.95
+    },
+    {
+      "symbol": "ADI",
+      "rank": 37,
+      "name": "Analog Devices, Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 393.3,
+      "volume": 4410621,
+      "dollar_volume": 1734697239.3
+    },
+    {
+      "symbol": "NFLX",
+      "rank": 38,
+      "name": "Netflix, Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 63.26,
+      "volume": 27260083,
+      "dollar_volume": 1724472850.58
+    },
+    {
+      "symbol": "QCOM",
+      "rank": 39,
+      "name": "QUALCOMM Incorporated",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 173.53,
+      "volume": 9606883,
+      "dollar_volume": 1667082406.99
+    },
+    {
+      "symbol": "COST",
+      "rank": 40,
+      "name": "Costco Wholesale Corporation",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 1066.14,
+      "volume": 1561715,
+      "dollar_volume": 1665006830.1000001
+    },
+    {
+      "symbol": "PANW",
+      "rank": 41,
+      "name": "Palo Alto Networks, Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 326.36,
+      "volume": 4673000,
+      "dollar_volume": 1525080280.0
+    },
+    {
+      "symbol": "IREN",
+      "rank": 42,
+      "name": "IREN Limited",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 19.73,
+      "volume": 75387327,
+      "dollar_volume": 1487391961.71
+    },
+    {
+      "symbol": "MPWR",
+      "rank": 43,
+      "name": "Monolithic Power Systems, Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 1357.6,
+      "volume": 1076500,
+      "dollar_volume": 1461456400.0
+    },
+    {
+      "symbol": "CRWD",
+      "rank": 44,
+      "name": "CrowdStrike Holdings, Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 225.76,
+      "volume": 6194193,
+      "dollar_volume": 1398401011.6799998
+    },
+    {
+      "symbol": "SMCI",
+      "rank": 45,
+      "name": "Super Micro Computer, Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 27.79,
+      "volume": 45943643,
+      "dollar_volume": 1276773838.97
+    },
+    {
+      "symbol": "HOOD",
+      "rank": 46,
+      "name": "Robinhood Markets, Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 81.33,
+      "volume": 13419865,
+      "dollar_volume": 1091437620.45
+    },
+    {
+      "symbol": "BKNG",
+      "rank": 47,
+      "name": "Booking Holdings Inc. Common Stock",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 159.26,
+      "volume": 6435658,
+      "dollar_volume": 1024942893.0799999
+    },
+    {
+      "symbol": "COIN",
+      "rank": 48,
+      "name": "Coinbase Global, Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 132.13,
+      "volume": 7709661,
+      "dollar_volume": 1018677507.93
+    },
+    {
+      "symbol": "PEP",
+      "rank": 49,
+      "name": "PepsiCo, Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 143.61,
+      "volume": 7007468,
+      "dollar_volume": 1006342479.4800001
+    },
+    {
+      "symbol": "TTD",
+      "rank": 50,
+      "name": "The Trade Desk, Inc.",
+      "exchange": "NASDAQ",
+      "type": "stock",
+      "close": 15.42,
+      "volume": 64923457,
+      "dollar_volume": 1001119706.9399999
+    }
+  ]
+}
