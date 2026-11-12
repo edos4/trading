@@ -1,13 +1,13 @@
-/* Arrow Experiment 3: frozen directions and observed prices; read-only GETs. */
+/* Arrow Experiment 4: frozen directions and observed prices; read-only GETs. */
 (function () {
-  if (!document.getElementById('kronos-experiment3')) return;
-  const status = document.getElementById('experiment3-status');
-  const scores = document.getElementById('experiment3-scores');
-  const refresh = document.getElementById('experiment3-refresh');
-  const select = document.getElementById('experiment3-symbol');
-  const host = document.getElementById('experiment3-chart');
-  const body = document.querySelector('#experiment3-table tbody');
-  const reportBody = document.querySelector('#experiment3-direction-report tbody');
+  if (!document.getElementById('kronos-experiment4')) return;
+  const status = document.getElementById('experiment4-status');
+  const scores = document.getElementById('experiment4-scores');
+  const refresh = document.getElementById('experiment4-refresh');
+  const select = document.getElementById('experiment4-symbol');
+  const host = document.getElementById('experiment4-chart');
+  const body = document.querySelector('#experiment4-table tbody');
+  const reportBody = document.querySelector('#experiment4-direction-report tbody');
   let results = [], chart = null;
   const price = value => Number.isFinite(value) ? value.toFixed(2) : 'Pending';
   const direction = value => ({up:'↑ Up',down:'↓ Down',flat:'→ Flat'}[value] || 'Pending');
@@ -51,10 +51,10 @@
     select.replaceChildren();body.replaceChildren();reportBody.replaceChildren();scores.replaceChildren();
     select.disabled = !results.length;
     if (payload.status === 'not_started') {
-      status.textContent = 'Arrow Experiment 3 has no saved predictions yet.';draw();return;
+      status.textContent = 'Arrow Experiment 4 has no saved predictions yet.';draw();return;
     }
-    document.getElementById('experiment3-title').textContent = `Experiment 3 — Arrow · ${metadata.as_of} · +1D / +3D`;
-    document.getElementById('experiment3-description').textContent =
+    document.getElementById('experiment4-title').textContent = `Experiment 4 — Arrow · ${metadata.as_of} · +1D / +3D`;
+    document.getElementById('experiment4-description').textContent =
       `Top 50 NASDAQ stocks frozen at the ${metadata.as_of} close. Targets: +1D ${metadata.target_dates['1']} and +3D ${metadata.target_dates['3']}. ` +
       'The white line shows observed prices. Arrow predicts up/down/flat, without a price path.';
     const state = payload.status === 'complete' ? 'Complete; collection stopped.' : payload.status === 'expired_incomplete' ? 'Collection ended with missing actuals.' : 'Waiting for target-session closes.';
@@ -87,11 +87,11 @@
   async function load() {
     refresh.disabled=true;
     try {
-      const response = await fetch('/api/kronos/experiment3',{credentials:'same-origin',cache:'no-store'});
+      const response = await fetch('/api/kronos/experiment4',{credentials:'same-origin',cache:'no-store'});
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail || 'Could not load Arrow Experiment 3');
+      if (!response.ok) throw new Error(payload.detail || 'Could not load Arrow Experiment 4');
       render(payload);
-    } catch(error) {status.textContent=`Experiment 3: ${error.message || error}`;}
+    } catch(error) {status.textContent=`Experiment 4: ${error.message || error}`;}
     finally {refresh.disabled=false;}
   }
   select.addEventListener('change',draw);refresh.addEventListener('click',load);load();

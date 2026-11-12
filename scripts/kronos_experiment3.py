@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import date, datetime
+from datetime import datetime
 import fcntl
 import json
 from pathlib import Path
@@ -19,14 +19,13 @@ BEGIN = "# --- kronos-experiment3 BEGIN ---"
 END = "# --- kronos-experiment3 END ---"
 
 
-def cron_block(root: Path = ROOT, stop_at: str | None = None) -> str:
+def cron_block(root: Path = ROOT) -> str:
     """Poll in any host timezone; Python enforces the two NY session closes."""
     inner = (f"cd {shlex.quote(str(root))} && "
              f"{shlex.quote(str(root / '.venv/bin/python'))} "
              "scripts/kronos_experiment3.py --collect --cron "
-             + (f'--stop-at {shlex.quote(stop_at)} ' if stop_at else '') +
              f">> {shlex.quote(str(root / 'logs/kronos_experiment3.log'))} 2>&1")
-    return (f"{BEGIN}\n# Arrow +1D/+3D actuals only; self-removes at completion or its frozen deadline.\n"
+    return (f"{BEGIN}\n# November 11/12 closes only; self-removes when complete or November 13 09:30 ET.\n"
             f"*/15 * * * * {inner}\n{END}\n")
 
 
@@ -47,13 +46,13 @@ def merge_cron(existing: str, block: str = "") -> str:
     return existing + ("\n" if existing and not existing.endswith("\n") else "") + block
 
 
-def update_cron(install: bool, stop_at: str | None = None) -> None:
+def update_cron(install: bool) -> None:
     """Preserve all unrelated jobs and environment assignments verbatim."""
     result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
     if result.returncode and "no crontab for" not in result.stderr.lower():
         raise RuntimeError(f"Cannot read crontab: {result.stderr.strip()}")
     existing = result.stdout if result.returncode == 0 else ""
-    updated = merge_cron(existing, cron_block(stop_at=stop_at) if install else "")
+    updated = merge_cron(existing, cron_block() if install else "")
     if existing != updated:
         subprocess.run(["crontab", "-"], input=updated, text=True, check=True)
 
@@ -62,18 +61,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     action = parser.add_mutually_exclusive_group()
     action.add_argument("--start", action="store_true")
-    action.add_argument('--reset', action='store_true', help='Archive/reset only the Arrow Experiment 3 run after new forecasts validate')
     action.add_argument("--collect", action="store_true")
     action.add_argument("--status", action="store_true")
     action.add_argument("--report", action="store_true", help="Write the daily directional accuracy Markdown report")
     action.add_argument("--remove-cron", action="store_true")
     parser.add_argument("--install-cron", action="store_true")
     parser.add_argument("--cron", action="store_true", help="Remove own job at completion/expiry")
-    parser.add_argument('--as-of', type=date.fromisoformat)
-    parser.add_argument('--universe-file', type=Path, help='Previously captured current-session universe')
-    parser.add_argument('--model-dir', type=Path)
-    parser.add_argument('--archive-dir', type=Path)
-    parser.add_argument('--stop-at', type=datetime.fromisoformat, help='Frozen cron deadline; checked even if the database is down')
+    parser.add_argument('--stop-at', type=datetime.fromisoformat,
+                        help='Accept the previous collector command during restoration')
     args = parser.parse_args(argv)
     (ROOT / "logs").mkdir(exist_ok=True)
     with (ROOT / "logs/kronos_experiment3.lock").open("a") as lock:
@@ -85,27 +80,25 @@ def main(argv: list[str] | None = None) -> int:
             update_cron(False)
             print("Experiment 3 cron removed; saved results retained.")
             return 0
-        from core.arrow_experiment3 import (
-            collect, ny_now, read_experiment, save_direction_report, start,
+        from core.kronos_experiment3 import (
+            DEADLINE, collect, ny_now, read_experiment, save_direction_report, start,
         )
 
         # Remove even if the database is unavailable at the hard deadline.
-        if args.cron and args.stop_at and ny_now() >= ny_now(args.stop_at):
+        if args.cron and (ny_now() >= DEADLINE or args.stop_at and ny_now() >= ny_now(args.stop_at)):
             update_cron(False)
             print("Experiment 3 collection window ended; cron removed.")
             return 0
-        result = (start(reset=args.reset, as_of=args.as_of, universe_file=args.universe_file,
-                        model_dir=args.model_dir, archive_dir=args.archive_dir)
-                  if args.start or args.reset else collect() if args.collect else read_experiment())
-        if args.start or args.reset or args.collect or args.report:
+        result = start() if args.start else collect() if args.collect else read_experiment()
+        if args.start or args.collect or args.report:
             report_path = save_direction_report(result, ROOT / "logs/kronos_experiment3_direction_report.md")
             if args.report:
                 print(f"Daily directional accuracy report: {report_path}")
         if args.install_cron:
             if result["status"] != "collecting":
                 raise ValueError("Install collection only after forecasts are saved and before expiry")
-            update_cron(True, result['metadata']['deadline'])
-        if args.cron and result["status"] in ('complete','expired_incomplete'):
+            update_cron(True)
+        if args.cron and result["status"] == "complete":
             update_cron(False)
         if not args.cron or result.get("actual_count") or result["status"] == "complete":
             print(json.dumps({k: result.get(k) for k in

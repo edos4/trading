@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 
-from core import arrow_experiment3 as exp
+from core import arrow_experiment4 as exp
 
 ANCHOR = date(2026, 11, 11)
 NOW = datetime.fromisoformat('2026-11-12T07:00:00-05:00')
@@ -161,14 +161,16 @@ def store(monkeypatch):
         connection = get_conn()
     except Exception as exc:
         pytest.skip(f'Local PostgreSQL unavailable: {type(exc).__name__}')
-    schema = 'arrow_experiment3_test_' + uuid4().hex
+    schema = 'arrow_experiment4_test_' + uuid4().hex
+    source_schema = 'arrow_experiment4_source_test_' + uuid4().hex
 
     class Cursor:
         def __init__(self, cursor): self.cursor = cursor
         def __enter__(self): self.cursor.__enter__(); return self
         def __exit__(self, *args): return self.cursor.__exit__(*args)
         def execute(self, query, params=None):
-            return self.cursor.execute(query.replace('kronos_experiment3_arrow', schema), params)
+            query = query.replace('kronos_experiment3_arrow', source_schema).replace('kronos_experiment4', schema)
+            return self.cursor.execute(query, params)
         def fetchone(self): return self.cursor.fetchone()
         def fetchall(self): return self.cursor.fetchall()
 
@@ -185,6 +187,7 @@ def store(monkeypatch):
     finally:
         connection.rollback()
         connection.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        connection.execute(f'DROP SCHEMA IF EXISTS "{source_schema}" CASCADE')
         connection.commit()
         connection.close()
 
@@ -193,9 +196,9 @@ def insert(store, rows):
     from psycopg.types.json import Jsonb
     with store as conn, conn.cursor() as cur:
         cur.execute(exp.SCHEMA_SQL)
-        cur.execute('INSERT INTO kronos_experiment3_arrow.run VALUES (1,%s)', (Jsonb(metadata()),))
+        cur.execute('INSERT INTO kronos_experiment4.run VALUES (1,%s)', (Jsonb(metadata()),))
         for row in rows:
-            cur.execute('INSERT INTO kronos_experiment3_arrow.forecasts VALUES (%s,%s,%s)',
+            cur.execute('INSERT INTO kronos_experiment4.forecasts VALUES (%s,%s,%s)',
                         (row['symbol'], row['rank'], Jsonb(row)))
 
 
@@ -218,6 +221,46 @@ def test_database_collects_exact_targets_once_and_stops(store, monkeypatch):
     assert not fetch.called
 
 
+def test_adoption_preserves_frozen_run_actuals_and_foreign_keys(store, monkeypatch):
+    from psycopg.errors import ForeignKeyViolation
+    from psycopg.types.json import Jsonb
+    rows = prepared()[2]['results']
+    with store as conn, conn.cursor() as cur:
+        cur.execute(exp.SCHEMA_SQL.replace('kronos_experiment4', 'kronos_experiment3_arrow'))
+        cur.execute('INSERT INTO kronos_experiment3_arrow.run VALUES (1,%s)', (Jsonb(metadata()),))
+        for row in rows:
+            cur.execute('INSERT INTO kronos_experiment3_arrow.forecasts VALUES (%s,%s,%s)',
+                        (row['symbol'], row['rank'], Jsonb(row)))
+        cur.execute("INSERT INTO kronos_experiment3_arrow.actuals (symbol,session_date,close,source) "
+                    "VALUES (%s,'2026-11-12',101,'test')", (rows[0]['symbol'],))
+    inference = Mock(side_effect=AssertionError('adoption must not run inference'))
+    monkeypatch.setattr(exp, 'forecast_inputs', inference)
+    first = exp.adopt_arrow_experiment3()
+    assert len(first['results']) == 50 and first['actual_count'] == 1
+    assert first['metadata'] == metadata()
+    assert first['results'][0]['forecasts'] == rows[0]['forecasts']
+    assert exp.adopt_arrow_experiment3() == first
+    with store as conn, conn.cursor() as cur:
+        cur.execute("SELECT to_regnamespace('kronos_experiment3_arrow')")
+        assert cur.fetchone()[0] is None
+    with pytest.raises(ForeignKeyViolation), store as conn, conn.cursor() as cur:
+        cur.execute("INSERT INTO kronos_experiment4.actuals (symbol,session_date,close,source) "
+                    "VALUES ('DOES_NOT_EXIST','2026-11-12',100,'test')")
+    assert exp.read_experiment()['actual_count'] == 1
+    assert not inference.called
+
+
+def test_adoption_refuses_missing_source_or_existing_destination(store):
+    with pytest.raises(ValueError, match='No saved Arrow'):
+        exp.adopt_arrow_experiment3()
+    insert(store, [result()])
+    with store as conn, conn.cursor() as cur:
+        cur.execute(exp.SCHEMA_SQL.replace('kronos_experiment4', 'kronos_experiment3_arrow'))
+    with pytest.raises(ValueError, match='already exists'):
+        exp.adopt_arrow_experiment3()
+    assert len(exp.read_experiment()['results']) == 1
+
+
 def test_database_missing_actuals_expire_without_fetching(store, monkeypatch):
     assert exp.read_experiment(NOW)['status'] == 'not_started'
     insert(store, [result()])
@@ -234,7 +277,7 @@ def test_collector_does_not_write_into_a_replacement_run(store, monkeypatch):
     def fetch(symbol):
         replacement = {**metadata(), 'run_id': 'replacement-run'}
         with store as conn, conn.cursor() as cur:
-            cur.execute('UPDATE kronos_experiment3_arrow.run SET metadata=%s WHERE id=1', (Jsonb(replacement),))
+            cur.execute('UPDATE kronos_experiment4.run SET metadata=%s WHERE id=1', (Jsonb(replacement),))
         return [{'time': '2026-11-12', 'close': 101.}]
     monkeypatch.setattr(exp, 'provider_bars', fetch)
     saved = exp.collect(datetime.fromisoformat('2026-11-12T16:30:00-05:00'))
@@ -264,7 +307,7 @@ def test_reset_archives_previous_and_failed_preparation_keeps_database(store, tm
 
 
 def test_cli_cron_deadline_does_not_require_database(tmp_path, monkeypatch):
-    from scripts import kronos_experiment3 as cli
+    from scripts import kronos_experiment4 as cli
     monkeypatch.setattr(cli, 'ROOT', tmp_path)
     clock = exp.ny_now
     monkeypatch.setattr(exp, 'ny_now', lambda value=None: clock(value or datetime.fromisoformat(metadata()['deadline'])))
@@ -278,7 +321,7 @@ def test_cli_cron_deadline_does_not_require_database(tmp_path, monkeypatch):
 
 
 def test_cli_collect_refreshes_report_and_stops_at_completion(tmp_path, monkeypatch):
-    from scripts import kronos_experiment3 as cli
+    from scripts import kronos_experiment4 as cli
     row = result()
     row['actuals'] = [{'time': '2026-11-12', 'value': 101.}, {'time': '2026-11-16', 'value': 100.}]
     saved = {'status': 'complete', 'metadata': metadata(), 'actual_count': 2,
@@ -289,4 +332,29 @@ def test_cli_collect_refreshes_report_and_stops_at_completion(tmp_path, monkeypa
     monkeypatch.setattr(cli, 'update_cron', update)
     assert cli.main(['--collect', '--cron']) == 0
     update.assert_called_once_with(False)
-    assert '100.0%' in (tmp_path / 'logs/kronos_experiment3_direction_report.md').read_text()
+    assert '100.0%' in (tmp_path / 'logs/kronos_experiment4_direction_report.md').read_text()
+
+
+def test_each_experiment_cron_preserves_the_other():
+    from scripts import kronos_experiment3 as third, kronos_experiment4 as fourth
+    protected = 'TZ=America/New_York\n*/15 * * * 1-5 protected-daily-job\n'
+    original = third.merge_cron(protected, third.cron_block())
+    both = fourth.merge_cron(original, fourth.cron_block(stop_at=metadata()['deadline']))
+    assert fourth.merge_cron(both) == original
+    assert third.merge_cron(both) == protected + fourth.cron_block(stop_at=metadata()['deadline'])
+    assert fourth.merge_cron(both, fourth.cron_block(stop_at=metadata()['deadline'])) == both
+
+
+def test_cli_adoption_only_moves_saved_data_and_installs_own_cron(tmp_path, monkeypatch):
+    from scripts import kronos_experiment4 as cli
+    monkeypatch.setattr(cli, 'ROOT', tmp_path)
+    saved = {'status': 'collecting', 'metadata': metadata(), 'direction_report': []}
+    adopt = Mock(return_value=saved)
+    monkeypatch.setattr(exp, 'adopt_arrow_experiment3', adopt)
+    monkeypatch.setattr(exp, 'start', Mock(side_effect=AssertionError('must not create new forecasts')))
+    update = Mock()
+    monkeypatch.setattr(cli, 'update_cron', update)
+    assert cli.main(['--adopt-arrow-experiment3', '--install-cron']) == 0
+    adopt.assert_called_once_with()
+    update.assert_called_once_with(True, metadata()['deadline'])
+    assert 'Experiment 4' in (tmp_path / 'logs/kronos_experiment4_direction_report.md').read_text()

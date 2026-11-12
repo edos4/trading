@@ -1,4 +1,4 @@
-"""Frozen Arrow Experiment 3 directions and bounded actual-close collection."""
+"""Frozen Arrow Experiment 4 directions and bounded actual-close collection."""
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
@@ -20,15 +20,15 @@ from learn.kronos_weekly_dataset import is_session
 from utils.logger import log
 
 SCHEMA_SQL = """
-CREATE SCHEMA IF NOT EXISTS kronos_experiment3_arrow;
-CREATE TABLE IF NOT EXISTS kronos_experiment3_arrow.run (
+CREATE SCHEMA IF NOT EXISTS kronos_experiment4;
+CREATE TABLE IF NOT EXISTS kronos_experiment4.run (
     id INTEGER PRIMARY KEY CHECK (id=1), metadata JSONB NOT NULL
 );
-CREATE TABLE IF NOT EXISTS kronos_experiment3_arrow.forecasts (
+CREATE TABLE IF NOT EXISTS kronos_experiment4.forecasts (
     symbol TEXT PRIMARY KEY, rank INTEGER UNIQUE NOT NULL, payload JSONB NOT NULL
 );
-CREATE TABLE IF NOT EXISTS kronos_experiment3_arrow.actuals (
-    symbol TEXT NOT NULL REFERENCES kronos_experiment3_arrow.forecasts(symbol),
+CREATE TABLE IF NOT EXISTS kronos_experiment4.actuals (
+    symbol TEXT NOT NULL REFERENCES kronos_experiment4.forecasts(symbol),
     session_date DATE NOT NULL,
     close DOUBLE PRECISION NOT NULL CHECK (close > 0 AND close < 'Infinity'::float8),
     source TEXT NOT NULL, observed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -36,7 +36,32 @@ CREATE TABLE IF NOT EXISTS kronos_experiment3_arrow.actuals (
 );
 """
 HORIZONS = (1, 3)
-WORKER = ROOT / 'scripts/arrow_experiment3_forecast.py'
+WORKER = ROOT / 'scripts/arrow_experiment4_forecast.py'
+
+
+def adopt_arrow_experiment3() -> dict:
+    """Relabel the existing Arrow run transactionally, without regenerating it."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext('kronos_experiment3_arrow'))")
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext('kronos_experiment4'))")
+            cur.execute("SELECT to_regnamespace('kronos_experiment3_arrow'), to_regnamespace('kronos_experiment4')")
+            source, target = cur.fetchone()
+            if source is not None:
+                if target is not None:
+                    raise ValueError('Experiment 4 already exists; refusing to replace either run')
+                cur.execute('SELECT metadata FROM kronos_experiment3_arrow.run WHERE id=1')
+                saved = cur.fetchone()
+                if saved is None or saved[0].get('engine') != 'Arrow':
+                    raise ValueError('The source experiment is not a saved Arrow run')
+                cur.execute('SELECT payload FROM kronos_experiment3_arrow.forecasts ORDER BY rank')
+                rows = [row[0] for row in cur.fetchall()]
+                if len(rows) != 50 or any({p['horizon'] for p in row['forecasts']} != set(HORIZONS) for row in rows):
+                    raise ValueError('Expected the complete frozen Arrow universe')
+                cur.execute('ALTER SCHEMA kronos_experiment3_arrow RENAME TO kronos_experiment4')
+            elif target is None:
+                raise ValueError('No saved Arrow run is available to adopt')
+    return read_experiment()
 
 
 def next_session(day: date) -> date:
@@ -123,14 +148,14 @@ def load_inputs(snapshot: dict, as_of: date) -> list[dict]:
 
 def forecast_inputs(inputs: list[dict], plan: dict, model_dir: Path) -> dict:
     """Run CPU Arrow on frozen inputs; no GPU and no later-history fetches."""
-    with tempfile.TemporaryDirectory(prefix='arrow-experiment3-') as folder:
+    with tempfile.TemporaryDirectory(prefix='arrow-experiment4-') as folder:
         input_path, output_path = Path(folder) / 'input.json', Path(folder) / 'output.json'
         write_json(input_path, {'inputs': inputs, 'schedule': plan})
         process = subprocess.run([sys.executable, str(WORKER), '--input', str(input_path),
                                   '--out', str(output_path), '--model-dir', str(model_dir)],
                                  cwd=ROOT, text=True, capture_output=True, timeout=300)
         if process.returncode or not output_path.exists():
-            log.error(f'Arrow Experiment 3 worker failed: {process.stderr[-1000:]}')
+            log.error(f'Arrow Experiment 4 worker failed: {process.stderr[-1000:]}')
             raise RuntimeError('Arrow could not generate the frozen experiment')
         return json.loads(output_path.read_text())
 
@@ -199,29 +224,29 @@ def start(now: datetime | None = None, *, reset: bool = False, as_of: date | Non
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(SCHEMA_SQL)
-            cur.execute("SELECT pg_advisory_xact_lock(hashtext('kronos_experiment3_arrow'))")
-            cur.execute('SELECT metadata FROM kronos_experiment3_arrow.run WHERE id=1')
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext('kronos_experiment4'))")
+            cur.execute('SELECT metadata FROM kronos_experiment4.run WHERE id=1')
             previous = cur.fetchone()
             if previous and not reset:
                 return read_experiment(now)
             if previous:
-                cur.execute('SELECT payload FROM kronos_experiment3_arrow.forecasts ORDER BY rank')
+                cur.execute('SELECT payload FROM kronos_experiment4.forecasts ORDER BY rank')
                 predictions = [r[0] for r in cur.fetchall()]
-                cur.execute('SELECT symbol,session_date,close,source,observed_at FROM kronos_experiment3_arrow.actuals')
+                cur.execute('SELECT symbol,session_date,close,source,observed_at FROM kronos_experiment4.actuals')
                 actuals = [[str(value) if isinstance(value, (date,datetime)) else value for value in row] for row in cur.fetchall()]
-                archive = archive_dir or ROOT / 'runs' / 'experiment3-archives'
+                archive = archive_dir or ROOT / 'runs' / 'experiment4-archives'
                 previous_id = previous[0]['run_id']
                 if Path(previous_id).name != previous_id or previous_id in ('.','..'):
                     raise ValueError('Invalid previous experiment identifier')
                 write_json(Path(archive) / f'{previous_id}.json',
                            {'metadata': previous[0], 'forecasts': predictions, 'actuals': actuals})
                 for table in ('actuals','forecasts','run'):
-                    cur.execute(f'DELETE FROM kronos_experiment3_arrow.{table}')
-            cur.execute('INSERT INTO kronos_experiment3_arrow.run (id,metadata) VALUES (1,%s)', (Jsonb(metadata),))
+                    cur.execute(f'DELETE FROM kronos_experiment4.{table}')
+            cur.execute('INSERT INTO kronos_experiment4.run (id,metadata) VALUES (1,%s)', (Jsonb(metadata),))
             for row in payload['results']:
                 item = by_symbol[row['symbol']]
                 row.update(rank=item['rank'], dollar_volume=item['dollar_volume'], input=item)
-                cur.execute('INSERT INTO kronos_experiment3_arrow.forecasts (symbol,rank,payload) VALUES (%s,%s,%s)',
+                cur.execute('INSERT INTO kronos_experiment4.forecasts (symbol,rank,payload) VALUES (%s,%s,%s)',
                             (row['symbol'], row['rank'], Jsonb(row)))
     return read_experiment(now)
 
@@ -270,17 +295,17 @@ def read_experiment(now: datetime | None = None) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
-            cur.execute("SELECT to_regclass('kronos_experiment3_arrow.run')")
+            cur.execute("SELECT to_regclass('kronos_experiment4.run')")
             if cur.fetchone()[0] is None:
                 return {'status': 'not_started', 'engine': 'Arrow', 'results': []}
-            cur.execute('SELECT metadata FROM kronos_experiment3_arrow.run WHERE id=1')
+            cur.execute('SELECT metadata FROM kronos_experiment4.run WHERE id=1')
             saved = cur.fetchone()
             if saved is None:
                 return {'status': 'not_started', 'engine': 'Arrow', 'results': []}
             metadata = saved[0]
-            cur.execute('SELECT payload FROM kronos_experiment3_arrow.forecasts ORDER BY rank')
+            cur.execute('SELECT payload FROM kronos_experiment4.forecasts ORDER BY rank')
             forecasts = cur.fetchall()
-            cur.execute('SELECT symbol,session_date,close,source,observed_at FROM kronos_experiment3_arrow.actuals ORDER BY symbol,session_date')
+            cur.execute('SELECT symbol,session_date,close,source,observed_at FROM kronos_experiment4.actuals ORDER BY symbol,session_date')
             actuals = cur.fetchall()
     by_symbol = {}
     for symbol, day, close, source, observed in actuals:
@@ -333,7 +358,7 @@ def collect(now: datetime | None = None) -> dict:
         try:
             return symbol, provider_bars(symbol)
         except Exception as exc:
-            log.warning(f'Arrow Experiment 3 | actual fetch failed for {symbol}: {exc}')
+            log.warning(f'Arrow Experiment 4 | actual fetch failed for {symbol}: {exc}')
             return symbol, []
     with ThreadPoolExecutor(max_workers=3) as pool:
         for symbol, bars in pool.map(fetch, need_provider):
@@ -341,18 +366,18 @@ def collect(now: datetime | None = None) -> dict:
                            for bar in bars if bar['time'] in need_provider[symbol] and positive(bar['close']))
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT pg_advisory_xact_lock(hashtext('kronos_experiment3_arrow'))")
-            cur.execute('SELECT metadata FROM kronos_experiment3_arrow.run WHERE id=1')
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext('kronos_experiment4'))")
+            cur.execute('SELECT metadata FROM kronos_experiment4.run WHERE id=1')
             current = cur.fetchone()
             if current is not None and current[0]['run_id'] == experiment['metadata']['run_id']:
                 for symbol, day, close, source in fetched:
-                    cur.execute('INSERT INTO kronos_experiment3_arrow.actuals (symbol,session_date,close,source) '
+                    cur.execute('INSERT INTO kronos_experiment4.actuals (symbol,session_date,close,source) '
                                 'VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING', (symbol, day, close, source))
     return read_experiment(now)
 
 
 def render_direction_report(experiment: dict) -> str:
-    lines = ['# Experiment 3 — Arrow direction accuracy', '']
+    lines = ['# Experiment 4 — Arrow direction accuracy', '']
     if experiment['status'] == 'not_started':
         return '\n'.join([*lines, 'No saved Arrow forecasts yet.', ''])
     metadata = experiment['metadata']
@@ -370,7 +395,7 @@ def render_direction_report(experiment: dict) -> str:
 
 
 def save_direction_report(experiment: dict, path: Path | None = None) -> Path:
-    path = path or ROOT / 'logs/kronos_experiment3_direction_report.md'
+    path = path or ROOT / 'logs/kronos_experiment4_direction_report.md'
     content = render_direction_report(experiment)
     if not path.exists() or path.read_text() != content:
         atomic_text(path, content)

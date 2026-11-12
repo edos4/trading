@@ -31,36 +31,36 @@ const document={getElementById:get,querySelector:get,createElement:()=>new Eleme
 const window={KronosCharts:{drawChart:(host,data)=>{drawn.push(data);return{remove(){}};}}};
 const fetch=async(url,options)=>{requests.push({url,options});return{ok:!failure,
   json:async()=>failure?{detail:'Database unavailable'}:payload()};};
-vm.runInNewContext(fs.readFileSync('web/static/arrow_experiment3.js','utf8'),{window,document,fetch});
+vm.runInNewContext(fs.readFileSync('web/static/arrow_experiment4.js','utf8'),{window,document,fetch});
 (async()=>{
   await new Promise(setImmediate);
   assert.equal(drawn.length,1);
   assert.equal(drawn[0].history.length,1,'never invent future closes');
   assert.equal(drawn[0].base.length+drawn[0].finetuned.length,0,'Arrow directions are not price paths');
-  assert.match(get('experiment3-title').textContent,/Arrow.*2026-11-11/);
-  const cells=i=>get('#experiment3-direction-report tbody').children[i].children.map(c=>c.textContent);
+  assert.match(get('experiment4-title').textContent,/Arrow.*2026-11-11/);
+  const cells=i=>get('#experiment4-direction-report tbody').children[i].children.map(c=>c.textContent);
   assert.deepEqual(cells(0),['2026-11-12','+1D','0/2','0','0','0','0','2','Pending']);
-  get('experiment3-symbol').value='SPCX';get('experiment3-symbol').events.change();
+  get('experiment4-symbol').value='SPCX';get('experiment4-symbol').events.change();
   actuals=[{time:'2026-11-12',value:101}];
-  await get('experiment3-refresh').events.click();
+  await get('experiment4-refresh').events.click();
   assert.equal(drawn.at(-1).symbol,'SPCX','refresh preserves stock selection');
   assert.equal(drawn.at(-1).history.at(-1).value,101);
   assert.deepEqual(cells(0),['2026-11-12','+1D','2/2','2','2','0','0','0','100.0%']);
   assert.deepEqual(cells(1),['2026-11-16','+3D','0/2','0','0','0','0','2','Pending']);
-  let row=get('#experiment3-table tbody').children[0].children;
+  let row=get('#experiment4-table tbody').children[0].children;
   assert.match(row[3].textContent,/Up · Correct.*up 60.0%/);
   assert.match(row[4].textContent,/101.00 · ↑ Up/);
   assert.match(row[5].textContent,/Up · Pending/,'three-day target is independently pending');
   assert.equal(row[6].textContent,'Pending');
   abstained=true;
-  await get('experiment3-refresh').events.click();
-  row=get('#experiment3-table tbody').children[0].children;
+  await get('experiment4-refresh').events.click();
+  row=get('#experiment4-table tbody').children[0].children;
   assert.match(row[3].textContent,/Abstained: short history/);
   assert.deepEqual(cells(0),['2026-11-12','+1D','2/2','0','0','0','2','0','Pending']);
-  assert.ok(requests.every(r=>r.url==='/api/kronos/experiment3'&&!r.options.method),'read-only GETs');
-  failure=true;await get('experiment3-refresh').events.click();
-  assert.match(get('experiment3-status').textContent,/Database unavailable/);
-  assert.equal(get('experiment3-refresh').disabled,false);
+  assert.ok(requests.every(r=>r.url==='/api/kronos/experiment4'&&!r.options.method),'read-only GETs');
+  failure=true;await get('experiment4-refresh').events.click();
+  assert.match(get('experiment4-status').textContent,/Database unavailable/);
+  assert.equal(get('experiment4-refresh').disabled,false);
   const series=[],renderer={};
   vm.runInNewContext(fs.readFileSync('web/static/kronos.js','utf8'),{document,window:renderer,
     LightweightCharts:{CrosshairMode:{Normal:0},LineStyle:{Dashed:2,Solid:0},createChart:()=>({
@@ -70,5 +70,5 @@ vm.runInNewContext(fs.readFileSync('web/static/arrow_experiment3.js','utf8'),{wi
   renderer.KronosCharts.drawChart(new Element(),drawn.at(-1));
   assert.equal(series.length,1,'only observed prices are drawn');
   assert.equal(series[0].options.color,'#ffffff');assert.equal(series[0].data.length,2);
-  console.log('Arrow Experiment 3 client checks passed');
+  console.log('Arrow Experiment 4 client checks passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

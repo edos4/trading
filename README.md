@@ -547,9 +547,137 @@ dataset cannot be used for reevaluation.
 For the full lifecycle, evaluation gates, locking, and recovery design, see
 [Weekly Kronos fine-tuning](docs/kronos-weekly-finetune.md).
 
-## Kronos Experiment 3 — Arrow
+## Kronos Experiment 3 — November 10, 2026, +2D
 
-The `/kronos` page's **Experiment 3** uses the named **Arrow** direction models
+The **Kronos** tab has a saved **Experiment 3** section comparing Kronos-base
+(blue) and the fine-tuned checkpoint (red) with actual closes (white). Select
+any stock to chart it, or expand the table for all 50. **Refresh saved results**
+reads PostgreSQL; it never regenerates predictions.
+
+This is one fixed forecast, anchored at the **November 10, 2026 close**, for the
+**November 11 (+1D) and November 12 (+2D)** US sessions. “Top 50” follows the
+tab's dollar-volume convention: NASDAQ stocks and depositary receipts ranked
+by TradingView `Value.Traded`, excluding ETFs. The exact ranking was captured
+on **November 11 at 08:04 PHT** (November 10, 19:04 ET), before the next session
+opened, and is frozen in
+[docs/kronos-experiment3-universe.json](docs/kronos-experiment3-universe.json).
+Both dates are open sessions on the [Nasdaq calendar](https://www.nasdaqtrader.com/Trader.aspx?id=Calendar).
+
+All **50 × 2 models × 2 dates = 200 predicted closes** were saved on November
+11 at **08:04:09 PHT**, using CUDA for both models. The fine-tuned pair is
+`~/Kronos/weekly/runs/2026-11-07-05cc4bf3bf01`, with declared selection data
+ending November 6. The database retains model identities, checkpoint provenance,
+generation time, the frozen universe, and exact causal OHLCV inputs. Each model
+uses up to 400 bars, at least 60 valid context bars, one sample, temperature
+1.0, top-p 0.9, and a per-stock seed (`310000 + rank`). Recent listings remain
+in their original ranks: SPCX uses 105 bars and SKHY uses 87, with SKHY fetched
+from Yahoo because it was absent from `daily_bars`. This small two-session
+comparison shows forecast errors and direction agreement; its results do not
+establish trading profitability.
+
+Actual closes come from Yahoo daily bars, first collected at **16:30 ET** after
+each target close: **05:30 PHT on November 12 and 13**. The job retries missing
+closes every 15 minutes. Only November 11/12 observations can be stored, and
+the first saved observation for each stock/date is retained. There are no new
+daily predictions. The cron block removes itself once all **100 actual closes**
+are saved, or at the hard deadline **November 13, 09:30 ET / 22:30 PHT**, even
+if some observations remain unavailable. The page then labels missing results
+as incomplete. Mean absolute percentage error and direction accuracy are
+computed separately for each model and each horizon using only matched actuals;
+the page displays the correct count and sample count (for example, `32/50 = 64%`).
+**Direction is a separate accuracy measure from price error.** For both +1D and
++2D, compare the forecast and actual close with the **November 10 anchor**;
++2D measures the cumulative two-session move. Each is Up, Down, or Flat after
+rounding to USD cents (half-cent ties round up), preventing float noise from
+turning an unchanged close into a move. A prediction is correct only when its
+direction matches the actual direction, including Flat. Missing actuals stay
+Pending and are excluded from the denominator. Per-stock direction labels and
+Correct / Incorrect results appear in the table and below the selected chart.
+
+The **Daily directional accuracy report** in Experiment 3 has one row per US
+session (November 11 and 12). For each model it shows the **number of stocks
+correct**, number incorrect, and accuracy percentage, alongside evaluated and
+pending stock counts. With all closes present, these counts cover 50 stocks
+per day. Before a date has actuals, its accuracy remains Pending. **Download
+report** exports the same daily summary as Markdown from the authenticated
+`GET /api/kronos/experiment3/report` endpoint.
+
+The existing actual-close collector also refreshes
+`logs/kronos_experiment3_direction_report.md` after each successful collection
+pass; no additional cron is installed. The file retains both daily results
+after the two-session experiment ends. It can also be refreshed manually:
+
+```bash
+.venv/bin/python scripts/kronos_experiment3.py --report
+```
+
+```bash
+# Initial run (already performed); refuses new forecasts after Nov 11 09:30 ET.
+# If predictions already exist, this only reads them, without changing anything.
+.venv/bin/python scripts/kronos_experiment3.py --start
+
+# Inspect saved progress / install the bounded actual-close collector.
+.venv/bin/python scripts/kronos_experiment3.py --status
+.venv/bin/python scripts/kronos_experiment3.py --install-cron
+
+# Manually collect currently due target closes; never forecasts or extends +2D.
+.venv/bin/python scripts/kronos_experiment3.py --collect
+```
+
+The user crontab contains exactly one independent marked block:
+
+```cron
+# --- kronos-experiment3 BEGIN ---
+# November 11/12 closes only; self-removes when complete or November 13 09:30 ET.
+*/15 * * * * cd /home/engine-33ai/codes/trading && /home/engine-33ai/codes/trading/.venv/bin/python scripts/kronos_experiment3.py --collect --cron >> /home/engine-33ai/codes/trading/logs/kronos_experiment3.log 2>&1
+# --- kronos-experiment3 END ---
+```
+
+The schedule polls in the host timezone; the Python gate uses New York time,
+so it does not depend on cron's handling of `TZ`/`CRON_TZ`. An experiment-only
+file lock prevents overlapping runs. Existing history-update jobs and weekly
+fine-tuning remain independent.
+
+Everything added for this experiment is listed here for removal:
+
+| Location | Purpose / removal |
+| --- | --- |
+| `core/kronos_experiment3.py` | Fixed dates, input freeze, PostgreSQL storage, actual collector, scoring, daily report rendering/saving; delete for retirement. |
+| `scripts/kronos_experiment3.py` | Start/status/collection/report CLI and marked cron installer/remover; remove cron before deleting. |
+| `scripts/kronos_experiment3_forecast.py` | Isolated `.venv-kronos` GPU worker; delete. |
+| `docs/kronos-experiment3-universe.json` | Frozen ranking with source, timestamp, price, volume, and rank; archive or delete. |
+| `core/test_kronos_experiment3.py` | Date, immutability, scoring, cron, and disposable-schema persistence tests; delete. |
+| `web/static/kronos_experiment3.js`, `web/test_kronos_experiment3.cjs` | Saved-result viewer and client tests; delete. |
+| `web/templates/kronos.html` | Remove the `Experiment 3 BEGIN` / `END` section and `kronos_experiment3.js` script include. |
+| `web/static/kronos.js` | Shared by Experiments 3 and 4; retain the renderer while either experiment is used. |
+| `web/app.py` | Remove the Experiment 3 comment and `/api/kronos/experiment3` and `/api/kronos/experiment3/report` GET routes. |
+| `web/test_kronos_api.py` | Remove the `test_experiment3_*` endpoint tests. |
+| PostgreSQL schema `kronos_experiment3` | Contains only `run`, `forecasts`, `actuals`; no changes to the shared bar tables. |
+| `logs/kronos_experiment3.log`, `logs/kronos_experiment3_start.log`, `logs/kronos_experiment3.lock`, `logs/kronos_experiment3_direction_report.md` | Collector/start logs, process lock, and automatically updated daily report; delete after removing cron. |
+| `.gitignore` | Remove the experiment-only lock, report, and report temporary-file entries if deleting the feature. |
+
+To retire the experiment, **first remove its cron**, optionally export its
+database schema, then drop only its dedicated schema:
+
+```bash
+.venv/bin/python scripts/kronos_experiment3.py --remove-cron
+# Optional archive using the same PostgreSQL connection as the app:
+pg_dump --schema=kronos_experiment3 stocks_history > /tmp/kronos-experiment3.sql
+# Destructive: do this only when the saved experiment is no longer needed.
+.venv/bin/python - <<'PY'
+from data.db import get_conn
+with get_conn() as conn:
+    conn.execute("DROP SCHEMA IF EXISTS kronos_experiment3 CASCADE")
+PY
+```
+
+Remove the files/edits in the table and this README section, then restart the
+web process to retire the route. No `.env`, `data/`, immutable pattern registry,
+deployment units, or existing daily-script cron blocks are part of Experiment 3.
+
+## Kronos Experiment 4 — Arrow
+
+The `/kronos` page's **Experiment 4** uses the named **Arrow** direction models
 on a frozen top-50 NASDAQ stock/DR universe ranked by completed-session dollar
 volume. The reset on November 12 anchors at the **November 11, 2026 close**:
 **+1D is November 12; +3D is November 16**. Horizons count trading sessions.
@@ -562,20 +690,20 @@ Pending; explicit abstentions are excluded from accuracy. Refresh and report
 exports only read saved data and never rerun inference.
 
 ```bash
-.venv/bin/python scripts/kronos_experiment3.py --status
-.venv/bin/python scripts/kronos_experiment3.py --collect
-.venv/bin/python scripts/kronos_experiment3.py --report
-.venv/bin/python scripts/kronos_experiment3.py --install-cron
-.venv/bin/python scripts/kronos_experiment3.py --remove-cron
+.venv/bin/python scripts/kronos_experiment4.py --status
+.venv/bin/python scripts/kronos_experiment4.py --collect
+.venv/bin/python scripts/kronos_experiment4.py --report
+.venv/bin/python scripts/kronos_experiment4.py --install-cron
+.venv/bin/python scripts/kronos_experiment4.py --remove-cron
 ```
 
-The independent `kronos-experiment3` cron block polls every 15 minutes, stores
+The independent `kronos-experiment4` cron block polls every 15 minutes, stores
 only the two frozen target dates after 16:30 New York time, and removes itself
 on completion or **November 17, 09:30 New York time**. Other jobs are preserved.
-Arrow forecasts and actuals use the isolated `kronos_experiment3_arrow` schema;
-the earlier Kronos comparison remains archived in `kronos_experiment3`.
+Arrow forecasts and actuals use the isolated `kronos_experiment4` schema;
+the original Kronos comparison remains active in `kronos_experiment3`.
 
-See [Arrow Experiment 3](docs/arrow-experiment3.md) for reset and storage details,
+See [Arrow Experiment 4](docs/arrow-experiment4.md) for reset and storage details,
 and [Arrow](docs/arrow.md) for standalone inference and model validation status.
 
 ## Symbol Explorer UI

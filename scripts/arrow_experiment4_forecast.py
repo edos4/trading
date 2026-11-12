@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CPU Arrow forecasts from Experiment 3's frozen, already dated input bars."""
+"""CPU Arrow forecasts from Experiment 4's frozen, already dated input bars."""
 from __future__ import annotations
 
 import argparse

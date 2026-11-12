@@ -315,3 +315,43 @@ def test_complete_database_stops_fetching_and_keeps_saved_actuals(store, monkeyp
     assert saved["actual_count"] == 100
     assert saved["scores"]["base"][1]["count"] == 50
     assert not fetch.called
+
+
+def test_cron_removes_itself_at_deadline_even_without_database(tmp_path, monkeypatch):
+    from scripts import kronos_experiment3 as cli
+    monkeypatch.setattr(cli, "ROOT", tmp_path)
+    monkeypatch.setattr(exp, "ny_now", lambda: exp.DEADLINE)
+    read = Mock(side_effect=AssertionError("must not need database after deadline"))
+    monkeypatch.setattr(exp, "read_experiment", read)
+    update = Mock()
+    monkeypatch.setattr(cli, "update_cron", update)
+    assert cli.main(["--collect", "--cron"]) == 0
+    update.assert_called_once_with(False)
+    assert not read.called
+
+
+def test_cron_removes_itself_on_completion(tmp_path, monkeypatch):
+    from scripts import kronos_experiment3 as cli
+    monkeypatch.setattr(cli, "ROOT", tmp_path)
+    monkeypatch.setattr(exp, "ny_now", lambda: at("2026-11-12T17:00:00-05:00"))
+    monkeypatch.setattr(exp, "collect", lambda: {"status": "complete", "actual_count": 100})
+    report = Mock()
+    monkeypatch.setattr(exp, "save_direction_report", report)
+    update = Mock()
+    monkeypatch.setattr(cli, "update_cron", update)
+    assert cli.main(["--collect", "--cron"]) == 0
+    update.assert_called_once_with(False)
+    report.assert_called_once()
+
+
+def test_collector_refreshes_local_report_with_existing_cron_command(tmp_path, monkeypatch):
+    from scripts import kronos_experiment3 as cli
+    rows = [result()]
+    rows[0]["actuals"] = [{"time": "2026-11-11", "value": 110.}]
+    experiment = {"status": "collecting", "results": rows, "scores": exp.score(rows), "actual_count": 1}
+    monkeypatch.setattr(cli, "ROOT", tmp_path)
+    monkeypatch.setattr(exp, "ny_now", lambda: at("2026-11-11T17:00:00-05:00"))
+    monkeypatch.setattr(exp, "collect", lambda: experiment)
+    assert cli.main(["--collect", "--cron"]) == 0
+    report = (tmp_path / "logs/kronos_experiment3_direction_report.md").read_text()
+    assert "| 2026-11-11 | +1D | 1/1 | 0 | 1 | 0 | 100.0% | 0 | 1 | 0.0% |" in report
