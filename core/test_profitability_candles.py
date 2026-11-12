@@ -7,6 +7,8 @@ from copy import deepcopy
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from core.candle_validation import candle_error
 from core.test_position_protection import book_with_position
 from core.test_patternsv2_exits import candle

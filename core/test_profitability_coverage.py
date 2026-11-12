@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from core.scanner import MarketScanner
 from core.paper_trader import PaperAccount
 from core.test_position_protection import book_with_position

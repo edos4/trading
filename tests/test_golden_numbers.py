@@ -27,7 +27,7 @@ from core.backtester import _core_backtest_symbol, _summarize
 from core.market import get_market
 from data.barcache import load as _load_barcache
 
-pytestmark = pytest.mark.slow
+pytestmark = [pytest.mark.slow, pytest.mark.usefixtures("confirmed_buy_dii")]
 
 FIXTURE = str(Path(__file__).parent / "fixtures" / "barcache")
 

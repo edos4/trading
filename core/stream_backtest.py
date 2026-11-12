@@ -176,7 +176,9 @@ class StreamReplay:
         return series
 
     def _required_warmup(self) -> int:
-        needed = [_min_required_bars(self.settings.timeframe), int(self.window.warmup_bars)]
+        from analysis.pattern_dii import BULLS_UPTREND_MIN_BARS
+        needed = [_min_required_bars(self.settings.timeframe), int(self.window.warmup_bars),
+                  BULLS_UPTREND_MIN_BARS]
         for pattern in self.patterns:
             if self.settings.timeframe in pattern.timeframes:
                 needed.append(int(getattr(pattern, "MIN_BARS", 2) or 2))
@@ -272,6 +274,13 @@ class StreamReplay:
                 fill = opening_candidate(signal, candle, self.notional, self.settings.market, self.slippage)
                 if fill is None:
                     continue
+                from core.entry_policy import describe_buy_entry_rejection
+                reason = describe_buy_entry_rejection(
+                    fill, series.store, market=self.settings.market,
+                    as_of=candle.timestamp, at_open=True,
+                )
+                if reason is not None:
+                    raise ValueError(reason)
                 # A historical Laya decision applies to its decision bar only.
                 # Filter assessments must be refreshed at execution, fail closed.
                 if (signal.laya_assessment or {}).get("mode") == "filter":
@@ -490,6 +499,13 @@ class StreamReplay:
             self.laya_stats["abstained"] += 1
 
     def _gates_allow(self, signal, store) -> bool:
+        from core.entry_policy import describe_buy_entry_rejection
+        reason = describe_buy_entry_rejection(signal, store, market=self.settings.market)
+        if reason is not None:
+            self.events.append({"symbol": signal.symbol, "pattern": signal.pattern,
+                                "session": signal.signal_bar_timestamp.isoformat(),
+                                "status": "rejected", "reason": reason})
+            return False
         if not self.settings.execution.volume_gate:
             return True
         from analysis.price_volume import volume_confirm_gate

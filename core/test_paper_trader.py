@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-pytestmark = pytest.mark.usefixtures("published_pattern_catalog")
+pytestmark = pytest.mark.usefixtures("published_pattern_catalog", "confirmed_buy_dii")
 
 from datetime import datetime, timezone
 

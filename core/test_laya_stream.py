@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import unittest
+import pytest
+
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
 from datetime import date
 
 

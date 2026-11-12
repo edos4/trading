@@ -9,6 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from core.backtester import _make_snapshot
 from core.scanner import MarketScanner
 from core.test_patternsv2_exits import candle, signal

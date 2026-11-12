@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from config import settings
 from core.scanner import MarketScanner
 from patterns.base_pattern import TradeSignal

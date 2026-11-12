@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from core.backtest_params import settings_from_values
 from core.backtest_service import BacktestService
 from core.pattern_edit_store import EditError, uid

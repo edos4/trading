@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from config import Settings, settings
 from core.paper_trader import PaperAccount
 from core.scanner import MarketScanner

@@ -26,7 +26,7 @@ from data.barcache import load as _load_barcache
 from data.ohlcv_store import OHLCVStore
 from patterns import _dedup
 
-pytestmark = [pytest.mark.slow, pytest.mark.usefixtures("published_pattern_catalog")]
+pytestmark = [pytest.mark.slow, pytest.mark.usefixtures("published_pattern_catalog", "confirmed_buy_dii")]
 
 FIXTURE = str(Path(__file__).parent / "fixtures" / "barcache")
 

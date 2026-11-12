@@ -6,6 +6,8 @@ from dataclasses import replace
 from unittest.mock import Mock
 
 import pytest
+
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
 from config import settings
 from core.kronos_process import KronosBusy
 from core.paper_trader import PaperAccount

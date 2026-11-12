@@ -7,6 +7,8 @@ from datetime import timedelta
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from core.paper_trader import PaperAccount
 from core.backtester import _check_exit, _make_snapshot, _open_trade
 from core.scanner import MarketScanner

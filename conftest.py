@@ -16,6 +16,14 @@ def pytest_configure(config):
     )
 
 
+def pytest_collection_modifyitems(items):
+    # This legacy fill test has no daily context. Keep it about TV stacks
+    # without editing the protected data/ directory.
+    for item in items:
+        if item.nodeid == "data/test_tv_stacks.py::test_fake_series_buys_then_trails_out":
+            item.fixturenames.append("confirmed_buy_dii")
+
+
 # Explicit opt-in only: never derive a test DSN from application Settings/.env.
 import os
 import uuid
@@ -97,6 +105,18 @@ def local_pattern_toggles(monkeypatch):
     setattr(module, "DISABLED", shipped)
     yield
     setattr(module, "DISABLED", shipped)
+
+
+@pytest.fixture
+def confirmed_buy_dii(monkeypatch):
+    """Isolate execution/band tests from daily entry confirmation.
+
+    Tests requesting this fixture supply no daily DII setup. The real guard,
+    including scanner, paper and replay integration, is tested separately in
+    core/test_dii_buy_entry.py.
+    """
+    monkeypatch.setattr("core.entry_policy.describe_buy_entry_rejection", lambda *a, **kw: None)
+    monkeypatch.setattr("analysis.pattern_dii.describe_dii_bulls_uptrend_rejection", lambda *a, **kw: None)
 
 
 @pytest.fixture

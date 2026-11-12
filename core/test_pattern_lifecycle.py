@@ -3,6 +3,8 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 
 import pytest
+
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
 from psycopg.types.json import Jsonb
 
 from core.pattern_edit_store import Conflict, EditError, uid

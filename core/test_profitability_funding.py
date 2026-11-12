@@ -6,6 +6,8 @@ import json
 from dataclasses import replace
 
 import pytest
+
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
 from config import settings
 from core.paper_trader import PaperAccount
 from core.scanner import MarketScanner

@@ -4,6 +4,8 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from config import settings
 from core.paper_trader import PaperAccount
 from core.test_patternsv2_exits import candle, signal

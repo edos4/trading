@@ -9,6 +9,8 @@ import pandas as pd
 import numpy as np
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from data.tv_client import MarketSnapshot, OHLCVCandle
 from patterns.base_pattern import TradeSignal
 from patterns_v2.signals import MIN_BARS, TRAIL_ARM_R, TRAIL_GIVEBACK_R, detect_trade_signals

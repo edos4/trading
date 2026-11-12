@@ -5,6 +5,8 @@ from copy import deepcopy
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from analysis.paper_policy_evaluation import compare_books, create_plan, model_holdout_evidence
 from core.paper_trader import PaperAccount
 from core.run_manifest import record_observation

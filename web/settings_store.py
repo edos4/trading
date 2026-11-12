@@ -324,8 +324,8 @@ INFO: dict[str, tuple[str, str]] = {
     "paper_v2_min_stop_atr": ("V2 minimum initial stop (ATR)", "Optional paper admission minimum using saved signal-time ATR and actual initial gross protection. 0 records evidence only. Keep thresholds fixed before evaluation; this does not widen the 3% net budget."),
     "min_signal_price_usd": ("Min US signal price", "Reject US pattern entries below this price. 0 disables the floor."),
     "short_entries_enabled": ("Short entries", "Allow US paper short entries through the normal causal entry/exit path. PH remains long-only."),
-    "dii_gate_shadow": ("DII gate shadow mode", "Record DII rejections without blocking, so the gate can be A/B tested."),
-    "paper_dii_gate_mode": ("Paper DII gate mode", "shadow records votes only; filter restores the veto for paper books."),
+    "dii_gate_shadow": ("DII gate shadow mode", "Record DII band rejections without blocking. The required three-day daily bulls uptrend still blocks BUY entries."),
+    "paper_dii_gate_mode": ("Paper DII gate mode", "shadow records band votes; filter enforces bands. Every BUY requires the three-day daily bulls uptrend in both modes."),
     "collect_first_enabled": ("Collect first", "Collect signals without opening, rank by reward:risk, and open only the top N. Expensive gates run only on winners."),
     "collect_first_top_n": ("Collect first top N", "Number of ranked signals to open when collect-first is enabled."),
     # Paper trading

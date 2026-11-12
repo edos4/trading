@@ -10,6 +10,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from core import signal_log_store as sls
 from core.paper_trader import PaperAccount
 from core.scanner import MarketScanner

@@ -825,12 +825,24 @@ uses them two ways:
    sideways breakouts are rejected.
 
 **DII entry votes for Patterns and Patternsv2.** The Paper tab defaults to
-**DII entries → Shadow**: record the vote and continue through the remaining
-entry checks. Choose **Filter** explicitly to make DII veto entries for that
+**DII entries → Shadow**: record the percentage-band vote and continue through
+the remaining entry checks. Choose **Filter** explicitly to make the band veto entries for that
 run. The choice is frozen at Start and saved in the run settings/export;
 changing it requires a new run. API/MCP callers can pass `dii_gate_mode` as
 `shadow` or `filter`; omitting it inherits `PAPER_DII_GATE_MODE` and the global
 shadow setting. Non-paper scanners retain their configured gate.
+
+**Every new BUY requires daily DII bulls to rise for at least three consecutive
+completed trading days**, independently of Shadow/Filter and Pattern-only mode.
+The last four daily `bulls` percentages must be finite and strictly increasing
+(`b0 < b1 < b2 < b3`); a flat or falling day resets the streak. This uses the
+`bulls` percentage, not price direction or the raw `up` event count. The default
+DII (20, 40) needs at least 63 completed daily candles for confirmation. Missing
+history blocks the buy. Weekly signals use daily context too. The scanner,
+paper queues/direct fills, historical engines and Explorer share the check;
+next-open fills recheck using only earlier completed daily sessions. This also
+applies to Indicators-only and saved-rule BUY entries. Existing position exits
+and short entries do not use this BUY guard.
 
 In Filter mode, entries must pass a breadth band on the side they trade,
 using DII defaults (20, 40) on the scanned timeframe. A **BUY requires a bullish percentage between 16% and
@@ -844,11 +856,11 @@ history preloads at process start) does not reject — the gate engages once
 enough candles are stored — and a zero-event window (no new `length`-bar high or
 low in the last `period` bars) counts as balanced 50/50, not unavailable.
 Filter rejections are recorded with the DII reason and `dii_rejected` count;
-Shadow records the same reason with `dii_shadow` and continues. The vote runs
+Shadow records the same band reason with `dii_shadow` and continues. The band vote runs
 before other entry checks and collect-first ranking. Pattern-only mode and
 optional rule filters retain the chosen DII mode. Explorer applies its gate to the detected bar's
 historical prefix. Indicators-only scans, including standalone DII and saved-rule
-strategies, keep their own entry policy. Existing position exits are unchanged.
+strategies, keep their own band policy alongside the required daily bulls check.
 
 Paper exit monitoring includes every held or queued `(symbol, timeframe)`,
 even after reducing the entry universe or disabling its detector. Held symbols

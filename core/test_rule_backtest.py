@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 import core.rule_backtest as rule_backtest
 from core.rule_contracts import RulePayload
 from data.tv_client import OHLCVCandle

@@ -844,6 +844,12 @@ class PaperAccount:
                 return False, str(exc)
             if candle.timestamp is None or candle.timestamp.tzinfo is None:
                 return False, "Pending entry requires an aware signal timestamp."
+            from core.entry_policy import describe_buy_entry_rejection
+            reason = describe_buy_entry_rejection(
+                signal, store, market=self.market, as_of=candle.timestamp,
+            )
+            if reason is not None:
+                return False, reason
             candidate = deepcopy(signal)
             candidate.signal_bar_timestamp = candle.timestamp
             from core.pattern_provenance import rules
@@ -888,7 +894,7 @@ class PaperAccount:
                         candidate.laya_assessment = {**assessment, **verdict}
                     point = replace(candle, open=candle.open, high=candle.open,
                                     low=candle.open, close=candle.open)
-                    ok, reason = self._open_position_locked(candidate, point, store)
+                    ok, reason = self._open_position_locked(candidate, point, store, at_open=True)
                     if ok:
                         # The journal receives the saved queue object, while
                         # execution used a copy with rebased rules/evidence.
@@ -921,6 +927,7 @@ class PaperAccount:
 
     def _open_position_locked(
         self, signal: TradeSignal, candle: OHLCVCandle, store: OHLCVStore,
+        *, at_open: bool = False,
     ) -> tuple[bool, str]:
         from core.entry_policy import describe_short_entry_rejection
         if signal.action not in ("BUY", "SELL"):
@@ -999,6 +1006,12 @@ class PaperAccount:
         from core.execution import validate_entry_geometry
         try:
             validate_entry_geometry(signal, entry_price)
+            from core.entry_policy import describe_buy_entry_rejection
+            reason = describe_buy_entry_rejection(
+                signal, store, market=self.market, as_of=candle.timestamp, at_open=at_open,
+            )
+            if reason is not None:
+                return False, reason
             from core.execution import apply_target_cap
             signal.execution_risk = apply_target_cap(
                 signal, entry_price, float(settings.target_max_r or 0), settings.target_risk_basis,

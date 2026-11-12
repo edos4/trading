@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from data.tv_client import OHLCVCandle
 from patterns.base_pattern import TradeSignal
 from web.services import ExplorerService

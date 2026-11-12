@@ -9,6 +9,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from data.ohlcv_store import OHLCVStore
 from data.tv_client import MarketSnapshot, OHLCVCandle
 from indicators import discover

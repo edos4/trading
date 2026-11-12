@@ -185,12 +185,30 @@ class ExplorerService:
                     session_tz=profile.session_tz,
                 )
             cheap: list[TradeSignal] = []
+            if timeframe != "1d" and any(sig.action == "BUY" for sig in raw):
+                daily = fetch_ohlcv_candles(
+                    symbol, "1d", exchange=exchange, tv_client=self._tv,
+                    tv_fallback=False, market=profile.id,
+                )
+                # A failed refresh must not reuse another request's context.
+                self._store = OHLCVStore(
+                    window=max(DEFAULT_WINDOW, settings.tv_history_days), session_tz=profile.session_tz,
+                )
+                self._store.replace_all(symbol, timeframe, candles)
+                self._store.replace_all(symbol, "1d", daily or [])
             for sig in raw:
+                from core.entry_policy import describe_buy_entry_rejection
+
+                end = sig.signal_bar_idx
+                decision = candles[-1] if end is None else candles[end]
+                if describe_buy_entry_rejection(
+                    sig, self._store, market=profile.id, as_of=decision.timestamp,
+                ) is not None:
+                    continue
                 if not indicators_only:
                     from analysis.pattern_dii import describe_pattern_dii_rejection
 
                     # Explorer includes recent historical detections: use that bar's prefix.
-                    end = sig.signal_bar_idx
                     prefix = df if end is None else df.iloc[:end + 1]
                     if describe_pattern_dii_rejection(prefix, action=sig.action) is not None:
                         continue

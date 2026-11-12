@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from analysis.paper_trade_review import replay_trade
 from config import settings
 from core.execution import apply_target_cap, opening_candidate

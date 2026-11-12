@@ -11,6 +11,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from config import settings
 from core.backtester import _check_exit, _open_trade
 from core.execution import opening_candidate

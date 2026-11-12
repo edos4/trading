@@ -179,6 +179,9 @@ def _replay(symbol: str, df: pd.DataFrame, dates: list[str], rule: RulePayload,
 
         if pending_entry:
             pending_entry = False
+            from analysis.pattern_dii import describe_dii_bulls_uptrend_rejection
+            if direction == "long" and describe_dii_bulls_uptrend_rejection(df.iloc[:i]) is not None:
+                continue
             entry = o * (1.0 + slippage) if direction == "long" else o * (1.0 - slippage)
             qty = notional / entry if entry > 0 else 0.0
             stop, target = _bracket(rule, direction, entry, df)
@@ -192,6 +195,9 @@ def _replay(symbol: str, df: pd.DataFrame, dates: list[str], rule: RulePayload,
             continue
 
         if allowed(i + 1) and bool(series.iloc[i]) and not bool(series.iloc[i - 1]):
+            from analysis.pattern_dii import describe_dii_bulls_uptrend_rejection
+            if direction == "long" and describe_dii_bulls_uptrend_rejection(df.iloc[:i + 1]) is not None:
+                continue
             pending_entry = True
 
     if position is not None:

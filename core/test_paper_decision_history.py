@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import pytest
+
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
 
 from core.paper_trader import PaperAccount
 from core.scanner import MarketScanner

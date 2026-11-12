@@ -12,6 +12,8 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 import pandas as pd
 
 from data.tv_client import OHLCVCandle

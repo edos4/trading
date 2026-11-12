@@ -3,6 +3,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from core.backtester import _check_exit, _core_backtest_symbol, _open_trade
 from core.test_patternsv2_exits import candle, signal
 from patterns import _dedup

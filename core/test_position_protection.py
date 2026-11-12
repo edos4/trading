@@ -6,6 +6,8 @@ from copy import deepcopy
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from core.backtester import _check_exit, _open_trade, trade_risk_dollars
 from core.paper_trader import PaperAccount, _trade_from_dict, _trade_to_dict, exit_state
 from core.position_protection import ensure_paper_protection

@@ -3,6 +3,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from core.backtester import _check_exit, _open_trade
 from core.paper_trader import PaperAccount, _trade_from_dict, _trade_to_dict
 from data.ohlcv_store import OHLCVStore

@@ -7,6 +7,8 @@ import threading
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from core.backtest_params import settings_from_values
 from core.backtester import (
     _apply_notional_sizing, _check_exit, _close_trade, _core_backtest_symbol, _open_trade,

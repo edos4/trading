@@ -8,6 +8,8 @@ import json
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from analysis.paper_trade_review import (
     boundary_objective_comparison, replay_trade, review_export, signal_evidence, signal_funnel, summarize,
 )

@@ -7,6 +7,8 @@ from copy import deepcopy
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from analysis.paper_trade_review import signal_evidence
 from core.paper_trader import PaperAccount
 from core.scanner import MarketScanner

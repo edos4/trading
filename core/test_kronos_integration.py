@@ -11,6 +11,8 @@ from unittest.mock import Mock
 import pandas as pd
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from config import settings
 from core.backtester import _make_snapshot
 from core.kronos_confirm import KronosConfirmGate

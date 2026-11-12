@@ -52,6 +52,8 @@ _CACHE_TTL_SECONDS = 6 * 3600
 # The pre-audit engine uses the identical exit ladder. Recheck this allowance
 # whenever exit helpers change; new entries still require the current runtime.
 _COMPATIBLE_EXIT_ENGINE_HASHES = frozenset({
+    # Mandatory daily DII bulls confirmation changes entry admission only.
+    "b2611a50b8b03befda535d8fd46811edb0719aac1f80317c14fcf82d2a360f3c",
     # Target-cap applicability changes entry admission only.
     "5cac5d73993901900facb872709d237a17c83bc631a0f9d17d134002f0d5011e",
     "88225ff16b3d2005a74d08ea9d5184036523f1c4b5c609f6fc1a2b254d6d6c30",
@@ -81,6 +83,7 @@ _COMPATIBLE_EXIT_ENGINE_HASHES = frozenset({
 # Entry corrections and an opt-in trail basis preserve these audited engines'
 # existing ladders. Missing basis always means the old reference percentage.
 _COMPATIBLE_CAUSAL_EXIT_ENGINE_HASHES = frozenset({
+    "b2611a50b8b03befda535d8fd46811edb0719aac1f80317c14fcf82d2a360f3c",
     "5cac5d73993901900facb872709d237a17c83bc631a0f9d17d134002f0d5011e",
     "88225ff16b3d2005a74d08ea9d5184036523f1c4b5c609f6fc1a2b254d6d6c30",
     "c924745b62323b0188b3675c02d51b335cfd472cb9dd062e52eebeee0c239740",
@@ -1142,6 +1145,7 @@ def _core_backtest_symbol(
     candles: list[OHLCVCandle],
     patterns: list[BasePattern],
     config: dict,
+    *, daily_candles: list[OHLCVCandle] | None = None,
 ) -> tuple[list[BacktestTrade], int, list[dict], list[dict]]:
     if not candles:
         return [], 0, [], []
@@ -1175,6 +1179,13 @@ def _core_backtest_symbol(
     # tell patterns the true walk bar via _dedup.set_current — they must use
     # _dedup.current_bar(len(df)-1), not len(df)-1 directly.
     store.replace_all(symbol, timeframe, candles)
+    # Detector adapters above may retain the full tape. Entry confirmation
+    # needs a separate causal window, including in histories over 512 bars.
+    entry_store = OHLCVStore(session_tz=config.get("session_tz", "America/New_York"))
+    if timeframe != "1d" and daily_candles:
+        entry_store = OHLCVStore(window=max(DEFAULT_WINDOW, len(daily_candles)),
+                                 session_tz=config.get("session_tz", "America/New_York"))
+        entry_store.replace_all(symbol, "1d", daily_candles)
     # Each pattern declares HORIZON_BARS = the minimum trailing bars its `.cjs`
     # counterpart needs after an anchor (the `.cjs` scans clamp the exit sim at
     # data end, so this is small — H&S/double-top can enter within a few bars of
@@ -1243,6 +1254,19 @@ def _core_backtest_symbol(
                         _dedup.mark(*key)
                         filtered.append({"sym": symbol, "entryDate": _bar_date(i),
                                          "reason": signal.filtered_reason})
+                        continue
+
+                    from core.entry_policy import describe_buy_entry_rejection
+                    if timeframe == "1d":
+                        entry_store.replace_all(symbol, "1d", candles[max(0, i - DEFAULT_WINDOW + 1):i + 1])
+                    reason = describe_buy_entry_rejection(
+                        signal, entry_store, market=config.get("market"), as_of=candles[i].timestamp,
+                    )
+                    if reason is not None:
+                        _dedup.mark(*key)
+                        filtered.append({"sym": symbol, "entryDate": _bar_date(i), "reason": reason})
+                        if not key:
+                            break
                         continue
 
                     _apply_notional_sizing(
@@ -1357,6 +1381,7 @@ def _worker_symbol_backtest(
     pattern_specs: list[tuple[str, str]],
     config: dict,
     candles: list[OHLCVCandle] | None = None,
+    daily_candles: list[OHLCVCandle] | None = None,
 ) -> tuple[list[BacktestTrade], int, list[dict], list[dict]]:
     if candles is None:
         return [], 0, [], []
@@ -1366,7 +1391,7 @@ def _worker_symbol_backtest(
         from core.pattern_edit_store import open_pattern_store
         store = open_pattern_store(**store_config)
     patterns = _load_patterns(pattern_specs, store)
-    return _core_backtest_symbol(symbol, timeframe, candles, patterns, config)
+    return _core_backtest_symbol(symbol, timeframe, candles, patterns, config, daily_candles=daily_candles)
 
 
 # ── Orchestrator ────────────────────────────────────────────────────────────
@@ -1508,6 +1533,7 @@ class Backtester:
                     loop.run_in_executor(
                         pool, _worker_symbol_backtest,
                         s, tf, pattern_specs, config, ohlcv_data.get((s, tf)),
+                        ohlcv_data.get((s, "1d")) if tf != "1d" else None,
                     )
                     for s, tf in tasks
                 ]
@@ -1521,7 +1547,8 @@ class Backtester:
             log.opt(exception=True).warning("Backtester | pool unavailable — running inline")
             for s, tf in tasks:
                 candles = ohlcv_data.get((s, tf))
-                _merge(_core_backtest_symbol(s, tf, candles or [], self._patterns, config))
+                _merge(_core_backtest_symbol(s, tf, candles or [], self._patterns, config,
+                                            daily_candles=ohlcv_data.get((s, "1d"))))
 
         return result
 

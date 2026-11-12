@@ -420,6 +420,7 @@ class MarketScanner:
             self._paper.run_manifest['active_controls']={
                 'account_model':self._paper.account_model,'volume_gate':self._volume_gate,
                 'dii_mode':self._dii_gate_mode,
+                'dii_bulls_uptrend': {'mode': 'filter', 'timeframe': '1d', 'days': 3},
                 'vision':settings.vision_confirmation_enabled,'collect_first':self._collect_first,
                 'kronos_entry':self._kronos_mode,'kronos_exit':self._kronos_exit_mode,
                 'kronos_decision_policy': 'direction_only',
@@ -1097,6 +1098,11 @@ class MarketScanner:
         timeframes_by_symbol = {symbol: set(all_timeframes) for symbol in self._symbols}
         for symbol, timeframe in watchlist:
             timeframes_by_symbol.setdefault(symbol, set()).add(timeframe)
+        # Daily DII is required even when the selected detector is weekly.
+        # Context-only requests do not add daily entry candidates.
+        for timeframes in timeframes_by_symbol.values():
+            if timeframes:
+                timeframes.add("1d")
         scan_symbols = sorted(managed_symbols) + [s for s in self._symbols if s not in managed_symbols]
         self.stats["symbols_total"] = len(scan_symbols)
         self.stats["entry_symbols_total"] = len(entry_symbols)
@@ -1197,7 +1203,7 @@ class MarketScanner:
                 pending: list[MarketSnapshot] = []
                 if fetch_many is not None:
                     batch_timeframes = set().union(*(timeframes_by_symbol[s] for s in batch))
-                    for timeframe in sorted(batch_timeframes):
+                    for timeframe in sorted(batch_timeframes, key=lambda tf: (tf != "1d", tf)):
                         requested = [s for s in batch if timeframe in timeframes_by_symbol[s]]
                         try:
                             results = await fetch_many(
@@ -1222,7 +1228,7 @@ class MarketScanner:
                                 pending.append(snap)
                 else:
                     for symbol in batch:
-                        for timeframe in sorted(timeframes_by_symbol[symbol]):
+                        for timeframe in sorted(timeframes_by_symbol[symbol], key=lambda tf: (tf != "1d", tf)):
                             try:
                                 snapshot = await self._tv.fetch_snapshot(
                                     symbol, timeframe,
@@ -1938,7 +1944,19 @@ class MarketScanner:
             self._append_signal_log(signal, status="rejected", reason=reason)
             return
 
-        # Paper records the DII vote by default so unvalidated narrow bands
+        from core.entry_policy import describe_buy_entry_rejection
+
+        dii_reason = describe_buy_entry_rejection(
+            signal, self._store, market=self._market,
+            as_of=candle.timestamp if candle is not None else None,
+        )
+        if dii_reason is not None:
+            self.stats["signals_rejected"] += 1
+            self.stats["dii_rejected"] = self.stats.get("dii_rejected", 0) + 1
+            self._append_signal_log(signal, status="rejected", reason=dii_reason)
+            return
+
+        # Paper records the DII band vote by default so unvalidated narrow bands
         # cannot starve both sides. Explicit filter mode retains the veto.
         if not self._indicators_only and signal.action in ("BUY", "SELL"):
             from analysis.pattern_dii import MIN_BARS, describe_pattern_dii_rejection

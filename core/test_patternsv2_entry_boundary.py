@@ -6,6 +6,8 @@ from dataclasses import replace
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from core.execution import opening_candidate, validate_entry_geometry
 from core.paper_trader import PaperAccount
 from core.test_patternsv2_exits import candle, signal

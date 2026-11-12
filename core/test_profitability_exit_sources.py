@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import pytest
+
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
 from core.test_position_protection import book_with_position
 from core.test_patternsv2_exits import candle
 

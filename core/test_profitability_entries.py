@@ -6,6 +6,8 @@ from unittest.mock import Mock
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
+
 from core.paper_trader import PaperAccount
 from core.scanner import MarketScanner
 from core.test_short_execution_pipeline import bar, candidate
