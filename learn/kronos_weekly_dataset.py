@@ -1,4 +1,4 @@
-"""Read-only five-year Kronos snapshots with causal, market-balanced windows."""
+"""Read-only full-history Kronos snapshots with causal, market-balanced windows."""
 from __future__ import annotations
 
 import hashlib
@@ -103,7 +103,7 @@ def ranges_for_days(days: np.ndarray, offset: int, lower: int, upper: int,
 
 
 def build_from_frames(frames: Iterable[tuple[str, str, pd.DataFrame]], out: Path, *,
-                      start: date, end: date, lookback: int = 256,
+                      end: date, start: date | None = None, lookback: int = 256,
                       predict_len: int = 10, min_bars: int = 500,
                       market_weights: tuple[float, float] = (.5, .5)) -> dict:
     """Stream canonical symbol frames to a fresh corpus; never reuse stale data."""
@@ -112,7 +112,7 @@ def build_from_frames(frames: Iterable[tuple[str, str, pd.DataFrame]], out: Path
     out.mkdir(parents=True, exist_ok=True)
     train_end = end - timedelta(weeks=16)
     val_end = end - timedelta(weeks=4)
-    bounds = {'train': (start, train_end), 'val': (train_end, val_end), 'eval': (val_end, end)}
+    bounds = {'train': (start or date.min, train_end), 'val': (train_end, val_end), 'eval': (val_end, end)}
     report = {'rejected_rows': 0, 'dropped_symbols': 0, 'suspected_discontinuities': 0, 'long_gaps': 0,
               'mixed_scale_windows': 0,
               'markets': {m: {'symbols': 0, 'bars': 0, 'train': 0, 'val': 0, 'eval': 0, 'long_gaps': 0,
@@ -120,13 +120,16 @@ def build_from_frames(frames: Iterable[tuple[str, str, pd.DataFrame]], out: Path
                           for m in ('us', 'ph')}}
     symbols = []
     offset = 0
+    first_day = None
     with (out / kd.FEATURES_FILE).open('wb') as features, (out / kd.DAYS_FILE).open('wb') as dates:
         for market, symbol, frame in frames:
             if market not in ('us', 'ph'):
                 continue
             work = frame.copy().sort_index(kind='stable')
             work = work[~work.index.duplicated(keep='last')]
-            work = work[(work.index >= pd.Timestamp(start)) & (work.index < pd.Timestamp(end))]
+            work = work[work.index < pd.Timestamp(end)]
+            if start is not None:
+                work = work[work.index >= pd.Timestamp(start)]
             work = work[kd.FEATURE_COLS[:5]].apply(pd.to_numeric, errors='coerce')
             prices = work.iloc[:, :4]
             valid = (np.isfinite(work).all(axis=1) & (prices > 0).all(axis=1)
@@ -159,6 +162,7 @@ def build_from_frames(frames: Iterable[tuple[str, str, pd.DataFrame]], out: Path
                 raise ValueError(f'Float32 overflow for {symbol}')
             features.write(array.tobytes())
             dates.write(days.tobytes())
+            first_day = int(days[0]) if first_day is None else min(first_day, int(days[0]))
             symbols.append({'name': symbol, 'market': market, 'offset': offset,
                             'count': len(work), 'ranges': ranges})
             counts = report['markets'][market]
@@ -177,7 +181,8 @@ def build_from_frames(frames: Iterable[tuple[str, str, pd.DataFrame]], out: Path
     for market, counts in report['markets'].items():
         if any(counts[split] == 0 for split in bounds):
             raise ValueError(f'Insufficient {market} split coverage: {counts}')
-    meta = {'schema_version': 3, 'window_start': start.isoformat(), 'window_end': end.isoformat(),
+    meta = {'schema_version': 3, 'history_scope': 'all_available' if start is None else 'bounded',
+            'window_start': (start or date.fromordinal(first_day)).isoformat(), 'window_end': end.isoformat(),
             'train_end': train_end.isoformat(), 'val_end': val_end.isoformat(),
             'lookback': lookback, 'predict_len': predict_len, 'market_weights': market_weights,
             'min_bars': min_bars, 'symbols': symbols, 'report': report}
@@ -189,7 +194,7 @@ def build_from_frames(frames: Iterable[tuple[str, str, pd.DataFrame]], out: Path
 
 
 def build_snapshot(out: Path, **kwargs) -> dict:
-    """One bounded, repeatable-read PostgreSQL scan, with session dates intact."""
+    """One repeatable-read PostgreSQL scan, with no default history lower bound."""
     import psycopg
     from data.db import build_dsn
     with psycopg.connect(build_dsn()) as conn:
@@ -197,11 +202,14 @@ def build_snapshot(out: Path, **kwargs) -> dict:
         def frames():
             with conn.cursor(name='weekly_kronos_snapshot') as cursor:
                 cursor.itersize = 50000
+                start = kwargs.get('start')
+                lower_bound = 'AND b.bar_date >= %s ' if start is not None else ''
+                params = (start, kwargs['end']) if start is not None else (kwargs['end'],)
                 cursor.execute(
                     "SELECT s.market,b.symbol,b.bar_date,b.ts,b.open,b.high,b.low,b.close,b.volume "
                     "FROM daily_bars b JOIN symbols s ON s.symbol=b.symbol "
-                    "WHERE s.market IN ('us','ph') AND b.bar_date >= %s AND b.bar_date < %s "
-                    "ORDER BY s.market,b.symbol,b.bar_date,b.ts", (kwargs['start'], kwargs['end']))
+                    "WHERE s.market IN ('us','ph') " + lower_bound + "AND b.bar_date < %s "
+                    "ORDER BY s.market,b.symbol,b.bar_date,b.ts", params)
                 key = None
                 rows = []
                 for market, symbol, day, ts, *values in cursor:

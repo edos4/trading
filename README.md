@@ -348,9 +348,12 @@ collapse. A run that goes to zero trades is not an edge — it is sample death.
 ## Kronos weekly fine-tuning
 
 The weekly workflow trains **one shared US + PH tokenizer/predictor pair** from
-five rolling calendar years of `stocks_history.daily_bars`. Each run starts from
+all available history in `stocks_history.daily_bars`. Each run starts from
 the original base weights. Its production schedule is **Saturday at 06:00 PHT
 (`Asia/Manila`, Friday 22:00 UTC)**, using bars strictly before that Saturday.
+There is no lower date cutoff. The last 16 weeks remain reserved for validation
+and evaluation; training samples eligible windows from all earlier history with
+the existing fixed step budget and equal US/PH market weights.
 
 Run the commands below from the repository root **on the NVIDIA GPU training
 host**. Training uses the isolated `.venv-kronos`; keep the application `.venv`
@@ -385,7 +388,8 @@ refresh, run:
 
 For a deeper historical gap/source audit and repair, use the maintenance command
 below; it can take substantially longer than the regular daily refresh. Set
-`--start` to the beginning of the five-year window you intend to train:
+`--start` to the earliest source date you intend to audit. This maintenance
+date does not limit the trainer's full-history snapshot:
 
 ```bash
 .venv/bin/python scripts/repair_daily_bars.py --repair --start 2021-11-07 --workers 8

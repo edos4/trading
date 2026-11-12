@@ -45,15 +45,11 @@ def training_complete(release: Path) -> bool:
                for name in ('tokenizer', 'predictor'))
 
 
-def snapshot_bounds(run_date: date) -> tuple[date, date]:
-    """Return five calendar years ending exclusively on the named Saturday."""
+def snapshot_bounds(run_date: date) -> tuple[None, date]:
+    """Include all available history ending exclusively on the named Saturday."""
     if run_date.weekday() != 5:
         raise ValueError('Run date must be a Saturday')
-    try:
-        start = run_date.replace(year=run_date.year - 5)
-    except ValueError:
-        start = run_date.replace(year=run_date.year - 5, day=28)
-    return start, run_date
+    return None, run_date
 
 
 def atomic_text(path: Path, text: str) -> None:
@@ -519,7 +515,8 @@ def run_weekly(home: Path, checkout: Path, run_date: date, config: dict, *, rehe
         previous = json.loads((active / 'run_manifest.json').read_text())
         if previous.get('run_date', '') > end.isoformat():
             raise ValueError('Cannot replace a newer scheduled release')
-        if previous.get('run_date') == end.isoformat() and not rehearsal:
+        if (previous.get('run_date') == end.isoformat() and not rehearsal
+                and previous.get('history_scope') == 'all_available'):
             return active.resolve()
     identity = source_fingerprint(checkout)
     from core.kronos_finetune import TOKENIZER_PATH, MODEL_PATH
@@ -555,13 +552,15 @@ def run_weekly(home: Path, checkout: Path, run_date: date, config: dict, *, rehe
         manifest = {'run_id': release.name, 'run_date': end.isoformat(), 'config': config,
                     'source_sha256': identity, 'base_identity': base_identity,
                     'rehearsal': rehearsal, 'status': 'building', 'freshness': fresh,
-                    'started_at': datetime.now(PHT).isoformat(), 'window_start': start.isoformat(), 'window_end': end.isoformat()}
+                    'started_at': datetime.now(PHT).isoformat(), 'history_scope': 'all_available',
+                    'window_start': None, 'window_end': end.isoformat()}
         write_json(release / 'run_manifest.json', manifest)
         try:
             snapshot = (builder or build_snapshot)(release / 'dataset', start=start, end=end,
                                                  lookback=config['lookback'], predict_len=config['predict_len'],
                                                  market_weights=tuple(config['market_weights']))
-            manifest.update(corpus_sha256=snapshot['corpus_sha256'], dataset_report=snapshot['report'], status='training')
+            manifest.update(corpus_sha256=snapshot['corpus_sha256'], dataset_report=snapshot['report'],
+                            window_start=snapshot['window_start'], status='training')
             write_json(release / 'run_manifest.json', manifest)
         except BaseException:
             shutil.rmtree(release)

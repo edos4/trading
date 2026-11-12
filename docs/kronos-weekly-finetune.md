@@ -1,4 +1,10 @@
-# Weekly Kronos fine-tuning: five years of US and PH daily bars
+# Weekly Kronos fine-tuning: all available US and PH daily bars
+
+History policy updated **2026-11-12**: new weekly runs use all available history
+before the intended Saturday, replacing the original rolling five-year limit.
+The validation/evaluation holdouts, cleaning rules, balanced sampling and fixed
+training budget remain unchanged. Sections 10 onward retain historical run and
+source-audit results; their five-year references describe those earlier runs.
 
 Status: **implementation complete; approved one-off model active**, updated
 2026-11-09. The shared US/PH pair was activated at **09:25:07 PHT** using the
@@ -13,7 +19,7 @@ unchanged; see sections 10–12 for operational history and verification.
 |---|---|
 | Schedule | Start every Saturday at **06:00 PHT**, explicitly `Asia/Manila` |
 | Source | PostgreSQL `stocks_history`, `daily_bars` joined to `symbols` |
-| History | A rolling **five calendar years**, recomputed for every run |
+| History | **All available history** before the intended Saturday, with no lower date cutoff |
 | Markets | **One shared model** trained on US and Philippine/PSE stocks |
 | Components | Fine-tune the tokenizer first, then the predictor using that tokenizer |
 | Initialization | Start each new weekly run from the original cached base weights |
@@ -60,23 +66,24 @@ Original gaps addressed by the weekly path (the legacy dataset format remains su
 - The existing evaluator's cross-market liquidity ranking can favor US stocks;
   it is insufficient as the weekly acceptance check for both markets.
 
-## 3. Five-year source snapshot
+## 3. Full-history source snapshot
 
 Freeze an aware `scheduled_at` in `Asia/Manila` when the job starts. For a normal
 Saturday run, define:
 
 ```text
 window_end_exclusive = scheduled_at.date()
-window_start         = window_end_exclusive minus 5 calendar years
-included bar dates   = [window_start, window_end_exclusive)
+requested lower bound = none
+included bar dates    = all available bar_date < window_end_exclusive
+recorded window_start = earliest retained bar_date in the frozen corpus
 ```
 
-Use calendar-year arithmetic with an explicit February 29 fallback to February
-28. Do not approximate five years as `5 * 365` days or a fixed number of bars.
-For Saturday **2026-11-14 06:00 PHT**, the interval is
-`2021-11-14 <= bar_date < 2026-11-14`; the latest normal session is Friday
-2026-11-13 for each market. Five years is the corpus horizon: newer listings
-with sufficient usable history may participate without five full years each.
+For Saturday **2026-11-14 06:00 PHT**, include all available history with
+`bar_date < 2026-11-14`; the latest normal session is Friday 2026-11-13 for each
+market. Newer listings and delisted stocks with sufficient usable training
+history may participate. The dry run prints `history_scope=all_available` and a
+null `window_start`, since it does not query the database. After extraction,
+both the corpus and run manifest record the actual earliest retained date.
 
 Read through `data.db.build_dsn()` on the designated GPU training host. Confirm
 that it reaches the authoritative `stocks_history` database; this may be a
@@ -92,7 +99,6 @@ SELECT s.market, b.symbol, b.bar_date, b.ts,
 FROM daily_bars AS b
 JOIN symbols AS s ON s.symbol = b.symbol
 WHERE s.market IN ('us', 'ph')
-  AND b.bar_date >= %(window_start)s
   AND b.bar_date < %(window_end_exclusive)s
 ORDER BY s.market, b.symbol, b.bar_date, b.ts;
 ```
@@ -130,7 +136,7 @@ the full universe into DataFrames. Close the snapshot before GPU training.
 - Retain the six input features: open, high, low, close, volume, and synthetic
   `amount = volume * mean(OHLC)`. Keep USD and PHP values in their native units;
   normalize each window using its lookback only, as today.
-- Apply `min_bars=500` **inside the five-year interval**, and require at least
+- Apply `min_bars=500` **across all history before the cutoff**, and require at least
   one legal training window per included symbol. Report training-only symbols
   separately from those with usable validation/evaluation targets. Abort if
   either market has zero usable training, validation, or evaluation samples.
@@ -138,7 +144,7 @@ the full universe into DataFrames. Close the snapshot before GPU training.
   inference. Report suspected split/discontinuity problems; do not silently
   change adjustment conventions or rewrite source bars.
 
-## 4. Chronological splits that work with five years
+## 4. Chronological splits with fixed recent holdouts
 
 Use shared calendar boundaries for all symbols and both markets. Implemented weekly
 defaults, relative to the exclusive Saturday end `E`:
@@ -149,16 +155,15 @@ defaults, relative to the exclusive Saturday end `E`:
 | Validation | `[E - 16 weeks, E - 4 weeks)` | Select each stage's best checkpoint |
 | Evaluation | `[E - 4 weeks, E)` | Final promotion decision; no gradients |
 
-This uses approximately 4.7 years for gradients, 12 weeks for validation, and
-four weeks for evaluation. All material comes from the requested five-year
-corpus. Recent evaluation bars are deliberately held out; there is no unscored
-refit on them after acceptance.
+This uses all eligible history before the final 16 weeks for gradients, 12 weeks
+for validation, and four weeks for evaluation. Recent evaluation bars are
+deliberately held out; there is no unscored refit on them after acceptance.
 
 Fix window construction instead of requiring 267 validation-only bars:
 
 1. Training windows stay wholly inside the training interval.
 2. Validation/evaluation windows may borrow **earlier** bars as lookback context
-   from the same symbol, within the five-year bounds. Every scored target must
+   from the same symbol, within the frozen corpus. Every scored target must
    be in its assigned split, and the full prediction suffix must fit there.
 3. Keep normalization fitted only on the lookback. Return a target mask/date
    range with each validation sample. Predictor validation cross-entropy and
@@ -448,17 +453,21 @@ requires the full-data rehearsal below.
 Tests are implemented in `core/test_kronos_weekly.py`, alongside existing
 `core/test_kronos_finetune.py` and affected worker/cache tests:
 
-1. Exact five-year bounds, leap-year handling, first/last included bar dates,
-   both market memberships, `.PS` keys, session-date handling, and bounded SQL.
+1. No default lower date bound, first/last included bar dates, older/delisted
+   training symbols, both market memberships, `.PS` keys, session-date handling,
+   and SQL bounded only by the exclusive Saturday end. Explicitly bounded
+   dataset-builder calls remain supported for source audits and older fixtures.
 2. Freshness behavior around US daylight saving time, market holidays, suspended
    stocks, partial imports, and timeout while either market is stale.
-3. Five-year synthetic corpora with lookback 256 produce validation/evaluation
+3. Full-history synthetic corpora with lookback 256 produce validation/evaluation
    windows for both markets. Training never touches later-split bars; metrics
    exclude reused context and normalization never uses future targets.
 4. No window crosses symbol/market boundaries; deterministic sampling includes
    both markets, and a missing/sparse PH corpus blocks promotion.
 5. Output isolation and resume fingerprint mismatches, including a changed
-   tokenizer, week, corpus, or training configuration.
+   tokenizer, week, corpus, or training configuration. A same-week legacy
+   five-year release must retrain once under `history_scope=all_available`;
+   repeated successful all-history runs for that week remain idempotent.
 6. A reader never sees mixed component versions. Cover legacy migration,
    interrupted activation, failed smoke checks, deletion path guards, and
    cleanup recovery without deleting the active model or original base weights.
@@ -487,8 +496,8 @@ new rehearsal and keep the 12-hour service timeout as a hard ceiling.
 ## 9. Completion criteria
 
 - [ ] Every scheduled start is Saturday 06:00 PHT regardless of host timezone.
-- [ ] Each run uses only the intended five-year `stocks_history.daily_bars`
-  interval, with fresh and usable US **and** PH data.
+- [ ] Each run uses all available `stocks_history.daily_bars` history before the
+  intended Saturday, with fresh and usable US **and** PH data.
 - [ ] One shared tokenizer/predictor pair trains from the original base weights
   and passes separate US/PH evaluation with verifiable provenance.
 - [ ] A passing candidate automatically replaces the active pair atomically,

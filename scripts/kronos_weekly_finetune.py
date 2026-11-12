@@ -109,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
         start, end = snapshot_bounds(intended)
         if intended > now.date() and not args.dry_run:
             raise ValueError('Cannot train a future scheduled snapshot')
-        plan = {'window_start': start.isoformat(), 'window_end_exclusive': end.isoformat(),
+        plan = {'history_scope': 'all_available', 'window_start': start, 'window_end_exclusive': end.isoformat(),
                 'run_date': end.isoformat(), 'rehearsal': args.rehearsal or args.smoke,
                 'kronos_home': str(args.kronos_home.resolve()), 'config': config,
                 'timestamp_file': str(ROOT / 'kronos-finetuned-at.txt')}

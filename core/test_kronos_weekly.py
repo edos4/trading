@@ -1,4 +1,4 @@
-"""Checks for bounded weekly snapshots and durable release bookkeeping."""
+"""Checks for full-history weekly snapshots and durable release bookkeeping."""
 from __future__ import annotations
 from datetime import date, datetime, timezone
 import json
@@ -7,8 +7,8 @@ from core.kronos_weekly import snapshot_bounds, record_completion, remove_supers
 
 
 def test_bounds_and_saturday():
-    assert snapshot_bounds(date(2026, 11, 14)) == (date(2021, 11, 14), date(2026, 11, 14))
-    assert snapshot_bounds(date(2020, 2, 29))[0] == date(2015, 2, 28)
+    assert snapshot_bounds(date(2026, 11, 14)) == (None, date(2026, 11, 14))
+    assert snapshot_bounds(date(2020, 2, 29)) == (None, date(2020, 2, 29))
     with pytest.raises(ValueError):
         snapshot_bounds(date(2026, 11, 13))
 
@@ -86,8 +86,8 @@ def layout(tmp_path, *, legacy=False):
     return home, checkout, runs, candidate
 
 
-def test_five_year_snapshot_has_short_heldout_windows_and_balanced_sampling(tmp_path):
-    meta = corpus(tmp_path / 'dataset')
+def test_full_history_snapshot_has_short_heldout_windows_and_balanced_sampling(tmp_path):
+    meta = corpus(tmp_path / 'dataset', start=None)
     features, days, stored = dataset.kd.load_corpus(tmp_path / 'dataset')
     assert days.min() >= date(2021, 11, 14).toordinal()
     assert days.max() < date(2026, 11, 14).toordinal()
@@ -109,6 +109,30 @@ def test_five_year_snapshot_has_short_heldout_windows_and_balanced_sampling(tmp_
         samples._draw()
     assert 400 < samples.sample_counts['ph'] < 600
     assert all(np.isfinite(samples._draw()[0]).ravel())
+
+
+def test_all_history_keeps_old_bars_and_delisted_training_symbols(tmp_path):
+    sources = [(market, symbol, frame(start=first, end=last)) for market in ('us', 'ph')
+               for symbol, first, last in [('LIVE', '2010-01-04', '2026-11-20'),
+                                            ('OLD', '2000-01-03', '2003-12-31')]]
+    meta = dataset.build_from_frames(sources, tmp_path, end=date(2026, 11, 14))
+    features, days, stored = dataset.kd.load_corpus(tmp_path)
+    assert meta['history_scope'] == stored['history_scope'] == 'all_available'
+    assert meta['window_start'] == '2000-01-03'
+    assert days.min() == date(2000, 1, 3).toordinal()
+    assert days.max() == date(2026, 11, 13).toordinal()
+    old_cutoff = date(2021, 11, 14).toordinal()
+    for market in ('us', 'ph'):
+        assert meta['report']['markets'][market]['training_only_symbols'] == 1
+        for symbol in (s for s in meta['symbols'] if s['market'] == market):
+            assert symbol['ranges']['train']
+            assert any(days[start + 256] < old_cutoff for start, _ in symbol['ranges']['train'])
+            for split, lower_key, upper_key in [('train', 'window_start', 'train_end'),
+                                                 ('val', 'train_end', 'val_end'),
+                                                 ('eval', 'val_end', 'window_end')]:
+                for start, count in symbol['ranges'][split]:
+                    assert days[start + 256] >= date.fromisoformat(meta[lower_key]).toordinal()
+                    assert days[start + count - 1 + 266] < date.fromisoformat(meta[upper_key]).toordinal()
 
 
 def test_invalid_rows_and_missing_market_block_promotion(tmp_path):
@@ -252,7 +276,9 @@ def test_dry_run_has_no_db_gpu_or_file_writes(tmp_path, capsys):
     from scripts.kronos_weekly_finetune import main
     assert main(['--run-date', '2026-11-14', '--dry-run', '--kronos-home', str(tmp_path / 'absent')]) == 0
     value = json.loads(capsys.readouterr().out)
-    assert value['window_start'] == '2021-11-14'
+    assert value['window_start'] is None
+    assert value['history_scope'] == 'all_available'
+    assert value['window_end_exclusive'] == '2026-11-14'
     assert not (tmp_path / 'absent').exists()
 
 
@@ -339,9 +365,24 @@ def test_complete_orchestrator_transaction_and_idempotent_repeat(tmp_path, monke
     assert (home / 'finetuned').resolve() == release
     assert (checkout / 'kronos-finetuned-at.txt').exists()
     assert not (release / 'dataset').exists()
-    assert json.loads((release / 'run_manifest.json').read_text())['status'] == 'complete'
+    manifest = json.loads((release / 'run_manifest.json').read_text())
+    assert manifest['status'] == 'complete'
+    assert manifest['history_scope'] == 'all_available'
+    assert manifest['window_start'] == '2021-11-15'
     injected['trainer'] = lambda *_args, **_kw: pytest.fail('Repeated successful week trained again')
     assert weekly.run_weekly(home, checkout, date(2026, 11, 7), config, **injected) == release
+
+
+def test_all_history_replaces_same_week_five_year_model(tmp_path, monkeypatch):
+    home, checkout, config, injected = fake_pipeline(tmp_path, monkeypatch)
+    old = weekly.run_weekly(home, checkout, date(2026, 11, 7), config, **injected)
+    manifest = json.loads((old / 'run_manifest.json').read_text())
+    manifest.pop('history_scope')
+    weekly.write_json(old / 'run_manifest.json', manifest)
+    release = weekly.run_weekly(home, checkout, date(2026, 11, 7), config, **injected)
+    assert release != old
+    assert (home / 'finetuned').resolve() == release
+    assert not old.exists()
 
 
 def test_rehearsal_does_not_activate_delete_or_stamp(tmp_path, monkeypatch):
@@ -408,10 +449,11 @@ def test_identity_changes_invalidate_forecast_cache(monkeypatch):
     assert not gate._cache and gate._model_identity == 'two'
 
 
-def test_readonly_snapshot_sql_is_bounded_and_preserves_session_dates(tmp_path, monkeypatch):
+@pytest.mark.parametrize('start', [None, date(2021, 11, 14)])
+def test_readonly_snapshot_sql_preserves_requested_history_and_session_dates(tmp_path, monkeypatch, start):
     import psycopg
     commands = []
-    source = frame()
+    source = frame(start='2010-01-04')
     rows = [(market, symbol, stamp.date(), 0, *record) for market, symbol in [('us', 'AAA'), ('ph', 'BDO.PS')]
             for stamp, record in zip(source.index, source.to_numpy())]
     class Cursor:
@@ -427,10 +469,17 @@ def test_readonly_snapshot_sql_is_bounded_and_preserves_session_dates(tmp_path, 
             assert kwargs['name'] == 'weekly_kronos_snapshot'
             return Cursor()
     monkeypatch.setattr(psycopg, 'connect', lambda *_: Connection())
-    meta = dataset.build_snapshot(tmp_path / 'data', start=date(2021, 11, 14), end=date(2026, 11, 14))
+    meta = dataset.build_snapshot(tmp_path / 'data', start=start, end=date(2026, 11, 14))
     assert commands[0][0] == 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY'
-    assert 'b.bar_date >= %s AND b.bar_date < %s' in commands[1][0]
-    assert commands[1][1] == (date(2021, 11, 14), date(2026, 11, 14))
+    if start is None:
+        assert 'b.bar_date >=' not in commands[1][0]
+        assert 'b.bar_date < %s' in commands[1][0]
+        assert commands[1][1] == (date(2026, 11, 14),)
+        assert meta['window_start'] == '2010-01-04'
+    else:
+        assert 'b.bar_date >= %s AND b.bar_date < %s' in commands[1][0]
+        assert commands[1][1] == (start, date(2026, 11, 14))
+        assert meta['window_start'] == start.isoformat()
     assert meta['report']['markets']['ph']['bars'] > 0
     # ts=0 on every source row proves dates came from bar_date, not UTC timestamps.
     assert meta['report']['markets']['us']['bars'] > 1000
