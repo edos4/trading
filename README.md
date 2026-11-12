@@ -367,6 +367,12 @@ for both actual and predicted returns. A small move inside the same flat band
 counts as flat on either side. Metrics record `atr-up-down-flat-v1` and a
 three-class confusion matrix; older sign-only accuracy reports are not comparable.
 
+For supervised up/down/flat models, recency weighting, fixed liquidity/staleness
+rules, direction-based checkpoint selection, and walk-forward validation, use
+[the direction-training workflow](docs/kronos-direction.md). It stages small
+one-day and three-day classifiers and reserves a separate final test; it does
+not replace the active Kronos pair.
+
 Run the commands below from the repository root **on the NVIDIA GPU training
 host**. Training uses the isolated `.venv-kronos`; keep the application `.venv`
 torch-free. The host needs CUDA, database access through the existing `.env`,

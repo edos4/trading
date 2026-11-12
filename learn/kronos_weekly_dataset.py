@@ -40,13 +40,12 @@ def suspension_breaks(days: np.ndarray, market: str) -> tuple[list[int], int]:
     """Split indexes where more than five expected sessions are missing."""
     breaks = [0]
     gaps = 0
-    for i in range(1, len(days)):
-        if int(days[i]) - int(days[i - 1]) > 7:
-            missing = sum(is_session(date.fromordinal(d), market)
-                          for d in range(int(days[i - 1]) + 1, int(days[i])))
-            if missing > 5:
-                breaks.append(i)
-                gaps += 1
+    for i in np.flatnonzero(np.diff(days) > 7) + 1:
+        missing = sum(is_session(date.fromordinal(d), market)
+                      for d in range(int(days[i - 1]) + 1, int(days[i])))
+        if missing > 5:
+            breaks.append(int(i))
+            gaps += 1
     breaks.append(len(days))
     return breaks, gaps
 
