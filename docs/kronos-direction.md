@@ -1,4 +1,7 @@
-# Direction-training experiments
+# Arrow direction-training experiments
+
+The created classifier pair is named **Arrow**. See [Arrow usage](arrow.md) for
+manual predictions, model registration, and validation status.
 
 `scripts/kronos_direction.py` implements a small supervised alternative for the
 up/down/flat task. It trains two NumPy softmax classifiers, for one and three

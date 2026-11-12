@@ -372,6 +372,8 @@ rules, direction-based checkpoint selection, and walk-forward validation, use
 [the direction-training workflow](docs/kronos-direction.md). It stages small
 one-day and three-day classifiers and reserves a separate final test; it does
 not replace the active Kronos pair.
+The pair is named **Arrow**; [run Arrow predictions](docs/arrow.md) with
+`.venv/bin/python scripts/arrow.py predict --symbol AAPL --market us --horizon 1`.
 
 Run the commands below from the repository root **on the NVIDIA GPU training
 host**. Training uses the isolated `.venv-kronos`; keep the application `.venv`
