@@ -10,6 +10,9 @@ alias for the original experiment directory. `arrow.json` records its name and
 version, tied to the locked selection hash. Naming does not alter either
 checkpoint or its original training/evaluation provenance.
 
+The `/kronos` page also uses Arrow in [Experiment 3](arrow-experiment3.md),
+with frozen forecasts and automatic collection of the two target closes.
+
 ## Predict a direction
 
 From the repository root:

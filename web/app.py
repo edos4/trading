@@ -509,7 +509,7 @@ def create_app() -> FastAPI:
     # Experiment 3: saved forecasts only; collection runs in its dedicated cron.
     @app.get("/api/kronos/experiment3")
     async def api_kronos_experiment3(_user: str = Depends(require_login)):
-        from core.kronos_experiment3 import read_experiment
+        from core.arrow_experiment3 import read_experiment
 
         try:
             return await asyncio.to_thread(read_experiment)
@@ -519,7 +519,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/kronos/experiment3/report")
     async def api_kronos_experiment3_report(_user: str = Depends(require_login)):
-        from core.kronos_experiment3 import read_experiment, render_direction_report
+        from core.arrow_experiment3 import read_experiment, render_direction_report
 
         try:
             saved = await asyncio.to_thread(read_experiment)

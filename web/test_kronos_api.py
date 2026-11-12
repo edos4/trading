@@ -79,7 +79,7 @@ class WebKronosApiTests(unittest.TestCase):
     def test_experiment3_reads_saved_data_without_inference(self) -> None:
         self._login()
         saved = {"status": "collecting", "results": PAYLOAD["results"], "actual_count": 0}
-        with patch("core.kronos_experiment3.read_experiment", return_value=saved) as read, \
+        with patch("core.arrow_experiment3.read_experiment", return_value=saved) as read, \
              patch("web.kronos.forecast") as forecast:
             response = self.client.get("/api/kronos/experiment3")
         self.assertEqual(response.status_code, 200)
@@ -89,7 +89,7 @@ class WebKronosApiTests(unittest.TestCase):
 
     def test_experiment3_database_failure_is_clear(self) -> None:
         self._login()
-        with patch("core.kronos_experiment3.read_experiment", side_effect=RuntimeError("private DSN")):
+        with patch("core.arrow_experiment3.read_experiment", side_effect=RuntimeError("private DSN")):
             response = self.client.get("/api/kronos/experiment3")
         self.assertEqual(response.status_code, 503)
         self.assertNotIn("private DSN", response.text)
@@ -99,27 +99,28 @@ class WebKronosApiTests(unittest.TestCase):
 
     def test_experiment3_report_download_uses_saved_results(self) -> None:
         self._login()
-        from core import kronos_experiment3 as exp
-        from core.test_kronos_experiment3 import result
+        from core import arrow_experiment3 as exp
+        from core.test_arrow_experiment3 import result, metadata
 
         row = result()
-        row["actuals"] = [{"time": "2026-11-11", "value": 110.}]
-        saved = {"status": "collecting", "results": [row], "scores": exp.score([row]), "actual_count": 1}
-        with patch("core.kronos_experiment3.read_experiment", return_value=saved) as read, \
+        row["actuals"] = [{"time": "2026-11-12", "value": 110.}]
+        saved = {"status": "collecting", "metadata": metadata(), "results": [row],
+                 "direction_report": exp.score([row], metadata())["arrow"], "actual_count": 1}
+        with patch("core.arrow_experiment3.read_experiment", return_value=saved) as read, \
              patch("web.kronos.forecast") as forecast:
             response = self.client.get("/api/kronos/experiment3/report")
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.headers["content-type"].startswith("text/markdown"))
         self.assertIn('attachment; filename="kronos_experiment3_direction_report.md"', response.headers["content-disposition"])
         self.assertEqual(response.headers["cache-control"], "no-store")
-        self.assertIn("| 2026-11-11 | +1D | 1/1 | 0 | 1 | 0 | 100.0% | 0 | 1 | 0.0% |", response.text)
-        self.assertIn("| 2026-11-12 | +2D | 0/1 | 1 | Pending", response.text)
+        self.assertIn("| 2026-11-12 | +1D | 1/1 | 1 | 1 | 0 | 0 | 0 | 100.0% |", response.text)
+        self.assertIn("| 2026-11-16 | +3D | 0/1 | 0 | 0 | 0 | 0 | 1 | Pending", response.text)
         read.assert_called_once_with()
         forecast.assert_not_called()
 
     def test_experiment3_report_failure_does_not_expose_database_details(self) -> None:
         self._login()
-        with patch("core.kronos_experiment3.read_experiment", side_effect=RuntimeError("private DSN")):
+        with patch("core.arrow_experiment3.read_experiment", side_effect=RuntimeError("private DSN")):
             response = self.client.get("/api/kronos/experiment3/report")
         self.assertEqual(response.status_code, 503)
         self.assertNotIn("private DSN", response.text)

@@ -20,40 +20,36 @@
 <!-- Experiment 3 BEGIN: remove this section and its script to retire the UI. -->
 <section class="panel" id="kronos-experiment3">
   <div class="toolbar">
-    <h2 style="margin:0">Experiment 3 — November 10, 2026 · +2D</h2>
+    <h2 style="margin:0" id="experiment3-title">Experiment 3 — Arrow · +1D / +3D</h2>
     <button type="button" class="btn" id="experiment3-refresh">Refresh saved results</button>
   </div>
-  <p class="muted small">Top 50 NASDAQ stocks by November 10 session dollar volume, frozen once.
-    Forecasts target the November 11 and 12 closes. Actuals are saved after each close;
-    collection ends after these two sessions. <span style="color:#ffffff">White: actual</span> ·
-    <span style="color:#2962ff">Blue: base</span> ·
-    <span style="color:#ef5350">Red: fine-tuned</span>.</p>
+  <p class="muted small" id="experiment3-description">A frozen top-50 NASDAQ universe with Arrow
+    up/down/flat forecasts for one and three trading sessions ahead. Actual closes arrive after
+    each target session. The white chart line shows observed prices; Arrow predicts direction.</p>
   <p id="experiment3-status" class="status" role="status">Loading saved experiment…</p>
   <p id="experiment3-scores" class="small"></p>
-  <p class="muted small">Direction accuracy compares each predicted and actual close with the
-    November 10 close, separately at +1D and +2D. Prices equal to the nearest cent count as flat.
-    Each prediction shows Up / Down / Flat and Correct / Incorrect once its actual close is saved.</p>
+  <p class="muted small">Predicted and actual directions use the same frozen ATR-based flat band.
+    Abstentions are shown separately and excluded from accuracy. Model probabilities are not
+    calibrated success rates. Refresh reads saved results and never regenerates predictions.</p>
   <div class="toolbar">
     <h3 style="margin:0">Daily directional accuracy report</h3>
     <a class="btn" href="/api/kronos/experiment3/report" download>Download report</a>
   </div>
   <div style="overflow-x:auto">
     <table class="data-table" id="experiment3-direction-report">
-      <thead><tr><th>US session</th><th>Horizon</th><th>Stocks evaluated</th><th>Pending</th>
-        <th>Base correct</th><th>Incorrect</th><th>Accuracy</th>
-        <th>Fine-tuned correct</th><th>Incorrect</th><th>Accuracy</th></tr></thead>
+      <thead><tr><th>US session</th><th>Horizon</th><th>Observed</th><th>Scored</th>
+        <th>Correct</th><th>Incorrect</th><th>Abstained</th><th>Pending</th><th>Accuracy</th></tr></thead>
       <tbody></tbody>
     </table>
   </div>
   <label>Chart <select id="experiment3-symbol" aria-label="Experiment 3 stock"></select></label>
   <div id="experiment3-chart"></div>
   <details>
-    <summary>All 50 stocks — predicted and actual closes</summary>
+    <summary>All 50 stocks — Arrow directions and actual closes</summary>
     <div style="overflow-x:auto">
       <table class="data-table" id="experiment3-table">
-        <thead><tr><th>Rank</th><th>Stock</th><th>Nov 10</th>
-          <th>Nov 11 base</th><th>Fine-tuned</th><th>Actual</th>
-          <th>Nov 12 base</th><th>Fine-tuned</th><th>Actual</th></tr></thead>
+        <thead><tr><th>Rank</th><th>Stock</th><th>Anchor close</th>
+          <th>Arrow +1D</th><th>Actual +1D</th><th>Arrow +3D</th><th>Actual +3D</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -81,5 +77,5 @@
 {% block scripts %}
 <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
 <script src="/static/kronos.js?v=14"></script>
-<script src="/static/kronos_experiment3.js?v=3"></script>
+<script src="/static/arrow_experiment3.js?v=1"></script>
 {% endblock %}
