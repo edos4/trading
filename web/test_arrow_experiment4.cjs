@@ -29,8 +29,16 @@ const payload=() => ({status:'collecting',metadata:{as_of:'2026-11-11',generated
   results:[forecast('NVDA',1),forecast('SPCX',2)]});
 const document={getElementById:get,querySelector:get,createElement:()=>new Element()};
 const window={KronosCharts:{drawChart:(host,data)=>{drawn.push(data);return{remove(){}};}}};
+const legacyPayload=()=>({status:'collecting',metadata:{generated_at:'2026-11-10T19:00:00-05:00',
+    target_dates:['2026-11-11','2026-11-12']},actual_count:0,scores:{base:[],finetuned:[]},direction_report:[],
+  results:['AAPL','MSFT'].map((symbol,index)=>({symbol,rank:index+1,days:2,
+    anchor:{time:'2026-11-10',value:100},history:[{time:'2026-11-10',value:100}],actuals:[],
+    base:[{time:'2026-11-11',value:101},{time:'2026-11-12',value:102}],
+    finetuned:[{time:'2026-11-11',value:99},{time:'2026-11-12',value:98}],
+    direction_results:[1,2].map(day=>({day,actual:null,base:{predicted:'up',correct:null},
+      finetuned:{predicted:'down',correct:null}}))}))});
 const fetch=async(url,options)=>{requests.push({url,options});return{ok:!failure,
-  json:async()=>failure?{detail:'Database unavailable'}:payload()};};
+  json:async()=>failure?{detail:'Database unavailable'}:url==='/api/kronos/experiment3'?legacyPayload():payload()};};
 vm.runInNewContext(fs.readFileSync('web/static/arrow_experiment4.js','utf8'),{window,document,fetch});
 (async()=>{
   await new Promise(setImmediate);
@@ -70,5 +78,26 @@ vm.runInNewContext(fs.readFileSync('web/static/arrow_experiment4.js','utf8'),{wi
   renderer.KronosCharts.drawChart(new Element(),drawn.at(-1));
   assert.equal(series.length,1,'only observed prices are drawn');
   assert.equal(series[0].options.color,'#ffffff');assert.equal(series[0].data.length,2);
+  // Mount both real clients against the same document and chart API.
+  failure=false;
+  window.KronosCharts.makePanel=()=>({section:new Element(),host:new Element(),save:new Element()});
+  window.KronosCharts.saveChart=()=>{};
+  vm.runInNewContext(fs.readFileSync('web/static/kronos_experiment3.js','utf8'),{window,document,fetch});
+  await new Promise(setImmediate);
+  assert.equal(get('experiment3-symbol').value,'AAPL');
+  assert.equal(get('experiment4-symbol').value,'SPCX');
+  get('experiment3-symbol').value='MSFT';get('experiment3-symbol').events.change();
+  assert.equal(drawn.at(-1).symbol,'MSFT');assert.equal(drawn.at(-1).days,2);
+  const legacyRows=get('#experiment3-table tbody').children;
+  await get('experiment4-refresh').events.click();
+  assert.equal(drawn.at(-1).symbol,'SPCX');assert.equal(drawn.at(-1).days,3);
+  assert.equal(get('experiment3-symbol').value,'MSFT');
+  assert.equal(get('#experiment3-table tbody').children,legacyRows,'Arrow refresh leaves Experiment 3 intact');
+  const arrowRows=get('#experiment4-table tbody').children;
+  await get('experiment3-refresh').events.click();
+  assert.equal(drawn.at(-1).symbol,'MSFT');
+  assert.equal(get('experiment4-symbol').value,'SPCX');
+  assert.equal(get('#experiment4-table tbody').children,arrowRows,'Experiment 3 refresh leaves Arrow intact');
+  assert.ok(requests.every(r=>['/api/kronos/experiment3','/api/kronos/experiment4'].includes(r.url)&&!r.options.method));
   console.log('Arrow Experiment 4 client checks passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

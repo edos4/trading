@@ -110,6 +110,21 @@ def test_three_day_actual_compares_to_anchor_and_abstentions_are_excluded():
     assert third['correct'] == 1 and exp.direction_results(row)[1]['actual'] == 'flat'
 
 
+def test_scoring_keeps_up_down_and_flat_as_three_distinct_classes():
+    rows = []
+    for index, (label, close) in enumerate([('up', 102.), ('down', 98.), ('flat', 100.5)]):
+        row = result(f'DIRECTION_{label}', index + 1)
+        for prediction in row['forecasts']:
+            prediction['direction'] = label
+            prediction['probabilities'] = {name: .8 if name == label else .1 for name in ('up', 'down', 'flat')}
+        row['actuals'] = [{'time': day, 'value': close} for day in metadata()['target_dates'].values()]
+        rows.append(row)
+    for score in exp.score(rows, metadata())['arrow']:
+        assert (score['count'], score['correct'], score['accuracy_pct']) == (3, 3, 100.)
+        assert set(score['classes']) == {'up', 'down', 'flat'}
+        assert all(row['support'] == row['predicted'] == 1 for row in score['classes'].values())
+
+
 def test_report_pending_and_actuals_do_not_change_frozen_predictions(tmp_path):
     row = result()
     row['actuals'] = [{'time': '2026-11-12', 'value': 101.}]
@@ -163,6 +178,11 @@ def store(monkeypatch):
         pytest.skip(f'Local PostgreSQL unavailable: {type(exc).__name__}')
     schema = 'arrow_experiment4_test_' + uuid4().hex
     source_schema = 'arrow_experiment4_source_test_' + uuid4().hex
+    bars_schema = 'arrow_experiment4_bars_test_' + uuid4().hex
+    connection.execute(f'CREATE SCHEMA "{bars_schema}"')
+    connection.execute(f'CREATE TABLE "{bars_schema}".daily_bars '
+                       '(symbol TEXT, bar_date DATE, ts BIGINT, close DOUBLE PRECISION)')
+    connection.commit()
 
     class Cursor:
         def __init__(self, cursor): self.cursor = cursor
@@ -170,6 +190,7 @@ def store(monkeypatch):
         def __exit__(self, *args): return self.cursor.__exit__(*args)
         def execute(self, query, params=None):
             query = query.replace('kronos_experiment3_arrow', source_schema).replace('kronos_experiment4', schema)
+            query = query.replace('FROM daily_bars ', f'FROM "{bars_schema}".daily_bars ')
             return self.cursor.execute(query, params)
         def fetchone(self): return self.cursor.fetchone()
         def fetchall(self): return self.cursor.fetchall()
@@ -181,6 +202,7 @@ def store(monkeypatch):
         def cursor(self): return Cursor(connection.cursor())
 
     wrapped = Connection()
+    wrapped.bars_schema = bars_schema
     monkeypatch.setattr(exp, 'get_conn', lambda: wrapped)
     try:
         yield wrapped
@@ -188,6 +210,7 @@ def store(monkeypatch):
         connection.rollback()
         connection.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
         connection.execute(f'DROP SCHEMA IF EXISTS "{source_schema}" CASCADE')
+        connection.execute(f'DROP SCHEMA IF EXISTS "{bars_schema}" CASCADE')
         connection.commit()
         connection.close()
 
@@ -219,6 +242,47 @@ def test_database_collects_exact_targets_once_and_stops(store, monkeypatch):
     monkeypatch.setattr(exp, 'provider_bars', fetch)
     assert exp.collect(datetime.fromisoformat('2026-11-17T10:00:00-05:00'))['status'] == 'complete'
     assert not fetch.called
+
+
+def test_collector_uses_latest_database_close_without_calling_provider(store, monkeypatch):
+    insert(store, [result()])
+    with store as conn, conn.cursor() as cur:
+        for day, stamp, close in [('2026-11-12', 1, 90.), ('2026-11-12', 2, 101.),
+                                  ('2026-11-13', 3, 999.), ('2026-11-16', 4, 100.5)]:
+            cur.execute(f'INSERT INTO "{store.bars_schema}".daily_bars VALUES (%s,%s,%s,%s)',
+                        ('ARROW_TEST', day, stamp, close))
+    fetch = Mock(side_effect=AssertionError('database closes must not require the provider'))
+    monkeypatch.setattr(exp, 'provider_bars', fetch)
+    first = exp.collect(datetime.fromisoformat('2026-11-12T16:30:00-05:00'))
+    assert first['actual_count'] == 1
+    assert first['results'][0]['actuals'][0]['value'] == 101.
+    assert first['results'][0]['actuals'][0]['source'] == 'daily_bars'
+    final = exp.collect(datetime.fromisoformat('2026-11-16T16:30:00-05:00'))
+    assert final['status'] == 'complete'
+    assert [point['value'] for point in final['results'][0]['actuals']] == [101., 100.5]
+    assert not fetch.called
+
+
+def test_provider_failure_retries_only_missing_stock_and_preserves_saved_results(store, monkeypatch):
+    from collections import Counter
+    insert(store, [result('GOOD', 1), result('RETRY', 2)])
+    calls = Counter()
+    def provider(symbol):
+        calls[symbol] += 1
+        if symbol == 'RETRY' and calls[symbol] == 1:
+            raise RuntimeError('temporary provider failure')
+        return [{'time': '2026-11-12', 'close': 101. if symbol == 'GOOD' else 100.5},
+                {'time': '2026-11-16', 'close': 999.}]
+    monkeypatch.setattr(exp, 'provider_bars', provider)
+    after_close = datetime.fromisoformat('2026-11-12T16:30:00-05:00')
+    first = exp.collect(after_close)
+    assert first['actual_count'] == 1 and first['scores']['arrow'][0]['pending'] == 1
+    second = exp.collect(after_close)
+    assert second['actual_count'] == 2 and second['scores']['arrow'][0]['accuracy_pct'] == 50.
+    assert second['scores']['arrow'][1]['count'] == 0
+    assert calls == {'GOOD': 1, 'RETRY': 2}
+    assert second['results'][0] == first['results'][0]
+    assert all(row['forecasts'] == result()['forecasts'] for row in second['results'])
 
 
 def test_adoption_preserves_frozen_run_actuals_and_foreign_keys(store, monkeypatch):
