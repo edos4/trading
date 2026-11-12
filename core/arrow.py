@@ -27,6 +27,17 @@ def _load_bundle(directory: Path) -> tuple[dict, dict[int, DirectionModel], str]
     selection = json.loads((directory / 'selection.json').read_text())
     if selection['source_files'] != _implementation_hashes():
         raise ValueError('Arrow feature/training implementation differs from its locked selection')
+    if 'flat_policy' in selection:
+        from core.arrow_flat import source_hashes, validate_policy
+        validate_policy(selection['flat_policy'])
+        if selection.get('revision_source_files') != source_hashes():
+            raise ValueError('Arrow Flat calibration implementation differs from its selection')
+        if (file_hash(directory / 'flat-validation.json') != selection['calibration_report_sha256']
+                or not date.fromisoformat(selection['history_verification_cutoff'])
+                <= date.fromisoformat(selection['feedback_through'])
+                < date.fromisoformat(selection['final_test_start'])
+                < date.fromisoformat(selection['final_test_end'])):
+            raise ValueError('Arrow Flat calibration provenance or forward dates differ')
     if set(selection['models']) != {'direction-1d.npz', 'direction-3d.npz'}:
         raise ValueError('Arrow requires both one- and three-session models')
     models = {}
@@ -39,6 +50,9 @@ def _load_bundle(directory: Path) -> tuple[dict, dict[int, DirectionModel], str]
                 or asdict(model.quality) != selection['quality']):
             raise ValueError('Arrow checkpoint configuration differs from its selection')
         models[horizon] = model
+    if 'flat_policy' in selection:
+        from core.arrow_flat import wrap_model
+        models = {h: wrap_model(model, selection['flat_policy']) for h, model in models.items()}
     return selection, models, digest
 
 
@@ -98,11 +112,16 @@ class Arrow:
             if final['selection_sha256'] != self.card['selection_sha256']:
                 raise ValueError('Arrow final report belongs to another selection')
             status = 'final_test_passed' if final['passed_gates'] else 'final_test_failed'
-        return {'name': MODEL_NAME, 'version': self.card['version'], 'directory': str(self.directory),
+        result = {'name': MODEL_NAME, 'version': self.card['version'], 'directory': str(self.directory),
                 'horizons_sessions': [1, 3], 'lookback_bars': self.selection['lookback'],
                 'excluded_symbols': self.selection['excluded_symbols'], 'validation_status': status,
                 'reserved_final_period': [self.selection['final_test_start'], self.selection['final_test_end']],
                 'automated_trading_enabled': False}
+        if 'flat_policy' in self.selection:
+            result.update(decision_policy=self.selection['flat_policy']['method'],
+                          parent_version=self.selection['parent_selection_sha256'][:12],
+                          feedback_through=self.selection['feedback_through'])
+        return result
 
     def predict(self, frame: pd.DataFrame, symbol: str, market: str, horizon: int = 1,
                 *, as_of: date | None = None) -> dict:

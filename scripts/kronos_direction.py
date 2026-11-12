@@ -85,7 +85,11 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         corpus = DirectionCorpus(args.dataset, lookback=lookback, quality=quality, excluded_symbols=excluded)
         if args.evaluate_final:
-            result = evaluate_final(corpus, args.output)
+            if 'flat_policy' in selection:
+                from core.arrow_flat import evaluate_revision
+                result = evaluate_revision(corpus, args.output)
+            else:
+                result = evaluate_final(corpus, args.output)
             print(json.dumps(result, indent=2))
         else:
             result = run_direction_experiment(corpus, args.output, args.final_test_start, config,

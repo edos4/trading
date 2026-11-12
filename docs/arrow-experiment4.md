@@ -19,6 +19,11 @@ The previously prepared Arrow run is moved intact into Experiment 4. The
 original Kronos-base/fine-tuned Experiment 3 is restored above it, including
 its original forecasts, actuals, dates, report and separate collector.
 
+The November 13 Flat calibration is a separate Arrow revision for future calls.
+This experiment keeps its original `c610c589d958` predictions and scores. Updating
+the default Arrow alias does not regenerate either horizon of this saved run.
+See [Arrow revisions](arrow.md) for the current model and fresh validation dates.
+
 ```bash
 # One-time adoption of the existing Arrow run; no new forecasts.
 .venv/bin/python scripts/kronos_experiment4.py --adopt-arrow-experiment3 --install-cron
