@@ -69,7 +69,7 @@ class WebKronosApiTests(unittest.TestCase):
         self.assertIn('id="kronos-results"', page.text)
         self.assertLess(page.text.index('id="kronos-experiment3"'), page.text.index('id="kronos-experiment4"'))
         self.assertIn('/static/kronos_experiment3.js?v=3', page.text)
-        self.assertIn('/static/arrow_experiment4.js?v=1', page.text)
+        self.assertIn('/static/arrow_experiment4.js?v=2', page.text)
         from html.parser import HTMLParser
         class Elements(HTMLParser):
             def __init__(self):

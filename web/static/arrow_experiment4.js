@@ -67,6 +67,25 @@
         : `Arrow +${row.horizon}D: awaiting actuals; ${row.abstained} abstained.`;
       scores.appendChild(line);
     });
+    const comparison = payload.retrospective_comparison;
+    const comparisonPanel = document.getElementById('experiment4-retrospective');
+    comparisonPanel.hidden = !comparison;
+    const comparisonSummary = document.getElementById('experiment4-retrospective-summary');
+    const comparisonBody = document.querySelector('#experiment4-retrospective-table tbody');
+    comparisonSummary.replaceChildren();comparisonBody.replaceChildren();
+    if (comparison) {
+      comparison.direction_report.forEach(row => {
+        const line = document.createElement('p');
+        line.textContent = `+${row.horizon}D retrospective: ${row.count ? `${row.correct}/${row.count} (${row.accuracy_pct.toFixed(1)}%)` : 'Pending'}; not official accuracy.`;
+        comparisonSummary.appendChild(line);
+      });
+      comparison.results.forEach(row => row.forecasts.forEach(prediction => {
+        const original = results.find(item => item.symbol === row.symbol).forecasts.find(item => item.horizon === prediction.horizon);
+        const actual = row.direction_results.find(item => item.horizon === prediction.horizon);
+        cells(comparisonBody,[row.symbol,`+${prediction.horizon}D`,original.abstained ? 'Abstained' : direction(original.direction),
+          prediction.abstained ? 'Abstained' : direction(prediction.direction),direction(actual.actual)]);
+      }));
+    }
     results.forEach(row => {
       const option = document.createElement('option');option.value = row.symbol;option.textContent = `${row.rank}. ${row.symbol}`;select.appendChild(option);
       const actuals = Object.fromEntries((row.actuals || []).map(point => [point.time,point.value]));

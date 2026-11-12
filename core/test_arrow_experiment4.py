@@ -422,3 +422,20 @@ def test_cli_adoption_only_moves_saved_data_and_installs_own_cron(tmp_path, monk
     adopt.assert_called_once_with()
     update.assert_called_once_with(True, metadata()['deadline'])
     assert 'Experiment 4' in (tmp_path / 'logs/kronos_experiment4_direction_report.md').read_text()
+
+
+def test_retrospective_comparison_keeps_official_predictions(tmp_path, monkeypatch):
+    rows = [result()]
+    rows[0]['actuals'] = [{'time': '2026-11-12', 'value': 100.5}]
+    original = deepcopy(rows)
+    forecasts = deepcopy(rows[0]['forecasts'])
+    forecasts[0].update(direction='flat', probabilities={'up': .2, 'down': .2, 'flat': .6})
+    folder = tmp_path / 'runs/experiment4-comparisons'
+    folder.mkdir(parents=True)
+    (folder / 'test-run.json').write_text(json.dumps({'run_id': 'test-run', 'predictions': {'ARROW_TEST': forecasts}}))
+    monkeypatch.setattr(exp, 'ROOT', tmp_path)
+    comparison = exp.read_comparison(metadata(), rows)
+    assert rows == original
+    assert exp.score(rows, metadata())['arrow'][0]['correct'] == 0
+    assert comparison['direction_report'][0]['correct'] == 1
+    assert 'not official' in comparison['label']

@@ -86,6 +86,17 @@
       <tbody></tbody>
     </table>
   </div>
+  <section id="experiment4-retrospective" hidden>
+    <h3>Retrospective comparison — not official forecast accuracy</h3>
+    <p class="muted small">The newer Flat rule applied to the original inputs after results were known.
+      Original forecasts and official accuracy above remain frozen. This is diagnostic evidence only.</p>
+    <div id="experiment4-retrospective-summary"></div>
+    <details><summary>Original and revised directions</summary>
+      <table class="data-table" id="experiment4-retrospective-table">
+        <thead><tr><th>Stock</th><th>Horizon</th><th>Original</th><th>Revised</th><th>Actual</th></tr></thead><tbody></tbody>
+      </table>
+    </details>
+  </section>
   <label>Chart <select id="experiment4-symbol" aria-label="Experiment 4 stock"></select></label>
   <div id="experiment4-chart"></div>
   <details>
@@ -122,5 +133,5 @@
 <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
 <script src="/static/kronos.js?v=14"></script>
 <script src="/static/kronos_experiment3.js?v=3"></script>
-<script src="/static/arrow_experiment4.js?v=1"></script>
+<script src="/static/arrow_experiment4.js?v=2"></script>
 {% endblock %}

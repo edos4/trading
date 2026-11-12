@@ -320,9 +320,28 @@ def read_experiment(now: datetime | None = None) -> dict:
     expected = len(rows) * len(HORIZONS)
     status = 'complete' if expected and len(actuals) == expected else 'expired_incomplete' if ny_now(now) >= ny_now(datetime.fromisoformat(metadata['deadline'])) else 'collecting'
     scores = score(rows, metadata)
-    return {'status': status, 'engine': 'Arrow', 'metadata': metadata, 'results': rows,
+    comparison = read_comparison(metadata, rows)
+    return {'retrospective_comparison': comparison, 'status': status, 'engine': 'Arrow', 'metadata': metadata, 'results': rows,
             'actual_count': len(actuals), 'expected_actual_count': expected, 'scores': scores,
             'direction_report': scores['arrow']}
+
+
+def read_comparison(metadata: dict, rows: list[dict]) -> dict | None:
+    """Join an explicitly saved retrospective revision to current observations."""
+    path = ROOT / 'runs' / 'experiment4-comparisons' / (metadata['run_id'] + '.json')
+    if not path.exists():
+        return None
+    saved = json.loads(path.read_text())
+    if saved['run_id'] != metadata['run_id']:
+        raise ValueError('Retrospective comparison belongs to another run')
+    from copy import deepcopy
+    revised = deepcopy(rows)
+    for row in revised:
+        prediction = saved['predictions'][row['symbol']]
+        row['forecasts'] = prediction
+        row['direction_results'] = direction_results(row)
+    return {**saved, 'results': revised, 'direction_report': score(revised, metadata)['arrow'],
+            'label': 'Retrospective comparison — not official forecast accuracy'}
 
 
 def due_targets(metadata: dict, now: datetime | None = None) -> list[date]:
@@ -389,6 +408,13 @@ def render_direction_report(experiment: dict) -> str:
         accuracy = f"{row['accuracy_pct']:.1f}%" if row['accuracy_pct'] is not None else 'Pending'
         lines.append(f"| {row['date']} | +{row['horizon']}D | {row['observed']}/{row['expected']} | {row['count']} | "
                      f"{row['correct']} | {row['incorrect']} | {row['abstained']} | {row['pending']} | {accuracy} |")
+    comparison = experiment.get('retrospective_comparison')
+    if comparison:
+        lines += ['', '## Retrospective comparison — not official forecast accuracy', '',
+                  'New Flat rule applied after outcomes were known. Original accuracy above stays official.', '']
+        for row in comparison['direction_report']:
+            value = f"{row['correct']}/{row['count']} ({row['accuracy_pct']:.1f}%)" if row['count'] else 'Pending'
+            lines.append(f"- +{row['horizon']}D: {value}")
     lines += ['', 'Arrow predicts direction, not a price path. Model scores are not calibrated success rates.',
               f"Automatic collection ends at {metadata['deadline']}. Forecasts stay frozen.", '']
     return '\n'.join(lines)
