@@ -105,8 +105,11 @@ def ranges_for_days(days: np.ndarray, offset: int, lower: int, upper: int,
 def build_from_frames(frames: Iterable[tuple[str, str, pd.DataFrame]], out: Path, *,
                       end: date, start: date | None = None, lookback: int = 256,
                       predict_len: int = 10, min_bars: int = 500,
-                      market_weights: tuple[float, float] = (.5, .5)) -> dict:
+                      market_weights: tuple[float, float] = (.5, .5),
+                      exclude_symbols: Iterable[str] = ()) -> dict:
     """Stream canonical symbol frames to a fresh corpus; never reuse stale data."""
+    excluded = sorted({symbol.strip().upper() for symbol in exclude_symbols if symbol.strip()})
+    excluded_set = set(excluded)
     if out.exists() and any(out.iterdir()):
         raise ValueError('Snapshot output must be empty')
     out.mkdir(parents=True, exist_ok=True)
@@ -123,7 +126,7 @@ def build_from_frames(frames: Iterable[tuple[str, str, pd.DataFrame]], out: Path
     first_day = None
     with (out / kd.FEATURES_FILE).open('wb') as features, (out / kd.DAYS_FILE).open('wb') as dates:
         for market, symbol, frame in frames:
-            if market not in ('us', 'ph'):
+            if market not in ('us', 'ph') or symbol in excluded_set:
                 continue
             work = frame.copy().sort_index(kind='stable')
             work = work[~work.index.duplicated(keep='last')]
@@ -182,6 +185,7 @@ def build_from_frames(frames: Iterable[tuple[str, str, pd.DataFrame]], out: Path
         if any(counts[split] == 0 for split in bounds):
             raise ValueError(f'Insufficient {market} split coverage: {counts}')
     meta = {'schema_version': 3, 'history_scope': 'all_available' if start is None else 'bounded',
+            'excluded_symbols': excluded,
             'window_start': (start or date.fromordinal(first_day)).isoformat(), 'window_end': end.isoformat(),
             'train_end': train_end.isoformat(), 'val_end': val_end.isoformat(),
             'lookback': lookback, 'predict_len': predict_len, 'market_weights': market_weights,

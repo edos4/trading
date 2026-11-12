@@ -146,6 +146,26 @@ def test_invalid_rows_and_missing_market_block_promotion(tmp_path):
                                   start=date(2021, 11, 14), end=date(2026, 11, 14))
 
 
+def test_excluded_symbols_have_no_bars_windows_or_evaluation_anchors(tmp_path):
+    from core.kronos_weekly_eval import select_anchors
+    source = frame()
+    frames = [('us', 'AAA', source), ('ph', 'BDO.PS', source)]
+    # Exclusions happen before inspecting or cleaning any of their source rows.
+    frames += [('us', symbol, pd.DataFrame()) for symbol in ('GBDMF', 'AXRX', 'GASE')]
+    meta = dataset.build_from_frames(frames, tmp_path, end=date(2026, 11, 14),
+                                     exclude_symbols=['GBDMF', 'axrx', ' GASE ', 'GBDMF'])
+    feats, days, stored = dataset.kd.load_corpus(tmp_path)
+    assert meta['excluded_symbols'] == stored['excluded_symbols'] == ['AXRX', 'GASE', 'GBDMF']
+    assert {s['name'] for s in stored['symbols']} == {'AAA', 'BDO.PS'}
+    assert len(feats) == len(days) == 2 * len(source)
+    anchors = select_anchors(tmp_path, symbols_per_market=50, lookback=256)
+    assert {row['symbol'] for row in anchors} == {'AAA', 'BDO.PS'}
+    for split in ('train', 'val', 'eval'):
+        draws = dataset.WeeklyWindowDataset(tmp_path, 256, 10, 5, 42, 10, split=split)
+        assert set(draws.pools) == {'us', 'ph'}
+        assert all(symbol['ranges'][split] for symbol in stored['symbols'])
+
+
 def test_ranges_do_not_cross_suspension():
     dates = list(pd.bdate_range('2025-01-01', periods=300)) + list(pd.bdate_range('2026-06-01', periods=300))
     days = np.array([d.date().toordinal() for d in dates])
@@ -282,6 +302,14 @@ def test_dry_run_has_no_db_gpu_or_file_writes(tmp_path, capsys):
     assert not (tmp_path / 'absent').exists()
 
 
+def test_exclusion_configuration_is_normalized_and_included_in_dry_run(capsys):
+    from scripts.kronos_weekly_finetune import main
+    assert main(['--dry-run', '--run-date', '2026-11-14', '--exclude-symbol', 'gbdmf',
+                 '--exclude-symbol', ' AXRX ', '--exclude-symbol', 'GASE', '--exclude-symbol', 'GBDMF']) == 0
+    config = json.loads(capsys.readouterr().out)['config']
+    assert config['exclude_symbols'] == ['AXRX', 'GASE', 'GBDMF']
+
+
 def test_installer_renders_pht_and_does_not_enable_by_default():
     from scripts.install_kronos_weekly import units, UNIT
     rendered = units(Path('/tmp/a path/100%'))
@@ -385,6 +413,22 @@ def test_all_history_replaces_same_week_five_year_model(tmp_path, monkeypatch):
     assert not old.exists()
 
 
+def test_changed_exclusions_retrain_same_week_and_reach_frozen_corpus(tmp_path, monkeypatch):
+    home, checkout, config, injected = fake_pipeline(tmp_path, monkeypatch)
+    old = weekly.run_weekly(home, checkout, date(2026, 11, 7), config, **injected)
+    changed = dict(config, exclude_symbols=['AXRX', 'GASE', 'GBDMF'])
+    release = weekly.run_weekly(home, checkout, date(2026, 11, 7), changed, rehearsal=True, **injected)
+    meta = dataset.kd.load_corpus(release / 'dataset')[2]
+    assert meta['excluded_symbols'] == changed['exclude_symbols']
+    # A production retry must also train with the new exclusion scope.
+    release = weekly.run_weekly(home, checkout, date(2026, 11, 7), changed, **injected)
+    assert release != old
+    assert not old.exists()
+    assert json.loads((release / 'run_manifest.json').read_text())['config']['exclude_symbols'] == changed['exclude_symbols']
+    injected['trainer'] = lambda *_args, **_kw: pytest.fail('Identical exclusions trained again')
+    assert weekly.run_weekly(home, checkout, date(2026, 11, 7), changed, **injected) == release
+
+
 def test_rehearsal_does_not_activate_delete_or_stamp(tmp_path, monkeypatch):
     home, checkout, config, injected = fake_pipeline(tmp_path, monkeypatch)
     checkpoint(home / 'finetuned')
@@ -411,7 +455,8 @@ def test_rejected_run_preserves_model_and_keeps_reviewable_candidate(tmp_path, m
     assert len(list((home / 'weekly' / 'reports').glob('*.json'))) == 1
 
 
-def test_resume_rejects_changed_configuration(tmp_path, monkeypatch):
+@pytest.mark.parametrize('override', [{'seed': 123}, {'exclude_symbols': ['GBDMF']}])
+def test_resume_rejects_changed_configuration(tmp_path, monkeypatch, override):
     home, checkout, config, injected = fake_pipeline(tmp_path, monkeypatch)
     def interrupted(*_args, **_kwargs):
         raise KeyboardInterrupt()
@@ -419,7 +464,7 @@ def test_resume_rejects_changed_configuration(tmp_path, monkeypatch):
     with pytest.raises(KeyboardInterrupt):
         weekly.run_weekly(home, checkout, date(2026, 11, 7), config, **injected)
     release = next((home / 'weekly' / 'runs').iterdir())
-    changed = dict(config, seed=123)
+    changed = dict(config, **override)
     with pytest.raises(ValueError, match='identity mismatch'):
         weekly.run_weekly(home, checkout, date(2026, 11, 7), changed, resume_id=release.name, **injected)
 

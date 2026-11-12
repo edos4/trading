@@ -355,6 +355,13 @@ There is no lower date cutoff. The last 16 weeks remain reserved for validation
 and evaluation; training samples eligible windows from all earlier history with
 the existing fixed step budget and equal US/PH market weights.
 
+Use repeatable `--exclude-symbol SYMBOL` options to omit specific stocks from
+training, validation, and evaluation. For example, add
+`--exclude-symbol GBDMF --exclude-symbol AXRX --exclude-symbol GASE` to a run.
+Exclusions are recorded in the configuration and frozen corpus; changing them
+starts a new candidate even for an already completed week. Since excluding
+stocks changes the evaluation set, compare scores only on matching contexts.
+
 Run the commands below from the repository root **on the NVIDIA GPU training
 host**. Training uses the isolated `.venv-kronos`; keep the application `.venv`
 torch-free. The host needs CUDA, database access through the existing `.env`,

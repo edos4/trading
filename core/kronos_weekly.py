@@ -516,7 +516,8 @@ def run_weekly(home: Path, checkout: Path, run_date: date, config: dict, *, rehe
         if previous.get('run_date', '') > end.isoformat():
             raise ValueError('Cannot replace a newer scheduled release')
         if (previous.get('run_date') == end.isoformat() and not rehearsal
-                and previous.get('history_scope') == 'all_available'):
+                and previous.get('history_scope') == 'all_available'
+                and previous.get('config', {}).get('exclude_symbols', []) == config.get('exclude_symbols', [])):
             return active.resolve()
     identity = source_fingerprint(checkout)
     from core.kronos_finetune import TOKENIZER_PATH, MODEL_PATH
@@ -558,7 +559,8 @@ def run_weekly(home: Path, checkout: Path, run_date: date, config: dict, *, rehe
         try:
             snapshot = (builder or build_snapshot)(release / 'dataset', start=start, end=end,
                                                  lookback=config['lookback'], predict_len=config['predict_len'],
-                                                 market_weights=tuple(config['market_weights']))
+                                                 market_weights=tuple(config['market_weights']),
+                                                 exclude_symbols=config.get('exclude_symbols', []))
             manifest.update(corpus_sha256=snapshot['corpus_sha256'], dataset_report=snapshot['report'],
                             window_start=snapshot['window_start'], status='training')
             write_json(release / 'run_manifest.json', manifest)

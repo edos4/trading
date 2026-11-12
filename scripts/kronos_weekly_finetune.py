@@ -30,6 +30,8 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument('--epochs', type=int, default=10)
     ap.add_argument('--batch-size', type=int, default=16)
     ap.add_argument('--seed', type=int, default=42)
+    ap.add_argument('--exclude-symbol', action='append', default=[], metavar='SYMBOL',
+                    help='Exclude a canonical symbol from the entire corpus; repeat for multiple symbols')
     ap.add_argument('--us-weight', type=float, default=.5)
     ap.add_argument('--freshness', type=float, default=.95)
     ap.add_argument('--invalid-policy', choices=('zero','relative'), default=None)
@@ -48,6 +50,7 @@ def configuration(args) -> dict:
         raise ValueError('Invalid freshness, disk, or GPU wait setting')
     return {'epochs': 1 if args.smoke else args.epochs, 'batch_size': args.batch_size,
             'seed': args.seed, 'lookback': 256, 'predict_len': 10,
+            'exclude_symbols': sorted({symbol.strip().upper() for symbol in args.exclude_symbol if symbol.strip()}),
             'train_steps': 2 if args.smoke else 2000, 'val_steps': 2 if args.smoke else 400,
             'market_weights': [args.us_weight, 1 - args.us_weight], 'freshness': args.freshness,
             'min_free_gb': args.min_free_gb, 'eval_symbols': 2 if args.smoke else 50,

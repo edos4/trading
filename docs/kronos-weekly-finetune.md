@@ -6,6 +6,15 @@ The validation/evaluation holdouts, cleaning rules, balanced sampling and fixed
 training budget remain unchanged. Sections 10 onward retain historical run and
 source-audit results; their five-year references describe those earlier runs.
 
+Manual runs support repeatable `--exclude-symbol SYMBOL` options. Exclusions
+apply before corpus construction, covering training, validation, evaluation and
+reload smoke contexts. The normalized list is stored in the configuration and
+corpus metadata, participates in the corpus hash and resume identity, and forces
+a fresh candidate when it differs from the active same-week run. No symbols are
+excluded by default. User-requested retraining on 2026-11-12 excludes `GBDMF`,
+`AXRX` and `GASE`; its scores use a changed evaluation universe and must be
+reported with that scope.
+
 Status: **implementation complete; approved one-off model active**, updated
 2026-11-09. The shared US/PH pair was activated at **09:25:07 PHT** using the
 user-approved 2% invalid-rate cap for this run only. Previous fine-tuned
