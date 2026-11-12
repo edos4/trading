@@ -665,6 +665,8 @@ def test_skill_comparison_uses_same_valid_windows_without_hiding_invalids():
         assert metric['invalid']==1 and metric['windows']==3
         assert metric['comparison_windows']==1 and metric['comparison_symbols']==1
         assert metric['direction_accuracy']==1
+        assert metric['direction_confusion']['up']['up']==1
+        assert sum(sum(values.values()) for values in metric['direction_confusion'].values())==1
     assert base['metrics']['us_1d']['mean_absolute_return_error']==0
     assert candidate['metrics']['us_1d']['mean_absolute_return_error']==pytest.approx(.02)
 

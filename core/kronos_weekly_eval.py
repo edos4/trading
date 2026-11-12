@@ -12,6 +12,8 @@ import pandas as pd
 
 from learn import kronos_dataset as kd
 
+DIRECTION_SCORING = 'atr-up-down-flat-v1'
+
 
 def select_anchors(dataset: Path, *, symbols_per_market: int = 50, lookback: int = 400) -> list[dict]:
     """Select anchors without using future returns or cross-currency rankings."""
@@ -130,7 +132,9 @@ def evaluate_model(predictor, dataset: Path, anchors: list[dict], *, seed: int =
         try:
             confirmed = forecast_returns(predictor, anchor['symbol'], ohlcv, 3, lookback)
             returns = [float(value) for value in confirmed['returns']]
-            anchor_close = float(confirmed['anchor_close'])
+            # The worker rounds its reported anchor for display. Labels must
+            # use the same unrounded close as its forecast-return denominator.
+            anchor_close = price
             actual = float(feats[b, 3]) / anchor_close - 1 if math.isfinite(anchor_close) and anchor_close > 0 else float('nan')
             extra = {'rejected_samples': int(confirmed['rejected']), 'confirmation_samples': len(returns)}
             if not returns:
@@ -182,6 +186,7 @@ def _mean(values: list[float]) -> float | None:
 
 
 def summarize(rows: list[dict]) -> dict:
+    from core.kronos_confirm import classify
     result = {}
     for market in ('us', 'ph'):
         for horizon in (1, 3):
@@ -189,15 +194,28 @@ def summarize(rows: list[dict]) -> dict:
             abstained = [r for r in subset if r.get('abstained')]
             scored = [r for r in subset if not r.get('abstained')]
             valid = [r for r in scored if r['valid']]
+            directions = []
+            confusion = {actual: {forecast: 0 for forecast in ('up', 'down', 'flat')}
+                         for actual in ('up', 'down', 'flat')}
+            for row in valid:
+                band = row.get('sideways_band_return')
+                if not isinstance(band, (int, float)) or not math.isfinite(band) or band <= 0:
+                    raise ValueError('Direction scoring requires a finite positive sideways band')
+                actual = classify(row['actual_return'], band * 100)
+                forecast = classify(row['forecast_return'], band * 100)
+                directions.append((actual, forecast))
+                confusion[actual][forecast] += 1
             result[f'{market}_{horizon}d'] = {
                 'symbols': len({r['symbol'] for r in subset}), 'windows': len(subset),
                 'abstained': len(abstained),
                 'invalid': len(scored) - len(valid),
                 'invalid_rate': (len(scored) - len(valid)) / len(subset) if subset else 1.,
                 'valid_windows': len(valid), 'valid_symbols': len({r['symbol'] for r in valid}),
-                'direction_accuracy': _mean([float(np.sign(r['actual_return']) == np.sign(r['forecast_return'])) for r in valid]),
+                'direction_accuracy': _mean([float(actual == forecast) for actual, forecast in directions]),
+                'direction_scoring': DIRECTION_SCORING,
+                'direction_confusion': confusion,
                 'mean_absolute_return_error': _mean([abs(r['actual_return'] - r['forecast_return']) for r in valid]),
-                'sideways_fraction': _mean([float(abs(r['forecast_return']) < r['sideways_band_return']) for r in valid if r['sideways_band_return'] is not None]),
+                'sideways_fraction': _mean([float(forecast == 'flat') for _, forecast in directions]),
                 'sideways_rule': 'ATR-scaled scanner band',
             }
     return result
@@ -252,7 +270,7 @@ def pair_comparison(base: dict, candidate: dict) -> None:
         for key,metrics in result['metrics'].items():
             metrics['comparison_windows']=paired[key]['windows']
             metrics['comparison_symbols']=paired[key]['symbols']
-            for name in ('direction_accuracy','mean_absolute_return_error'):
+            for name in ('direction_accuracy','direction_confusion','mean_absolute_return_error'):
                 metrics[name]=paired[key][name]
 
 

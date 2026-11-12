@@ -362,6 +362,11 @@ Exclusions are recorded in the configuration and frozen corpus; changing them
 starts a new candidate even for an already completed week. Since excluding
 stocks changes the evaluation set, compare scores only on matching contexts.
 
+Weekly direction accuracy uses the live bot's ATR-based up/down/flat classifier
+for both actual and predicted returns. A small move inside the same flat band
+counts as flat on either side. Metrics record `atr-up-down-flat-v1` and a
+three-class confusion matrix; older sign-only accuracy reports are not comparable.
+
 Run the commands below from the repository root **on the NVIDIA GPU training
 host**. Training uses the isolated `.venv-kronos`; keep the application `.venv`
 torch-free. The host needs CUDA, database access through the existing `.env`,

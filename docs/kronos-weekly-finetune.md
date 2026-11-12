@@ -219,6 +219,14 @@ error, invalid forecast rate, sideways classification, sample counts, and
 inference failures. Require finite, positive, credible prices using the scanner's
 existing credibility rules.
 
+Direction scoring version `atr-up-down-flat-v1` uses
+`core.kronos_confirm.classify()` with the same past-only ATR band for actual and
+predicted returns. The accuracy compares all three labels, including flat, and
+the confusion matrix uses the same paired valid windows as accuracy. One-day
+labels use the unrounded anchor close, rather than the worker's display-rounded
+quote. Historical sign-only reports retain their original values and must be
+recalculated before comparing with this scoring version.
+
 Implemented automatic acceptance defaults, fixed before the first scheduled run:
 
 - Both components reload from the candidate directory, all file hashes verify,
