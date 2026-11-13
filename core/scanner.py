@@ -42,6 +42,7 @@ from data.tv_client import TVClient, MarketSnapshot
 from data.ohlcv_store import OHLCVStore, DEFAULT_WINDOW
 from data.stream_client import FetchSkip
 from analysis.chart_renderer import ChartRenderer
+from analysis.pattern_dii import BULLS_UPTREND_DAYS
 from analysis.price_volume import volume_confirm_gate
 from analysis.vision_checker import VisionChecker, VisionVerdict
 from core.paper_trader import PaperAccount
@@ -420,7 +421,7 @@ class MarketScanner:
             self._paper.run_manifest['active_controls']={
                 'account_model':self._paper.account_model,'volume_gate':self._volume_gate,
                 'dii_mode':self._dii_gate_mode,
-                'dii_bulls_uptrend': {'mode': 'filter', 'timeframe': '1d', 'days': 3},
+                'dii_bulls_uptrend': {'mode': 'filter', 'timeframe': '1d', 'days': BULLS_UPTREND_DAYS},
                 'vision':settings.vision_confirmation_enabled,'collect_first':self._collect_first,
                 'kronos_entry':self._kronos_mode,'kronos_exit':self._kronos_exit_mode,
                 'kronos_decision_policy': 'direction_only',

@@ -1,4 +1,4 @@
-"""DII band votes and required three-day daily bulls confirmation for BUY."""
+"""DII band votes and required one-day daily bulls confirmation for BUY."""
 
 from __future__ import annotations
 
@@ -14,16 +14,16 @@ LONG_MAX_BULLS = 40.0
 SHORT_MIN_BEARS = 16.0
 SHORT_MAX_BEARS = 40.0
 BALANCED = 50.0
-BULLS_UPTREND_DAYS = 3
+BULLS_UPTREND_DAYS = 1
 BULLS_UPTREND_MIN_BARS = MIN_BARS + BULLS_UPTREND_DAYS
 
 
 def describe_dii_bulls_uptrend_rejection(df) -> str | None:
-    """Require three strict daily increases in bulls (four finite readings).
+    """Require one strict daily increase in bulls (two finite readings).
 
-    The caller supplies completed daily candles only. Flat days break the
-    streak; neither price direction nor the raw ``up`` event count substitutes
-    for the DII ``bulls`` percentage. Insufficient history fails closed.
+    The caller supplies completed daily candles only. Flat or falling days fail
+    confirmation; neither price direction nor the raw ``up`` event count
+    substitutes for the DII ``bulls`` percentage. Insufficient history fails closed.
     """
     if df is None or len(df) < BULLS_UPTREND_MIN_BARS:
         return (f"DII bulls uptrend unavailable: need at least "
@@ -31,11 +31,13 @@ def describe_dii_bulls_uptrend_rejection(df) -> str | None:
     bulls = IndicatorEngine(df).directional_imbalance_index(LENGTH, PERIOD)["bulls"]
     values = bulls.iloc[-(BULLS_UPTREND_DAYS + 1):].to_numpy(dtype=float)
     if len(values) != BULLS_UPTREND_DAYS + 1 or not np.isfinite(values).all():
-        return "DII bulls uptrend unavailable: need four finite daily bulls readings for BUY."
+        return (f"DII bulls uptrend unavailable: need {BULLS_UPTREND_DAYS + 1} "
+                "finite daily bulls readings for BUY.")
     if not (np.diff(values) > 0).all():
         readings = " → ".join(f"{value:.2f}%" for value in values)
-        return (f"DII bulls must rise for at least {BULLS_UPTREND_DAYS} consecutive "
-                f"completed trading days before BUY; latest readings: {readings}.")
+        return (f"DII bulls must rise for at least {BULLS_UPTREND_DAYS} completed trading "
+                f"day{'s' if BULLS_UPTREND_DAYS != 1 else ''} before BUY; "
+                f"latest readings: {readings}.")
     return None
 
 

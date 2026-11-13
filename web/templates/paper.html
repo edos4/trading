@@ -68,13 +68,13 @@
         </select>
       </label>
       <label class="check"><input type="checkbox" id="{{ book.id }}-volume" /> Volume gate</label>
-      <label class="check" title="Shadow records DII band votes. Filter rejects signals outside the DII bands. Every BUY also requires the daily DII bulls percentage to rise for three consecutive completed trading days in both modes.">
+      <label class="check" title="Shadow records DII band votes. Filter rejects signals outside the DII bands. Every BUY also requires the daily DII bulls percentage to rise over the last completed trading day in both modes.">
         DII entries <select id="{{ book.id }}-dii-mode">
           <option value="shadow" selected>Shadow</option>
           <option value="filter">Filter</option>
         </select>
       </label>
-      <span class="muted">BUY: DII bulls rising for 3 days required</span>
+      <span class="muted">BUY: DII bulls rising for 1 day required</span>
       <label class="check" title="Kronos checks direction only: up confirms longs, down confirms shorts, flat blocks entries. Shadow records without blocking.">
         Kronos entries <select id="{{ book.id }}-kronos-mode">
           {% for mode in ['confirm', 'shadow', 'off'] %}

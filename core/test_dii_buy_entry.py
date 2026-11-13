@@ -48,35 +48,45 @@ def candidate(candles, action="BUY", timeframe="1d") -> TradeSignal:
 
 @pytest.mark.parametrize("values,accepted", [
     ([16, 20, 25, 30], True), ([60, 65, 70, 75], True),
-    ([20, 25, 25, 30], False), ([20, 30, 25, 35], False),
-    ([35, 30, 25, 20], False), ([30, 20, 25, 35], False),
-    ([np.nan, 20, 25, 30], False), ([10, 20, np.inf, 30], False),
-    ([20, 25, 30], False),
+    ([20, 25, 25, 30], True), ([20, 30, 25, 35], True),
+    ([35, 30, 25, 20], False), ([30, 20, 25, 35], True),
+    ([np.nan, 20, 25, 30], True), ([10, 20, np.inf, 30], False),
+    ([20, 25, 30], True), ([20, 25], True),
+    ([0, 0, 0, 0], False), ([20, 25, 25], False), ([25, 20], False),
+    ([np.nan, 20], False), ([20, np.nan], False), ([30, np.inf], False),
+    ([20], False), ([], False),
 ])
-def test_requires_three_strict_increases_in_bulls(monkeypatch, values, accepted):
+def test_requires_one_strict_increase_in_latest_bulls(monkeypatch, values, accepted):
     # Rising raw event counts cannot rescue flat/falling bulls percentages.
     monkeypatch.setattr(IndicatorEngine, "directional_imbalance_index", lambda *a: {
         "bulls": pd.Series(values), "up": pd.Series([1, 2, 3, 4]),
         "bears": pd.Series([90, 80, 70, 60]),
     })
-    frame = pd.DataFrame({key: np.ones(63) for key in ("open", "high", "low", "close", "volume")})
+    frame = pd.DataFrame({key: np.ones(61) for key in ("open", "high", "low", "close", "volume")})
     reason = describe_dii_bulls_uptrend_rejection(frame)
     assert (reason is None) == accepted
     if reason:
         assert reason.startswith("DII bulls")
+        if len(values) < 2 or not np.isfinite(values[-2:]).all():
+            assert "need 2 finite daily bulls readings" in reason
+        else:
+            assert "1 completed trading day before BUY" in reason
+            readings = " → ".join(f"{value:.2f}%" for value in values[-2:])
+            assert reason.endswith(f"latest readings: {readings}.")
 
 
-@pytest.mark.parametrize("count", [0, 59, 60, 61, 62])
+@pytest.mark.parametrize("count", [0, 59, 60])
 def test_short_daily_history_fails_closed(count):
     frame = store_for(daily_candles()[:count]).get_df("TEST", "1d", min_bars=1)
-    assert "63 completed daily candles" in describe_dii_bulls_uptrend_rejection(frame)
+    assert "61 completed daily candles" in describe_dii_bulls_uptrend_rejection(frame)
 
 
 def test_real_bulls_calculation_and_no_balance_fallback():
     frame = store_for(daily_candles()).get_df("TEST", "1d")
-    values = IndicatorEngine(frame).directional_imbalance_index()["bulls"].iloc[-4:]
-    assert values.to_numpy() == pytest.approx([100 * 3 / 11, 100 * 4 / 11, 40, 50])
+    values = IndicatorEngine(frame).directional_imbalance_index()["bulls"].iloc[-2:]
+    assert values.to_numpy() == pytest.approx([40, 50])
     assert describe_dii_bulls_uptrend_rejection(frame) is None
+    assert describe_dii_bulls_uptrend_rejection(frame.tail(61)) is None
     frame["high"], frame["low"] = 500 - np.arange(100.), np.arange(100.)
     assert "unavailable" in describe_dii_bulls_uptrend_rejection(frame)
 
@@ -92,9 +102,9 @@ def test_weekly_and_daily_buys_use_daily_bulls(timeframe):
 
 
 def test_duplicate_sessions_cannot_supply_the_streak():
-    candles = daily_candles()[:62]
+    candles = daily_candles()[:60]
     candles += [replace(candles[-1], close=candles[-1].close + .01)]
-    assert "63 completed daily candles" in describe_buy_entry_rejection(
+    assert "61 completed daily candles" in describe_buy_entry_rejection(
         candidate(candles), store_for(candles), market="us")
 
 
@@ -159,7 +169,7 @@ def test_scanner_allows_confirmed_bulls_in_shadow_and_records_policy(monkeypatch
     # 50% bulls fails the optional band, but passes the mandatory rising check.
     assert scanner.stats["dii_shadow"] == 1
     assert book.run_manifest["active_controls"]["dii_bulls_uptrend"] == {
-        "mode": "filter", "timeframe": "1d", "days": 3}
+        "mode": "filter", "timeframe": "1d", "days": 1}
 
 
 @pytest.mark.parametrize("entry_path", ["queue_position", "open_position"])
@@ -217,7 +227,9 @@ def test_forming_daily_candle_cannot_complete_the_streak(monkeypatch):
 
 
 def test_utc_midnight_label_is_not_a_completed_bar_during_its_session(monkeypatch):
-    candles = [replace(c, timestamp=c.timestamp.replace(hour=0)) for c in daily_candles()]
+    # Only the final session supplies a rise: 0% -> 0% -> 6.25%.
+    candles = [replace(c, timestamp=c.timestamp.replace(hour=0)) for c in daily_candles(seed=10)]
+    assert describe_buy_entry_rejection(candidate(candles), store_for(candles), market="us") is None
     during_session = pd.Timestamp(candles[-1].timestamp.date(), tz="America/New_York") + pd.Timedelta(hours=10)
     monkeypatch.setattr("core.market._session_now", lambda *a, **kw: during_session.to_pydatetime())
     assert describe_buy_entry_rejection(candidate(candles), store_for(candles), market="us") is not None

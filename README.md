@@ -887,12 +887,12 @@ changing it requires a new run. API/MCP callers can pass `dii_gate_mode` as
 `shadow` or `filter`; omitting it inherits `PAPER_DII_GATE_MODE` and the global
 shadow setting. Non-paper scanners retain their configured gate.
 
-**Every new BUY requires daily DII bulls to rise for at least three consecutive
-completed trading days**, independently of Shadow/Filter and Pattern-only mode.
-The last four daily `bulls` percentages must be finite and strictly increasing
-(`b0 < b1 < b2 < b3`); a flat or falling day resets the streak. This uses the
+**Every new BUY requires daily DII bulls to rise over the last completed
+trading day**, independently of Shadow/Filter and Pattern-only mode.
+The last two daily `bulls` percentages must be finite and strictly increasing
+(`b0 < b1`); a flat or falling latest day blocks the buy. This uses the
 `bulls` percentage, not price direction or the raw `up` event count. The default
-DII (20, 40) needs at least 63 completed daily candles for confirmation. Missing
+DII (20, 40) needs at least 61 completed daily candles for confirmation. Missing
 history blocks the buy. Weekly signals use daily context too. The scanner,
 paper queues/direct fills, historical engines and Explorer share the check;
 next-open fills recheck using only earlier completed daily sessions. This also
