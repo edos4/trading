@@ -62,3 +62,5 @@ logs/kronos_experiment4_direction_report.md
 logs/.kronos_experiment4_direction_report.*.tmp
 # Independent historical experiment artifacts (source manifest is tracked).
 /logs/experiments/
+
+indicator-vides
