@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Experiments — Trading Bot{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/experiments.css?v=1" />
+<section class="exp-heading">
+  <div><p class="exp-eyebrow">Historical research</p><h1>Experiments</h1>
+    <p class="muted">One batch, a separate result for every source folder.</p></div>
+  <span id="exp-catalog-count" class="exp-badge">Loading sources…</span>
+</section>
+<form id="exp-form" class="panel exp-controls">
+  <label>Market<select id="exp-market"><option value="us" {% if default_market == 'us' %}selected{% endif %}>US · USD</option><option value="ph" {% if default_market == 'ph' %}selected{% endif %}>Philippines · PHP</option></select></label>
+  <label>Start date<input id="exp-start" type="date" required value="{{ start_default }}" /></label>
+  <label>End date<input id="exp-end" type="date" required value="{{ end_default }}" /></label>
+  <button id="exp-run" class="btn primary" type="submit" disabled>Start all folders</button>
+  <button id="exp-cancel" class="btn" type="button" disabled>Cancel batch</button>
+  <details class="exp-options"><summary>Run settings</summary><div class="toolbar">
+    <label>Symbols (blank = all available)<input id="exp-symbols" placeholder="AAPL, MSFT or BDO.PS" /></label>
+    <label>Reference capital<input id="exp-capital" type="number" min="1" step="any" value="100000" required /></label>
+    <label>Position notional<input id="exp-notional" type="number" min="1" step="any" value="10000" required /></label>
+    <label>Slippage (%)<input id="exp-slippage" type="number" min="0" max="9.99" step="0.01" value="0.05" required /></label>
+    <label>Cost per side (%)<input id="exp-cost" type="number" min="0" max="9.99" step="0.01" placeholder="Market default" /></label>
+    <label>End date<select id="exp-end-policy"><option value="keep-open">Keep positions marked open</option><option value="force-close">Liquidate at last close</option></select></label>
+  </div></details>
+  <p class="muted exp-form-note">Incomplete strategies and unavailable data stay blocked with reasons. Event studies show observations; trading metrics appear only where entry and exit rules are implemented. Select a folder to inspect its scope and assumptions.</p>
+</form>
+<section class="panel exp-batch-status" aria-live="polite">
+  <div class="exp-status-line"><strong id="exp-status">Ready to configure a batch.</strong><span id="exp-progress-label" class="muted"></span></div>
+  <progress id="exp-progress" max="100" value="0" aria-label="Batch progress"></progress>
+  <div class="exp-status-line"><span id="exp-run-id" class="muted small"></span>
+    <label class="exp-history">Saved batch<select id="exp-history"><option value="">New batch</option></select></label></div>
+  <p id="exp-error" class="exp-error" role="alert" hidden></p>
+  <details id="exp-data-errors" hidden><summary>History coverage issues</summary><pre></pre></details>
+</section>
+<div class="exp-layout">
+  <aside class="panel exp-sources" aria-label="Source folders">
+    <div class="exp-source-tools"><label>Find a folder<input id="exp-search" type="search" placeholder="Number, author, indicator…" /></label>
+      <label>Show<select id="exp-filter"><option value="all">All folders</option><option value="ready">Runnable</option><option value="blocked">Blocked</option><option value="completed">Completed</option><option value="failed">Failed</option></select></label></div>
+    <p id="exp-visible-count" class="muted small"></p>
+    <div id="exp-folders" class="exp-folder-list"></div>
+  </aside>
+  <section class="panel exp-detail" aria-label="Selected folder">
+    <div id="exp-empty" class="exp-empty"><span>↗</span><h2>Open an experiment</h2><p class="muted">Choose a source folder to see its rules, readiness and run results.</p></div>
+    <div id="exp-selected" hidden>
+      <div class="exp-detail-header"><div><p id="exp-folder-id" class="exp-eyebrow"></p><h2 id="exp-title"></h2></div><span id="exp-folder-state" class="exp-badge"></span></div>
+      <p id="exp-scope" class="muted"></p><p id="exp-blocker" class="exp-blocker" hidden></p>
+      <details id="exp-rules"><summary>Parameters, scope and assumptions</summary><pre id="exp-parameters"></pre><ul id="exp-assumptions"></ul><ul id="exp-limitations"></ul></details>
+      <div id="exp-stats" class="exp-stat-grid"></div>
+      <div class="exp-detail-toolbar"><span id="exp-coverage" class="muted small"></span><a id="exp-export" class="btn" hidden>Export complete results</a></div>
+      <div class="tabs exp-tabs" role="tablist" aria-label="Experiment results">
+        <button class="tab active" data-exp-tab="positions" role="tab" aria-controls="exp-table-wrap" aria-selected="true">Positions</button>
+        <button class="tab" data-exp-tab="trades" role="tab" aria-controls="exp-table-wrap" aria-selected="false">Trades</button>
+        <button class="tab" data-exp-tab="signals" role="tab" aria-controls="exp-table-wrap" aria-selected="false">Signals</button>
+        <button class="tab" data-exp-tab="performance" role="tab" aria-controls="exp-performance" aria-selected="false">Performance</button>
+        <button class="tab" data-exp-tab="outcomes" role="tab" aria-controls="exp-table-wrap" aria-selected="false">Event outcomes</button>
+        <button class="tab" data-exp-tab="logs" role="tab" aria-controls="exp-table-wrap" aria-selected="false">Logs</button>
+        <button class="tab" data-exp-tab="source" role="tab" aria-controls="exp-source-text" aria-selected="false">Source & plan</button>
+      </div>
+      <div id="exp-table-wrap" role="tabpanel"><p id="exp-table-note" class="muted small"></p><div class="table-wrap"><table id="exp-table"><thead></thead><tbody></tbody></table></div><button id="exp-more" class="btn" hidden>Load more rows</button></div>
+      <section id="exp-performance" role="tabpanel" hidden><p class="muted small">Each variant is a separate comparison. Independent fixed-notional results do not enforce finite portfolio cash.</p><div id="exp-metrics"></div><canvas id="exp-equity" height="260" aria-label="Equity curves for the selected experiment" role="img"></canvas><details><summary>Equity data</summary><pre id="exp-equity-data"></pre></details></section>
+      <section id="exp-source-text" role="tabpanel" hidden><details open><summary>Writeup</summary><pre id="exp-writeup"></pre></details><details><summary>33ai integration plan</summary><pre id="exp-plan"></pre></details><p id="exp-provenance" class="muted small"></p></section>
+    </div>
+  </section>
+</div>
+<dialog id="exp-chart-dialog"><div class="exp-status-line"><strong id="exp-chart-title">Frozen history</strong><button type="button" class="btn" id="exp-chart-close">Close</button></div><p id="exp-chart-status" class="muted" aria-live="polite"></p><div id="exp-chart-tools"></div><div id="exp-chart" class="tv-chart-host"></div></dialog>
+{% endblock %}
+{% block scripts %}
+<script>window.TB_PAGE = "experiments";</script>
+<script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+<script src="/static/tv_chart.js?v=26"></script>
+<script src="/static/experiments.js?v=1"></script>
+{% endblock %}

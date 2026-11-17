@@ -1601,6 +1601,10 @@ def create_app() -> FastAPI:
 
     _register_rules(app, templates, ctx)
 
+    from web.experiments import register_experiment_routes
+
+    register_experiment_routes(app, templates, ctx)
+
     return app
 
 

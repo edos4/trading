@@ -1,0 +1,173 @@
+"""Authenticated Experiments page and isolated batch APIs."""
+from __future__ import annotations
+
+import asyncio
+import json
+from datetime import date, timedelta
+
+from fastapi import Depends, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from pydantic import ValidationError
+
+from core.experiments.catalog import catalog, source_by_id
+from core.experiments.contracts import BatchRequest
+from core.experiments.service import get_service
+from core.experiments.store import Conflict
+from core.market import default_market, get_market
+from web.auth import require_login
+from utils.logger import log
+
+
+KINDS = {"signals", "trades", "positions", "outcomes", "logs"}
+
+
+def _failure(exc: Exception) -> JSONResponse:
+    if isinstance(exc, KeyError):
+        return JSONResponse({"detail": str(exc).strip("'")}, status_code=404)
+    if isinstance(exc, Conflict):
+        return JSONResponse({"detail": str(exc)}, status_code=409)
+    if isinstance(exc, ValidationError):
+        return JSONResponse({"detail": "; ".join(error["msg"] for error in exc.errors())}, status_code=400)
+    if isinstance(exc, ValueError):
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+    log.exception("Experiments | request failed")
+    return JSONResponse({"detail": "Experiment storage/service unavailable; check server logs"}, status_code=503)
+
+
+def register_experiment_routes(app, templates, ctx) -> None:
+    @app.get("/experiments", response_class=HTMLResponse)
+    async def page(request: Request, _user: str = Depends(require_login)):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        today = datetime.now(ZoneInfo("Asia/Manila")).date()
+        return templates.TemplateResponse(request, "experiments.html", ctx(
+            request, active="experiments", default_market=default_market().id,
+            start_default=(today - timedelta(days=365)).isoformat(),
+            end_default=today.isoformat()))
+
+    @app.get("/api/experiments/catalog")
+    async def api_catalog(_user: str = Depends(require_login)):
+        try:
+            return {"sources": await asyncio.to_thread(catalog)}
+        except Exception as exc:
+            return _failure(exc)
+
+    @app.get("/api/experiments/sources/{source_id}")
+    async def api_source(source_id: str, _user: str = Depends(require_login)):
+        try:
+            return await asyncio.to_thread(source_by_id, source_id)
+        except Exception as exc:
+            return _failure(exc)
+
+    @app.get("/api/experiments/runs")
+    async def api_batches(_user: str = Depends(require_login)):
+        try:
+            return {"batches": await asyncio.to_thread(get_service().store.listing)}
+        except Exception as exc:
+            return _failure(exc)
+
+    @app.post("/api/experiments/runs", status_code=202)
+    async def api_start(request: Request, _user: str = Depends(require_login)):
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a JSON object")
+            validated = BatchRequest.model_validate(payload)
+            return await asyncio.to_thread(get_service().submit, validated)
+        except Exception as exc:
+            return _failure(exc)
+
+    @app.get("/api/experiments/runs/{batch_id}")
+    async def api_status(batch_id: str, _user: str = Depends(require_login)):
+        try:
+            return await asyncio.to_thread(get_service().snapshot, batch_id)
+        except Exception as exc:
+            return _failure(exc)
+
+    @app.post("/api/experiments/runs/{batch_id}/cancel")
+    async def api_cancel(batch_id: str, _user: str = Depends(require_login)):
+        try:
+            await asyncio.to_thread(get_service().store.cancel, batch_id)
+            return await asyncio.to_thread(get_service().snapshot, batch_id)
+        except Exception as exc:
+            return _failure(exc)
+
+    @app.get("/api/experiments/runs/{batch_id}/folders/{source_id}")
+    async def api_detail(batch_id: str, source_id: str, _user: str = Depends(require_login)):
+        try:
+            return await asyncio.to_thread(get_service().detail, batch_id, source_id)
+        except Exception as exc:
+            return _failure(exc)
+
+    @app.get("/api/experiments/runs/{batch_id}/folders/{source_id}/records")
+    async def api_records(batch_id: str, source_id: str, kind: str = "signals",
+                          after: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500),
+                          symbol: str | None = None, _user: str = Depends(require_login)):
+        try:
+            if kind not in KINDS:
+                raise ValueError("Unknown result table")
+            await asyncio.to_thread(get_service().detail, batch_id, source_id)
+            return await asyncio.to_thread(get_service().store.evidence, batch_id, source_id,
+                                           kind, after=after, limit=limit, symbol=symbol)
+        except Exception as exc:
+            return _failure(exc)
+
+    @app.get("/api/experiments/runs/{batch_id}/folders/{source_id}/chart")
+    async def api_chart(batch_id: str, source_id: str, symbol: str,
+                        record: int | None = Query(None, ge=1),
+                        _user: str = Depends(require_login)):
+        def build():
+            import pandas as pd
+            from analysis.chart_renderer import build_trade_viewer_payload
+
+            detail = get_service().detail(batch_id, source_id)
+            evidence = get_service().store.record(batch_id, source_id, record) if record else {}
+            if evidence and evidence.get("symbol") != symbol:
+                raise ValueError("Chart record belongs to a different symbol")
+            rows = get_service().store.chart(batch_id, symbol)
+            if len(rows) < 2:
+                raise ValueError("Not enough frozen bars to chart")
+            frame = pd.DataFrame(rows)
+            market = detail["request"]["market"]
+            profile = get_market(market)
+            frame.index = pd.to_datetime(frame.pop("date")).dt.tz_localize(profile.session_tz)
+            payload = build_trade_viewer_payload(frame, symbol=symbol, market=market,
+                                                session_tz=profile.session_tz, trendlines=False,
+                                                action=evidence.get("action"),
+                                                entry=evidence.get("entry_price"),
+                                                stop=evidence.get("stop_loss"), target=evidence.get("take_profit"),
+                                                exit_price=evidence.get("exit_price"),
+                                                exit_reason=evidence.get("exit_reason"),
+                                                current=evidence.get("current"),
+                                                entry_time=evidence.get("entry_date", evidence.get("date")),
+                                                exit_time=evidence.get("exit_date"))
+            payload["replay_id"] = batch_id
+            return payload
+        try:
+            return await asyncio.to_thread(build)
+        except Exception as exc:
+            return _failure(exc)
+
+    @app.get("/api/experiments/runs/{batch_id}/folders/{source_id}/export")
+    async def api_export(batch_id: str, source_id: str, _user: str = Depends(require_login)):
+        try:
+            detail = await asyncio.to_thread(get_service().detail, batch_id, source_id)
+            if detail["run"]["state"] in {"queued","processing"}:
+                raise Conflict("Wait for this folder to finish before exporting its complete results")
+        except Exception as exc:
+            return _failure(exc)
+
+        def lines():
+            yield json.dumps({"kind": "manifest", **detail}, allow_nan=False) + "\n"
+            for kind in sorted(KINDS):
+                after = 0
+                while True:
+                    page = get_service().store.evidence(batch_id, source_id, kind, after=after, limit=500)
+                    for row in page["rows"]:
+                        yield json.dumps({"kind": kind, **row}, allow_nan=False) + "\n"
+                    if page["next"] is None:
+                        break
+                    after = page["next"]
+        return StreamingResponse(lines(), media_type="application/x-ndjson",
+                                 headers={"Content-Disposition": f'attachment; filename="experiment-{source_id}-{batch_id}.jsonl"'})

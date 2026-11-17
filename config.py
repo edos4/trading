@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     # Frozen daily-bar dataset for shared backtest runs (offline + stream).
     # Local files are import inputs only; PostgreSQL remains the durable store.
     backtest_dataset_dir: str = "data/barcache"
+    # Independent experiment runs; never writes live Paper books or bar history.
+    experiments_store_dir: Path = Path("logs/experiments")
 
     # ── DeepSeek (pattern editing) ────────────────────────────────────────
     # Server-side only; never logged or returned to a client. API model id
