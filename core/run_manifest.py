@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 import platform
@@ -54,11 +55,17 @@ def record_observation(manifest: dict, symbol: str, timeframe: str, candle,
                          'last': candle.timestamp.isoformat()}
 
 
-def build_run_manifest(*, patterns_v2: bool, market: str) -> dict:
+def build_run_manifest(*, patterns_v2: bool, market: str, rsi_divergence: bool = False) -> dict:
     root=Path(__file__).resolve().parent.parent
     sources=[root/'main.py',root/'config.py']
     sources += sorted((root/'core').glob('*.py'))
     sources += [root/'data/stream_client.py',root/'data/stream_server.py',root/'utils/trade_export.py']
+    strategy = {}
+    if rsi_divergence:
+        from core.rsi_divergence import POLICY
+        strategy['rsi_divergence_policy'] = deepcopy(POLICY)
+        sources += [root/'analysis/indicator_engine.py', root/'indicators/_signal.py',
+                    root/'patterns/base_pattern.py', root/'patterns/_rules.py']
     if patterns_v2:
         from patterns_v2.loader import detector_root
         sources += sorted((detector_root()/'patterns').glob('*.py'))
@@ -69,4 +76,5 @@ def build_run_manifest(*, patterns_v2: bool, market: str) -> dict:
             'created_at': datetime.now(timezone.utc).isoformat(),
             'python':platform.python_version(),'source_sha256':hashes,
             'resolved_controls': resolved_controls(), 'control_changes': [], 'observation_fingerprints': {},
-            'scope':'sources at scanner construction; historical trades retain their own evidence'}
+            'scope':'sources at scanner construction; historical trades retain their own evidence',
+            **strategy}

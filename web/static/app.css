@@ -595,6 +595,7 @@ progress::-moz-progress-bar { background: var(--accent); border-radius: 999px; }
   align-items: center;
   margin-top: 0.65rem;
 }
+.book-flags .flag-break { flex-basis: 100%; height: 0; }
 .blotter-filter { align-items: center; }
 .filter-pills { display: flex; gap: 0.35rem; }
 .pill-btn {

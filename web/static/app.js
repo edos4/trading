@@ -531,30 +531,65 @@ function initPaper() {
     const indicatorsOnly = document.getElementById(`${id}-indicators-only`);
     const patternOnly = document.getElementById(`${id}-pattern-only`);
     const patternsV2 = document.getElementById(`${id}-patterns-v2`);
+    const rsiDivergence = document.getElementById(`${id}-rsi-divergence`);
+    const rule = document.getElementById(`${id}-rule`);
+    const patternControls = [patternOnly, patternsV2].filter(Boolean);
+    function releaseRsiLocks() {
+      const indicatorsOn = !!(indicatorsOnly && indicatorsOnly.checked);
+      for (const control of [indicatorsOnly, rule, ...patternControls]) {
+        if (control) control.disabled = false;
+      }
+      if (indicatorsOn) {
+        patternControls.forEach((control) => { control.disabled = true; });
+      }
+    }
     if (indicatorsOnly && patternOnly) {
       indicatorsOnly.addEventListener("change", () => {
         if (indicatorsOnly.checked) {
-          patternOnly.checked = false;
-          patternOnly.disabled = true;
-          if (patternsV2) {
-            patternsV2.checked = false;
-            patternsV2.disabled = true;
+          patternControls.forEach((control) => {
+            control.checked = false;
+            control.disabled = true;
+          });
+          if (rsiDivergence) {
+            rsiDivergence.checked = false;
+            rsiDivergence.disabled = true;
           }
-        } else {
-          patternOnly.disabled = false;
-          if (patternsV2) patternsV2.disabled = false;
+        } else if (!(rsiDivergence && rsiDivergence.checked)) {
+          patternControls.forEach((control) => { control.disabled = false; });
+          if (rsiDivergence) rsiDivergence.disabled = false;
         }
       });
     }
-    if (patternsV2 && indicatorsOnly) {
-      patternsV2.addEventListener("change", () => {
-        if (patternsV2.checked) indicatorsOnly.checked = false;
+    patternControls.forEach((control) => {
+      control.addEventListener("change", () => {
+        if (!control.checked) return;
+        if (indicatorsOnly) indicatorsOnly.checked = false;
+        if (rsiDivergence && rsiDivergence.checked) {
+          rsiDivergence.checked = false;
+          releaseRsiLocks();
+        }
+      });
+    });
+    if (rsiDivergence) {
+      rsiDivergence.addEventListener("change", () => {
+        const on = rsiDivergence.checked;
+        for (const control of [indicatorsOnly, rule, ...patternControls]) {
+          if (!control) continue;
+          control.disabled = on;
+          if (!on) continue;
+          if (control === rule) control.value = "";
+          else control.checked = false;
+        }
+        if (!on) releaseRsiLocks();
       });
     }
-    const rule = document.getElementById(`${id}-rule`);
     if (rule && indicatorsOnly) {
       rule.addEventListener("change", () => {
         if (!rule.value) return;
+        if (rsiDivergence && rsiDivergence.checked) {
+          rsiDivergence.checked = false;
+          releaseRsiLocks();
+        }
         indicatorsOnly.checked = true;
         indicatorsOnly.dispatchEvent(new Event("change"));
       });
@@ -590,6 +625,11 @@ function initPaper() {
             mode.value = attachment.mode || "filter";
             position.value = attachment.position === "before" ? "before" : "after";
             if (patternsV2) {
+              const rsiDivergence = document.getElementById(`${id}-rsi-divergence`);
+              if (rsiDivergence && rsiDivergence.checked) {
+                rsiDivergence.checked = false;
+                rsiDivergence.dispatchEvent(new Event("change"));
+              }
               patternsV2.checked = true;
               patternsV2.dispatchEvent(new Event("change"));
             }
@@ -719,6 +759,8 @@ function initPaper() {
   }
 
   function bookStartBody(id) {
+    const rsiOn = !!(document.getElementById(`${id}-rsi-divergence`) || {}).checked;
+    const indicatorsOn = !rsiOn && !!(document.getElementById(`${id}-indicators-only`) || {}).checked;
     return {
       market: id,
       n_symbols: Number(document.getElementById(`${id}-n`).value || 50),
@@ -727,15 +769,16 @@ function initPaper() {
       volume_gate: !!(document.getElementById(`${id}-volume`) || {}).checked,
       dii_gate_mode: (document.getElementById(`${id}-dii-mode`) || {}).value || "shadow",
       kronos_gate_mode: (document.getElementById(`${id}-kronos-mode`) || {}).value || null,
-      indicators_only: !!(document.getElementById(`${id}-indicators-only`) || {}).checked,
-      rule_id: ((document.getElementById(`${id}-rule`) || {}).value || "").trim(),
+      indicators_only: indicatorsOn,
+      rsi_divergence: rsiOn,
+      rule_id: rsiOn ? "" : ((document.getElementById(`${id}-rule`) || {}).value || "").trim(),
       rule_filter_id: ((document.getElementById(`${id}-rule-filter`) || {}).value || "").trim(),
       rule_filter_mode: ((document.getElementById(`${id}-rule-filter-mode`) || {}).value || "off"),
       rule_filter_position: ((document.getElementById(`${id}-rule-filter-position`) || {}).value || "after"),
-      patterns_v2: !!(document.getElementById(`${id}-patterns-v2`) || {}).checked
-        && !(document.getElementById(`${id}-indicators-only`) || {}).checked,
-      pattern_only: !!(document.getElementById(`${id}-pattern-only`) || {}).checked
-        && !(document.getElementById(`${id}-indicators-only`) || {}).checked,
+      patterns_v2: !rsiOn && !indicatorsOn
+        && !!(document.getElementById(`${id}-patterns-v2`) || {}).checked,
+      pattern_only: !rsiOn && !indicatorsOn
+        && !!(document.getElementById(`${id}-pattern-only`) || {}).checked,
       collect_first: !!(document.getElementById(`${id}-collect-first`) || {}).checked,
       collect_first_top_n: Number(
         (document.getElementById(`${id}-collect-first-top-n`) || {}).value || 4

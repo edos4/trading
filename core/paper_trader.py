@@ -833,7 +833,10 @@ class PaperAccount:
                 return False, f"Invalid decision candle: {invalid}."
             if signal.action not in ("BUY", "SELL"):
                 return False, "Trade entries require BUY or SELL."
-            reason = describe_short_entry_rejection(signal.action, indicators_only=self.indicators_only)
+            reason = describe_short_entry_rejection(
+                signal.action,
+                indicators_only=self.indicators_only or signal.provenance == "rsi_divergence",
+            )
             if reason is not None:
                 return False, reason
             if get_market(self.market).long_only and signal.action == "SELL":
@@ -934,7 +937,8 @@ class PaperAccount:
             return False, "Trade entries require BUY or SELL."
         # Recheck here as well: direct paper entries and saved pending orders
         # must obey the switch even if they bypassed today's scanner gate.
-        reason = describe_short_entry_rejection(signal.action, indicators_only=self.indicators_only)
+        indicator_signal = self.indicators_only or signal.provenance == "rsi_divergence"
+        reason = describe_short_entry_rejection(signal.action, indicators_only=indicator_signal)
         if reason is not None:
             return False, reason
         from core.candle_validation import candle_error
@@ -960,7 +964,7 @@ class PaperAccount:
             )
         if signal.pattern_version_id and signal.requested_rules:
             cap = signal.requested_rules.get("max_open_per_symbol")
-        elif self.indicators_only or signal.provenance == "patternsv2":
+        elif indicator_signal or signal.provenance == "patternsv2":
             # Indicators and Patternsv2 are not pinned pattern versions, so
             # they have no catalog MAX_OPEN_PER_SYMBOL. Looking one up opens
             # the pattern-editor database; a timeout there used to abort the
@@ -988,7 +992,7 @@ class PaperAccount:
                 f"Session {window}: paper will not assume a fill outside continuous "
                 f"AM/PM matching."
             )
-        if self.indicators_only:
+        if indicator_signal:
             # Eight indicators on one symbol, with no cash check, turned a
             # $100k book into hundreds of $10k bets. Pattern scans stay uncapped.
             if open_list:

@@ -52,6 +52,8 @@
       <label class="check"><input type="checkbox" id="{{ book.id }}-pattern-only" /> Pattern-only</label>
       <label class="check"><input type="checkbox" id="{{ book.id }}-indicators-only" /> Indicators only</label>
       <label class="check"><input type="checkbox" id="{{ book.id }}-patterns-v2" checked /> Patternsv2</label>
+      <span class="flag-break"></span>
+      <label class="check" title="Own strategy: confirmed price/RSI swings, a reversal close, a swing stop and a prior support/resistance target. Cannot run with the pattern scan or Patternsv2. Checking it clears those and the Builder strategy. Existing paper risk controls and entry gates still apply."><input type="checkbox" id="{{ book.id }}-rsi-divergence" /> RSI Divergence</label>
       <label class="check" title="Run a saved Builder indicator as this book's own strategy. Selecting one forces Indicators only.">
         Rule <select id="{{ book.id }}-rule"><option value="">—</option></select>
       </label>
@@ -264,7 +266,7 @@
 {% endblock %}
 {% block scripts %}
 <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
-<script src="/static/tv_chart.js?v=25"></script>
+<script src="/static/tv_chart.js?v=26"></script>
 <script src="/static/pattern_notes.js?v=3"></script>
 <script src="/static/chart_draw.js?v=11"></script>
 <script src="/static/chart_export.js?v=1"></script>

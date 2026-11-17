@@ -1072,7 +1072,12 @@ def build_trade_viewer_payload(
     dii_values = {key: pd.Series(value.to_numpy(), index=calculation_frame.index)
                   for key, value in dii_values.items()}
     df = renderer._prepare_df(ohlcv_df, timeframe)
-    rsi_values = _rsi_sma(df["Close"])
+    if pattern == "indicator_rsi_divergence":
+        rsi_values = pd.Series(
+            IndicatorEngine(df.rename(columns=str.lower)).rsi_wilder(14).to_numpy(), index=df.index,
+        )
+    else:
+        rsi_values = _rsi_sma(df["Close"])
     full_frame = df
     rolling_values = _chart_vwap(df)
     vwap_values = _session_chart_vwap(df, timeframe)
@@ -1162,6 +1167,7 @@ def build_trade_viewer_payload(
         })
 
     segments = []
+    rsi_segments = []
     candle_times = {row["time"] for row in candles}
 
     def annotation_time(value):
@@ -1174,7 +1180,15 @@ def build_trade_viewer_payload(
 
     for ann in annotations:
         color = ann.get("color") or "#ffeb3b"
-        if ann.get("type") == "hline":
+        if ann.get("type") == "rsi_segment":
+            start, end = annotation_time(ann.get("start_date")), annotation_time(ann.get("end_date"))
+            first, second = _viewer_finite(ann.get("start_value")), _viewer_finite(ann.get("end_value"))
+            if (ann.get("timeframe") == timeframe and start and end and start < end
+                    and first is not None and second is not None
+                    and 0 <= first <= 100 and 0 <= second <= 100):
+                rsi_segments.append({"data": [{"time": start, "value": first}, {"time": end, "value": second}],
+                                     "color": color, "label": ann.get("label", "")})
+        elif ann.get("type") == "hline":
             price = _viewer_finite(ann.get("price"))
             # Signal annotations carry float32-precision prices (0.8600000143)
             # while trade levels carry float64 (0.86). Exact equality left two
@@ -1326,6 +1340,7 @@ def build_trade_viewer_payload(
         "vwap": vwap,
         "vwap_variants": vwap_variants,
         "rsi14": rsi14,
+        "rsi_segments": rsi_segments,
         "dii": dii,
         "levels": levels,
         "markers": markers,

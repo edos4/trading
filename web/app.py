@@ -110,6 +110,7 @@ class PaperStartRequest(BaseModel):
     pattern_only: bool = False
     indicators_only: bool = False
     patterns_v2: bool = False
+    rsi_divergence: bool = False
     collect_first: bool = False
     collect_first_top_n: int = 4
     stream_start: Optional[str] = None
@@ -128,6 +129,18 @@ class PaperStartRequest(BaseModel):
     kronos_gate_mode: Optional[Literal["off", "shadow", "confirm"]] = None
     kronos_gate_samples: Optional[int] = Field(None, ge=1, le=9)
     dii_gate_mode: Optional[Literal["shadow", "filter"]] = None
+
+    @model_validator(mode="after")
+    def _validate_strategy(self) -> PaperStartRequest:
+        if self.rsi_divergence and (
+            self.patterns_v2 or self.pattern_only
+            or self.rule_id.strip() or self.tv_stack_id.strip()
+        ):
+            raise ValueError(
+                "RSI Divergence cannot be combined with patterns, Patternsv2, "
+                "a Builder strategy, or a TradingView stack"
+            )
+        return self
 
 
 class PaperStopRequest(BaseModel):
@@ -1302,6 +1315,7 @@ def create_app() -> FastAPI:
         rule_mode = bool(rule_id)
         indicators_only = (
             payload.indicators_only
+            or payload.rsi_divergence
             or bool((payload.tv_stack_id or "").strip())
             or rule_mode
         )
@@ -1313,6 +1327,7 @@ def create_app() -> FastAPI:
             volume_gate=payload.volume_gate,
             pattern_only=payload.pattern_only and not indicators_only,
             indicators_only=indicators_only,
+            rsi_divergence=payload.rsi_divergence,
             patterns_v2=payload.patterns_v2 and not indicators_only,
             collect_first=payload.collect_first,
             collect_first_top_n=payload.collect_first_top_n,

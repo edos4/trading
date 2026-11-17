@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -139,6 +140,7 @@ def paper_run_settings(
     kronos_gate_samples: int | None = None,
     kronos_exit_mode: str | None = None,
     dii_gate_mode: str | None = None,
+    rsi_divergence: bool = False,
 ) -> dict[str, Any]:
     """The filters one paper run was started with, as exportable JSON.
 
@@ -147,8 +149,14 @@ def paper_run_settings(
     which gates were on.
     """
     profile = get_market(market)
+    if rsi_divergence:
+        indicators_only = True
+        patterns_v2 = False
+        pattern_only = False
+    indicators_only = bool(indicators_only)
     from core.kronos_confirm import _normalize_samples
     from core.entry_policy import resolve_dii_gate_mode
+    from core.rsi_divergence import POLICY
     enabled_v2: list[str] = []
     disabled_v2: list[str] = []
     if patterns_v2 and not indicators_only:
@@ -174,6 +182,8 @@ def paper_run_settings(
         "dii_gate_mode": resolve_dii_gate_mode(dii_gate_mode, paper=True),
         "pattern_only": bool(pattern_only and not indicators_only),
         "indicators_only": bool(indicators_only),
+        "rsi_divergence": bool(rsi_divergence),
+        "rsi_divergence_policy": deepcopy(POLICY) if rsi_divergence else None,
         "patterns_v2": bool(patterns_v2 and not indicators_only),
         "patternsv2_enabled_patterns": enabled_v2,
         "patternsv2_disabled_patterns": disabled_v2,
@@ -230,6 +240,7 @@ def paper_run_status(cfg: dict[str, Any]) -> str:
         f", DII={str(cfg.get('dii_gate_mode') or 'filter').upper()}"
         f", Pattern-only={'ON' if cfg.get('pattern_only') else 'OFF'}"
         f", Indicators-only={'ON' if cfg.get('indicators_only') else 'OFF'}"
+        f"{', RSI Divergence=ON' if cfg.get('rsi_divergence') else ''}"
         f"{', TradingView=' + str(cfg['tv_stack_name']) if cfg.get('tv_stack_name') else ''}"
         f"{', Rule=' + str(cfg['rule_name']) if cfg.get('rule_name') else ''}"
         f"{', RuleFilter=' + str(cfg['rule_filter_mode']) if rule_filter_on else ''}"
@@ -720,6 +731,7 @@ class PaperBook:
         kronos_gate_mode: str | None = None,
         kronos_gate_samples: int | None = None,
         dii_gate_mode: str | None = None,
+        rsi_divergence: bool = False,
     ) -> str | None:
         from core.entry_policy import resolve_dii_gate_mode
         try:
@@ -729,6 +741,15 @@ class PaperBook:
         stack_name = ""
         tv_stack_id = (tv_stack_id or "").strip()
         rule_id = (rule_id or "").strip()
+        if rsi_divergence:
+            if rule_id or tv_stack_id or patterns_v2 or pattern_only:
+                return (
+                    "RSI Divergence cannot be combined with patterns, Patternsv2, "
+                    "a Builder strategy, or a TradingView stack."
+                )
+            indicators_only = True
+            patterns_v2 = False
+            pattern_only = False
         rule_filter_id = (rule_filter_id or "").strip()
         rule_filter_mode = (rule_filter_mode or "off").strip().lower()
         rule_filter_position = (rule_filter_position or "after").strip().lower()
@@ -819,6 +840,7 @@ class PaperBook:
                 stream_start, tv_stack_id, laya_mode, laya_policy_id,
                 duration_days, rule_id, rule_filter_id, rule_filter_mode,
                 rule_filter_position, kronos_gate_mode, kronos_gate_samples, dii_gate_mode,
+                rsi_divergence,
             ),
             name=f"paper-{self.market}",
             daemon=True,
@@ -1072,6 +1094,7 @@ class PaperBook:
         kronos_gate_mode: str | None = None,
         kronos_gate_samples: int | None = None,
         dii_gate_mode: str | None = None,
+        rsi_divergence: bool = False,
     ) -> None:
         data_feed = None
         profile = get_market(self.market)
@@ -1150,6 +1173,7 @@ class PaperBook:
                 volume_gate=volume_gate,
                 pattern_only=pattern_only and not indicators_only,
                 indicators_only=indicators_only,
+                rsi_divergence=rsi_divergence,
                 patterns_v2=bool(patterns_v2) and not indicators_only,
                 collect_first=collect_first,
                 collect_first_top_n=collect_first_top_n,
@@ -1186,6 +1210,7 @@ class PaperBook:
                 pattern_only=pattern_only,
                 indicators_only=indicators_only,
                 patterns_v2=patterns_v2,
+                rsi_divergence=rsi_divergence,
                 collect_first=collect_first,
                 collect_first_top_n=collect_first_top_n,
                 tv_stack_name=self.tv_stack_name,
@@ -1331,6 +1356,7 @@ class PaperBookManager:
         kronos_gate_mode: str | None = None,
         kronos_gate_samples: int | None = None,
         dii_gate_mode: str | None = None,
+        rsi_divergence: bool = False,
     ) -> str | None:
         with self._start_lock:
             book = self._book(market)
@@ -1360,6 +1386,7 @@ class PaperBookManager:
                 volume_gate=volume_gate,
                 pattern_only=pattern_only,
                 indicators_only=indicators_only,
+                rsi_divergence=rsi_divergence,
                 patterns_v2=patterns_v2,
                 collect_first=collect_first,
                 collect_first_top_n=collect_first_top_n,
@@ -1392,6 +1419,7 @@ class PaperBookManager:
                 volume_gate=bool(payload.get("volume_gate")),
                 pattern_only=bool(payload.get("pattern_only")),
                 indicators_only=bool(payload.get("indicators_only")),
+                rsi_divergence=bool(payload.get("rsi_divergence")),
                 patterns_v2=bool(payload.get("patterns_v2")),
                 collect_first=bool(payload.get("collect_first")),
                 collect_first_top_n=int(payload.get("collect_first_top_n") or 4),

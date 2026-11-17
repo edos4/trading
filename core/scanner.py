@@ -186,6 +186,7 @@ class MarketScanner:
         kronos_exit_min_agree: int | None = None,
         stream_end: str | None = None,
         dii_gate_mode: str | None = None,
+        rsi_divergence: bool = False,
     ):
         self._symbols = symbols or settings.symbols
         from core.entry_policy import resolve_dii_gate_mode
@@ -206,6 +207,14 @@ class MarketScanner:
         self._volume_gate_obv_bars = settings.volume_gate_obv_bars
         self._tv_stack_id = (tv_stack_id or "").strip()
         self._rule_id = (rule_id or "").strip()
+        self._rsi_divergence = bool(rsi_divergence)
+        if self._rsi_divergence and (
+            self._rule_id or self._tv_stack_id or patterns_v2 or pattern_only
+        ):
+            raise ValueError(
+                "RSI Divergence cannot be combined with patterns, Patternsv2, "
+                "a Builder strategy, or a TradingView stack"
+            )
         self._rule_filter_id = (rule_filter_id or "").strip()
         self._rule_filter_mode = (rule_filter_mode or "off").strip().lower()
         if self._rule_filter_mode not in ("off", "shadow", "filter"):
@@ -217,6 +226,7 @@ class MarketScanner:
             raise ValueError("Before-placement rule filters require filter mode")
         self._indicators_only = (
             bool(indicators_only) or bool(self._tv_stack_id) or bool(self._rule_id)
+            or self._rsi_divergence
         )
         self._patterns_v2 = bool(patterns_v2) and not self._indicators_only
         self._pattern_only = bool(pattern_only) and not self._indicators_only
@@ -254,7 +264,10 @@ class MarketScanner:
             self._paper.pattern_only = self._pattern_only
             self._paper.indicators_only = self._indicators_only
             from core.run_manifest import build_run_manifest
-            self._paper.run_manifest = build_run_manifest(patterns_v2=self._patterns_v2, market=self._market)
+            self._paper.run_manifest = build_run_manifest(
+                patterns_v2=self._patterns_v2, market=self._market,
+                rsi_divergence=self._rsi_divergence,
+            )
         self._patterns: list[BasePattern] = []
         self._pattern_files: dict[str, str] = {}
         self._analyze_pool = None
@@ -444,6 +457,7 @@ class MarketScanner:
                 'slippage_pct': self._paper.slippage_pct, 'max_daily_loss': self._paper.max_daily_loss,
                 'position_notional': ENGINE.position_notional, 'risk_pct': ENGINE.risk_pct,
                 'stream_end': stream_end, 'patterns_v2': self._patterns_v2,
+                'rsi_divergence': self._rsi_divergence,
                 'kronos_samples': self._kronos_gate.samples if self._kronos_gate else settings.kronos_gate_samples,
                 'collect_first_top_n': self._collect_first_top_n,
                 'volume_gate_rvol_min': self._volume_gate_rvol_min,
@@ -1648,17 +1662,28 @@ class MarketScanner:
     def _analyze_local(self, snapshot: MarketSnapshot) -> tuple[int, list[TradeSignal]]:
         """Inline analyze on this loop — tests, workers=1, or pool fallback."""
         if getattr(self, "_patterns_v2", False) and not getattr(self, "_indicators_only", False):
-            if not self._v2_gate_before(snapshot.symbol, snapshot.timeframe):
-                return 0, []
-            n_eval, hits = self._analyze_patterns_v2(snapshot)
-            return n_eval, self._v2_apply_before(snapshot, hits)
+            n_eval, hits = 0, []
+            if self._v2_gate_before(snapshot.symbol, snapshot.timeframe):
+                n_eval, hits = self._analyze_patterns_v2(snapshot)
+                hits = self._v2_apply_before(snapshot, hits)
+            extra_eval, extra_hits = self._analyze_local_patterns(snapshot)
+            return n_eval + extra_eval, hits + extra_hits
+        return self._analyze_local_patterns(snapshot)
+
+    def _analyze_local_patterns(self, snapshot: MarketSnapshot) -> tuple[int, list[TradeSignal]]:
+        """Run in-process detectors alongside the batched Patternsv2 scan."""
         symbol, timeframe = snapshot.symbol, snapshot.timeframe
+        # Patternsv2Scan is a lifecycle/timeframe marker; its detectors run
+        # through the optimized array path and in the pool.
+        patterns = [pattern for pattern in self._patterns
+                    if callable(getattr(pattern, "analyze", None))
+                    and timeframe in pattern.timeframes]
+        if not patterns:
+            return 0, []
         n_bars = self._store.available(symbol, timeframe)
         n_eval = 0
         hits: list[TradeSignal] = []
-        for pattern in self._patterns:
-            if timeframe not in pattern.timeframes:
-                continue
+        for pattern in patterns:
             min_bars = max(
                 int(getattr(pattern, "MIN_BARS", 2) or 2),
                 PATTERN_SCAN_HISTORY_BARS,
@@ -1733,6 +1758,10 @@ class MarketScanner:
             return
         if getattr(self, "_patterns_v2", False):
             await self._run_analyzes_v2(snapshots)
+            for snapshot in snapshots:
+                n_eval, hits = self._analyze_local_patterns(snapshot)
+                self.stats["pattern_evaluations"] += n_eval
+                await self._emit_signals(snapshot, hits)
             return
         if self._analyze_pool is None:
             for snapshot in snapshots:
@@ -1776,10 +1805,12 @@ class MarketScanner:
         Numeric arrays go out, raw detections come back. Signal conversion,
         rule gates, the ledger, and replay advancement stay on this loop.
         """
-        from patterns_v2.signals import MIN_BARS, detect_raw
+        from patterns_v2.signals import MIN_BARS, Patternsv2Scan, detect_raw
 
         pending: list[tuple[MarketSnapshot, tuple]] = []
         for snapshot in snapshots:
+            if snapshot.timeframe not in Patternsv2Scan.timeframes:
+                continue
             if not self._v2_gate_before(snapshot.symbol, snapshot.timeframe):
                 continue
             arrays = self._store.detect_arrays(
@@ -1842,8 +1873,8 @@ class MarketScanner:
 
     # ── Signal pipeline ────────────────────────────────────────────────────────
     def _apply_fixed_stop(self, signal: TradeSignal, candle) -> None:
-        """Apply the legacy override; V2 owns its structural/ATR risk ladder."""
-        if signal.provenance == "patternsv2":
+        """Apply the legacy override; V2 and RSI divergence own their stops."""
+        if signal.provenance in ("patternsv2", "rsi_divergence"):
             return
         pct = float(settings.stop_loss_pct or 0.0)
         if pct <= 0 or signal.action not in ("BUY", "SELL"):
@@ -1907,8 +1938,9 @@ class MarketScanner:
 
         from core.entry_policy import describe_short_entry_rejection
 
+        indicator_signal = self._indicators_only or signal.provenance == "rsi_divergence"
         reason = describe_short_entry_rejection(
-            signal.action, indicators_only=self._indicators_only,
+            signal.action, indicators_only=indicator_signal,
         )
         if reason is not None:
             log.info(f"Signal REJECTED by short gate — {signal.symbol} {signal.pattern}")
@@ -1932,7 +1964,7 @@ class MarketScanner:
         # 2026-11 export was +$1,691 and held both winners.
         price_floor = float(settings.min_signal_price_usd or 0.0)
         if (
-            not self._indicators_only
+            not indicator_signal
             and self._market == "us"
             and signal.action in ("BUY", "SELL")
             and price_floor > 0
@@ -1963,7 +1995,7 @@ class MarketScanner:
 
         # Paper records the DII band vote by default so unvalidated narrow bands
         # cannot starve both sides. Explicit filter mode retains the veto.
-        if not self._indicators_only and signal.action in ("BUY", "SELL"):
+        if not indicator_signal and signal.action in ("BUY", "SELL"):
             from analysis.pattern_dii import MIN_BARS, describe_pattern_dii_rejection
 
             df = self._store.get_df(signal.symbol, signal.timeframe, min_bars=MIN_BARS)
@@ -2599,9 +2631,11 @@ class MarketScanner:
 
     def _analyze_patterns_v2(self, snapshot: MarketSnapshot) -> tuple[int, list[TradeSignal]]:
         """Breakouts from technical-pattern-detector on the current bar only."""
-        from patterns_v2.signals import MIN_BARS, detect_raw
+        from patterns_v2.signals import MIN_BARS, Patternsv2Scan, detect_raw
 
         symbol, timeframe = snapshot.symbol, snapshot.timeframe
+        if timeframe not in Patternsv2Scan.timeframes:
+            return 0, []
         arrays = self._store.detect_arrays(symbol, timeframe, min_bars=MIN_BARS)
         if arrays is None:
             return 0, []
@@ -2639,6 +2673,13 @@ class MarketScanner:
         bind(symbol, getattr(indicator, "timeframes", ["1d"])[0], exchange)
 
     def _discover_patterns(self) -> None:
+        if getattr(self, "_rsi_divergence", False):
+            from core.rsi_divergence import RSIDivergenceIndicator
+
+            self._version_set = {}
+            self._patterns = [RSIDivergenceIndicator()]
+            self._pattern_files = {self._patterns[0].name: "rsi_divergence"}
+            return
         if getattr(self, "_rule_id", ""):
             from analysis.rule_detector import VisualRuleIndicator
             from core.rules_store import open_rules_store

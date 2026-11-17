@@ -646,6 +646,16 @@ window.TVChart = (function createTVChart(preferences = {}) {
         });
       }
       rsiSeries.setData(rsiData);
+      if (view.patterns) {
+        for (const segment of data.rsi_segments || []) {
+          if (!segment.data || segment.data.length < 2) continue;
+          const line = rsiChart.addLineSeries({
+            color: segment.color || RSI, lineWidth: 2,
+            priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+          });
+          line.setData(segment.data);
+        }
+      }
       rsiChart.timeScale().fitContent();
       if (!diiEl) cleanup.push(linkTimeScales(chart, rsiChart));
       // Hovering the oscillator still reports the candle under the cursor.

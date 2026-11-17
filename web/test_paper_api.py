@@ -207,6 +207,62 @@ class WebPaperApiTests(unittest.TestCase):
         self.assertTrue(start.call_args.kwargs.get("patterns_v2"))
         self.assertFalse(start.call_args.kwargs.get("indicators_only"))
 
+    def test_rsi_divergence_controls_and_start_payload(self) -> None:
+        self._login()
+        page = self.client.get("/paper")
+        self.assertIn("Cannot run with the pattern scan or Patternsv2", page.text)
+        self.assertIn('class="flag-break"', page.text)
+        for market in ("us", "ph"):
+            self.assertIn(f'id="{market}-rsi-divergence" /> RSI Divergence', page.text)
+            with patch("web.app.paper_books.start", return_value=None) as start:
+                response = self.client.post("/api/paper/start", json={
+                    "market": market, "rsi_divergence": True,
+                    "patterns_v2": False, "pattern_only": False,
+                })
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(start.call_args.kwargs["rsi_divergence"])
+            self.assertTrue(start.call_args.kwargs["indicators_only"])
+            self.assertFalse(start.call_args.kwargs["patterns_v2"])
+            self.assertFalse(start.call_args.kwargs["pattern_only"])
+
+    def test_rsi_divergence_is_off_by_default_and_refuses_other_strategies(self) -> None:
+        self._login()
+        with patch("web.app.paper_books.start", return_value=None) as start:
+            response = self.client.post("/api/paper/start", json={"market": "us"})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(start.call_args.kwargs["rsi_divergence"])
+        for conflict in (
+            {"rule_id": "test"},
+            {"tv_stack_id": "test"},
+            {"patterns_v2": True},
+            {"pattern_only": True},
+        ):
+            with patch("web.app.paper_books.start") as start:
+                response = self.client.post("/api/paper/start", json={
+                    "market": "us", "rsi_divergence": True, **conflict,
+                })
+            self.assertEqual(response.status_code, 400, conflict)
+            start.assert_not_called()
+
+    def test_rsi_divergence_reaches_start_both(self) -> None:
+        self._login()
+        with patch("web.app.paper_books.start_both", return_value={}) as start:
+            response = self.client.post("/api/paper/start-both", json={
+                "us": {"rsi_divergence": True, "patterns_v2": False},
+                "ph": {"rsi_divergence": False, "patterns_v2": True},
+            })
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(start.call_args.args[0]["us"]["rsi_divergence"])
+        self.assertFalse(start.call_args.args[0]["us"]["patterns_v2"])
+        self.assertFalse(start.call_args.args[0]["ph"]["rsi_divergence"])
+        self.assertTrue(start.call_args.args[0]["ph"]["patterns_v2"])
+        with patch("web.app.paper_books.start_both") as start:
+            response = self.client.post("/api/paper/start-both", json={
+                "us": {"rsi_divergence": True, "patterns_v2": True},
+            })
+        self.assertEqual(response.status_code, 400)
+        start.assert_not_called()
+
     def test_indicators_only_replaces_patterns_v2(self) -> None:
         self._login()
         body = {
