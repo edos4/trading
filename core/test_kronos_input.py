@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
-from core.kronos_input import prepare_context
+from core.kronos_input import InsufficientHistory, prepare_context
 
 
 def frame(prices):
@@ -23,7 +23,9 @@ def test_discontinuity_uses_post_break_data_without_changing_prices():
 
 
 def test_recent_break_abstains_instead_of_reusing_old_regime():
-    with pytest.raises(ValueError,match='post-price-break'):
+    # The typed class matters: a replay must classify this as the symbol's own
+    # short context, not as a retryable worker fault (retrying stops the run).
+    with pytest.raises(InsufficientHistory,match='post-price-break'):
         prepare_context(frame([100.]*200+[1.]*30),256)
 
 

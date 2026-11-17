@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
@@ -134,6 +135,43 @@ def test_database_query_scopes_market_and_historical_cutoff(monkeypatch):
     assert params == ["TEST.PS", "ph", "2026-10-30"]
     assert result.index[-1] == pd.Timestamp("2026-10-30")
     conn.close.assert_called_once()
+
+
+def test_short_series_is_the_symbol_defect_class_not_a_worker_fault():
+    """49 bars is the symbol's own problem, and it must travel as such.
+
+    The message reaches the gate as ``Kronos worker error for SOLS: ...`` either
+    way; only the class lets a replay record the miss instead of retrying it
+    until the bounded retry stops the run.
+    """
+    predictor = SimpleNamespace(predict=Mock())
+    with pytest.raises(worker.InsufficientHistory, match="only 49 bars; need 60"):
+        worker.forecast_returns(predictor, "SOLS", frame(49), 3)
+    predictor.predict.assert_not_called()
+    assert worker.error_kind(worker.InsufficientHistory("only 49 bars; need 60")) == (
+        worker.SYMBOL_HISTORY_ERROR_KIND)
+    assert worker.error_kind(RuntimeError("CUDA out of memory")) == "worker_error"
+
+
+def test_context_refusal_is_not_swallowed_into_the_generic_invalid_context_branch():
+    """A too-recent price break is a short series too, not a broken worker."""
+    data = frame(80)
+    data.iloc[-30:, data.columns.get_indexer(['open', 'high', 'low', 'close'])] *= .000001
+    with pytest.raises(worker.InsufficientHistory, match='post-price-break'):
+        worker._prep_1d_frame(data, 400)
+
+
+def test_short_series_symbol_is_tagged_in_the_worker_payload(monkeypatch, tmp_path):
+    """The payload tag is what the gate reads; a bare message would be retried."""
+    monkeypatch.setattr(worker, "load_confirmation_predictor",
+                        lambda *a, **k: (SimpleNamespace(), "cpu"))
+    monkeypatch.setattr(worker, "load_symbol_df", lambda *a, **k: frame(49))
+    out = tmp_path / "payload.json"
+    assert worker.main(["--symbols", "SOLS", "--model", "base", "--out", str(out)]) == 0
+    row = json.loads(out.read_text())["results"][0]
+    assert row["symbol"] == "SOLS" and row["returns"] == []
+    assert row["error_kind"] == worker.SYMBOL_HISTORY_ERROR_KIND
+    assert "only 49 bars; need 60" in row["error"]
 
 
 def test_worker_passes_only_post_collapse_prices_and_reports_context():

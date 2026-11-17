@@ -9,6 +9,7 @@ from core.kronos_confirm import (
     atr_pct_from_frame,
     classify,
     evaluate,
+    failure_kind_for,
     sideways_band_pct,
     summarize,
 )
@@ -254,6 +255,56 @@ def test_entry_and_exit_share_one_worker_call():
     entries, exits = gate.flush_with_exits()
     assert calls == [["BBB", "AAA"]]  # Existing positions have inference priority.
     assert len(entries) == 1 and len(exits) == 1
+
+
+@pytest.mark.parametrize("reason,error_kind,expected", [
+    ("Kronos check cap reached", None, "capacity"),
+    ("Kronos worker error for AAA: RuntimeError: CUDA out of memory", None, "infrastructure_or_context"),
+    ("Kronos unavailable: no worker", None, "infrastructure_or_context"),
+    ("Kronos busy", None, "infrastructure_or_context"),
+    # The structured class wins over the message: the same text is a symbol's
+    # own short series, which no retry at that anchor can fix.
+    ("Kronos worker error for SOLS: InsufficientHistory: only 49 bars; need 60",
+     "insufficient_history", "symbol_history"),
+    ("Kronos refused SOLS", "insufficient_history", "symbol_history"),
+    ("2/3 forecasts flat (need 2)", None, "model_vote"),
+])
+def test_failure_kind_separates_symbol_defects_from_worker_faults(reason, error_kind, expected):
+    assert failure_kind_for(reason, error_kind) == expected
+
+
+def test_short_series_row_is_reported_as_a_symbol_defect(monkeypatch):
+    """The class must survive the worker boundary, not just the message.
+
+    Both kinds arrive as ``Kronos worker error for SYMBOL: ...``; the replay
+    retries that shape and stops the whole run after three tries. Only the
+    structured kind lets the scanner record the miss instead.
+    """
+    rows = {
+        "SHORT": ("insufficient_history", "InsufficientHistory: only 49 bars; need 60"),
+        "BROKEN": ("worker_error", "RuntimeError: CUDA out of memory"),
+    }
+
+    def fake_run(script, args, *, timeout_s, label):
+        symbols = args[args.index("--symbols") + 1:args.index("--samples")]
+        return {
+            "model": "finetuned", "samples": 3, "market": "us",
+            "results": [
+                {"symbol": symbol, "returns": [], "error": rows[symbol][1],
+                 "error_kind": rows[symbol][0]}
+                for symbol in symbols
+            ],
+        }
+
+    monkeypatch.setattr("core.kronos_confirm.run_worker", fake_run)
+    gate = KronosConfirmGate(mode="confirm", exit_mode="exit", cache_minutes=0)
+    gate.queue(_signal(symbol="SHORT"), _candle(), None)
+    gate.queue(_signal(symbol="BROKEN"), _candle(), None)
+    entries, _exits = gate.flush_with_exits()
+
+    kinds = {getattr(signal, "symbol"): evidence["failure_kind"] for signal, _, _, evidence in entries}
+    assert kinds == {"SHORT": "symbol_history", "BROKEN": "infrastructure_or_context"}
+    assert all(verdict.decision == "no_opinion" for _, _, verdict, _ in entries)
 
 
 def test_worker_calls_are_cut_at_each_replay_anchor(monkeypatch):

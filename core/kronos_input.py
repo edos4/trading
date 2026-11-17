@@ -25,6 +25,18 @@ class ModelContext:
                 'regime_start': self.regime_start}
 
 
+class InsufficientHistory(ValueError):
+    """The symbol's own series cannot supply the model's minimum context.
+
+    Deterministic for a given anchor: the symbol is a recent listing, or its
+    usable regime is shorter than ``min_bars``. No retry of the same anchor can
+    change the answer, so callers must record the miss and move on rather than
+    spend a bounded retry on it — in a replay, exhausting that retry stops the
+    whole run. It stays a ``ValueError`` so the existing context guards that
+    raise or catch ``ValueError`` keep their contract.
+    """
+
+
 def prepare_context(frame: pd.DataFrame, lookback: int = 400, *, min_bars: int = MIN_CONTEXT_BARS) -> ModelContext:
     """Use only the latest observed price regime; never inspect forecast labels.
 
@@ -49,7 +61,7 @@ def prepare_context(frame: pd.DataFrame, lookback: int = 400, *, min_bars: int =
     old_scale = np.flatnonzero(closes[:-1] > PRICE_BREAK_RATIO * closes[-1])
     start = int(old_scale[-1] + 1) if len(old_scale) else 0
     if original - start < min_bars:
-        raise ValueError(f'Insufficient post-price-break context: {original-start} bars; need {min_bars}')
+        raise InsufficientHistory(f'Insufficient post-price-break context: {original-start} bars; need {min_bars}')
     work = work.iloc[start:].copy()
     values = work[list(OHLCV)].to_numpy(dtype=float)
     prices = work[list(OHLCV[:4])]

@@ -28,9 +28,22 @@ import pandas as pd
 import numpy as np
 
 from core.kronos_eval import LOOKBACK, MAX_CONTEXT, load_predictor, with_amount
+from core.kronos_input import InsufficientHistory
 from utils.logger import log
 
 MIN_BARS = 60
+
+#: Structured failure classes for the gate. ``insufficient_history`` means the
+#: symbol's own series is too short for the model's minimum context: no retry of
+#: that anchor can succeed, so the gate must not spend its bounded replay retry
+#: on it (the third try stops a whole replay run).
+SYMBOL_HISTORY_ERROR_KIND = "insufficient_history"
+
+
+def error_kind(exc: BaseException) -> str:
+    """Classify a per-symbol worker failure for the caller's retry decision."""
+    return (SYMBOL_HISTORY_ERROR_KIND if isinstance(exc, InsufficientHistory)
+            else "worker_error")
 
 
 def load_symbol_df(symbol: str, as_of: str | None = None, market: str = "us") -> pd.DataFrame:
@@ -62,7 +75,7 @@ def load_symbol_df(symbol: str, as_of: str | None = None, market: str = "us") ->
     finally:
         conn.close()
     if not rows:
-        raise ValueError(f"no daily bars for {symbol} in stocks_history")
+        raise InsufficientHistory(f"no daily bars for {symbol} in stocks_history")
     df = pd.DataFrame(rows, columns=["bar_date", "open", "high", "low", "close", "volume"])
     df.index = pd.to_datetime(df["bar_date"])
     df = df.sort_index()
@@ -81,6 +94,11 @@ def _prep_1d_frame(df: pd.DataFrame, lookback: int):
     from core.kronos_input import prepare_context
     try:
         work = prepare_context(work, use).frame
+    except InsufficientHistory:
+        # The symbol's own regime is shorter than the minimum context: report
+        # the specific reason instead of folding it into the generic
+        # invalid-context branch, which callers would treat as a worker defect.
+        raise
     except ValueError:
         return None
     columns = ["open", "high", "low", "close", "volume"]
@@ -140,7 +158,7 @@ def forecast_returns(
 
     from core.kronos_input import prepare_context
     if df is None or len(df) < MIN_BARS:
-        raise ValueError(f"only {0 if df is None else len(df)} bars; need {MIN_BARS}")
+        raise InsufficientHistory(f"only {0 if df is None else len(df)} bars; need {MIN_BARS}")
     selection = prepare_context(df, lookback)
     prepared = _prep_1d_frame(selection.frame, lookback)
     if prepared is None:
@@ -276,6 +294,10 @@ def main(argv: list[str] | None = None) -> int:
                 "symbol": symbol,
                 "returns": [],
                 "error": f"{type(exc).__name__}: {exc}",
+                # The gate decides retry-vs-record from this, not from the
+                # message text: a short series is a symbol defect, an
+                # unavailable worker is not.
+                "error_kind": error_kind(exc),
             })
 
     payload = {

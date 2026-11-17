@@ -90,9 +90,10 @@ def model_holdout_evidence(book: dict, expected_identity: str | None = None) -> 
     unique = {_digest(row): row for row in evidence}.values()
     checked, ineligible = [], []
     for row in unique:
-        # Retries with no forecast are not model votes; retained run health
-        # still determines whether the complete experiment finished.
-        if row.get('failure_kind') in ('capacity', 'infrastructure_or_context'):
+        # Retries with no forecast are not model votes, and neither is a symbol
+        # whose own series is too short to model; retained run health still
+        # determines whether the complete experiment finished.
+        if row.get('failure_kind') in ('capacity', 'infrastructure_or_context', 'symbol_history'):
             continue
         provenance = row.get('model_provenance') or {}
         reasons = []

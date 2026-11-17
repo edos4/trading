@@ -373,10 +373,13 @@ Pure logic and wiring, no GPU and no database:
   vote tallies; the full 3-vote truth table including `min_agree` ties; cache hit/miss;
   unavailable → `no_opinion`; the credibility bound dropping an implausible simulation
   instead of letting it manufacture a majority; an all-unusable forecast reading as
-  `no_opinion` rather than a worker error.
+  `no_opinion` rather than a worker error; the failure-kind split between a retryable
+  worker fault and a symbol's own short series, including one through a real worker
+  payload row.
 - `core/test_kronos_confirm_worker.py` — input validation, per-sample seeding, and the
   per-sample drop rule: one degenerate draw leaves the other votes intact and is counted in
-  `rejected`, and a bad draw never reaches `returns`.
+  `rejected`, and a bad draw never reaches `returns`. The short-series class is asserted at
+  the raise site, through the generic context guard, and in the written payload.
 - `core/test_scanner_kronos_confirm.py` — modelled on `core/test_scanner_dii_gate.py`:
   mocked store, `votes_fn` injected. Asserts shadow never blocks and stamps evidence;
   `confirm` queues only `confirm`; `oppose` and `no_opinion` both block; unavailable and
@@ -525,3 +528,42 @@ record `active_controls.kronos_decision_policy: "direction_only"`. Saved evidenc
 from earlier runs is revalidated from its original votes without a fill-session
 forecast. The ignored legacy exit threshold is excluded from resolved controls
 and from the list of supported experiment changes.
+
+## 14. November 13 short-history context refusals
+
+A US replay stopped after 31 sessions (`2025-11-13` → `2025-12-29`) with
+`termination_reason: kronos_unavailable`, `kronos_deferred: 9` and no error on
+the desk — the status read only `Stopped.` The cause was one symbol: SOLS, a
+recent listing whose series at that anchor was 49 daily bars against the
+worker's `MIN_BARS = 60`. Both its `1W` and `1d` signals hit
+`Kronos worker error for SOLS: ValueError: only 49 bars; need 60` on three
+consecutive scans.
+
+The classification was the defect. `_evidence` derived `failure_kind` from the
+reason *text*, and any message containing `worker` became
+`infrastructure_or_context`. In a replay that kind defers the decision
+(`replay_action: retry_same_session`), which counts a `snapshot_errors` entry,
+which makes `scan_complete` false, which stops the replay date from advancing —
+so the same anchor was rescanned, and `scanner._defer_replay_kronos` stopped the
+whole run when the retry count for that `(symbol, timeframe, anchor_date)`
+reached 3. A message-only kind cannot separate a symbol's own short series from
+a broken worker, and the two need opposite handling.
+
+Now the class travels: `core.kronos_input.InsufficientHistory(ValueError)` is
+raised by the worker's bar-count check, its missing-series check and by
+`prepare_context`'s post-price-break shortage (which `_prep_1d_frame` no longer
+folds into the generic invalid-context branch). Each failed symbol row carries
+`error_kind: insufficient_history`, `_fetch` records it on the `Forecast`, and
+`failure_kind_for` maps it to `symbol_history` regardless of the message. A
+`symbol_history` miss is never deferred: the entry is recorded as a rejected
+decision (the position keeps its other exits), the scan completes, the replay
+date advances, and the symbol may vote at a later anchor once its series is long
+enough. The scanner logs the refusal once per symbol per run and counts it in
+`kronos_symbol_history`, which `utils/trade_export.py` keeps;
+`analysis/paper_policy_evaluation.py` treats it as a non-vote like the other
+two failure kinds.
+
+What is deliberately unchanged: a genuine infrastructure miss
+(`worker`, `unavailable`, `busy`, `differs`, `no forecast`) still defers and
+still stops a replay after the third try. Tightening that bound is a separate
+change.

@@ -9,6 +9,7 @@ import pytest
 
 pytestmark = pytest.mark.usefixtures("confirmed_buy_dii")
 from config import settings
+from core.kronos_confirm import Forecast
 from core.kronos_process import KronosBusy
 from core.paper_trader import PaperAccount
 from core.scanner import MarketScanner
@@ -101,3 +102,54 @@ def test_retry_limit_counts_context_observations_not_pattern_rows(monkeypatch):
         assert scanner._running
     asyncio.run(scanner._scan_all(feed_sessions=[object()]))
     assert not scanner._running and scanner._kronos_gate._fetch_fn.call_count==3
+
+
+def _short_history(symbols):
+    """Worker rows for a symbol whose own series is shorter than MIN_BARS."""
+    return {symbol: Forecast((),'',0,0,error='InsufficientHistory: only 49 bars; need 60',
+                             error_kind='insufficient_history') for symbol in symbols}
+
+
+def test_short_history_entry_is_recorded_without_stopping_the_replay(monkeypatch):
+    """A listing too short to model must not end a replay.
+
+    The refusal is deterministic for its anchor, so deferring it spent the
+    bounded retry and the third try set termination_reason='kronos_unavailable':
+    one short-history symbol stopped a 31-session replay at its own anchor.
+    """
+    scanner,book,feed=setup(monkeypatch,['AAA'])
+    scanner._kronos_gate._fetch_fn=_short_history
+    async def analyze(snapshots):
+        for snap in snapshots:
+            await scanner._emit_signals(snap,[replace(candidate(False),symbol=snap.symbol)])
+    scanner._run_analyzes=analyze
+    for _ in range(3):
+        asyncio.run(scanner._scan_all(feed_sessions=[object()]))
+        assert scanner._running
+    assert feed.advances==3
+    assert scanner.stats.get('kronos_deferred',0)==0
+    assert 'termination_reason' not in scanner.stats
+    assert scanner.stats['kronos_symbol_history']==1
+    assert not book.pending_entries
+    # Recorded as a terminal rejection for the anchor, never as a deferral:
+    # a deferral is what spends the bounded retry that stops the run.
+    kronos_rows=[call.kwargs for call in scanner._append_signal_log.call_args_list
+                 if str(call.kwargs.get('reason','')).startswith('Kronos')]
+    assert kronos_rows and {row['status'] for row in kronos_rows}=={'rejected'}
+
+
+def test_short_history_position_is_neither_deferred_nor_exited(monkeypatch):
+    """A held short-history symbol keeps its other exits and blocks nothing."""
+    scanner,book,feed=setup(monkeypatch,['AAA'])
+    assert book.open_position(replace(candidate(False),symbol='AAA'),bar(100),OHLCVStore())[0]
+    scanner._kronos_gate._fetch_fn=_short_history
+    async def analyze(snapshots):
+        return None
+    scanner._run_analyzes=analyze
+    for _ in range(3):
+        asyncio.run(scanner._scan_all(feed_sessions=[object()]))
+    assert feed.advances==3 and scanner._running
+    assert scanner.stats.get('kronos_deferred',0)==0
+    assert scanner.stats.get('kronos_exits',0)==0
+    position=book.open_for('AAA')[0]
+    assert not getattr(position,'pending_exit_reason','')

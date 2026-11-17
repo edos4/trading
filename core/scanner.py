@@ -296,6 +296,10 @@ class MarketScanner:
         self._preprocessed_fills: set[tuple[str,str]] = set()
         self._kronos_retry_tries: dict[tuple, int] = {}
         self._kronos_failure_seen: set[tuple] = set()
+        # Symbols the Kronos worker refused for their own short series this run.
+        # A symbol defect, not a worker fault: recorded once, never retried, so
+        # it cannot spend the bounded retry that stops a replay.
+        self._kronos_symbol_history: set[str] = set()
         # Retained for compatibility/injected hooks. The shipped cooldown
         # helper is inactive; this map does not enforce an admission delay.
         self._cooldown_tracker: dict[tuple[str, str], tuple[int, bool]] = {}
@@ -2387,6 +2391,17 @@ class MarketScanner:
 
     def _defer_replay_kronos(self, value, evidence: dict) -> bool:
         kind=evidence.get('failure_kind')
+        if kind=='symbol_history':
+            # The worker refused the symbol's own context (fewer bars than the
+            # model's minimum, e.g. a recent listing). Retrying the same anchor
+            # cannot change that answer, so the miss is recorded as a rejected
+            # decision instead of deferred: a deferral spends the bounded retry,
+            # and the third spent retry stops the whole run
+            # ('kronos_unavailable') — which is how one short-history symbol
+            # ended a replay after 31 sessions. The symbol can vote at a later
+            # anchor once its series is long enough.
+            self._note_kronos_symbol_history(value.symbol,evidence)
+            return False
         if (self._paper is None or not getattr(self._paper,'assume_session_open',False)
                 or kind not in ('capacity','infrastructure_or_context')):
             return False
@@ -2409,6 +2424,23 @@ class MarketScanner:
                 self.stats['termination_reason']='kronos_unavailable'
                 evidence['replay_action']='stopped_incomplete'
         return True
+
+    def _note_kronos_symbol_history(self, symbol: str, evidence: dict) -> None:
+        """Record a symbol-scoped Kronos context refusal once per run.
+
+        The symbol cannot be voted by the model at this anchor, so the entry is
+        rejected (or the position keeps its other exit rules) and the replay
+        clock advances. Logging once keeps a 250-session replay readable.
+        """
+        if symbol in self._kronos_symbol_history:
+            return
+        self._kronos_symbol_history.add(symbol)
+        self.stats['kronos_symbol_history']=len(self._kronos_symbol_history)
+        log.warning(
+            f"Scan | Kronos cannot vote for {symbol} — "
+            f"{evidence.get('reason') or 'symbol history too short'} "
+            f"(symbol-scoped, not retried)"
+        )
 
     def _handle_kronos_exit(self, position, verdict, evidence: dict) -> None:
         """Record every position decision after its final action is known."""

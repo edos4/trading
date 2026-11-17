@@ -163,7 +163,7 @@ def _scan_stats(raw: Any) -> Optional[dict[str, Any]]:
         kronos_exit_shadow kronos_exits kronos_exit_deferred collect_first_ranked
         collect_first_selected rule_filter_shadow rule_filter_rejected rule_filter_prefiltered
         short_rejected geometry_rejected price_floor_rejected orders_queued
-        laya_shadow laya_filtered kronos_deferred'''.split())
+        laya_shadow laya_filtered kronos_deferred kronos_symbol_history'''.split())
     return deepcopy({k:v for k,v in raw.items() if k in keep})
 
 

@@ -70,6 +70,9 @@ class Forecast:
     anchor_close: float
     atr_pct: float
     error: str | None = None
+    #: Structured worker failure class (see ``failure_kind_for``); the message
+    #: alone cannot separate a symbol's own short series from a broken worker.
+    error_kind: str | None = None
     provenance: dict | None = None
     context_sha256: str | None = None
     model_context: dict | None = None
@@ -234,6 +237,24 @@ def evaluate(
         "no_opinion",
         f"no majority of {need} in either direction",
     )
+
+
+def failure_kind_for(reason: str, error_kind: str | None = None) -> str:
+    """Classify a Kronos miss so the caller knows whether a retry can help.
+
+    ``symbol_history`` is the symbol's own context (a series shorter than the
+    model's minimum, or a regime with too few bars). It is deterministic for an
+    anchor, so a replay must record the miss and keep the clock moving: deferring
+    it spends the bounded retry, and the third spent retry stops the run.
+    ``capacity`` and ``infrastructure_or_context`` stay retryable.
+    """
+    if error_kind == "insufficient_history":
+        return "symbol_history"
+    if reason == "Kronos check cap reached":
+        return "capacity"
+    if any(x in reason.lower() for x in ("worker", "unavailable", "busy", "differs", "no forecast")):
+        return "infrastructure_or_context"
+    return "model_vote"
 
 
 def _normalize_samples(value: int) -> int:
@@ -455,7 +476,10 @@ class KronosConfirmGate:
             if not symbol:
                 continue
             if row.get("error"):
-                out[symbol] = Forecast((), "", 0, 0, error=str(row["error"]))
+                out[symbol] = Forecast(
+                    (), "", 0, 0, error=str(row["error"]),
+                    error_kind=str(row.get("error_kind") or "") or None,
+                )
                 continue
             if contexts and symbol in contexts and row.get('context_sha256')!=contexts[symbol]['sha256']:
                 out[symbol]=Forecast((),'',0,0,error='Kronos context identity differs from scanner snapshot')
@@ -503,6 +527,10 @@ class KronosConfirmGate:
         resolved: dict[tuple, tuple[Forecast, bool]] = {}
         missing: dict[tuple, PendingConfirm | PendingExit] = {}
         failures: dict[tuple, str] = {}
+        # Structured failure class per key, when the worker reported one. The
+        # reason text cannot separate a symbol's short series from a broken
+        # worker; the scanner retries the latter and records the former.
+        failure_kinds: dict[tuple, str] = {}
         for item in all_items:
             key = self._cache_key(item)
             if not item.anchor_date or not _finite(item.anchor_close) or item.anchor_close <= 0:
@@ -545,6 +573,8 @@ class KronosConfirmGate:
                             )
                             if forecast.error:
                                 failures[key] = f"Kronos worker error for {item.symbol}: {forecast.error}"
+                                if forecast.error_kind:
+                                    failure_kinds[key] = forecast.error_kind
                             elif forecast.anchor_date != item.anchor_date:
                                 failures[key] = (
                                     "Kronos forecast date differs from the decision bar: "
@@ -582,21 +612,24 @@ class KronosConfirmGate:
             for item in all_items:
                 failures[self._cache_key(item)] = "Kronos model identity changed during the batch; retry"
 
-        def _miss_reason(item: PendingConfirm | PendingExit) -> str:
+        def _miss(item: PendingConfirm | PendingExit) -> tuple[str, str | None]:
             key = self._cache_key(item)
             if key in over_cap:
-                return "Kronos check cap reached"
+                return "Kronos check cap reached", None
             if key in failures:
-                return failures[key]
-            return f"no forecast for {item.symbol}"
+                return failures[key], failure_kinds.get(key)
+            return f"no forecast for {item.symbol}", None
 
         entry_rows: list[tuple[object, object, ConfirmVerdict, dict]] = []
         for item in entries:
             hit = self._hit(item, resolved, fetched, over_cap)
             if hit is None:
-                verdict = ConfirmVerdict("no_opinion", _miss_reason(item))
+                reason, error_kind = _miss(item)
+                verdict = ConfirmVerdict("no_opinion", reason)
                 summary = summarize(item.anchor_close, item.band_pct, ())
-                evidence = _evidence(self, item, summary, verdict, cached=False)
+                evidence = _evidence(
+                    self, item, summary, verdict, cached=False, error_kind=error_kind,
+                )
             else:
                 forecast, cached = hit
                 item = self._forecast_context(item, forecast)
@@ -610,11 +643,13 @@ class KronosConfirmGate:
             hit = self._hit(item, resolved, fetched, over_cap)
             if hit is None:
                 summary = summarize(item.anchor_close, item.band_pct, ())
+                reason, error_kind = _miss(item)
                 for position in item.positions:
-                    verdict = ConfirmVerdict("no_opinion", _miss_reason(item))
+                    verdict = ConfirmVerdict("no_opinion", reason)
                     exit_rows.append(
                         (position, verdict, _evidence(
-                            self, item, summary, verdict, cached=False, scope="position", action=position.action,
+                            self, item, summary, verdict, cached=False, scope="position",
+                            action=position.action, error_kind=error_kind,
                         ))
                     )
                 continue
@@ -671,6 +706,7 @@ def _evidence(
     cached: bool,
     scope: str = "entry",
     action: str | None = None,
+    error_kind: str | None = None,
 ) -> dict:
     return {
         "schema_version": 1,
@@ -697,9 +733,7 @@ def _evidence(
         "model_provenance": item.model_provenance or {'identity_verified':False,'out_of_sample_eligible':False},
         "context_sha256": (item.context or {}).get('sha256'),
         "context_source": 'scanner_snapshot' if item.context else 'provider_history',
-        "failure_kind": ('capacity' if verdict.reason=='Kronos check cap reached' else
-                         'infrastructure_or_context' if any(x in verdict.reason.lower() for x in ('worker','unavailable','busy','differs','no forecast')) else
-                         'model_vote'),
+        "failure_kind": failure_kind_for(verdict.reason, error_kind),
         "device": gate.last_device,
         "samples": gate.samples,
         "cached": bool(cached),
