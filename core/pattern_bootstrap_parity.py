@@ -82,6 +82,14 @@ def _worker(mode, root, files, version, dsn, schema, fixture, negative):
         # existing helper never falls through to EDGAR. No detector gates mocked.
         if 'patterns._rules' in modules:
             modules['patterns._rules']._EARNINGS_CACHE = {'FIXTURE': []}
+        # The daily DII bulls BUY permission is an entry policy, not a detector,
+        # so a policy change must not decide whether the fixture still exercises
+        # the detector it pins (a stricter policy silently emptied the trade
+        # list and the import failed as "fixture does not exercise expected
+        # behavior"). Neutralize that one permission for the fixture only: the
+        # rule stays live in the scanner, the paper fills and the backtester.
+        from analysis import pattern_dii
+        pattern_dii.describe_dii_bulls_uptrend_rejection = lambda df: None
         if fixture.lstrip().startswith(b'{'):
             rows = json.loads(fixture)['bars']
             bars = [OHLCVCandle(open=r['o'], high=r['h'], low=r['l'], close=r['c'], volume=r['v'],
