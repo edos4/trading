@@ -184,7 +184,7 @@
     if (!more) { state.rows = []; state.next = null; state.loadedMore = false; }
     if (!state.batch || !state.detail?.run) { renderTable(0); return; }
     try {
-      const result = await api(path(`/records?kind=${state.tab}&after=${more ? state.next : 0}&limit=100`));
+      const result = await api(path(`/records?kind=${state.tab}&after=${more ? state.next : 0}&limit=100&chronological=${state.batch?.progress.tape_version >= 2}`));
       if (epoch !== state.tableEpoch || selectedEpoch !== state.epoch) return;
       state.rows = more ? [...state.rows, ...result.rows] : result.rows; state.next = result.next;
       if (more) state.loadedMore = true;
@@ -242,10 +242,11 @@
     canvas.width = width * (window.devicePixelRatio || 1); canvas.height = height * (window.devicePixelRatio || 1);
     ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1); ctx.clearRect(0,0,width,height);
     const independent = Object.values(state.detail?.run?.summary?.variants || {}).some(v => v.account_model === "independent-fixed-notional");
-    const ordinate = point => independent ? point.pnl : point.equity;
-    const all = Object.values(curves).flat();
+    const measure = $("exp-chart-measure").value || "performance";
+    const ordinate = point => measure === "performance" ? (independent ? point.pnl : point.equity) : point[measure];
+    const all = Object.values(curves).flat().filter(p=>Number.isFinite(ordinate(p)));
     if (!all.length) return;
-    const dates = [...new Set(all.map(p => p.date))].sort(), indices = new Map(dates.map((d,i) => [d,i]));
+    const dates = [...new Set(all.map(p => p.date))].sort(), first = Date.parse(dates[0]), duration = Math.max(1, Date.parse(dates.at(-1)) - first);
     const lo = all.reduce((v,p)=>Math.min(v,ordinate(p)),Infinity), hi = all.reduce((v,p)=>Math.max(v,ordinate(p)),-Infinity), span = hi-lo || 1;
     ctx.fillStyle = "#8b9aab"; ctx.font = "11px monospace";
     ctx.fillText(number(hi),0,15); ctx.fillText(number(lo),0,height-20);
@@ -253,8 +254,8 @@
     const colors = ["#3d8bfd","#3dd68c","#d4a017","#ca95ed"];
     Object.entries(curves).forEach(([name, points],i) => {
       ctx.strokeStyle = colors[i % colors.length]; ctx.beginPath();
-      points.forEach((p,j) => { const x=65+(width-80)*indices.get(p.date)/Math.max(dates.length-1,1), y=20+(height-55)*(hi-ordinate(p))/span; if(j) ctx.lineTo(x,y); else ctx.moveTo(x,y); }); ctx.stroke();
-      ctx.fillStyle = colors[i % colors.length]; ctx.fillText(name + (independent ? " · cumulative P&L" : " · NAV"),75,15+i*14);
+      points.filter(p=>Number.isFinite(ordinate(p))).forEach((p,j) => { const x=65+(width-80)*(Date.parse(p.date)-first)/duration, y=20+(height-55)*(hi-ordinate(p))/span; if(j) ctx.lineTo(x,y); else ctx.moveTo(x,y); }); ctx.stroke();
+      ctx.fillStyle = colors[i % colors.length]; ctx.fillText(name + " · " + (measure === "performance" ? (independent ? "cumulative P&L" : "NAV") : measure.replaceAll("_"," ")),75,15+i*14);
     });
   }
   async function showChart(record) {
@@ -268,7 +269,7 @@
       const payload = await api(path("/chart?symbol=" + encodeURIComponent(symbol) + "&record=" + record.cursor));
       if (!dialog.open || batch !== state.batch?.id || folder !== state.selected) return;
       window.TVChart.mount($("exp-chart"), payload, {readOnly:true, toolsEl:$("exp-chart-tools")});
-      $("exp-chart-status").textContent = "Saved daily bars through this batch’s end date; no live history is fetched.";
+      $("exp-chart-status").textContent = "Frozen history" + (payload.event_evidence ? " · " + JSON.stringify(payload.event_evidence) : "");
     } catch(error) { $("exp-chart-status").textContent = error.message; }
   }
   async function savedBatches() {
@@ -353,6 +354,7 @@
     $("exp-table-wrap").hidden=!columns[state.tab]; $("exp-performance").hidden=state.tab!=="performance"; $("exp-source-text").hidden=state.tab!=="source";
     if(state.tab==="performance") drawEquity(state.detail?.run?.summary.equity || {}); else await loadRows(false);
   }));
+  $("exp-chart-measure").addEventListener("change",()=>drawEquity(state.detail?.run?.summary.equity || {}));
   $("exp-more").addEventListener("click",()=>loadRows(true));
   $("exp-chart-close").addEventListener("click",()=>$("exp-chart-dialog").close());
   $("exp-chart-dialog").addEventListener("close",()=>window.TVChart?.unmount());

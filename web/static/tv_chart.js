@@ -505,6 +505,7 @@ window.TVChart = (function createTVChart(preferences = {}) {
         : segment.data;
       const line = chart.addLineSeries({
         color: segment.color, lineWidth: Math.max(1, Math.min(4, Math.round(segment.width || 2))),
+        ...(segment.step ? {lineType: LightweightCharts.LineType.WithSteps} : {}),
         lineStyle: segment.style === "--"
           ? LightweightCharts.LineStyle.Dashed
           : segment.style === ":"

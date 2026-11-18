@@ -98,7 +98,10 @@ def test_folder_drilldown_pagination_export_and_frozen_chart(app_client):
     saved_chart=client.get(root+f"/chart?symbol=SPY&record={trade['cursor']}")
     assert saved_chart.status_code == 200
     assert any(level["title"] == "entry" for level in saved_chart.json()["levels"])
-    assert saved_chart.json()["markers"]
+    assert "Exit fill" in [marker["text"] for marker in saved_chart.json()["markers"]]
+    signal = first["rows"][0]
+    chart = client.get(root+f"/chart?symbol=SPY&record={signal['cursor']}").json()
+    assert [marker["text"] for marker in chart["markers"]] == [signal["status"].replace("-", " ")]
     assert client.get(root+"/chart?symbol=SPY&record=999999999").status_code == 404
     assert client.get(root+"/chart?symbol=UNKNOWN").status_code == 404
 

@@ -103,13 +103,13 @@ def register_experiment_routes(app, templates, ctx) -> None:
     @app.get("/api/experiments/runs/{batch_id}/folders/{source_id}/records")
     async def api_records(batch_id: str, source_id: str, kind: str = "signals",
                           after: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500),
-                          symbol: str | None = None, _user: str = Depends(require_login)):
+                          symbol: str | None = None, chronological: bool = False, _user: str = Depends(require_login)):
         try:
             if kind not in KINDS:
                 raise ValueError("Unknown result table")
             await asyncio.to_thread(get_service().detail, batch_id, source_id)
             return await asyncio.to_thread(get_service().store.evidence, batch_id, source_id,
-                                           kind, after=after, limit=limit, symbol=symbol)
+                                           kind, after=after, limit=limit, symbol=symbol, chronological=chronological)
         except Exception as exc:
             return _failure(exc)
 
@@ -134,14 +134,36 @@ def register_experiment_routes(app, templates, ctx) -> None:
             frame.index = pd.to_datetime(frame.pop("date")).dt.tz_localize(profile.session_tz)
             payload = build_trade_viewer_payload(frame, symbol=symbol, market=market,
                                                 session_tz=profile.session_tz, trendlines=False,
-                                                action=evidence.get("action"),
+                                                action=None,
                                                 entry=evidence.get("entry_price"),
-                                                stop=evidence.get("stop_loss"), target=evidence.get("take_profit"),
+                                                stop=None if evidence.get("planned_risk") else evidence.get("stop_loss"), target=evidence.get("take_profit"),
                                                 exit_price=evidence.get("exit_price"),
                                                 exit_reason=evidence.get("exit_reason"),
                                                 current=evidence.get("current"),
                                                 entry_time=evidence.get("entry_date", evidence.get("date")),
                                                 exit_time=evidence.get("exit_date"))
+            candle_dates = {c["time"] for c in payload["candles"]}
+            payload["markers"] = []
+            def marker(day, label, color, shape="circle"):
+                if day in candle_dates:
+                    payload["markers"].append({"time": day, "text": label, "color": color,
+                                               "shape": shape, "position": "aboveBar"})
+            if evidence.get("record_kind") in {"trades", "positions"}:
+                marker(evidence.get("signal_date"), "Decision", "#e3a539")
+                marker(evidence.get("entry_date"), "Filled " + evidence["action"], "#409ded",
+                       "arrowUp" if evidence["action"] == "BUY" else "arrowDown")
+                trigger = evidence.get("exit_trigger", {})
+                marker(trigger.get("date"), trigger.get("reason"), "#ee9955")
+                marker(evidence.get("exit_date"), "Exit fill", "#cd6f7b")
+                trail = [{"time": p["date"], "value": p["active_stop"]} for p in evidence.get("trail_history", [])
+                         if p["date"] in candle_dates]
+                if trail:
+                    payload["segments"].append({"data": trail, "color":"#da895d", "label":"Active ATR stop","step":True})
+            elif evidence:
+                status = evidence.get("status", "observation")
+                marker(evidence.get("date"), status.replace("-", " "), "#409ded" if status == "filled" else "#e3a539")
+            payload["markers"].sort(key=lambda m: m["time"])
+            payload["event_evidence"] = evidence.get("evidence") or evidence.get("exit_trigger")
             payload["replay_id"] = batch_id
             return payload
         try:

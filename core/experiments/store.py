@@ -78,6 +78,9 @@ class ExperimentStore:
                     seq INTEGER PRIMARY KEY AUTOINCREMENT,
                     batch TEXT NOT NULL, source TEXT NOT NULL, kind TEXT NOT NULL,
                     symbol TEXT NOT NULL, payload BLOB NOT NULL);
+                CREATE TABLE IF NOT EXISTS evidence_dates (
+                    batch TEXT, source TEXT, kind TEXT, day TEXT, seq INTEGER,
+                    PRIMARY KEY(batch,source,kind,day,seq)) WITHOUT ROWID;
                 CREATE INDEX IF NOT EXISTS experiment_evidence_lookup
                     ON evidence(batch,source,kind,seq);
                     """)
@@ -224,18 +227,38 @@ class ExperimentStore:
             con.execute("INSERT INTO results VALUES(?,?,?,?)", (batch_id, source, symbol, packed(result)))
             for kind in ("signals", "trades", "positions", "outcomes", "logs"):
                 rows = result.get(kind, [])
-                con.executemany("INSERT INTO evidence(batch,source,kind,symbol,payload) VALUES(?,?,?,?,?)",
-                                [(batch_id, source, kind, symbol, packed(row)) for row in rows])
+                for row in rows:
+                    cursor = con.execute("INSERT INTO evidence(batch,source,kind,symbol,payload) VALUES(?,?,?,?,?)",
+                                         (batch_id, source, kind, symbol, packed(row)))
+                    day = row.get("exit_date") or row.get("mark_date") or row.get("date") or ""
+                    con.execute("INSERT INTO evidence_dates VALUES(?,?,?,?,?)",
+                                (batch_id, source, kind, day, cursor.lastrowid))
 
     def evidence(self, batch_id: str, source: str, kind: str, *, after: int = 0,
-                 limit: int = 100, symbol: str | None = None) -> dict:
+                 limit: int = 100, symbol: str | None = None, chronological: bool = False) -> dict:
         with self.connect() as con:
             clause, params = "batch=? AND source=? AND kind=? AND seq>?", [batch_id, source, kind, after]
             if symbol:
                 clause += " AND symbol=?"
                 params.append(symbol)
-            rows = con.execute(f"SELECT seq,symbol,payload FROM evidence WHERE {clause} ORDER BY seq LIMIT ?",
-                               [*params, limit + 1]).fetchall()
+            if chronological:
+                query = ("SELECT e.seq,e.symbol,e.payload FROM evidence_dates d JOIN evidence e ON e.seq=d.seq "
+                         "WHERE d.batch=? AND d.source=? AND d.kind=?")
+                args = [batch_id, source, kind]
+                if after:
+                    prior = self.record(batch_id, source, after)
+                    if prior["record_kind"] != kind:
+                        raise ValueError("Cursor belongs to a different table")
+                    day = prior.get("exit_date") or prior.get("mark_date") or prior.get("date") or ""
+                    query += " AND (d.day,d.seq)>(?,?)"
+                    args.extend([day, after])
+                if symbol:
+                    query += " AND e.symbol=?"
+                    args.append(symbol)
+                rows = con.execute(query + " ORDER BY d.day,d.seq LIMIT ?", [*args, limit+1]).fetchall()
+            else:
+                rows = con.execute(f"SELECT seq,symbol,payload FROM evidence WHERE {clause} ORDER BY seq LIMIT ?",
+                                   [*params, limit + 1]).fetchall()
             count_clause = clause.replace(" AND seq>?", "")
             count_params = [batch_id, source, kind] + ([symbol] if symbol else [])
             total = con.execute(f"SELECT COUNT(*) FROM evidence WHERE {count_clause}", count_params).fetchone()[0]
@@ -253,8 +276,8 @@ class ExperimentStore:
 
     def record(self, batch_id: str, source: str, cursor: int) -> dict:
         with self.connect() as con:
-            row = con.execute("SELECT payload FROM evidence WHERE batch=? AND source=? AND seq=?",
+            row = con.execute("SELECT payload,kind FROM evidence WHERE batch=? AND source=? AND seq=?",
                               (batch_id, source, cursor)).fetchone()
             if row is None:
                 raise KeyError("Saved experiment record not found")
-            return unpacked(row["payload"])
+            return {**unpacked(row["payload"]), "record_kind": row["kind"]}

@@ -265,3 +265,15 @@ def test_indicator_evidence_identifies_the_firing_branch():
     for v in variants(56, df):
         assert v.evidence(100)["branch"] == v.name
     assert SPECS[56]["parameters"]["outcome_horizons"] == [20]
+
+
+def test_cross_symbol_chronology_survives_page_boundary(tmp_path):
+    from core.experiments.store import ExperimentStore
+    st = ExperimentStore(tmp_path)
+    for symbol,days in (("A",["2025-06-01","2025-06-03"]), ("B",["2025-06-01","2025-06-02"])):
+        st.save_result("b","s",symbol,{"signals":[{"date":d,"symbol":symbol} for d in days]})
+    one = st.evidence("b","s","signals",limit=2,chronological=True)
+    two = st.evidence("b","s","signals",after=one["next"],chronological=True)
+    rows = one["rows"] + two["rows"]
+    assert [r["date"] for r in rows] == sorted(r["date"] for r in rows)
+    assert len({r["cursor"] for r in rows}) == one["total"] == 4
