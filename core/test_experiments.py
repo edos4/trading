@@ -237,7 +237,7 @@ def test_research_hold_realizes_pnl_and_ph_skips_shorts():
 
     short_rows = bars(45, flat=True)
     short_rows[10].update(open=98, high=98.5, low=97, close=97.5)
-    short_req = request(start_date=short_rows[0]["date"], end_date=short_rows[-1]["date"], txn_cost_pct=0, slippage_pct=0)
+    short_req = request(short_policy="assume-borrow", borrow_rate=0, start_date=short_rows[0]["date"], end_date=short_rows[-1]["date"], txn_cost_pct=0, slippage_pct=0)
     short = replay(48, "AAPL", frame(short_rows), short_req)
     assert short["trades"] and short["trades"][0]["action"] == "SELL"
     sold = short["trades"][0]

@@ -68,13 +68,14 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
     slip, notional = request.slippage_pct, request.position_notional
     finite = bool(variant.policy.get("finite_account"))
     position, pending = None, None
+    pending_qty = 0
     realized = 0.0
     days = {}
     exposure = {}
     stats = {"status": "completed", "kind": variant.kind, "signal_count": 0,
              "trade_count": 0, "wins": 0, "gross_profit": 0.0, "gross_loss": 0.0,
              "fees": 0.0, "turnover": 0.0, "realized_pnl": 0.0, "unrealized_pnl": 0.0,
-             "r_total": 0.0, "r_count": 0,
+             "long_pnl": 0.0, "short_pnl": 0.0, "borrow_fees": 0.0, "r_total": 0.0, "r_count": 0,
              "account_model": "finite-cash" if finite else "independent-fixed-notional"}
 
     # Daily proxy. Forecast capacity from previously completed sessions only.
@@ -109,6 +110,23 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
         return {"symbol": symbol, "variant": variant.name, "date": str(df.date.iloc[index]),
                 "action": "BUY" if direction > 0 else "SELL", "status": status, **extra}
 
+    def decision_quantity(i: int, direction: int) -> int:
+        estimate = float(df.close.iloc[i]) * (1 + slip * direction)
+        budget = request.initial_capital + realized if finite else notional
+        shares = max(0, math.floor(budget / (estimate * (1 + cost))))
+        if finite:
+            distance = variant.policy["trail_atr"] * float(variant.policy["atr"][i])
+            if not math.isfinite(distance) or distance <= 0:
+                return 0
+            shares = min(shares, math.floor(budget * variant.policy["risk_fraction"] / distance))
+        return shares
+
+    def borrow_charge(index: int) -> float:
+        if position["action"] != "SELL":
+            return 0.0
+        elapsed = (dates[index] - dates[position["entry_index"]]).days
+        return position["qty"] * position["entry_price"] * request.borrow_rate * elapsed / 365
+
     def close(index: int, raw_price: float, reason: str) -> bool:
         nonlocal position, realized
         short = position["action"] == "SELL"
@@ -122,7 +140,10 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
         price = raw_price * (1 + slip) if short else raw_price * (1 - slip)
         fees = price * position["qty"] * cost
         change = (position["entry_price"] - price) if short else (price - position["entry_price"])
-        net = change * position["qty"] - position["entry_fee"] - fees
+        borrow = borrow_charge(index)
+        net = change * position["qty"] - position["entry_fee"] - fees - borrow
+        stats["borrow_fees"] += borrow
+        stats["short_pnl" if short else "long_pnl"] += net
         realized += net
         stats["trade_count"] += 1
         stats["wins"] += int(net > 0)
@@ -137,7 +158,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
             **event(index, "closed"), **position, "exit_date": str(df.date.iloc[index]),
             "exit_price": price, "exit_reason": reason, "exit_reference_price": raw_price,
             "exit_requested_qty": qty, "exit_filled_qty": qty, "exit_shortfall": abs(price-raw_price)*qty, "fees": position["entry_fee"] + fees,
-            "pnl": net, "pnl_pct": 100 * net / (position["entry_price"] * position["qty"]),
+            "borrow_fee": borrow, "pnl": net, "pnl_pct": 100 * net / (position["entry_price"] * position["qty"]),
             "bars": index - position["entry_index"],
             "elapsed_sessions": calendar[dates[index]] - calendar[dates[position["entry_index"]]],
             "r": net / position["planned_risk"] if position.get("planned_risk", 0) > 0 else None,
@@ -145,11 +166,11 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
         position = None
         return True
 
-    def open_pnl(mark_price: float) -> float:
+    def open_pnl(mark_price: float, index: int) -> float:
         if position is None:
             return 0.0
         change = (position["entry_price"] - mark_price) if position["action"] == "SELL" else (mark_price - position["entry_price"])
-        return change * position["qty"] - position["entry_fee"]
+        return change * position["qty"] - position["entry_fee"] - borrow_charge(index)
 
     long_only = get_market(request.market).long_only
     start, end = request.start_date.isoformat(), request.end_date.isoformat()
@@ -175,7 +196,8 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                 direction = int(detail)
                 short = direction < 0
                 price = o * (1 - slip) if short else o * (1 + slip)
-                qty = math.floor(notional / (price * (1 + cost)))
+                budget = request.initial_capital + realized if finite else notional
+                qty = min(pending_qty, math.floor(budget / (price * (1 + cost))))
                 planned_risk, stop = 0.0, None
                 if short and finite:
                     output["logs"].append(event(i, "rejected", direction, reason="Short risk model is not defined"))
@@ -187,13 +209,11 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                     if not math.isfinite(distance) or distance <= 0 or capital <= 0:
                         output["logs"].append(event(i, "rejected", reason="No valid risk budget/ATR"))
                         continue
-                    qty = min(math.floor(capital * variant.policy["risk_fraction"] / distance),
-                              math.floor(capital / (price * (1 + cost))))
                     stop, planned_risk = price - distance, qty * distance
                     if stop <= 0:
                         output["logs"].append(event(i, "rejected", reason="ATR invalidation is not a positive market price"))
                         continue
-                requested_qty = qty
+                requested_qty = pending_qty
                 qty = min(qty, capacity(i))
                 if request.market == "ph":
                     qty = round_qty_to_lot(qty, price, as_of=date.fromisoformat(day))
@@ -244,10 +264,15 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
             elif position is None and int(variant.entry[i]) != 0:
                 direction = int(variant.entry[i])
                 stats["signal_count"] += 1
-                output["signals"].append(event(i, "entry-queued", direction, evidence=variant.evidence(i)))
-                if direction < 0 and long_only:
-                    output["logs"].append(event(i, "rejected", direction, reason="PH book is long-only"))
+                evidence = variant.evidence(i)
+                if direction < 0 and (long_only or request.short_policy == "exclude"):
+                    reason = "PH book is long-only" if long_only else "Borrow inventory unavailable"
+                    output["signals"].append(event(i, "ineligible", direction, reason=reason, evidence=evidence))
+                    output["logs"].append(event(i, "rejected", direction, reason=reason))
                 else:
+                    pending_qty = decision_quantity(i, direction)
+                    output["signals"].append(event(i, "entry-queued", direction, evidence=evidence,
+                                                   requested_qty=pending_qty, decision_price=c))
                     pending = ("entry", i, direction)
         elif variant.entry[i]:
             direction = int(variant.entry[i])
@@ -277,7 +302,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                                    entry_date=str(df.date.iloc[i + 1]), outcome_date=str(df.date.iloc[endpoint]))
                 output["outcomes"].append(outcome)
         if variant.kind == "trades":
-            days[day] = realized + open_pnl(c)
+            days[day] = realized + open_pnl(c, i)
             gross = position["qty"] * c if position else 0.0
             net = -gross if position and position["action"] == "SELL" else gross
             basis = position["qty"] * position["entry_price"] + position["entry_fee"] if position else 0.0
@@ -287,7 +312,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
         indices = {day: index for index, day in enumerate(dates)}
         for i in range(variant.warmup, len(df)):
             side = int(variant.entry[i])
-            if not side or str(dates[i]) < start or (side < 0 and long_only):
+            if not side or str(dates[i]) < start or (side < 0 and (long_only or request.short_policy == "exclude")):
                 continue
             if i % 128 == 0 and cancel():
                 raise Cancelled()
@@ -314,7 +339,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                 exposure[str(df.date.iloc[last])] = (0.0, 0.0, 0.0)
         if position is not None:
             current = float(df.close.iloc[last])
-            unrealized = open_pnl(current)
+            unrealized = open_pnl(current, last)
             output["positions"].append({**position, "date": str(df.date.iloc[last]), "current": current,
                                          "unrealized_pnl": unrealized,
                                          "unrealized_pct": 100 * unrealized / (position["entry_price"] * position["qty"]),
@@ -322,6 +347,8 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                                          "elapsed_sessions": calendar[dates[last]] - calendar[dates[position["entry_index"]]],
                                          "value": current * position["qty"]})
             stats["unrealized_pnl"] = unrealized
+            stats["borrow_fees"] += borrow_charge(last)
+            stats["short_pnl" if position["action"] == "SELL" else "long_pnl"] += unrealized
         if pending:
             output["logs"].append(event(last, "unfilled", reason="No later eligible bar before end date",
                                          pending=pending[0]))

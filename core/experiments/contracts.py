@@ -20,6 +20,8 @@ class BatchRequest(BaseModel):
     position_notional: float = Field(10000, gt=0, le=1e10)
     txn_cost_pct: float | None = Field(None, ge=0, lt=0.1)
     slippage_pct: float = Field(0.0005, ge=0, lt=0.1)
+    short_policy: Literal["exclude", "assume-borrow"] = "exclude"
+    borrow_rate: float = Field(0.03, ge=0, le=5)  # Annual simple rate on entry notional.
     participation: float = Field(0.01, gt=0, le=1)  # Fraction of trailing daily liquidity.
     end_policy: Literal["keep-open", "force-close"] = "keep-open"
     idempotency_key: str = Field(min_length=1, max_length=100)

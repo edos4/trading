@@ -241,9 +241,9 @@ def _merge(summary: dict, result: dict) -> None:
         if values["status"] != "completed":
             continue
         total = summary["variants"].setdefault(name, {**values, **{key: 0 for key in (
-            "signal_count", "trade_count", "wins", "gross_profit", "gross_loss", "fees", "turnover",
+            "signal_count", "trade_count", "long_pnl", "short_pnl", "borrow_fees", "wins", "gross_profit", "gross_loss", "fees", "turnover",
             "realized_pnl", "unrealized_pnl", "r_total", "r_count")}})
-        for key in ("signal_count", "trade_count", "wins", "gross_profit", "gross_loss", "fees", "turnover",
+        for key in ("signal_count", "trade_count", "long_pnl", "short_pnl", "borrow_fees", "wins", "gross_profit", "gross_loss", "fees", "turnover",
                     "realized_pnl", "unrealized_pnl", "r_total", "r_count"):
             if values[key] is None:
                 total[key] = None

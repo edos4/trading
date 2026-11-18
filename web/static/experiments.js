@@ -213,7 +213,7 @@
           ["Gross exposure",number(metrics.gross_exposure)],["Net exposure",number(metrics.net_exposure)],
           ["Peak concurrent entry cost (close)",number(metrics.peak_committed_basis)],
           ["Expectancy",number(metrics.expectancy)],["Average R",number(metrics.average_r)],
-          ["Fees",number(metrics.fees)],["Turnover",number(metrics.turnover)]].forEach(([key,value]) => {
+          ["Long P&L",number(metrics.long_pnl)],["Short P&L",number(metrics.short_pnl)],["Borrow cost",number(metrics.borrow_fees)],["Fees",number(metrics.fees)],["Turnover",number(metrics.turnover)]].forEach(([key,value]) => {
           const pair = node("div"); pair.append(node("dt",key),node("dd",value)); dl.append(pair);
         }); section.append(dl);
       } groups.push(section);
@@ -300,6 +300,7 @@
         symbols:$("exp-symbols").value.split(/[\s,]+/).filter(Boolean), initial_capital:Number($("exp-capital").value),
         position_notional:Number($("exp-notional").value), slippage_pct:Number($("exp-slippage").value)/100,
         txn_cost_pct:$("exp-cost").value === "" ? null : Number($("exp-cost").value)/100,
+        short_policy:$("exp-shorts").value || "exclude", borrow_rate:Number($("exp-borrow").value || 3)/100,
         end_policy:$("exp-end-policy").value};
       const signature=JSON.stringify(draft);
       if(state.pendingSubmission?.signature !== signature) {

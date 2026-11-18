@@ -19,6 +19,8 @@
     <label>Position notional<input id="exp-notional" type="number" min="1" step="any" value="10000" required /></label>
     <label>Slippage (%)<input id="exp-slippage" type="number" min="0" max="9.99" step="0.01" value="0.05" required /></label>
     <label>Cost per side (%)<input id="exp-cost" type="number" min="0" max="9.99" step="0.01" placeholder="Market default" /></label>
+    <label>US short sales<select id="exp-shorts"><option value="exclude">Exclude without verified borrow</option><option value="assume-borrow">Assume available for research</option></select></label>
+    <label>Annual borrow cost (%)<input id="exp-borrow" type="number" value="3" min="0" max="500" step="any" /></label>
     <label>End date<select id="exp-end-policy"><option value="keep-open">Keep positions marked open</option><option value="force-close">Liquidate at last close</option></select></label>
   </div></details>
   <p class="muted exp-form-note">Incomplete strategies and unavailable data stay blocked with reasons. Event studies show observations; trading metrics appear only where entry and exit rules are implemented. Select a folder to inspect its scope and assumptions.</p>

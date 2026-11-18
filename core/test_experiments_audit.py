@@ -92,3 +92,37 @@ def test_session_hold_and_missing_next_open():
     assert any(x["status"]=="expired" and x["signal_date"]==rows[4]["date"] for x in missing["logs"])
     assert not any(t["signal_date"]==rows[4]["date"] for t in missing["trades"])
     assert any(o["date"] == rows[4]["date"] and not o["complete"] for o in missing["outcomes"])
+
+
+def test_gap_down_cannot_increase_a_queued_share_order():
+    from core.experiments.history import frame
+    from core.experiments.replay import replay
+    from core.test_experiments import bars, request
+
+    rows = bars(32, flat=True)
+    rows[4].update(low=102, open=103, high=104, close=103)
+    rows[5].update(low=69, open=70)
+    req = request(start_date=rows[4]["date"], end_date=rows[-1]["date"], participation=1,
+                  txn_cost_pct=0, slippage_pct=0)
+    r = replay(48, "X", frame(rows), req)
+    assert r["signals"][0]["requested_qty"] == r["trades"][0]["qty"] == 97
+    rows[5].update(open=140, high=141)
+    r = replay(48, "X", frame(rows), req)
+    assert r["trades"][0]["entry_requested_qty"] == 97 and r["trades"][0]["qty"] == 71
+
+
+def test_borrow_assumption_and_daily_accrual():
+    import pytest
+    from core.experiments.history import frame
+    from core.experiments.replay import replay
+    from core.test_experiments import bars, request
+
+    rows = bars(32, flat=True)
+    rows[4].update(low=95, open=96, high=97, close=96)
+    req = request(start_date=rows[4]["date"], end_date=rows[-1]["date"], txn_cost_pct=0, slippage_pct=0)
+    assert replay(48, "X", frame(rows), req)["signals"][0]["status"] == "ineligible"
+    result = replay(48, "X", frame(rows), req.model_copy(update={"short_policy":"assume-borrow", "borrow_rate":.365}))
+    t = result["trades"][0]
+    days = (date.fromisoformat(t["exit_date"]) - date.fromisoformat(t["entry_date"])).days
+    assert t["borrow_fee"] == pytest.approx(.001 * days * t["qty"] * t["entry_price"])
+    assert t["pnl"] == pytest.approx((t["entry_price"]-t["exit_price"])*t["qty"] - t["borrow_fee"])
