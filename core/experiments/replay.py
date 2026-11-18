@@ -75,13 +75,37 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
              "r_total": 0.0, "r_count": 0,
              "account_model": "finite-cash" if finite else "independent-fixed-notional"}
 
+    # Daily proxy. Forecast capacity from previously completed sessions only.
+    volume = df.volume.to_numpy(dtype=float)
+    trailing_shares = df.volume.rolling(20, min_periods=1).mean().shift(1).fillna(0).to_numpy()
+    trailing_value = (df.volume * df.close).rolling(20, min_periods=1).mean().shift(1).fillna(0).to_numpy()
+    executed = {}
+
+    def capacity(index: int) -> int:
+        if index == 0:
+            return 0
+        prior_close = float(df.close.iloc[index - 1])
+        available = min(trailing_shares[index], trailing_value[index] / prior_close)
+        return max(0, math.floor(available * request.participation) - executed.get(index, 0))
+
+    def supported(index: int, qty: int) -> bool:
+        # Ex-post impossibility check only. Never tune the quantity to today's volume.
+        return qty > 0 and qty + executed.get(index, 0) <= volume[index]
+
     def event(index: int, status: str, direction: int = 1, **extra) -> dict:
         return {"symbol": symbol, "variant": variant.name, "date": str(df.date.iloc[index]),
                 "action": "BUY" if direction > 0 else "SELL", "status": status, **extra}
 
-    def close(index: int, raw_price: float, reason: str) -> None:
+    def close(index: int, raw_price: float, reason: str) -> bool:
         nonlocal position, realized
         short = position["action"] == "SELL"
+        direction = 1 if short else -1
+        qty = position["qty"]
+        if qty > capacity(index) or not supported(index, qty):
+            output["logs"].append(event(index, "unfilled", direction, reason="Insufficient exit liquidity",
+                                        requested_qty=qty, filled_qty=0, reference_price=raw_price))
+            return False
+        executed[index] = executed.get(index, 0) + qty
         price = raw_price * (1 + slip) if short else raw_price * (1 - slip)
         fees = price * position["qty"] * cost
         change = (position["entry_price"] - price) if short else (price - position["entry_price"])
@@ -98,12 +122,14 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
             stats["r_count"] += 1
         output["trades"].append({
             **event(index, "closed"), **position, "exit_date": str(df.date.iloc[index]),
-            "exit_price": price, "exit_reason": reason, "fees": position["entry_fee"] + fees,
+            "exit_price": price, "exit_reason": reason, "exit_reference_price": raw_price,
+            "exit_requested_qty": qty, "exit_filled_qty": qty, "exit_shortfall": abs(price-raw_price)*qty, "fees": position["entry_fee"] + fees,
             "pnl": net, "pnl_pct": 100 * net / (position["entry_price"] * position["qty"]),
             "bars": index - position["entry_index"],
             "r": net / position["planned_risk"] if position.get("planned_risk", 0) > 0 else None,
         })
         position = None
+        return True
 
     def open_pnl(mark_price: float) -> float:
         if position is None:
@@ -124,7 +150,8 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
             action, signal_index, detail = pending
             pending = None
             if action == "exit" and position is not None:
-                close(i, o, detail)
+                if not close(i, o, detail):
+                    pending = ("exit", signal_index, detail)
             elif action == "entry" and position is None:
                 direction = int(detail)
                 short = direction < 0
@@ -147,16 +174,25 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                     if stop <= 0:
                         output["logs"].append(event(i, "rejected", reason="ATR invalidation is not a positive market price"))
                         continue
+                requested_qty = qty
+                qty = min(qty, capacity(i))
                 if request.market == "ph":
                     qty = round_qty_to_lot(qty, price, as_of=date.fromisoformat(day))
+                if not supported(i, qty):
+                    qty = 0
                 if qty < 1:
-                    output["logs"].append(event(i, "rejected", reason="Size rounds below one permitted lot"))
+                    output["logs"].append(event(i, "rejected", direction, reason="Insufficient liquidity or permitted lot", requested_qty=requested_qty, filled_qty=0, reference_price=o))
                 else:
+                    executed[i] = executed.get(i, 0) + qty
+                    if finite:
+                        planned_risk = qty * distance
                     fee = price * qty * cost
                     position = {"symbol": symbol, "variant": variant.name,
                                 "action": "SELL" if short else "BUY",
                                 "signal_date": str(df.date.iloc[signal_index]), "entry_date": day,
                                 "entry_index": i, "entry_price": price, "qty": qty,
+                                "entry_requested_qty": requested_qty, "entry_filled_qty": qty,
+                                "entry_reference_price": o, "entry_shortfall": abs(price-o)*qty,
                                 "entry_fee": fee, "stop_loss": stop, "take_profit": None,
                                 "planned_risk": planned_risk, "high_close": price}
                     stats["fees"] += fee
@@ -178,7 +214,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                 atr = float(variant.policy["atr"][i])
                 if math.isfinite(atr):
                     position["stop_loss"] = max(stop, position["high_close"] - variant.policy["trail_atr"] * atr)
-            if position is not None and exit_signal:
+            if position is not None and exit_signal and pending is None:
                 pending = ("exit", i, exit_reason)
                 closing = -1 if position["action"] == "BUY" else 1
                 output["signals"].append(event(i, "exit-queued", closing,
@@ -223,9 +259,9 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
     if variant.kind == "trades":
         last = len(df) - 1
         if position is not None and request.end_policy == "force-close":
-            close(last, float(df.close.iloc[last]), "end-date-liquidation")
-            days[str(df.date.iloc[last])] = realized
-        elif position is not None:
+            if close(last, float(df.close.iloc[last]), "end-date-liquidation"):
+                days[str(df.date.iloc[last])] = realized
+        if position is not None:
             current = float(df.close.iloc[last])
             unrealized = open_pnl(current)
             output["positions"].append({**position, "date": str(df.date.iloc[last]), "current": current,

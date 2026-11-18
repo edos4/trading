@@ -135,3 +135,8 @@ Validation commands:
 .venv/bin/pytest -q core/test_experiments.py web/test_experiments_api.py
 node web/test_experiments.cjs
 ```
+
+
+### Daily execution capacity
+
+The research proxy caps entries at 1% of the mean of up to 20 prior daily volumes and the corresponding mean traded value divided by prior close, using the tighter limit. A smaller entry cancels its remainder. Exits require sufficient capacity for the remaining position and retry at subsequent opens. The recorded full-day volume can invalidate an impossible fill after the fact, but never determines order size. The model has no auction depth or bid/ask history. Fees and slippage are explicit assumptions.
