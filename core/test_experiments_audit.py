@@ -194,8 +194,79 @@ def test_missing_final_session_keeps_last_traded_mark():
     pos = result["positions"][0]
     assert not result["trades"] and pos["current"] == rows[6]["close"]
     assert pos["mark_date"] == rows[6]["date"] and pos["mark_age_days"] > 0
+    assert pos["valuation"] == "stale; security status unresolved"
     assert result["variants"]["fvg-geometry"]["stale_exposure"] == pos["value"]
     assert any("final-session" in row.get("reason", "") for row in result["logs"])
+
+
+def test_evaluable_session_stops_at_the_last_closed_session(monkeypatch):
+    from datetime import date
+    from core.experiments.history import evaluable_session, is_session
+
+    closed = date(2026, 11, 17)
+    monkeypatch.setattr("core.experiments.history.last_closed_session_date", lambda *args, **kwargs: closed)
+    assert is_session("us", closed)
+    assert evaluable_session("us", date(2026, 11, 18)) == closed
+    assert evaluable_session("us", date(2021, 11, 30)) == date(2021, 11, 30)
+    # last_closed_session_date does not skip US holidays; the evaluable session does.
+    monkeypatch.setattr("core.experiments.history.last_closed_session_date", lambda *args, **kwargs: date(2026, 1, 19))
+    assert evaluable_session("us", date(2026, 1, 20)) == date(2026, 1, 16)
+
+
+def test_unclosed_end_date_is_the_last_traded_close(monkeypatch):
+    from core.experiments.history import frame, shift_session
+    from core.experiments.replay import replay
+    from core.test_experiments import bars, request
+    from datetime import date
+
+    rows = bars(10, flat=True)
+    rows[4].update(low=102, open=103, high=104, close=103)
+    closed = date.fromisoformat(rows[-1]["date"])
+    monkeypatch.setattr("core.experiments.history.last_closed_session_date", lambda *args, **kwargs: closed)
+    end = shift_session("us", closed, 1)
+    req = request(start_date=rows[4]["date"], end_date=end)
+    result = replay(48, "X", frame(rows), req)
+    pos = result["positions"][0]
+    assert pos["mark_date"] == rows[-1]["date"]
+    assert pos["valuation"] == "last traded close"
+    assert pos["liquidation_pnl_estimate"] is not None
+    assert result["variants"]["fvg-geometry"]["stale_exposure"] == 0
+
+
+def test_bar_missing_on_the_last_closed_session_stays_unresolved(monkeypatch):
+    from datetime import date
+    from core.experiments.history import frame, shift_session
+    from core.experiments.replay import replay
+    from core.test_experiments import bars, request
+
+    rows = bars(10, flat=True)
+    rows[4].update(low=102, open=103, high=104, close=103)
+    closed = date.fromisoformat(rows[-1]["date"])
+    monkeypatch.setattr("core.experiments.history.last_closed_session_date", lambda *args, **kwargs: closed)
+    req = request(start_date=rows[4]["date"], end_date=shift_session("us", closed, 1), end_policy="force-close")
+    result = replay(48, "X", frame(rows[:8]), req)
+    pos = result["positions"][0]
+    assert pos["mark_date"] < closed.isoformat()
+    assert pos["valuation"] == "stale; security status unresolved"
+    assert result["variants"]["fvg-geometry"]["stale_exposure"] == pos["value"]
+    assert not any(row.get("exit_reason") == "end-date-liquidation" for row in result["trades"])
+
+
+def test_force_close_liquidates_the_last_closed_session(monkeypatch):
+    from datetime import date
+    from core.experiments.history import frame, shift_session
+    from core.experiments.replay import replay
+    from core.test_experiments import bars, request
+
+    rows = bars(10, flat=True)
+    rows[4].update(low=102, open=103, high=104, close=103)
+    closed = date.fromisoformat(rows[-1]["date"])
+    monkeypatch.setattr("core.experiments.history.last_closed_session_date", lambda *args, **kwargs: closed)
+    req = request(start_date=rows[4]["date"], end_date=shift_session("us", closed, 1), end_policy="force-close")
+    result = replay(48, "X", frame(rows), req)
+    assert result["trades"] and result["trades"][-1]["exit_reason"] == "end-date-liquidation"
+    assert result["trades"][-1]["exit_date"] == closed.isoformat()
+    assert not result["positions"]
 
 
 def test_short_mark_and_estimated_cover_cost():

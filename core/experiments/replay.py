@@ -18,8 +18,23 @@ import pandas as pd
 
 from core.experiments.adapters import Variant, variants
 from core.experiments.contracts import BatchRequest
-from core.experiments.history import is_session, shift_session
+from core.experiments.history import evaluable_session, is_session, shift_session
 from core.market import get_market, pse_execution_price, round_qty_to_lot
+
+
+def liquidation_estimate(request: BatchRequest, *, action: str, qty: float, current: float,
+                        unrealized: float, mark: date) -> float | None:
+    """Estimated P&L of closing an open mark at the adverse slipped price."""
+    short = action == "SELL"
+    signed = -qty if short else qty
+    slip = request.slippage_pct
+    price = current * (1 + slip if short else 1 - slip)
+    if request.market == "ph":
+        price = pse_execution_price(price, buy=short)
+        if price is None:
+            return None
+    fee = price * qty * fee_rate(request, mark, buy=short)
+    return unrealized + signed * (price - current) - fee
 
 
 def fee_rate(request: BatchRequest, day: date, *, buy: bool) -> float:
@@ -252,9 +267,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
         return change * position["qty"] - position["entry_fee"] - borrow_charge(index)
 
     mark_index = None
-    final_session = request.end_date
-    if not is_session(market, final_session):
-        final_session = shift_session(market, final_session, -1)
+    final_session = evaluable_session(market, request.end_date)
     long_only = get_market(request.market).long_only
     start, end = request.start_date.isoformat(), request.end_date.isoformat()
     for i in range(variant.warmup, len(df)):
@@ -450,13 +463,9 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
             unrealized = open_pnl(current, last)
             short = position["action"] == "SELL"
             signed_qty = -position["qty"] if short else position["qty"]
-            liquidation_price = current * (1 + slip if short else 1 - slip)
-            if market == "ph":
-                liquidation_price = pse_execution_price(liquidation_price, buy=short)
-            estimate = None
-            if not stale and liquidation_price is not None:
-                fee = liquidation_price * position["qty"] * fee_rate(request, mark_date, buy=short)
-                estimate = unrealized + signed_qty * (liquidation_price - current) - fee
+            estimate = None if stale else liquidation_estimate(
+                request, action=position["action"], qty=position["qty"], current=current,
+                unrealized=unrealized, mark=mark_date)
             output["positions"].append({**position, "signed_exposure": signed_qty * current,
                                          "liquidation_pnl_estimate": estimate, "date": str(df.date.iloc[last]), "current": current,
                                          "mark_date": str(mark_date), "mark_age_days": (request.end_date-mark_date).days,

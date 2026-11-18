@@ -7,6 +7,67 @@
     epoch: 0, tableEpoch: 0, pollBusy: false, rows: [], loadedMore: false, submitting: false,
     pendingSubmission: null, folderSignature: null};
   const label = value => String(value || "").replaceAll("-", " ");
+  const clock = () => typeof window.__experimentClock === "function" ? window.__experimentClock() : new Date();
+  function zoneParts(timeZone) {
+    const parts = {};
+    new Intl.DateTimeFormat("en-US", {timeZone, year:"numeric", month:"2-digit", day:"2-digit",
+      hour:"2-digit", minute:"2-digit", hourCycle:"h23"}).formatToParts(clock())
+      .forEach(part => { if (part.type !== "literal") parts[part.type] = part.value; });
+    return parts;
+  }
+  const padIso = parts => `${parts.year}-${parts.month}-${parts.day}`;
+  function addDays(iso, days) {
+    const [year, month, day] = iso.split("-").map(Number);
+    return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+  }
+  function isWeekday(iso) {
+    const [year, month, day] = iso.split("-").map(Number);
+    const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+    return weekday !== 0 && weekday !== 6;
+  }
+  function previousWeekday(iso) {
+    let day = addDays(iso, -1);
+    while (!isWeekday(day)) day = addDays(day, -1);
+    return day;
+  }
+  function lastClosedSession(market) {
+    const ph = market === "ph";
+    const parts = zoneParts(ph ? "Asia/Manila" : "America/New_York");
+    let iso = padIso(parts);
+    const minutes = Number(parts.hour) * 60 + Number(parts.minute);
+    const weekend = !isWeekday(iso);
+    // US cash close is 16:00 ET. PSE's cash session is closed before 09:00 and from 15:00.
+    const closed = ph ? weekend || minutes < 9 * 60 || minutes >= 15 * 60 : weekend || minutes >= 16 * 60;
+    if (!closed) iso = addDays(iso, -1);
+    while (!isWeekday(iso)) iso = addDays(iso, -1);
+    return iso;
+  }
+  function evaluableSession(market, end) {
+    const final = isWeekday(end) ? end : previousWeekday(end);
+    const closed = lastClosedSession(market);
+    return final <= closed ? final : closed;
+  }
+  function currentMark(record) {
+    const end = state.batch?.request?.end_date;
+    return record.valuation === "stale; security status unresolved" && Boolean(end) &&
+      record.mark_date >= evaluableSession(state.batch.request.market, end);
+  }
+  function shownValuation(record) {
+    return currentMark(record) ? "last traded close" : (record.valuation ?? "—");
+  }
+  function shownLiquidation(record) {
+    if (!currentMark(record) || record.liquidation_pnl_estimate != null) return record.liquidation_pnl_estimate;
+    const req = state.batch.request;
+    const qty = record.qty, current = record.current, unrealized = record.unrealized_pnl;
+    if ((req.market === "ph" && req.txn_cost_pct == null) ||
+        ![qty, current, unrealized].every(value => typeof value === "number")) return null;
+    const short = record.action === "SELL";
+    const slip = Number(req.slippage_pct) || 0;
+    const price = current * (short ? 1 + slip : 1 - slip);
+    const feeRate = req.txn_cost_pct == null ? 0.001 : Number(req.txn_cost_pct);
+    const signed = short ? -qty : qty;
+    return unrealized + signed * (price - current) - price * qty * feeRate;
+  }
   const number = (value, digits = 2) => value == null || !Number.isFinite(Number(value)) ? "—" :
     Number(value).toLocaleString(undefined, {maximumFractionDigits: digits});
   const percent = value => value == null ? "—" : number(value) + "%";
@@ -170,6 +231,8 @@
           const button = node("button", record.symbol, "exp-row-chart"); button.type = "button";
           button.addEventListener("click", () => showChart(record)); td.append(button);
         } else if (key === "evidence") td.textContent = JSON.stringify(record.evidence || {});
+        else if (key === "valuation") td.textContent = shownValuation(record);
+        else if (key === "liquidation_pnl_estimate") td.textContent = number(shownLiquidation(record));
         else if (typeof record[key] === "boolean") td.textContent = record[key] ? "yes" : "censored";
         else if (["entry_price","exit_price","stop_loss","take_profit","current"].includes(key) && typeof record[key] === "number") {
           td.textContent = record[key].toLocaleString(undefined,{maximumSignificantDigits:9});

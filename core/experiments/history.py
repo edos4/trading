@@ -63,6 +63,20 @@ def shift_session(market: str, day: date, steps: int) -> date:
     return day
 
 
+def evaluable_session(market: str, end: date) -> date:
+    """Latest session a daily tape can contain for this request.
+
+    History stops at the last closed cash session, so an end date of today
+    (or a later date) is not a missing bar. A mark before the returned
+    session is stale. A mark on it is the last traded close.
+    """
+    final = end if is_session(market, end) else shift_session(market, end, -1)
+    closed = last_closed_session_date(market)
+    if not is_session(market, closed):
+        closed = shift_session(market, closed, -1)
+    return min(final, closed)
+
+
 def normalize_bars(rows: list[dict], market: str, end_date: date,
                    *, closed_through: date | None = None,
                    issues: list[dict] | None = None) -> list[dict]:

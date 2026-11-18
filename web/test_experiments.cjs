@@ -39,6 +39,7 @@ const batch = {id:'batch-one',state:'completed-with-blockers',request:{market:'u
     {source:'385-candles',state:'completed',summary:summary(40)}]};
 const calls = [];
 let deferred, poll, failPost = false, keyCounter = 0;
+const positionRows = [];
 async function api(url, options={}) {
   calls.push({url,options});
   if(url==='/api/experiments/catalog') return {sources};
@@ -53,12 +54,16 @@ async function api(url, options={}) {
     return sources.find(s=>s.id===id);
   }
   if(url.endsWith('/cancel')) return {...batch,state:'cancelled',cancel:1};
-  if(url.includes('/records?')) return {rows:[{cursor:1,symbol:'SPY',date:'2020-06-01',variant:'ema-10-50',status:'observed',evidence:{}}],next:null,total:1};
+  if(url.includes('/records?')) {
+    if(url.includes('kind=positions')) return {rows: positionRows, next:null, total:positionRows.length};
+    return {rows:[{cursor:1,symbol:'SPY',date:'2020-06-01',variant:'ema-10-50',status:'observed',evidence:{}}],next:null,total:1};
+  }
   const id=url.split('/folders/')[1];
   if(id) return {source:sources.find(s=>s.id===id),run:batch.runs.find(s=>s.source===id)};
   return batch;
 }
 const context = {
+  Date, Intl,
   document:{getElementById:get,createElement:tag=>new Element(tag),createDocumentFragment:()=>new Element('fragment'),querySelectorAll:()=>tabs},
   window:{location:{href:'http://localhost/experiments',search:''},history:{replaceState(){}},addEventListener(){},devicePixelRatio:1},
   localStorage:{getItem(){return null;},setItem(){}},
@@ -122,6 +127,19 @@ vm.runInNewContext(fs.readFileSync(__dirname+'/static/experiments.js','utf8'),co
   await folder('385-candles').events.click(); await flush();
   assert.match(get('exp-table-note').textContent,/Event study/);
   assert.equal(get('exp-export').hidden,false);
+  // 2026-11-18 02:30 UTC is 21:30 in New York on 2026-11-17, after the cash close.
+  context.window.__experimentClock = () => new Date('2026-11-18T02:30:00Z');
+  Object.assign(batch.request, {market:'us', end_date:'2026-11-18', slippage_pct:0.0005, txn_cost_pct:null});
+  positionRows.splice(0, positionRows.length,
+    {cursor:1, symbol:'AA', action:'BUY', qty:10, current:100, unrealized_pnl:5,
+     valuation:'stale; security status unresolved', mark_date:'2026-11-17', liquidation_pnl_estimate:null},
+    {cursor:2, symbol:'OLD', action:'BUY', qty:1, current:10, unrealized_pnl:0,
+     valuation:'stale; security status unresolved', mark_date:'2026-11-16', liquidation_pnl_estimate:null});
+  await tabs.find(t=>t.dataset.expTab==='positions').events.click(); await flush();
+  const cells = descendants(get('exp-table').parts.tbody).filter(el => el.tag==='td').map(el => el.textContent);
+  assert.ok(cells.includes('last traded close'));
+  assert.ok(cells.includes('stale; security status unresolved'));
+  assert.ok(cells.some(text => text.startsWith('3.5')));
   get('exp-history').value=''; await get('exp-history').events.change(); await flush();
   assert.deepEqual(folderIds(),['406-ema','442-repaint','385-candles']);
   assert.equal(get('exp-progress').value,0);
