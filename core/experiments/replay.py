@@ -39,7 +39,7 @@ class Cancelled(RuntimeError):
 def replay(number: int, symbol: str, df: pd.DataFrame, request: BatchRequest,
            *, cancel: Callable[[], bool] = lambda: False) -> dict:
     df = df.loc[df.date <= request.end_date.isoformat()].reset_index(drop=True)
-    output = {"signals": [], "trades": [], "positions": [], "outcomes": [], "logs": [],
+    output = {"symbol": symbol, "signals": [], "trades": [], "positions": [], "outcomes": [], "logs": [],
               "equity": {}, "exposure": {}, "variants": {}, "coverage": {"bars": len(df)}}
     if df.empty:
         output["coverage"]["reason"] = "No history"

@@ -213,3 +213,23 @@ def test_short_mark_and_estimated_cover_cost():
     cover = p["current"] * 1.002
     assert p["liquidation_pnl_estimate"] == pytest.approx(p["unrealized_pnl"] -
         (cover-p["current"] + cover*.001)*p["qty"])
+
+
+def test_distribution_and_no_loss_profit_factor():
+    from core.experiments.service import _empty_summary, _merge, _present
+    from core.experiments.history import frame
+    from core.experiments.replay import replay
+    from core.test_experiments import bars, request
+
+    rows = bars(32, flat=True)
+    rows[4].update(low=102, open=103, high=104, close=103)
+    req = request(start_date=rows[4]["date"], end_date=rows[26]["date"], txn_cost_pct=0, slippage_pct=0)
+    summary = _empty_summary({"kind":"trades"})
+    for symbol, exit_price in (("A",100), ("B",110), ("C",200)):
+        rows[25].update(open=exit_price,high=exit_price+1)
+        _merge(summary,replay(48,symbol,frame(rows),req))
+    stats = _present(summary,req,final=True)["variants"]["fvg-geometry"]
+    assert stats["p05_pnl"] < stats["median_pnl"] < stats["p95_pnl"]
+    assert stats["profit_factor_status"] == "profits without losses"
+    assert list(stats["best_symbols"]) == ["C","B","A"]
+    assert abs(stats["realized_without_best_three"]) < .000001

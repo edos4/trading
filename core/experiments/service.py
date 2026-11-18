@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import threading
+
+import numpy as np
 from collections import defaultdict
 from pathlib import Path
 
@@ -167,7 +169,7 @@ class ExperimentService:
                 source_id = source["id"]
                 if source_id in failures:
                     continue
-                summary = _present(summaries[source_id], request)
+                summary = _present(summaries[source_id], request, final=True)
                 coverage = summary["coverage"]
                 state, error = "completed", None
                 if (coverage["history_failed"] and not coverage["evaluated_symbols"]
@@ -253,6 +255,14 @@ def _merge(summary: dict, result: dict) -> None:
                 total[key] = None
             else:
                 total[key] += values[key]
+    samples = summary.setdefault("_samples", {})
+    for trade in result["trades"]:
+        samples.setdefault(trade["variant"], []).append(trade["pnl"])
+    contributors = summary.setdefault("_contributors", {})
+    for name, stats in result["variants"].items():
+        if stats.get("trade_count"):
+            symbol = result["symbol"]
+            contributors.setdefault(name, {})[symbol] = stats["realized_pnl"]
     for outcome in result["outcomes"]:
         total = summary["variants"][outcome["variant"]].setdefault("outcomes",{}).setdefault(
             str(outcome["horizon"]), {"complete":0,"censored":0,"positive":0,
@@ -282,10 +292,10 @@ def _merge(summary: dict, result: dict) -> None:
             previous = pnl
 
 
-def _present(summary: dict, request: BatchRequest) -> dict:
+def _present(summary: dict, request: BatchRequest, *, final: bool = False) -> dict:
     import copy
 
-    view = copy.deepcopy(summary)
+    view = copy.deepcopy({k: v for k, v in summary.items() if not k.startswith("_")})
     view["currency"] = get_market(request.market).currency
     exposure = view.pop("exposure", {})
     for name, values in view["variants"].items():
@@ -297,6 +307,21 @@ def _present(summary: dict, request: BatchRequest) -> dict:
                 outcomes["positive_fraction"] = outcomes["positive"]/count if count else None
         if values["kind"] != "trades":
             continue
+        if values["gross_loss"]:
+            values["profit_factor_status"] = "finite"
+        elif values["wins"]:
+            values["profit_factor_status"] = "profits without losses"
+        else:
+            values["profit_factor_status"] = "all scratches" if values["trade_count"] else "no closed trades"
+        if final and values["trade_count"]:
+            series = np.asarray(summary["_samples"][name])
+            quantiles = np.quantile(series, [.05, .5, .95]).tolist()
+            by_symbol = summary["_contributors"][name]
+            best = sorted(by_symbol, key=by_symbol.get, reverse=True)[:3]
+            worst = min(by_symbol, key=by_symbol.get)
+            values.update(p05_pnl=quantiles[0], median_pnl=quantiles[1], p95_pnl=quantiles[2],
+                          best_symbols={s: by_symbol[s] for s in best}, worst_symbol={worst: by_symbol[worst]},
+                          realized_without_best_three=values["realized_pnl"] - sum(by_symbol[s] for s in best))
         finite = values["account_model"] == "finite-cash"
         base = request.initial_capital if finite else 0.0
         pnl, peak, max_dd, max_dollars = 0.0, base, 0.0, 0.0
