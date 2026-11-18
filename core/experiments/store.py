@@ -68,6 +68,9 @@ class ExperimentStore:
                 CREATE TABLE IF NOT EXISTS datasets (
                     batch TEXT NOT NULL, symbol TEXT NOT NULL, payload BLOB NOT NULL,
                     digest TEXT NOT NULL, PRIMARY KEY(batch, symbol));
+                CREATE TABLE IF NOT EXISTS quarantine (
+                    batch TEXT NOT NULL, symbol TEXT NOT NULL, payload BLOB NOT NULL,
+                    PRIMARY KEY(batch, symbol));
                 CREATE TABLE IF NOT EXISTS results (
                     batch TEXT NOT NULL, source TEXT NOT NULL, symbol TEXT NOT NULL,
                     payload BLOB NOT NULL, PRIMARY KEY(batch, source, symbol));
@@ -198,6 +201,16 @@ class ExperimentStore:
         with self.connect() as con:
             con.execute("UPDATE runs SET state=?,progress=?,summary=?,error=? WHERE batch=? AND source=?",
                         (state, progress, packed(summary), error, batch_id, source))
+
+    def save_quarantine(self, batch_id: str, symbol: str, issues: list[dict]) -> None:
+        with self.connect() as con:
+            con.execute("INSERT INTO quarantine VALUES(?,?,?)", (batch_id, symbol, packed(issues)))
+
+    def quarantined(self, batch_id: str) -> Iterator[dict]:
+        with self.connect() as con:
+            for row in con.execute("SELECT symbol,payload FROM quarantine WHERE batch=? ORDER BY symbol", (batch_id,)):
+                for issue in unpacked(row["payload"]):
+                    yield {"symbol": row["symbol"], **issue}
 
     def dataset(self, batch_id: str, symbol: str, rows: list[dict]) -> str:
         payload = packed(rows)

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from core.experiments.catalog import catalog, sources
 from core.experiments.contracts import BatchRequest
-from core.experiments.history import available_symbols, frame, load_symbol
+from core.experiments.history import available_symbols, frame, normalize_bars, raw_symbol
 from core.experiments.replay import Cancelled, replay
 from core.experiments.store import ExperimentStore
 from core.market import get_market
@@ -19,7 +19,7 @@ class ExperimentService:
     def __init__(self, store: ExperimentStore, *, enumerate_symbols=None, loader=None):
         self.store = store
         self.enumerate_symbols = enumerate_symbols or available_symbols
-        self.loader = loader or load_symbol
+        self.loader = loader or raw_symbol
         self._threads: dict[str, threading.Thread] = {}
         self._lock = threading.Lock()
 
@@ -65,7 +65,7 @@ class ExperimentService:
         # Network loading and a single expensive adapter can outlive a polling
         # interval; heartbeat the lease independently of that work.
         progress = {"stage": "loading", "completed_symbols": 0, "total_symbols": None,
-                    "data_errors": [], "engine_sha256": _engine_hash(),
+                    "tape_version": 2, "quarantined_rows": 0, "data_errors": [], "engine_sha256": _engine_hash(),
                     "universe_membership": "current snapshot; historical membership/delistings unverified",
                     "corporate_actions": "provider adjustments unverified"}
 
@@ -105,7 +105,14 @@ class ExperimentService:
                 progress.update(stage="loading", current_symbol=symbol)
                 self.store.heartbeat(batch_id, "loading", dict(progress))
                 try:
-                    rows = self.loader(symbol, request.market, request.end_date)
+                    raw = self.loader(symbol, request.market, request.end_date)
+                    issues = []
+                    try:
+                        rows = normalize_bars(raw, request.market, request.end_date, issues=issues)
+                    finally:
+                        if issues:
+                            self.store.save_quarantine(batch_id, symbol, issues)
+                            progress["quarantined_rows"] += len(issues)
                     if self.store.cancelled(batch_id):
                         raise Cancelled()
                     digest = self.store.dataset(batch_id, symbol, rows)

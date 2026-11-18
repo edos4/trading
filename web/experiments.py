@@ -160,6 +160,8 @@ def register_experiment_routes(app, templates, ctx) -> None:
 
         def lines():
             yield json.dumps({"kind": "manifest", **detail}, allow_nan=False) + "\n"
+            for row in get_service().store.quarantined(batch_id):
+                yield json.dumps({"kind": "quarantine", **row}, allow_nan=False) + "\n"
             for kind in sorted(KINDS):
                 after = 0
                 while True:

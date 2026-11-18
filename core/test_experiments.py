@@ -9,6 +9,8 @@ from unittest.mock import patch
 
 import pandas as pd
 import pytest
+from zoneinfo import ZoneInfo
+from core.experiments.history import is_session
 from pydantic import ValidationError
 
 from core.experiments.adapters import SPECS, variants
@@ -21,15 +23,17 @@ from core.experiments.store import Conflict, ExperimentStore
 
 
 def bars(n: int = 700, *, flat: bool = False) -> list[dict]:
-    start = date(2020, 1, 1)
+    day = date(2019, 6, 3)
     output = []
     for i in range(n):
-        day = start + timedelta(days=i)
+        while not is_session("us", day):
+            day += timedelta(days=1)
         c = 100.0 if flat else 100 + i * .03 + 8 * math.sin(i / 13)
         o = c - .2
-        output.append({"ts": int(datetime.combine(day, datetime.min.time(), timezone.utc).timestamp()),
+        output.append({"ts": int(datetime.combine(day, datetime.min.time(), ZoneInfo("America/New_York")).replace(hour=9, minute=30).timestamp()),
                        "date": day.isoformat(), "open": o, "high": c + 1,
                        "low": o - 1, "close": c, "volume": 10000.0})
+        day += timedelta(days=1)
     return output
 
 
@@ -95,9 +99,9 @@ def test_history_symbol_failure_and_ph_mapping():
 
 def test_date_filter_is_inclusive_and_respects_explicit_session_date():
     rows = bars(4)
-    rows[0]["ts"] -= 10 * 3600  # Session date, not UTC shifting, owns the range.
-    result = normalize_bars(rows, "ph", date(2020,1,3), closed_through=date(2020,1,2))
-    assert [r["date"] for r in result] == ["2020-01-01","2020-01-02"]
+    labeled = [{**row, "interval": "1d", "ts": row["ts"] - 10 * 3600} for row in rows]
+    result = normalize_bars(labeled, "ph", date(2019,6,7), closed_through=date(2019,6,4))
+    assert [r["date"] for r in result] == ["2019-06-03", "2019-06-04"]
     assert normalize_bars([rows[0],rows[0]],"us",date(2020,1,5)) == [rows[0]]
     with pytest.raises(ValueError, match="Conflicting"):
         normalize_bars([rows[0],{**rows[0],"volume":1}],"us",date(2020,1,5))
@@ -259,7 +263,7 @@ def test_cancellation_is_checked_inside_replay():
 def test_complete_batch_runs_every_folder_and_keeps_blockers(tmp_path):
     store = ExperimentStore(tmp_path)
     service = ExperimentService(store,enumerate_symbols=lambda *_:["SPY"],loader=lambda *_:bars(1200))
-    req=request(start_date="2022-10-01",end_date="2023-04-14")
+    req=request(start_date="2023-06-01",end_date="2024-04-14")
     result = service.submit(req,background=False)
     assert len(result["runs"]) == 449
     assert result["state"] == "completed-with-blockers"
@@ -271,7 +275,7 @@ def test_complete_batch_runs_every_folder_and_keeps_blockers(tmp_path):
     summary = detail["run"]["summary"]
     for name, values in summary["variants"].items():
         assert summary["equity"][name][-1]["pnl"] == pytest.approx(values["net_pnl"])
-    assert len(store.chart(result["id"],"SPY")) == 1200
+    assert store.chart(result["id"],"SPY") == [r for r in bars(1200) if r["date"] <= req.end_date.isoformat()]
     assert service.submit(req,background=False)["id"] == result["id"]
     assert len(store.listing()) == 1
 
@@ -283,7 +287,7 @@ def test_partial_symbol_history_failure_keeps_the_evaluated_folders(tmp_path):
         return bars(1200)
     service = ExperimentService(ExperimentStore(tmp_path),
                                 enumerate_symbols=lambda *_: ["SPY", "BAD"], loader=loader)
-    result = service.submit(request(start_date="2022-10-01", end_date="2023-04-14"), background=False)
+    result = service.submit(request(start_date="2023-06-01", end_date="2024-04-14"), background=False)
     assert result["state"] == "completed-with-blockers"
     assert result["counts"].get("failed", 0) == 0
     ready = [run for run in result["runs"] if run["state"] == "completed"]

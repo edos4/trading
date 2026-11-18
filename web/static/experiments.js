@@ -72,6 +72,9 @@
     const errors = progress.data_errors || [];
     $("exp-data-errors").hidden = !errors.length;
     $("exp-data-errors").querySelector("pre").textContent = errors.map(e => `${e.symbol}: ${e.reason}`).join("\n");
+    const quality = progress.tape_version ? " · " + (progress.quarantined_rows || 0) + " quarantined history rows"
+      : " · Legacy tape: interval, session and fill quality were unverified";
+    $("exp-run-id").textContent += quality;
     if (batch.error) message(batch.error);
     renderFolders();
   }

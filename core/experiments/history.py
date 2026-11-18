@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 from datetime import date, datetime, time, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from core.market import get_market, last_closed_session_date, ph_history_symbol
+from core.market import get_market, is_ph_holiday, is_us_holiday, last_closed_session_date, ph_history_symbol
 
 
 class HistoryUnavailable(RuntimeError):
@@ -46,92 +47,74 @@ def _valid_ohlcv(bar: dict) -> bool:
     return min(o, h, l, c) > 0 and v >= 0 and l <= min(o, c) <= max(o, c) <= h
 
 
-def _session_clock(ts: int, zone: ZoneInfo) -> time:
-    return datetime.fromtimestamp(ts, timezone.utc).astimezone(zone).time()
-
-
-def _resolve_session(session: date, bars: list[dict], zone: ZoneInfo) -> dict | None:
-    """Keep one daily bar. Same-timestamp disagreements stay an error.
-
-    A 09:30 session bar is the daily print used by the current history
-    loader. A local-midnight companion is a month-label or older stamp, and
-    other extra prints are intraday rows stored on the same session. Those
-    are dropped. A session with no valid daily bar is omitted.
-    """
-    by_ts: dict[int, dict] = {}
-    for bar in bars:
-        previous = by_ts.get(bar["ts"])
-        if previous is not None and previous != bar:
-            raise ValueError(f"Conflicting daily rows for session {session}")
-        by_ts[bar["ts"]] = bar
-    valid = [bar for bar in by_ts.values() if _valid_ohlcv(bar)]
-    if not valid:
-        return None
-    unique: list[dict] = []
-    for bar in valid:
-        match = next((item for item in unique if all(item[key] == bar[key] for key in _PRICE_KEYS)), None)
-        if match is None:
-            unique.append(bar)
-        elif _session_clock(bar["ts"], zone) == _SESSION_OPEN:
-            unique[unique.index(match)] = bar
-    if len(unique) == 1:
-        return unique[0]
-    opens = [bar for bar in unique if _session_clock(bar["ts"], zone) == _SESSION_OPEN]
-    if len(opens) == 1:
-        return opens[0]
-    return None
+@lru_cache(maxsize=65536)
+def is_session(market: str, day: date) -> bool:
+    holiday = is_ph_holiday if market == "ph" else is_us_holiday
+    return day.weekday() < 5 and not holiday(day)
 
 
 def normalize_bars(rows: list[dict], market: str, end_date: date,
                    *, closed_through: date | None = None,
                    issues: list[dict] | None = None) -> list[dict]:
-    """Retain warm-up and cut at end-date.
-
-    Non-finite values and two different bars with the same timestamp still
-    fail the symbol. An invalid print, or several incompatible prints that
-    are not the 09:30 daily bar, drops that session only.
-    """
+    """Admit declared daily bars or the history feed's regular-open daily stamp."""
     zone = ZoneInfo(get_market(market).session_tz)
     cutoff = min(end_date, closed_through or last_closed_session_date(market))
-    grouped: dict[date, list[dict]] = {}
+    grouped: dict[date, dict[int, dict]] = {}
+    seen: dict[int, dict] = {}
+    invalid = []
     for raw in rows:
         ts = int(raw["ts"])
-        session = date.fromisoformat(str(raw["date"])) if raw.get("date") else datetime.fromtimestamp(ts, timezone.utc).astimezone(zone).date()
+        local = datetime.fromtimestamp(ts, timezone.utc).astimezone(zone)
+        session = date.fromisoformat(str(raw["date"])) if raw.get("date") else local.date()
         if session > cutoff:
             continue
         numbers = {key: float(raw[key]) for key in _PRICE_KEYS}
         if not all(math.isfinite(value) for value in numbers.values()):
             raise ValueError(f"Non-finite OHLCV on {session}")
-        grouped.setdefault(session, []).append({"ts": ts, "date": session.isoformat(), **numbers})
-    kept, identities = [], set()
-    for session in sorted(grouped):
-        chosen = _resolve_session(session, grouped[session], zone)
-        if chosen is None:
+        bar = {"ts": ts, "date": session.isoformat(), **numbers}
+        interval = raw.get("interval", raw.get("timeframe"))
+        reason = None
+        if not is_session(market, session):
+            reason = "outside exchange session"
+        elif interval is not None and str(interval).lower() not in {"1d", "d", "daily"}:
+            reason = "non-daily interval"
+        elif interval is None and (local.date() != session or local.time() != _SESSION_OPEN):
+            reason = "unverified daily interval"
+        elif not _valid_ohlcv(bar):
+            reason = "invalid OHLCV"
+            invalid.append(session)
+        if reason:
             if issues is not None:
-                issues.append({"date": session.isoformat(), "reason": "unusable session omitted"})
+                issues.append({"date": session.isoformat(), "ts": ts, "reason": reason})
             continue
-        if chosen["ts"] in identities:
-            raise ValueError(f"Duplicate bar identity {chosen['ts']}")
-        identities.add(chosen["ts"])
-        kept.append(chosen)
-    if grouped and not kept:
-        raise ValueError(f"Invalid OHLCV on {min(grouped)}")
+        if ts in seen and seen[ts] != bar:
+            raise ValueError(f"Conflicting daily rows for session {session}")
+        seen[ts] = bar
+        grouped.setdefault(session, {})[ts] = bar
+    kept = []
+    for session, by_ts in sorted(grouped.items()):
+        candidates = list(by_ts.values())
+        if any(any(row[k] != candidates[0][k] for k in _PRICE_KEYS) for row in candidates[1:]):
+            if issues is not None:
+                issues.extend({"date": session.isoformat(), "ts": ts, "reason": "conflicting daily prints"} for ts in by_ts)
+            continue
+        kept.append(min(candidates, key=lambda row: row["ts"]))
+    if invalid and not kept:
+        raise ValueError(f"Invalid OHLCV on {min(invalid)}")
     return kept
 
 
-def load_symbol(symbol: str, market: str, end_date: date) -> list[dict]:
+def raw_symbol(symbol: str, market: str, end_date: date) -> list[dict]:
     from data.history import load_daily_bars
-    from utils.logger import log
 
-    # No newest-N limit: it can entirely miss an old requested interval.
     raw = load_daily_bars(symbol, market=market)
     if raw is None:
         raise HistoryUnavailable(f"Daily history request failed for {symbol}")
-    issues: list[dict] = []
-    rows = normalize_bars(raw, market, end_date, issues=issues)
-    if issues:
-        log.warning(f"Experiments | {symbol}: omitted {len(issues)} unusable session(s); remaining daily bars kept")
-    return rows
+    return raw
+
+
+def load_symbol(symbol: str, market: str, end_date: date) -> list[dict]:
+    return normalize_bars(raw_symbol(symbol, market, end_date), market, end_date)
 
 
 def frame(rows: list[dict]) -> pd.DataFrame:
