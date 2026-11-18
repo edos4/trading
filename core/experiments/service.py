@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import threading
+from importlib.metadata import version
 
 import numpy as np
 from collections import defaultdict
@@ -62,7 +63,8 @@ class ExperimentService:
         run = next((r for r in self.store.runs(batch_id) if r["source"] == source_id), None)
         if entry is None or run is None:
             raise KeyError("Experiment folder not found in this batch")
-        return {"batch_id": batch_id, "request": batch["request"], "source": entry, "run": run}
+        return {"batch_id": batch_id, "request": batch["request"], "source": entry, "run": run,
+                "provenance": batch["progress"]}
 
     def execute(self, batch_id: str) -> None:
         stop = threading.Event()
@@ -207,8 +209,12 @@ class ExperimentService:
 
 def _engine_hash() -> str:
     digest = hashlib.sha256()
-    for path in sorted(Path(__file__).parent.glob("*.py")):
-        digest.update(path.name.encode())
+    root = Path(__file__).resolve().parents[2]
+    paths = [*Path(__file__).parent.glob("*.py"), root / "core/market.py", root / "indicators/_math.py"]
+    for package in ("numpy", "pandas"):
+        digest.update(f"{package}={version(package)}".encode())
+    for path in sorted(paths):
+        digest.update(str(path.relative_to(root)).encode())
         digest.update(path.read_bytes())
     return digest.hexdigest()
 

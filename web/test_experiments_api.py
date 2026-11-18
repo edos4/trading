@@ -88,6 +88,9 @@ def test_folder_drilldown_pagination_export_and_frozen_chart(app_client):
     assert exported.status_code == 200
     lines = [json.loads(line) for line in exported.text.splitlines()]
     assert lines[0]["kind"] == "manifest"
+    frozen = lines[0]["provenance"]
+    assert frozen["symbols"] == ["SPY"] and frozen["txn_cost_pct"] == .001
+    assert frozen["dataset_sha256"] and frozen["engine_sha256"] and frozen["tape_version"] == 2
     assert sum(line["kind"] == "signals" for line in lines) == first["total"]
     with patch("data.history.load_daily_bars",side_effect=AssertionError("Charts must use frozen data")):
         chart = client.get(root+"/chart?symbol=SPY")

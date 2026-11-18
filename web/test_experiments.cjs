@@ -125,6 +125,7 @@ vm.runInNewContext(fs.readFileSync(__dirname+'/static/experiments.js','utf8'),co
   get('exp-history').value=''; await get('exp-history').events.change(); await flush();
   assert.deepEqual(folderIds(),['406-ema','442-repaint','385-candles']);
   assert.equal(get('exp-progress').value,0);
+  assert.equal(get('exp-frozen').hidden,true);
   assert.equal(get('exp-run-id').textContent,'');
   assert.equal(get('exp-export').hidden,true);
   console.log('Experiments client: catalog, blockers, safe text, request, drilldown and stale-response checks passed');

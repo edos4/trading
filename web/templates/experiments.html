@@ -31,6 +31,7 @@
   <div class="exp-status-line"><span id="exp-run-id" class="muted small"></span>
     <label class="exp-history">Saved batch<select id="exp-history"><option value="">New batch</option></select></label></div>
   <p id="exp-error" class="exp-error" role="alert" hidden></p>
+  <details id="exp-frozen" hidden><summary>Saved run settings and data coverage</summary><pre id="exp-frozen-settings"></pre><details><summary>Frozen symbol universe</summary><pre id="exp-universe"></pre></details></details>
   <details id="exp-data-errors" hidden><summary>History coverage issues</summary><pre></pre></details>
 </section>
 <div class="exp-layout">
@@ -68,6 +69,6 @@
 {% block scripts %}
 <script>window.TB_PAGE = "experiments";</script>
 <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
-<script src="/static/tv_chart.js?v=26"></script>
-<script src="/static/experiments.js?v=1"></script>
+<script src="/static/tv_chart.js?v=27"></script>
+<script src="/static/experiments.js?v=3"></script>
 {% endblock %}

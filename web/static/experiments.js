@@ -83,7 +83,14 @@
     const errors = progress.data_errors || [];
     $("exp-data-errors").hidden = !errors.length;
     $("exp-data-errors").querySelector("pre").textContent = errors.map(e => `${e.symbol}: ${e.reason}`).join("\n");
-    const quality = progress.tape_version ? " · " + (progress.quarantined_rows || 0) + " quarantined history rows"
+    $("exp-frozen").hidden = false;
+    const {idempotency_key, symbols: requestedSymbols, ...settings} = batch.request;
+    const {symbols, data_errors, ...resolved} = progress;
+    $("exp-frozen-settings").textContent = JSON.stringify({settings, resolved,
+      requested_symbols: requestedSymbols?.length || "all", enumerated_symbols: symbols?.length,
+      failed_symbols: data_errors?.length}, null, 2);
+    $("exp-universe").textContent = (symbols || []).join(", ");
+    const quality = progress.stage === "queued" ? "" : progress.tape_version ? " · " + (progress.quarantined_rows || 0) + " quarantined history rows"
       : " · Legacy tape: interval, session and fill quality were unverified";
     $("exp-run-id").textContent += quality;
     if (batch.error) message(batch.error);
@@ -164,7 +171,10 @@
           button.addEventListener("click", () => showChart(record)); td.append(button);
         } else if (key === "evidence") td.textContent = JSON.stringify(record.evidence || {});
         else if (typeof record[key] === "boolean") td.textContent = record[key] ? "yes" : "censored";
-        else td.textContent = typeof record[key] === "number" ? number(record[key], ["entry_price","exit_price","stop_loss","current"].includes(key) ? 4 : 2) : record[key] ?? "—";
+        else if (["entry_price","exit_price","stop_loss","take_profit","current"].includes(key) && typeof record[key] === "number") {
+          td.textContent = record[key].toLocaleString(undefined,{maximumSignificantDigits:9});
+          td.title = String(record[key]);
+        } else td.textContent = typeof record[key] === "number" ? number(record[key]) : record[key] ?? "—";
         if (["pnl","unrealized_pnl","return_pct"].includes(key)) td.className = record[key] > 0 ? "exp-positive" : record[key] < 0 ? "exp-negative" : "";
         row.append(td);
       }); fragment.append(row);
@@ -225,7 +235,7 @@
           ["Realized excluding top three symbols",number(metrics.realized_without_best_three)],["Average R",number(metrics.average_r)],
           ...(metrics.r_count ? [["Losing trades (≤1R / >1–2R / >2R)",
             [metrics.loss_r_0_to_1, metrics.loss_r_1_to_2, metrics.loss_r_over_2].join(" / ")]] : []),
-          ["Long P&L",number(metrics.long_pnl)],["Short P&L",number(metrics.short_pnl)],["Borrow cost",number(metrics.borrow_fees)],["Fees",number(metrics.fees)],["Turnover",number(metrics.turnover)]].forEach(([key,value]) => {
+          ["Long P&L",number(metrics.long_pnl)],["Short P&L",number(metrics.short_pnl)],["Borrow cost",number(metrics.borrow_fees)],["Fees",number(metrics.fees)],["Gross traded value",number(metrics.turnover)]].forEach(([key,value]) => {
           const pair = node("div"); pair.append(node("dt",key),node("dd",value)); dl.append(pair);
         }); section.append(dl);
       } groups.push(section);
@@ -342,7 +352,7 @@
         state.batch=null; $("exp-run").disabled=false; $("exp-cancel").disabled=true;
         $("exp-status").textContent="Ready to configure a batch."; $("exp-progress").value=0;
         $("exp-progress-label").textContent=""; $("exp-run-id").textContent="";
-        $("exp-data-errors").hidden=true; message(null);
+        $("exp-frozen").hidden=true; $("exp-data-errors").hidden=true; message(null);
         try { localStorage.removeItem("experiments-last-batch"); } catch (_) {}
         renderFolders(); if(state.selected) await selectSource(state.selected);
       }
