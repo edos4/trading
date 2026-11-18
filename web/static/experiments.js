@@ -194,7 +194,10 @@
         [["Account", metrics.account_model],["Currency",summary.currency],["Net P&L",number(metrics.net_pnl)],
           ["Realized",number(metrics.realized_pnl)],["Unrealized",number(metrics.unrealized_pnl)],
           ["Trades",metrics.trade_count],["Win rate",percent(metrics.win_rate == null ? null : metrics.win_rate * 100)],
-          ["Profit factor",number(metrics.profit_factor)],["Max drawdown",percent(metrics.max_drawdown_pct)],
+          ["Profit factor",number(metrics.profit_factor)],["Max drawdown (currency)",number(metrics.max_drawdown_cash)],
+          ...(metrics.account_model === "finite-cash" ? [["Max NAV drawdown",percent(metrics.max_drawdown_pct)]] : []),
+          ["Gross exposure",number(metrics.gross_exposure)],["Net exposure",number(metrics.net_exposure)],
+          ["Peak concurrent entry cost (close)",number(metrics.peak_committed_basis)],
           ["Expectancy",number(metrics.expectancy)],["Average R",number(metrics.average_r)],
           ["Fees",number(metrics.fees)],["Turnover",number(metrics.turnover)]].forEach(([key,value]) => {
           const pair = node("div"); pair.append(node("dt",key),node("dd",value)); dl.append(pair);
@@ -212,18 +215,20 @@
     const width = Math.max(canvas.clientWidth || 600, 300), height = 260;
     canvas.width = width * (window.devicePixelRatio || 1); canvas.height = height * (window.devicePixelRatio || 1);
     ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1); ctx.clearRect(0,0,width,height);
+    const independent = Object.values(state.detail?.run?.summary?.variants || {}).some(v => v.account_model === "independent-fixed-notional");
+    const ordinate = point => independent ? point.pnl : point.equity;
     const all = Object.values(curves).flat();
     if (!all.length) return;
     const dates = [...new Set(all.map(p => p.date))].sort(), indices = new Map(dates.map((d,i) => [d,i]));
-    const lo = all.reduce((v,p)=>Math.min(v,p.equity),Infinity), hi = all.reduce((v,p)=>Math.max(v,p.equity),-Infinity), span = hi-lo || 1;
+    const lo = all.reduce((v,p)=>Math.min(v,ordinate(p)),Infinity), hi = all.reduce((v,p)=>Math.max(v,ordinate(p)),-Infinity), span = hi-lo || 1;
     ctx.fillStyle = "#8b9aab"; ctx.font = "11px monospace";
     ctx.fillText(number(hi),0,15); ctx.fillText(number(lo),0,height-20);
     ctx.fillText(dates[0],60,height-2); ctx.fillText(dates.at(-1),width-95,height-2);
     const colors = ["#3d8bfd","#3dd68c","#d4a017","#ca95ed"];
     Object.entries(curves).forEach(([name, points],i) => {
       ctx.strokeStyle = colors[i % colors.length]; ctx.beginPath();
-      points.forEach((p,j) => { const x=65+(width-80)*indices.get(p.date)/Math.max(dates.length-1,1), y=20+(height-55)*(hi-p.equity)/span; if(j) ctx.lineTo(x,y); else ctx.moveTo(x,y); }); ctx.stroke();
-      ctx.fillStyle = colors[i % colors.length]; ctx.fillText(name,75,15+i*14);
+      points.forEach((p,j) => { const x=65+(width-80)*indices.get(p.date)/Math.max(dates.length-1,1), y=20+(height-55)*(hi-ordinate(p))/span; if(j) ctx.lineTo(x,y); else ctx.moveTo(x,y); }); ctx.stroke();
+      ctx.fillStyle = colors[i % colors.length]; ctx.fillText(name + (independent ? " · cumulative P&L" : " · NAV"),75,15+i*14);
     });
   }
   async function showChart(record) {

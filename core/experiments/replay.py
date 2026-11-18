@@ -26,7 +26,7 @@ def replay(number: int, symbol: str, df: pd.DataFrame, request: BatchRequest,
            *, cancel: Callable[[], bool] = lambda: False) -> dict:
     df = df.loc[df.date <= request.end_date.isoformat()].reset_index(drop=True)
     output = {"signals": [], "trades": [], "positions": [], "outcomes": [], "logs": [],
-              "equity": {}, "variants": {}, "coverage": {"bars": len(df)}}
+              "equity": {}, "exposure": {}, "variants": {}, "coverage": {"bars": len(df)}}
     if df.empty:
         output["coverage"]["reason"] = "No history"
         output["logs"].append({"symbol":symbol,"date":request.start_date.isoformat(),
@@ -69,6 +69,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
     position, pending = None, None
     realized = 0.0
     days = {}
+    exposure = {}
     stats = {"status": "completed", "kind": variant.kind, "signal_count": 0,
              "trade_count": 0, "wins": 0, "gross_profit": 0.0, "gross_loss": 0.0,
              "fees": 0.0, "turnover": 0.0, "realized_pnl": 0.0, "unrealized_pnl": 0.0,
@@ -256,11 +257,16 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                 output["outcomes"].append(outcome)
         if variant.kind == "trades":
             days[day] = realized + open_pnl(c)
+            gross = position["qty"] * c if position else 0.0
+            net = -gross if position and position["action"] == "SELL" else gross
+            basis = position["qty"] * position["entry_price"] + position["entry_fee"] if position else 0.0
+            exposure[day] = (gross, net, basis)
     if variant.kind == "trades":
         last = len(df) - 1
         if position is not None and request.end_policy == "force-close":
             if close(last, float(df.close.iloc[last]), "end-date-liquidation"):
                 days[str(df.date.iloc[last])] = realized
+                exposure[str(df.date.iloc[last])] = (0.0, 0.0, 0.0)
         if position is not None:
             current = float(df.close.iloc[last])
             unrealized = open_pnl(current)
@@ -275,6 +281,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                                          pending=pending[0]))
         stats["realized_pnl"] = realized
         output["equity"][variant.name] = days
+        output["exposure"][variant.name] = exposure
     else:
         for key in ("realized_pnl", "unrealized_pnl", "gross_profit", "gross_loss", "fees", "turnover"):
             stats[key] = None

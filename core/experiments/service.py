@@ -218,16 +218,21 @@ def _data_error(exc: Exception) -> str:
 def _empty_summary(source: dict) -> dict:
     return {"kind": source["kind"], "coverage": {"evaluated_symbols": 0, "history_failed": 0,
             "insufficient_history": 0, "outside_source_universe": 0, "no_history":0,"no_in_range_bars":0},
-            "variants": {}, "equity": {}, "signal_count": 0, "trade_count": 0, "open_count": 0}
+            "variants": {}, "equity": {}, "exposure": {}, "signal_count": 0, "trade_count": 0, "open_count": 0}
 
 
 def _merge(summary: dict, result: dict) -> None:
     evaluated = any(v.get("status") == "completed" for v in result["variants"].values())
-    if result["coverage"].get("reason") == "No history":
-        summary["coverage"]["no_history"] += 1
-    elif result["coverage"].get("reason") == "No bars inside the selected dates":
-        summary["coverage"]["no_in_range_bars"] += 1
-    summary["coverage"]["evaluated_symbols" if evaluated else "insufficient_history"] += 1
+    reason = result["coverage"].get("reason")
+    if reason == "No history":
+        bucket = "no_history"
+    elif reason == "No bars inside the selected dates":
+        bucket = "no_in_range_bars"
+    elif evaluated:
+        bucket = "evaluated_symbols"
+    else:
+        bucket = "insufficient_history"
+    summary["coverage"][bucket] += 1
     summary["signal_count"] += len(result["signals"])
     summary["trade_count"] += len(result["trades"])
     summary["open_count"] += len(result["positions"])
@@ -256,6 +261,14 @@ def _merge(summary: dict, result: dict) -> None:
             total["censored"] += 1
     # Store per-date DELTAS, then take a cumulative sum when presenting. This
     # carries a symbol's last mark across dates when another symbol trades.
+    for name, days in result.get("exposure", {}).items():
+        curve = summary["exposure"].setdefault(name, {})
+        previous = (0.0, 0.0, 0.0)
+        for day, point in sorted(days.items()):
+            delta = curve.setdefault(day, [0.0, 0.0, 0.0])
+            for j, value in enumerate(point):
+                delta[j] += value - previous[j]
+            previous = point
     for name, days in result["equity"].items():
         curve = summary["equity"].setdefault(name, {})
         previous = 0.0
@@ -269,6 +282,7 @@ def _present(summary: dict, request: BatchRequest) -> dict:
 
     view = copy.deepcopy(summary)
     view["currency"] = get_market(request.market).currency
+    exposure = view.pop("exposure", {})
     for name, values in view["variants"].items():
         if values["kind"] != "trades":
             for outcomes in values.get("outcomes",{}).values():
@@ -277,21 +291,33 @@ def _present(summary: dict, request: BatchRequest) -> dict:
                     outcomes["mean_"+key] = outcomes["sum_"+key]/count if count else None
                 outcomes["positive_fraction"] = outcomes["positive"]/count if count else None
             continue
-        pnl, peak, max_dd = 0.0, request.initial_capital, 0.0
+        finite = values["account_model"] == "finite-cash"
+        base = request.initial_capital if finite else 0.0
+        pnl, peak, max_dd, max_dollars = 0.0, base, 0.0, 0.0
+        gross = net = basis = peak_basis = 0.0
         points = []
         for day, delta in sorted(view["equity"].get(name, {}).items()):
             pnl += delta
-            equity = request.initial_capital + pnl
+            change = exposure.get(name, {}).get(day, (0, 0, 0))
+            gross += change[0]
+            net += change[1]
+            basis += change[2]
+            peak_basis = max(peak_basis, basis)
+            equity = base + pnl
             peak = max(peak, equity)
             max_dd = max(max_dd, 100 * (peak - equity) / peak if peak > 0 else 0)
-            points.append({"date": day, "equity": equity, "pnl": pnl})
+            drawdown = peak - equity
+            max_dollars = max(max_dollars, drawdown)
+            points.append({"date": day, "equity": equity if finite else None, "pnl": pnl,
+                           "drawdown": drawdown, "gross_exposure": gross, "net_exposure": net})
         view["equity"][name] = points
         values.update(net_pnl=values["realized_pnl"] + values["unrealized_pnl"],
                       win_rate=values["wins"] / values["trade_count"] if values["trade_count"] else None,
                       profit_factor=values["gross_profit"] / values["gross_loss"] if values["gross_loss"] else None,
                       expectancy=values["realized_pnl"] / values["trade_count"] if values["trade_count"] else None,
                       average_r=values["r_total"] / values["r_count"] if values["r_count"] else None,
-                      max_drawdown_pct=max_dd)
+                      max_drawdown_pct=max_dd if finite else None, max_drawdown_cash=max_dollars,
+                      peak_committed_basis=peak_basis, gross_exposure=gross, net_exposure=net)
     return view
 
 
