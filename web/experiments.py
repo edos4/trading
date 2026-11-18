@@ -105,7 +105,7 @@ def register_experiment_routes(app, templates, ctx) -> None:
                           after: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500),
                           symbol: str | None = None, chronological: bool = False, _user: str = Depends(require_login)):
         try:
-            if kind not in KINDS:
+            if kind.removeprefix("holdout-") not in KINDS:
                 raise ValueError("Unknown result table")
             await asyncio.to_thread(get_service().detail, batch_id, source_id)
             return await asyncio.to_thread(get_service().store.evidence, batch_id, source_id,
@@ -148,7 +148,7 @@ def register_experiment_routes(app, templates, ctx) -> None:
                 if day in candle_dates:
                     payload["markers"].append({"time": day, "text": label, "color": color,
                                                "shape": shape, "position": "aboveBar"})
-            if evidence.get("record_kind") in {"trades", "positions"}:
+            if evidence.get("record_kind", "").removeprefix("holdout-") in {"trades", "positions"}:
                 marker(evidence.get("signal_date"), "Decision", "#e3a539")
                 marker(evidence.get("entry_date"), "Filled " + evidence["action"], "#409ded",
                        "arrowUp" if evidence["action"] == "BUY" else "arrowDown")
@@ -184,7 +184,10 @@ def register_experiment_routes(app, templates, ctx) -> None:
             yield json.dumps({"kind": "manifest", **detail}, allow_nan=False) + "\n"
             for row in get_service().store.quarantined(batch_id):
                 yield json.dumps({"kind": "quarantine", **row}, allow_nan=False) + "\n"
-            for kind in sorted(KINDS):
+            kinds = sorted(KINDS)
+            if detail["request"].get("holdout_start"):
+                kinds.extend(["holdout-" + kind for kind in sorted(KINDS)])
+            for kind in kinds:
                 after = 0
                 while True:
                     page = get_service().store.evidence(batch_id, source_id, kind, after=after, limit=500)

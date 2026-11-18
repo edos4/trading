@@ -165,6 +165,10 @@
     }));
     $("exp-coverage").textContent = summary.coverage ? Object.entries(summary.coverage).map(([key,value]) => `${label(key.replaceAll("_", "-"))}: ${value}`).join(" · ") : "No run results yet.";
   }
+  function selectedSummary() {
+    const summary = state.detail?.run?.summary || {};
+    return state.batch?.request.holdout_start && $("exp-sample").value === "holdout" ? summary.holdout || {} : summary;
+  }
   function renderDetail(detail) {
     state.detail = detail;
     const source = detail.source, run = detail.run;
@@ -186,9 +190,10 @@
     $("exp-export").textContent = run?.state === "blocked" ? "Export source and blocker" :
       ["failed","cancelled","interrupted"].includes(run?.state) ? "Export retained partial results" : "Export complete results";
     if (state.batch) $("exp-export").href = path("/export");
-    stats(run?.summary || {});
+    $("exp-sample-label").hidden = !state.batch?.request.holdout_start;
+    stats(selectedSummary());
     if(run?.state === "blocked") $("exp-coverage").textContent = "Blocked for this run; no simulated trading results were produced.";
-    renderPerformance(run?.summary || {});
+    renderPerformance(selectedSummary());
   }
   async function selectSource(id) {
     state.selected = id; state.detail = null; state.loadedMore = false;
@@ -257,7 +262,8 @@
     if (!more) { state.rows = []; state.next = null; state.loadedMore = false; }
     if (!state.batch || !state.detail?.run) { renderTable(0); return; }
     try {
-      const result = await api(path(`/records?kind=${state.tab}&after=${more ? state.next : 0}&limit=100&chronological=${state.batch?.progress.tape_version >= 2}`));
+      const sample = state.batch?.request.holdout_start && $("exp-sample").value === "holdout" ? "holdout-" : "";
+      const result = await api(path(`/records?kind=${sample}${state.tab}&after=${more ? state.next : 0}&limit=100&chronological=${state.batch?.progress.tape_version >= 2}`));
       if (epoch !== state.tableEpoch || selectedEpoch !== state.epoch) return;
       state.rows = more ? [...state.rows, ...result.rows] : result.rows; state.next = result.next;
       if (more) state.loadedMore = true;
@@ -298,6 +304,7 @@
           ...(metrics.account_model === "finite-cash" ? [["Max NAV drawdown",percent(metrics.max_drawdown_pct)]] : []),
           ["Stale gross exposure",number(metrics.stale_exposure)],["Gross exposure",number(metrics.gross_exposure)],["Net exposure",number(metrics.net_exposure)],
           ["Peak concurrent entry cost (close)",number(metrics.peak_committed_basis)],
+          ["95% block interval, mean daily P&L",metrics.uncertainty?.mean_daily_pnl_95?.map(x=>number(x)).join(" to ") || "Requires four 20-session blocks"],
           ["Mean net P&L / close",number(metrics.expectancy)],["Median trade",number(metrics.median_pnl)],
           ["5th / 95th percentile",[number(metrics.p05_pnl),number(metrics.p95_pnl)].join(" / ")],
           ["Top realized contributors",Object.entries(metrics.best_symbols || {}).map(([s,p])=>s+" "+number(p)).join(", ") || "—"],
@@ -321,7 +328,7 @@
     const width = Math.max(canvas.clientWidth || 600, 300), height = 260;
     canvas.width = width * (window.devicePixelRatio || 1); canvas.height = height * (window.devicePixelRatio || 1);
     ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1); ctx.clearRect(0,0,width,height);
-    const independent = Object.values(state.detail?.run?.summary?.variants || {}).some(v => v.account_model === "independent-fixed-notional");
+    const independent = Object.values(selectedSummary().variants || {}).some(v => v.account_model === "independent-fixed-notional");
     const measure = $("exp-chart-measure").value || "performance";
     const ordinate = point => measure === "performance" ? (independent ? point.pnl : point.equity) : point[measure];
     const all = Object.values(curves).flat().filter(p=>Number.isFinite(ordinate(p)));
@@ -393,7 +400,7 @@
         symbols:$("exp-symbols").value.split(/[\s,]+/).filter(Boolean), initial_capital:Number($("exp-capital").value),
         position_notional:Number($("exp-notional").value), slippage_pct:Number($("exp-slippage").value)/100,
         txn_cost_pct:$("exp-cost").value === "" ? null : Number($("exp-cost").value)/100,
-        short_policy:$("exp-shorts").value || "exclude", borrow_rate:Number($("exp-borrow").value || 3)/100,
+        holdout_start:$("exp-holdout").value || null, short_policy:$("exp-shorts").value || "exclude", borrow_rate:Number($("exp-borrow").value || 3)/100,
         end_policy:$("exp-end-policy").value};
       const signature=JSON.stringify(draft);
       if(state.pendingSubmission?.signature !== signature) {
@@ -432,13 +439,14 @@
     state.tab=button.dataset.expTab; ++state.tableEpoch;
     document.querySelectorAll("[data-exp-tab]").forEach(el => { el.classList.toggle("active",el===button); el.setAttribute("aria-selected",String(el===button)); });
     $("exp-table-wrap").hidden=!columns[state.tab]; $("exp-performance").hidden=state.tab!=="performance"; $("exp-source-text").hidden=state.tab!=="source";
-    if(state.tab==="performance") drawEquity(state.detail?.run?.summary.equity || {}); else await loadRows(false);
+    if(state.tab==="performance") drawEquity(selectedSummary().equity || {}); else await loadRows(false);
   }));
-  $("exp-chart-measure").addEventListener("change",()=>drawEquity(state.detail?.run?.summary.equity || {}));
+  $("exp-sample").addEventListener("change",async()=>{ if (state.detail) { renderDetail(state.detail); await loadRows(false); } });
+  $("exp-chart-measure").addEventListener("change",()=>drawEquity(selectedSummary().equity || {}));
   $("exp-more").addEventListener("click",()=>loadRows(true));
   $("exp-chart-close").addEventListener("click",()=>$("exp-chart-dialog").close());
   $("exp-chart-dialog").addEventListener("close",()=>window.TVChart?.unmount());
-  window.addEventListener("resize",()=>drawEquity(state.detail?.run?.summary.equity || {}));
+  window.addEventListener("resize",()=>drawEquity(selectedSummary().equity || {}));
   async function init() {
     try {
       if($("exp-market").value === "ph") { $("exp-capital").value="1000000"; $("exp-notional").value="100000"; }

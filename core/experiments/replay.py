@@ -87,6 +87,14 @@ def _output(symbol: str, length: int) -> dict:
 
 def replay(number: int, symbol: str, df: pd.DataFrame, request: BatchRequest,
            *, cancel: Callable[[], bool] = lambda: False, tape: DailyTape | None = None) -> dict:
+    if request.holdout_start:
+        # Independent flat starts. Training decisions, exits and outcome labels all
+        # see only the prefix. Holdout indicators may warm on the earlier history.
+        training = request.model_copy(update={"end_date":request.holdout_start-timedelta(days=1), "holdout_start":None})
+        test = request.model_copy(update={"start_date":request.holdout_start, "holdout_start":None})
+        result = replay(number, symbol, df, training, cancel=cancel)
+        result["holdout"] = replay(number, symbol, df, test, cancel=cancel, tape=tape)
+        return result
     df = df.loc[df.date <= request.end_date.isoformat()].reset_index(drop=True)
     output = _output(symbol, len(df))
     if df.empty:

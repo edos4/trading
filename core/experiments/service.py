@@ -8,10 +8,11 @@ from importlib.metadata import version
 import numpy as np
 from collections import defaultdict
 from pathlib import Path
+from datetime import date, timedelta
 
 from core.experiments.catalog import catalog, sources
 from core.experiments.contracts import BatchRequest
-from core.experiments.history import available_symbols, frame, normalize_bars, raw_symbol
+from core.experiments.history import available_symbols, frame, is_session, normalize_bars, raw_symbol
 from core.experiments.replay import Cancelled, DailyTape, replay
 from core.experiments.store import ExperimentStore
 from core.market import get_market
@@ -93,6 +94,10 @@ class ExperimentService:
             batch = self.store.batch(batch_id, manifest=True)
             request = BatchRequest.model_validate(batch["request"])
             active = [s for s in batch["manifest"] if s["availability"] == "ready"]
+            progress["trial_families"] = sorted({s["family_id"] for s in active if s.get("family_id")})
+            progress["evaluation"] = {"holdout_start": str(request.holdout_start) if request.holdout_start else None,
+                                      "metric": "net P&L per variant", "selection": "all trials retained",
+                                      "window_policy": "flat start; outcomes censored at each boundary"}
             if not self.store.heartbeat(batch_id, "loading", progress):
                 raise Cancelled()
             if not active:
@@ -177,10 +182,11 @@ class ExperimentService:
                 summary = _present(summaries[source_id], request, final=True)
                 coverage = summary["coverage"]
                 state, error = "completed", None
-                if (coverage["history_failed"] and not coverage["evaluated_symbols"]
+                evaluated = coverage["evaluated_symbols"] or summary.get("holdout", {}).get("coverage", {}).get("evaluated_symbols")
+                if (coverage["history_failed"] and not evaluated
                         and not coverage["outside_source_universe"]):
                     state, error = "failed", "History failed for every symbol; partial results are retained"
-                elif not coverage["evaluated_symbols"]:
+                elif not evaluated:
                     required = source.get("symbols") or []
                     if required:
                         state, error = "blocked", (
@@ -238,6 +244,10 @@ def _empty_summary(source: dict) -> dict:
 
 
 def _merge(summary: dict, result: dict) -> None:
+    if "holdout" in result:
+        if "_holdout" not in summary:
+            summary["_holdout"] = _empty_summary(summary)
+        _merge(summary["_holdout"], result["holdout"])
     if result.get("control"):
         if "_control" not in summary:
             summary["_control"] = _empty_summary({"kind":"trades"})
@@ -304,6 +314,29 @@ def _merge(summary: dict, result: dict) -> None:
             previous = pnl
 
 
+def _block_interval(points: list[dict], market: str) -> dict:
+    """Resample whole blocks of aggregate daily P&L. Preserve concurrent holdings."""
+    by_date = {date.fromisoformat(p["date"]):p["pnl"] for p in points}
+    changes = []
+    prior = 0.0
+    if by_date:
+        day, end = min(by_date), max(by_date)
+        while day <= end:
+            if is_session(market, day):
+                current = by_date.get(day, prior)
+                changes.append(current - prior)
+                prior = current
+            day += timedelta(days=1)
+    size = 20
+    count = len(changes) // size
+    result = {"block_sessions":size, "complete_blocks":count, "unused_tail":len(changes)%size}
+    if count >= 4:
+        means = np.reshape(changes[:count*size], (count,size)).mean(axis=1)
+        draws = np.random.default_rng(414).choice(means, size=(1000,count)).mean(axis=1)
+        result["mean_daily_pnl_95"] = np.quantile(draws,[.025,.975]).tolist()
+    return result
+
+
 def _present(summary: dict, request: BatchRequest, *, final: bool = False) -> dict:
     import copy
 
@@ -354,6 +387,8 @@ def _present(summary: dict, request: BatchRequest, *, final: bool = False) -> di
             points.append({"date": day, "equity": equity if finite else None, "pnl": pnl,
                            "drawdown": drawdown, "gross_exposure": gross, "net_exposure": net})
         view["equity"][name] = points
+        if final:
+            values["uncertainty"] = _block_interval(points, request.market)
         values.update(gross_pnl=values["realized_pnl"]+values["unrealized_pnl"]+values["fees"]+values["borrow_fees"]+values["execution_shortfall"],
                       net_pnl=values["realized_pnl"] + values["unrealized_pnl"],
                       win_rate=values["wins"] / values["trade_count"] if values["trade_count"] else None,
@@ -371,6 +406,8 @@ def _present(summary: dict, request: BatchRequest, *, final: bool = False) -> di
             main["benchmark"]["name"] = "Buy and hold SPY" if main["account_model"] == "finite-cash" else "Same triggers delayed five sessions"
             main["benchmark"]["filled"] = control["funnel"]["filled"]
             main["benchmark"]["net_difference"] = main["net_pnl"] - control["net_pnl"] if control["funnel"]["filled"] else None
+    if "_holdout" in summary:
+        view["holdout"] = _present(summary["_holdout"], request, final=final)
     return view
 
 

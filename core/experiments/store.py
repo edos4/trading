@@ -225,14 +225,16 @@ class ExperimentStore:
     def save_result(self, batch_id: str, source: str, symbol: str, result: dict) -> None:
         with self.connect() as con:
             con.execute("INSERT INTO results VALUES(?,?,?,?)", (batch_id, source, symbol, packed(result)))
-            for kind in ("signals", "trades", "positions", "outcomes", "logs"):
-                rows = result.get(kind, [])
-                for row in rows:
-                    cursor = con.execute("INSERT INTO evidence(batch,source,kind,symbol,payload) VALUES(?,?,?,?,?)",
-                                         (batch_id, source, kind, symbol, packed(row)))
-                    day = row.get("exit_date") or row.get("mark_date") or row.get("date") or ""
-                    con.execute("INSERT INTO evidence_dates VALUES(?,?,?,?,?)",
-                                (batch_id, source, kind, day, cursor.lastrowid))
+            for prefix, sample in (("", result), ("holdout-", result.get("holdout", {}))):
+                for kind in ("signals", "trades", "positions", "outcomes", "logs"):
+                    rows = sample.get(kind, [])
+                    kind = prefix + kind
+                    for row in rows:
+                        cursor = con.execute("INSERT INTO evidence(batch,source,kind,symbol,payload) VALUES(?,?,?,?,?)",
+                                             (batch_id, source, kind, symbol, packed(row)))
+                        day = row.get("exit_date") or row.get("mark_date") or row.get("date") or ""
+                        con.execute("INSERT INTO evidence_dates VALUES(?,?,?,?,?)",
+                                    (batch_id, source, kind, day, cursor.lastrowid))
 
     def evidence(self, batch_id: str, source: str, kind: str, *, after: int = 0,
                  limit: int = 100, symbol: str | None = None, chronological: bool = False) -> dict:

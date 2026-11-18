@@ -365,3 +365,20 @@ def test_matched_control_and_finite_buy_hold_use_same_execution():
     spy = replay(40,"SPY",frame(rows),req)["control"]
     assert len(spy["positions"]) == 1 and not spy["trades"]
     assert spy["positions"][0]["entry_date"] == rows[26]["date"]
+
+
+def test_holdout_mutation_leaves_training_evidence_unchanged():
+    from core.experiments.history import frame
+    from core.experiments.replay import replay
+    from core.test_experiments import bars, request
+    rows = bars(150)
+    req = request(start_date=rows[12]["date"], holdout_start=rows[100]["date"], end_date=rows[-1]["date"])
+    first = replay(120,"X",frame(rows),req)
+    for row in rows[100:]:
+        row.update(open=40,low=39,high=41,close=40)
+    second = replay(120,"X",frame(rows),req)
+    untouched = first.pop("holdout")
+    changed = second.pop("holdout")
+    assert first == second and untouched != changed
+    assert all(t["signal_date"] >= str(req.holdout_start) for t in untouched["trades"])
+    assert all(o["outcome_date"] < str(req.holdout_start) for o in first["outcomes"] if o["complete"])

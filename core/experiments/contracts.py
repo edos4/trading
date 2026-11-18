@@ -14,6 +14,7 @@ class BatchRequest(BaseModel):
 
     start_date: date
     end_date: date
+    holdout_start: date | None = None
     market: Literal["us", "ph"] = "us"
     symbols: list[str] = Field(default_factory=list, max_length=20000)
     initial_capital: float = Field(100000, gt=0, le=1e12)
@@ -30,6 +31,8 @@ class BatchRequest(BaseModel):
     def validate_range(self) -> BatchRequest:
         if self.start_date > self.end_date:
             raise ValueError("Start date must be on or before end date")
+        if self.holdout_start and not self.start_date < self.holdout_start <= self.end_date:
+            raise ValueError("Holdout must begin after the start and within the selected range")
         if (self.end_date - self.start_date).days > 36525:
             raise ValueError("Choose a date range of at most 100 years")
         cleaned = []

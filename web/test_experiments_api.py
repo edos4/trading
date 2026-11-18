@@ -129,3 +129,18 @@ def test_cancel_and_conflict_are_http_errors_not_generic_server_failures(app_cli
     assert response.status_code == 409
     response=client.post(f"/api/experiments/runs/{batch}/cancel")
     assert response.status_code == 200 and response.json()["cancel"] == 1
+
+
+def test_holdout_evidence_and_export_are_separate(app_client):
+    client, _, service = app_client
+    batch = service.submit(BatchRequest(start_date="2020-06-01", end_date="2021-11-30",
+        holdout_start="2021-06-01", idempotency_key="holdout-test"), background=False)
+    src = next(s["id"] for s in catalog() if s["number"] == 120)
+    path = f"/api/experiments/runs/{batch['id']}/folders/{src}"
+    assert batch["progress"]["evaluation"]["holdout_start"] == "2021-06-01"
+    summary = client.get(path).json()["run"]["summary"]
+    assert summary["trade_count"] and summary["holdout"]["trade_count"]
+    rows = client.get(path+"/records?kind=holdout-trades&chronological=true").json()["rows"]
+    assert rows and all(t["signal_date"] >= "2021-06-01" for t in rows)
+    exported = [json.loads(line) for line in client.get(path+"/export").text.splitlines()]
+    assert sum(row["kind"]=="holdout-trades" for row in exported) == len(rows)

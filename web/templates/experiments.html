@@ -14,6 +14,7 @@
   <button id="exp-run" class="btn primary" type="submit" disabled>Start all folders</button>
   <button id="exp-cancel" class="btn" type="button" disabled>Cancel batch</button>
   <details class="exp-options"><summary>Run settings</summary><div class="toolbar">
+    <label>Holdout starts (optional)<input id="exp-holdout" type="date" /></label>
     <label>Symbols (blank = all available)<input id="exp-symbols" placeholder="AAPL, MSFT or BDO.PS" /></label>
     <label>Reference capital<input id="exp-capital" type="number" min="1" step="any" value="100000" required /></label>
     <label>Position notional<input id="exp-notional" type="number" min="1" step="any" value="10000" required /></label>
@@ -47,6 +48,7 @@
       <div class="exp-detail-header"><div><p id="exp-folder-id" class="exp-eyebrow"></p><h2 id="exp-title"></h2></div><span id="exp-folder-state" class="exp-badge"></span></div>
       <p id="exp-scope" class="muted"></p><p id="exp-blocker" class="exp-blocker" hidden></p>
       <details id="exp-rules"><summary>Parameters, scope and assumptions</summary><pre id="exp-parameters"></pre><ul id="exp-assumptions"></ul><ul id="exp-limitations"></ul></details>
+      <label id="exp-sample-label" hidden>Evaluation window<select id="exp-sample"><option value="training">Development window</option><option value="holdout">Reserved holdout</option></select></label>
       <div id="exp-stats" class="exp-stat-grid"></div>
       <div class="exp-detail-toolbar"><span id="exp-coverage" class="muted small"></span><a id="exp-export" class="btn" hidden>Export complete results</a></div>
       <div class="tabs exp-tabs" role="tablist" aria-label="Experiment results">
