@@ -17,7 +17,7 @@ from datetime import date, timedelta
 
 from core.experiments.catalog import catalog, sources
 from core.experiments.contracts import BatchRequest
-from core.experiments.history import available_symbols, frame, is_session, normalize_bars, raw_symbol
+from core.experiments.history import frame, is_session, normalize_bars, raw_symbol, resolve_universe
 from core.experiments.replay import Cancelled, DailyTape, replay
 from core.experiments.scan_worker import prepare_history, scan_symbol
 from core.experiments.store import ExperimentStore
@@ -28,7 +28,7 @@ from utils.logger import log
 class ExperimentService:
     def __init__(self, store: ExperimentStore, *, enumerate_symbols=None, loader=None, workers: int = 1):
         self.store = store
-        self.enumerate_symbols = enumerate_symbols or available_symbols
+        self.enumerate_symbols = enumerate_symbols or resolve_universe
         self.loader = loader or raw_symbol
         self.workers = max(1, int(workers))
         self._threads: dict[str, threading.Thread] = {}
@@ -169,7 +169,7 @@ class ExperimentService:
             if not active:
                 self.store.finish(batch_id, "completed-with-blockers")
                 return
-            symbols = self.enumerate_symbols(request.market, request.symbols)
+            symbols = self.enumerate_symbols(request.market, request.symbols, request.n_symbols)
             if not symbols:
                 raise ValueError("No history symbols were available; the batch cannot be evaluated")
             progress.update(total_symbols=len(symbols), symbols=symbols,
@@ -177,6 +177,12 @@ class ExperimentService:
                             currency=get_market(request.market).currency,
                             fee_model="ph-broker-0.25pct-vat-and-dated-stt-v1" if request.market == "ph" and request.txn_cost_pct is None else "fixed-per-side",
                             txn_cost_pct=get_market("us").txn_cost_pct if request.market == "us" and request.txn_cost_pct is None else request.txn_cost_pct)
+            if request.n_symbols and not request.symbols:
+                progress["universe_rank"] = {
+                    "requested": request.n_symbols,
+                    "with_history": len(symbols),
+                    "order": get_market(request.market).universe_order,
+                }
             summaries = {s["id"]: _empty_summary(s) for s in active}
             failures = set()
             dataset_hash = hashlib.sha256()

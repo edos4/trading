@@ -45,8 +45,12 @@ def register_experiment_routes(app, templates, ctx) -> None:
         from zoneinfo import ZoneInfo
 
         today = datetime.now(ZoneInfo("Asia/Manila")).date()
+        market = default_market()
         return templates.TemplateResponse(request, "experiments.html", ctx(
-            request, active="experiments", default_market=default_market().id,
+            request, active="experiments", default_market=market.id,
+            default_n_symbols=market.default_n_symbols,
+            us_n_symbols=get_market("us").default_n_symbols,
+            ph_n_symbols=get_market("ph").default_n_symbols,
             start_default=(today - timedelta(days=365)).isoformat(),
             end_default=today.isoformat()))
 

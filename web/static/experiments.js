@@ -154,7 +154,8 @@
     const {idempotency_key, symbols: requestedSymbols, ...settings} = batch.request;
     const {symbols, data_errors, ...resolved} = progress;
     $("exp-frozen-settings").textContent = JSON.stringify({settings, resolved,
-      requested_symbols: requestedSymbols?.length || "all", enumerated_symbols: symbols?.length,
+      requested_symbols: requestedSymbols?.length || (batch.request.n_symbols ? `top ${batch.request.n_symbols}` : "all"),
+      enumerated_symbols: symbols?.length,
       failed_symbols: data_errors?.length}, null, 2);
     $("exp-universe").textContent = (symbols || []).join(", ");
     const quality = progress.stage === "queued" ? "" : progress.tape_version ? " · " + (progress.quarantined_rows || 0) + " quarantined history rows"
@@ -524,8 +525,10 @@
     if($("exp-start").value > $("exp-end").value) { message("Start date must be on or before end date."); return; }
     state.submitting=true; $("exp-run").disabled=true;
     try {
+      const symbols = $("exp-symbols").value.split(/[\s,]+/).filter(Boolean);
       const draft = {market:$("exp-market").value, start_date:$("exp-start").value, end_date:$("exp-end").value,
-        symbols:$("exp-symbols").value.split(/[\s,]+/).filter(Boolean), initial_capital:Number($("exp-capital").value),
+        symbols, n_symbols: symbols.length ? null : Number($("exp-n").value),
+        initial_capital:Number($("exp-capital").value),
         position_notional:Number($("exp-notional").value), slippage_pct:Number($("exp-slippage").value)/100,
         txn_cost_pct:$("exp-cost").value === "" ? null : Number($("exp-cost").value)/100,
         holdout_start:$("exp-holdout").value || null, short_policy:$("exp-shorts").value || "exclude", borrow_rate:Number($("exp-borrow").value || 3)/100,
@@ -557,6 +560,8 @@
   $("exp-run-scope").addEventListener("change",renderRunScope);
   $("exp-market").addEventListener("change", () => {
     const ph=$("exp-market").value==="ph"; $("exp-capital").value=ph?"1000000":"100000"; $("exp-notional").value=ph?"100000":"10000";
+    const count=$("exp-n");
+    if(count.value===count.dataset.us || count.value===count.dataset.ph) count.value=ph?count.dataset.ph:count.dataset.us;
     if(!state.batch) { renderFolders(); if(state.detail) renderDetail(state.detail); }
   });
   function resetDraft() {

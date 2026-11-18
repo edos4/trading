@@ -16,6 +16,10 @@ class BatchRequest(BaseModel):
     end_date: date
     holdout_start: date | None = None
     market: Literal["us", "ph"] = "us"
+    # Empty symbols plus a count means the paper book's top liquid names.
+    # An explicit symbol list replaces that ranking. Omitted count keeps the
+    # full history catalog for older clients.
+    n_symbols: int | None = Field(None, ge=5, le=20000)
     symbols: list[str] = Field(default_factory=list, max_length=20000)
     source_ids: list[str] = Field(default_factory=list, max_length=2000)
     initial_capital: float = Field(100000, gt=0, le=1e12)

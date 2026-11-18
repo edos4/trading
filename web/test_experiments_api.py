@@ -47,6 +47,12 @@ def test_page_catalog_and_auth(app_client):
     assert response.status_code == 200
     assert 'href="/experiments"' in response.text
     assert 'id="exp-end"' in response.text and 'id="exp-start"' in response.text
+    from core.market import default_market, get_market
+    page = response.text
+    assert page.find('id="exp-market"') < page.find('id="exp-n"') < page.find('id="exp-start"')
+    assert f'value="{default_market().default_n_symbols}"' in page
+    assert f'data-us="{get_market("us").default_n_symbols}"' in page
+    assert f'data-ph="{get_market("ph").default_n_symbols}"' in page
     assert 'experiments.js' in response.text
     assert len(client.get("/api/experiments/catalog").json()["sources"]) == 449
     anonymous = TestClient(app)

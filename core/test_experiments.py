@@ -17,7 +17,9 @@ from pydantic import ValidationError
 from core.experiments.adapters import SPECS, variants
 from core.experiments.catalog import catalog, sources
 from core.experiments.contracts import BatchRequest
-from core.experiments.history import HistoryUnavailable, available_symbols, frame, load_symbol, normalize_bars
+from core.experiments.history import (
+    HistoryUnavailable, available_symbols, frame, load_symbol, normalize_bars, resolve_universe,
+)
 from core.experiments.replay import Cancelled, replay
 from core.experiments.service import ExperimentService
 from core.experiments.store import Conflict, ExperimentStore
@@ -70,7 +72,8 @@ def test_changed_source_revision_is_blocked_until_adapter_review():
 
 @pytest.mark.parametrize("values", [{"start_date":"2022-01-01","end_date":"2021-01-01"},
                                    {"initial_capital":float("nan")}, {"market":"both"},
-                                   {"symbols":["bad\nticker"]}, {"unexpected":True}])
+                                   {"symbols":["bad\nticker"]}, {"unexpected":True},
+                                   {"n_symbols":4}, {"n_symbols":20001}])
 def test_request_rejects_invalid_inputs(values):
     with pytest.raises(ValidationError):
         request(**values)
@@ -96,6 +99,59 @@ def test_history_symbol_failure_and_ph_mapping():
         assert available_symbols("ph", ["BDO"]) == ["BDO.PS"]
         with pytest.raises(ValueError):
             available_symbols("ph", ["NOPE"])
+
+
+def test_top_n_universe_follows_the_paper_ranking_and_skips_names_without_history():
+    listed = [{"symbol": "MSFT", "market": "us"}, {"symbol": "AAPL", "market": "us"},
+              {"symbol": "STALE", "market": "us"}]
+    with patch("data.history.list_history_symbols", return_value=listed), \
+         patch("data.tv_client.TVClient.fetch_universe_cached",
+               return_value=[("NVDA", "NASDAQ"), ("AAPL", "NASDAQ"), ("MSFT", "NASDAQ")]) as fetch:
+        assert resolve_universe("us", [], 50) == ["AAPL", "MSFT"]
+        fetch.assert_called_once()
+        assert fetch.call_args.args[:2] == (50, "us")
+    with patch("data.history.list_history_symbols", return_value=listed), \
+         patch("data.tv_client.TVClient.fetch_universe_cached", side_effect=AssertionError("screener")):
+        assert resolve_universe("us", ["MSFT"], 50) == ["MSFT"]
+    with patch("data.history.list_history_symbols", return_value=[{"symbol": "BDO.PS", "market": "ph"}]), \
+         patch("data.tv_client.TVClient.fetch_universe_cached",
+               return_value=[("BDO", "PSE"), ("TEL", "PSE")]):
+        assert resolve_universe("ph", [], 30) == ["BDO.PS"]
+    with patch("data.tv_client.TVClient.fetch_universe_cached", return_value=[]):
+        with pytest.raises(HistoryUnavailable, match="No top symbols"):
+            resolve_universe("us", [], 50)
+    with patch("data.history.list_history_symbols", return_value=listed), \
+         patch("data.tv_client.TVClient.fetch_universe_cached", return_value=[("NVDA", "NASDAQ")]):
+        with pytest.raises(HistoryUnavailable, match="have daily history"):
+            resolve_universe("us", [], 50)
+    with patch("data.history.list_history_symbols", return_value=listed):
+        assert resolve_universe("us", []) == ["AAPL", "MSFT", "STALE"]
+
+
+def test_batch_forwards_the_top_n_universe(tmp_path):
+    seen = {}
+
+    def enumerate_symbols(market, selected, n_symbols=None):
+        seen.update(market=market, selected=list(selected), n_symbols=n_symbols)
+        return ["SPY"]
+
+    folder = next(s["id"] for s in catalog() if s["number"] == 406)
+    service = ExperimentService(ExperimentStore(tmp_path), enumerate_symbols=enumerate_symbols,
+                                loader=lambda *_: bars(1200))
+    result = service.submit(request(
+        n_symbols=40, source_ids=[folder], idempotency_key="top-n", short_policy="assume-borrow",
+    ), background=False)
+    assert seen == {"market": "us", "selected": [], "n_symbols": 40}
+    assert result["request"]["n_symbols"] == 40
+    assert result["progress"]["symbols"] == ["SPY"]
+    assert result["progress"]["universe_rank"] == {"requested": 40, "with_history": 1, "order": "value"}
+
+    explicit = service.submit(request(
+        n_symbols=40, symbols=["qqq"], source_ids=[folder], idempotency_key="explicit",
+        short_policy="assume-borrow",
+    ), background=False)
+    assert seen["selected"] == ["QQQ"] and seen["n_symbols"] == 40
+    assert "universe_rank" not in explicit["progress"]
 
 
 def test_date_filter_is_inclusive_and_respects_explicit_session_date():

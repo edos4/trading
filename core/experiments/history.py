@@ -15,6 +15,49 @@ class HistoryUnavailable(RuntimeError):
     pass
 
 
+def top_market_symbols(market: str, n: int) -> list[str]:
+    """Top liquid names for this market that also have daily history.
+
+    Ranking matches the paper book: US dollar volume with the ADV floor, PH
+    peso turnover. Screener names missing from history are skipped. They are
+    not replaced by stale listings further down the history catalog.
+    """
+    from data.tv_client import TVClient
+
+    from utils.logger import log
+
+    profile = get_market(market)
+    rows = TVClient.fetch_universe_cached(int(n), profile.id)
+    ranked: list[str] = []
+    for symbol, _exchange in rows:
+        key = ph_history_symbol(symbol) if profile.id == "ph" else str(symbol).strip().upper()
+        if key and key not in ranked:
+            ranked.append(key)
+    if not ranked:
+        raise HistoryUnavailable(f"No top symbols were returned for the {profile.id} market")
+    listed = set(available_symbols(profile.id, []))
+    chosen = [symbol for symbol in ranked if symbol in listed]
+    skipped = len(ranked) - len(chosen)
+    if skipped:
+        log.info(
+            f"Experiments | skipped {skipped} of the top {len(ranked)} {profile.id} "
+            "symbols with no daily history"
+        )
+    if not chosen:
+        raise HistoryUnavailable(
+            f"None of the top {n} {profile.id} symbols have daily history")
+    return chosen
+
+
+def resolve_universe(market: str, selected: list[str] | None = None,
+                     n_symbols: int | None = None) -> list[str]:
+    """Explicit tickers win. Otherwise a count is the paper top-N universe."""
+    chosen = list(selected or [])
+    if chosen or not n_symbols:
+        return available_symbols(market, chosen)
+    return top_market_symbols(market, int(n_symbols))
+
+
 def available_symbols(market: str, selected: list[str]) -> list[str]:
     from data.history import list_history_symbols
 

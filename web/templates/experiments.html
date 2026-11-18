@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Experiments — Trading Bot{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="/static/experiments.css?v=4" />
+<link rel="stylesheet" href="/static/experiments.css?v=5" />
 <section class="exp-heading">
   <div><p class="exp-eyebrow">Historical research</p><h1>Experiments</h1>
     <p class="muted">One batch, a separate result for every source folder.</p></div>
@@ -26,6 +26,7 @@
 </section>
 <form id="exp-form" class="panel exp-controls">
   <label>Market<select id="exp-market"><option value="us" {% if default_market == 'us' %}selected{% endif %}>US · USD</option><option value="ph" {% if default_market == 'ph' %}selected{% endif %}>Philippines · PHP</option></select></label>
+  <label class="exp-n" title="Top liquid symbols for the selected market, same ranking as the paper book. Names without daily history are skipped.">Symbols<input id="exp-n" type="number" min="5" max="20000" step="1" required value="{{ default_n_symbols }}" data-us="{{ us_n_symbols }}" data-ph="{{ ph_n_symbols }}" /></label>
   <label>Start date<input id="exp-start" type="date" required value="{{ start_default }}" /></label>
   <label>End date<input id="exp-end" type="date" required value="{{ end_default }}" /></label>
   <label>Run scope<select id="exp-run-scope"><option value="all">All folders</option><option value="selected">Selected experiment</option></select></label>
@@ -33,7 +34,7 @@
   <button id="exp-cancel" class="btn" type="button" disabled>Cancel batch</button>
   <details class="exp-options"><summary>Run settings</summary><div class="toolbar">
     <label>Holdout starts (optional)<input id="exp-holdout" type="date" /></label>
-    <label>Symbols (blank = all available)<input id="exp-symbols" placeholder="AAPL, MSFT or BDO.PS" /></label>
+    <label title="When filled, the batch runs only these symbols instead of the top-N list.">Specific symbols<input id="exp-symbols" placeholder="AAPL, MSFT or BDO.PS" /></label>
     <label>Reference capital<input id="exp-capital" type="number" min="1" step="any" value="100000" required /></label>
     <label>Position notional<input id="exp-notional" type="number" min="1" step="any" value="10000" required /></label>
     <label>Slippage (%)<input id="exp-slippage" type="number" min="0" max="9.99" step="0.01" value="0.05" required /></label>
@@ -42,7 +43,7 @@
     <label>Annual borrow cost (%)<input id="exp-borrow" type="number" value="3" min="0" max="500" step="any" /></label>
     <label>End date<select id="exp-end-policy"><option value="keep-open">Keep positions marked open</option><option value="force-close">Liquidate at last close</option></select></label>
   </div></details>
-  <p class="muted exp-form-note">Incomplete strategies and unavailable data stay blocked with reasons. Event studies show observations; trading metrics appear only where entry and exit rules are implemented. Select a folder to inspect its scope and assumptions.</p>
+  <p class="muted exp-form-note">Symbols selects the most liquid names for the market, using the same ranking as the paper book. Names without daily history are skipped. Specific symbols in Run settings replace that list. Incomplete strategies and unavailable data stay blocked with reasons. Event studies show observations; trading metrics appear only where entry and exit rules are implemented. Select a folder to inspect its scope and assumptions.</p>
 </form>
 <section class="panel exp-batch-status" aria-live="polite">
   <div class="exp-status-line"><strong id="exp-status">Ready to configure a batch.</strong><span id="exp-progress-label" class="muted"></span></div>
@@ -120,5 +121,5 @@
 <script>window.TB_PAGE = "experiments";</script>
 <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
 <script src="/static/tv_chart.js?v=27"></script>
-<script src="/static/experiments.js?v=6"></script>
+<script src="/static/experiments.js?v=7"></script>
 {% endblock %}
