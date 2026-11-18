@@ -391,7 +391,17 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
             if stale and request.end_policy == "force-close":
                 output["logs"].append(event(last, "unfilled", reason="No executable final-session close"))
             unrealized = open_pnl(current, last)
-            output["positions"].append({**position, "date": str(df.date.iloc[last]), "current": current,
+            short = position["action"] == "SELL"
+            signed_qty = -position["qty"] if short else position["qty"]
+            liquidation_price = current * (1 + slip if short else 1 - slip)
+            if market == "ph":
+                liquidation_price = pse_execution_price(liquidation_price, buy=short)
+            estimate = None
+            if not stale and liquidation_price is not None:
+                fee = liquidation_price * position["qty"] * fee_rate(request, mark_date, buy=short)
+                estimate = unrealized + signed_qty * (liquidation_price - current) - fee
+            output["positions"].append({**position, "signed_exposure": signed_qty * current,
+                                         "liquidation_pnl_estimate": estimate, "date": str(df.date.iloc[last]), "current": current,
                                          "mark_date": str(mark_date), "mark_age_days": (request.end_date-mark_date).days,
                                          "valuation": "stale; security status unresolved" if stale else "last traded close",
                                          "unrealized_pnl": unrealized,

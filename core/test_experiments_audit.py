@@ -196,3 +196,20 @@ def test_missing_final_session_keeps_last_traded_mark():
     assert pos["mark_date"] == rows[6]["date"] and pos["mark_age_days"] > 0
     assert result["variants"]["fvg-geometry"]["stale_exposure"] == pos["value"]
     assert any("final-session" in row.get("reason", "") for row in result["logs"])
+
+
+def test_short_mark_and_estimated_cover_cost():
+    import pytest
+    from core.experiments.history import frame
+    from core.experiments.replay import replay
+    from core.test_experiments import bars, request
+
+    rows = bars(8, flat=True)
+    rows[4].update(low=95, open=96, high=97, close=96)
+    req = request(start_date=rows[4]["date"], end_date=rows[-1]["date"], short_policy="assume-borrow",
+                  txn_cost_pct=.001, slippage_pct=.002)
+    p = replay(48, "X", frame(rows), req)["positions"][0]
+    assert p["signed_exposure"] == -p["value"]
+    cover = p["current"] * 1.002
+    assert p["liquidation_pnl_estimate"] == pytest.approx(p["unrealized_pnl"] -
+        (cover-p["current"] + cover*.001)*p["qty"])
