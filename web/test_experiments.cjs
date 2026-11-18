@@ -31,9 +31,12 @@ const source = (id,number,extra={})=>({id,number,title:`Source ${number}`,availa
   parameters:{},assumptions:[],limitations:[],kind:'trades',writeup:'source text',plan:'plan text',...extra});
 const sources = [source('406-ema',406),source('442-repaint',442,{availability:'blocked',blocker:'Repainting formula missing'}),
   source('385-candles',385,{kind:'event-study',title:'<img src=x onerror=alert(1)>'})];
-const summary = {signal_count:2,trade_count:1,open_count:0,coverage:{evaluated_symbols:1},variants:{},equity:{}};
+const summary = pnl => ({signal_count:2,trade_count:1,open_count:0,coverage:{evaluated_symbols:1},
+  variants: pnl == null ? {} : {book:{kind:'trades',net_pnl:pnl},other:{kind:'trades',net_pnl:pnl}},equity:{}});
 const batch = {id:'batch-one',state:'completed-with-blockers',request:{market:'us',start_date:'2020-01-01',end_date:'2021-01-01'},
-  progress:{total_symbols:1,completed_symbols:1},counts:{completed:2,blocked:1},runs:sources.map(s=>({source:s.id,state:s.availability==='blocked'?'blocked':'completed',summary}))};
+  progress:{total_symbols:1,completed_symbols:1},counts:{completed:2,blocked:1},
+  runs:[{source:'406-ema',state:'completed',summary:summary(10)},{source:'442-repaint',state:'blocked',summary:null},
+    {source:'385-candles',state:'completed',summary:summary(40)}]};
 const calls = [];
 let deferred, poll, failPost = false, keyCounter = 0;
 async function api(url, options={}) {
@@ -65,11 +68,13 @@ const context = {
 const flush = async()=>{for(let i=0;i<8;i++) await new Promise(resolve=>setImmediate(resolve));};
 const descendants = el => [el,...el.children.flatMap(descendants)];
 const folder = id => descendants(get('exp-folders')).find(el=>el.tag==='button' && descendants(el).some(c=>c.textContent===id));
+const folderIds = () => descendants(get('exp-folders')).filter(el=>el.tag==='button').map(el=>descendants(el).find(c=>c.tag==='small').textContent);
 vm.runInNewContext(fs.readFileSync(__dirname+'/static/experiments.js','utf8'),context);
 
 (async()=>{
   await flush();
   assert.match(get('exp-catalog-count').textContent,/3 folders · 2 runnable · 1 blocked/);
+  assert.deepEqual(folderIds(),['406-ema','442-repaint','385-candles']);
   assert.equal(get('exp-title').textContent,'Source 406');
   await folder('442-repaint').events.click(); await flush();
   assert.equal(get('exp-blocker').textContent,'Repainting formula missing');
@@ -103,6 +108,14 @@ vm.runInNewContext(fs.readFileSync(__dirname+'/static/experiments.js','utf8'),co
   assert.equal(posted.start_date,'2020-01-01'); assert.equal(posted.end_date,'2021-01-01');
   assert.equal(posted.slippage_pct,.0005); assert.equal(posted.txn_cost_pct,null);
   assert.ok(!('experiment_id' in posted)); // Start schedules the entire catalog.
+  assert.deepEqual(folderIds(),['406-ema','442-repaint','385-candles']);
+  assert.ok(descendants(folder('406-ema')).some(el=>el.textContent==='2 variants'));
+  batch.state='processing';
+  batch.runs[0].summary.variants.duplicate = {...batch.runs[0].summary.variants.book};
+  await poll(); await flush();
+  assert.deepEqual(folderIds(),['406-ema','442-repaint','385-candles']);
+  assert.ok(descendants(folder('406-ema')).some(el=>el.textContent==='3 variants'));
+  batch.state='completed-with-blockers';
   await tabs.find(t=>t.dataset.expTab==='signals').events.click(); await flush();
   assert.match(get('exp-table-note').textContent,/1 of 1 rows/);
   assert.ok(calls.some(c=>c.url.includes('/folders/406-ema/records?kind=signals')));
@@ -110,6 +123,7 @@ vm.runInNewContext(fs.readFileSync(__dirname+'/static/experiments.js','utf8'),co
   assert.match(get('exp-table-note').textContent,/Event study/);
   assert.equal(get('exp-export').hidden,false);
   get('exp-history').value=''; await get('exp-history').events.change(); await flush();
+  assert.deepEqual(folderIds(),['406-ema','442-repaint','385-candles']);
   assert.equal(get('exp-progress').value,0);
   assert.equal(get('exp-run-id').textContent,'');
   assert.equal(get('exp-export').hidden,true);

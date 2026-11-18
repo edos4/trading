@@ -32,11 +32,14 @@
   function badge(status) {
     const el = node("span", label(status), "exp-badge"); el.dataset.state = status; return el;
   }
+  function variantCount(id) {
+    return Object.keys(runFor(id)?.summary?.variants || {}).length;
+  }
   function renderFolders() {
     const search = $("exp-search").value.toLowerCase();
     const filter = $("exp-filter").value;
     const signature = JSON.stringify([search,filter,state.selected,$("exp-market").value,
-      state.batch?.request.market,state.sources.map(s=>[s.id,runFor(s.id)?.state || availability(s)])]);
+      state.batch?.request.market,state.sources.map(s=>[s.id,runFor(s.id)?.state || availability(s),variantCount(s.id)])]);
     if(signature === state.folderSignature) return;
     state.folderSignature = signature;
     const visible = state.sources.filter(source => {
@@ -50,10 +53,14 @@
       button.setAttribute("aria-pressed", String(source.id === state.selected));
       button.append(node("strong", source.title), badge(runFor(source.id)?.state || availability(source)),
         node("small", source.id));
+      const count = variantCount(source.id);
+      if (count) button.append(node("small", count + (count === 1 ? " variant" : " variants")));
       button.addEventListener("click", () => selectSource(source.id));
       fragment.append(button);
     });
-    $("exp-folders").replaceChildren(fragment);
+    const list = $("exp-folders"), scroll = list.scrollTop;
+    list.replaceChildren(fragment);
+    list.scrollTop = scroll;
     $("exp-visible-count").textContent = `${visible.length} of ${state.sources.length} folders`;
     const ready = state.sources.filter(s => availability(s) === "ready").length;
     $("exp-catalog-count").textContent = `${state.sources.length} folders · ${ready} runnable · ${state.sources.length - ready} blocked`;
