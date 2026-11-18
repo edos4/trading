@@ -6,10 +6,9 @@ import json
 from datetime import date, timedelta
 
 from fastapi import Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from pydantic import ValidationError
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from core.experiments.catalog import catalog, source_by_id
 from core.experiments.contracts import BatchRequest
 from core.experiments.service import get_service
 from core.experiments.store import Conflict
@@ -19,6 +18,11 @@ from utils.logger import log
 
 
 KINDS = {"signals", "trades", "positions", "outcomes", "logs"}
+
+
+class URLRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    url: str = Field(min_length=8, max_length=2048)
 
 
 def _failure(exc: Exception) -> JSONResponse:
@@ -49,14 +53,71 @@ def register_experiment_routes(app, templates, ctx) -> None:
     @app.get("/api/experiments/catalog")
     async def api_catalog(_user: str = Depends(require_login)):
         try:
-            return {"sources": await asyncio.to_thread(catalog)}
+            return {"sources": await asyncio.to_thread(get_service().catalog)}
         except Exception as exc:
             return _failure(exc)
 
     @app.get("/api/experiments/sources/{source_id}")
     async def api_source(source_id: str, _user: str = Depends(require_login)):
         try:
-            return await asyncio.to_thread(source_by_id, source_id)
+            return await asyncio.to_thread(get_service().source, source_id)
+        except Exception as exc:
+            return _failure(exc)
+
+    @app.get("/api/experiments/sources/{source_id}/video")
+    async def api_source_video(source_id: str, _user: str = Depends(require_login)):
+        try:
+            path = await asyncio.to_thread(get_service().source_video, source_id)
+            media = {".mp4": "video/mp4", ".webm": "video/webm", ".mkv": "video/x-matroska"}
+            return FileResponse(path, filename=path.name, media_type=media.get(path.suffix, "application/octet-stream"),
+                                content_disposition_type="inline")
+        except Exception as exc:
+            return _failure(exc)
+
+    @app.get("/api/experiments/imports")
+    async def api_imports(_user: str = Depends(require_login)):
+        try:
+            service = get_service().imports
+            return {"imports":await asyncio.to_thread(service.jobs.listing),
+                    "capabilities":await asyncio.to_thread(service.capabilities)}
+        except Exception as exc:
+            return _failure(exc)
+
+    @app.post("/api/experiments/imports", status_code=202)
+    async def api_import_url(request: Request, _user: str = Depends(require_login)):
+        try:
+            submitted = URLRequest.model_validate(await request.json())
+            return await asyncio.to_thread(get_service().imports.submit, submitted.url)
+        except Exception as exc:
+            return _failure(exc)
+
+    @app.get("/api/experiments/imports/{identity}")
+    async def api_import_detail(identity: str, _user: str = Depends(require_login)):
+        try:
+            return await asyncio.to_thread(get_service().imports.detail, identity)
+        except Exception as exc:
+            return _failure(exc)
+
+    @app.post("/api/experiments/imports/{identity}/retry", status_code=202)
+    async def api_import_retry(identity: str, _user: str = Depends(require_login)):
+        try:
+            return await asyncio.to_thread(get_service().imports.retry, identity)
+        except Exception as exc:
+            return _failure(exc)
+
+    @app.post("/api/experiments/imports/{identity}/cancel")
+    async def api_import_cancel(identity: str, _user: str = Depends(require_login)):
+        try:
+            return await asyncio.to_thread(get_service().imports.jobs.cancel, identity)
+        except Exception as exc:
+            return _failure(exc)
+
+    @app.get("/api/experiments/imports/{identity}/files/{name:path}")
+    async def api_import_file(identity: str, name: str, _user: str = Depends(require_login)):
+        try:
+            path = await asyncio.to_thread(get_service().imports.artifact, identity, name)
+            return FileResponse(path, filename=path.name,
+                                content_disposition_type="inline" if path.suffix in {".mp4", ".webm", ".jpg"} else "attachment")
         except Exception as exc:
             return _failure(exc)
 

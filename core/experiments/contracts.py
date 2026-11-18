@@ -17,6 +17,7 @@ class BatchRequest(BaseModel):
     holdout_start: date | None = None
     market: Literal["us", "ph"] = "us"
     symbols: list[str] = Field(default_factory=list, max_length=20000)
+    source_ids: list[str] = Field(default_factory=list, max_length=2000)
     initial_capital: float = Field(100000, gt=0, le=1e12)
     position_notional: float = Field(10000, gt=0, le=1e10)
     txn_cost_pct: float | None = Field(None, ge=0, lt=0.1)
@@ -43,4 +44,7 @@ class BatchRequest(BaseModel):
             if symbol not in cleaned:
                 cleaned.append(symbol)
         self.symbols = cleaned
+        if any(not s or len(s) > 160 for s in self.source_ids):
+            raise ValueError("Invalid source selection")
+        self.source_ids = list(dict.fromkeys(self.source_ids))
         return self

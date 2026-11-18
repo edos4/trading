@@ -68,6 +68,7 @@ SECRET_FIELDS: set[str] = {
 # uses them (the bind address is fixed at startup and credentials must not
 # change under the session performing the save).
 RESTART_FIELDS: set[str] = {
+    "experiments_store_dir",
     "web_ui_host",
     "web_ui_port",
     "web_ui_username",
@@ -185,6 +186,13 @@ GROUPS: list[tuple[str, str, str, list[str]]] = [
             "kronos_gate_max_checks_per_scan", "kronos_exit_mode",
             "kronos_exit_min_agree", "kronos_exit_min_adverse_atr",
         ],
+    ),
+    (
+        "experiments",
+        "URL experiments",
+        "Video evidence, source writeups and supported daily-rule generation. Uses the selected provider's existing server-side key.",
+        ["experiments_store_dir", "experiments_media_python", "experiments_generation_provider", "experiments_generation_model",
+         "experiments_generation_timeout_seconds"],
     ),
     (
         "vision",
@@ -386,7 +394,12 @@ INFO: dict[str, tuple[str, str]] = {
     "kronos_exit_min_agree": ("Exit votes", "One-day forecasts that must oppose an open position to queue an exit."),
     "kronos_exit_min_adverse_atr": ("Legacy exit threshold (unused)", "Ignored. Paper Kronos acts only on direction; distance from entry does not delay an opposing exit."),
     # Vision
-    "anthropic_api_key": ("Anthropic API key", "Claude vision key used to confirm rendered pattern charts. Server-side only."),
+    "anthropic_api_key": ("Anthropic API key", "Claude key for rendered-chart confirmation and URL experiment analysis. Server-side only."),
+    "experiments_store_dir": ("Experiment storage", "Durable experiment runs, generated source folders and saved video evidence. Restart after changing this directory."),
+    "experiments_media_python": ("Video worker Python", "Interpreter in the isolated environment installed from requirements-experiments.txt; relative paths use the repository root."),
+    "experiments_generation_provider": ("Experiment AI provider", "DeepSeek uses its existing API key and native Flash vision model; Anthropic uses its existing vision key. No silent provider fallback."),
+    "experiments_generation_model": ("Experiment analysis model", "Optional vision model override. Blank uses the configured DeepSeek model or Claude's existing vision model."),
+    "experiments_generation_timeout_seconds": ("Generation timeout (seconds)", "Deadline for each source-analysis API call; evidence is retained for explicit retry."),
     "vision_confirmation_enabled": ("Enable vision check", "Send a rendered chart to Claude and require CONFIRM before an entry."),
     "vision_min_indicator_confidence": ("Min indicator confidence", "Indicator confidence (0-1) required before the vision check is even attempted."),
     # Notifications

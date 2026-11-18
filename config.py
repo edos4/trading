@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 from pydantic_settings import BaseSettings
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from enum import Enum
 
 # Daily bars each symbol must carry into a pattern scan so forming setups
@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     backtest_dataset_dir: str = "data/barcache"
     # Independent experiment runs; never writes live Paper books or bar history.
     experiments_store_dir: Path = Path("logs/experiments")
+    # URL evidence preparation stays outside the application's Python env.
+    experiments_media_python: str = ".venv-experiments/bin/python"
+    experiments_generation_provider: Literal["deepseek", "anthropic"] = "deepseek"
+    experiments_generation_model: str = ""  # Empty uses the selected provider's model.
+    experiments_generation_timeout_seconds: float = Field(300.0, gt=0, le=900)
 
     # ── DeepSeek (pattern editing) ────────────────────────────────────────
     # Server-side only; never logged or returned to a client. API model id

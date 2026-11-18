@@ -7,6 +7,7 @@ data/__pycache__
 .venv-browseruse
 .venv-kronos
 .venv-laya
+.venv-experiments/
 # Local timestamp of the last successful Kronos fine-tuning run
 /kronos-finetuned-at.txt
 /.kronos-finetuned-at.*.tmp

@@ -86,14 +86,15 @@ def _output(symbol: str, length: int) -> dict:
 
 
 def replay(number: int, symbol: str, df: pd.DataFrame, request: BatchRequest,
-           *, cancel: Callable[[], bool] = lambda: False, tape: DailyTape | None = None) -> dict:
+           *, cancel: Callable[[], bool] = lambda: False, tape: DailyTape | None = None,
+           specification: dict | None = None) -> dict:
     if request.holdout_start:
         # Independent flat starts. Training decisions, exits and outcome labels all
         # see only the prefix. Holdout indicators may warm on the earlier history.
         training = request.model_copy(update={"end_date":request.holdout_start-timedelta(days=1), "holdout_start":None})
         test = request.model_copy(update={"start_date":request.holdout_start, "holdout_start":None})
-        result = replay(number, symbol, df, training, cancel=cancel)
-        result["holdout"] = replay(number, symbol, df, test, cancel=cancel, tape=tape)
+        result = replay(number, symbol, df, training, cancel=cancel, specification=specification)
+        result["holdout"] = replay(number, symbol, df, test, cancel=cancel, tape=tape, specification=specification)
         return result
     df = df.loc[df.date <= request.end_date.isoformat()].reset_index(drop=True)
     output = _output(symbol, len(df))
@@ -118,7 +119,11 @@ def replay(number: int, symbol: str, df: pd.DataFrame, request: BatchRequest,
     # direct callers and future bar-loader implementations as well.
     df = df.iloc[:in_range[-1] + 1].copy()
     tape = tape or DailyTape.prepare(df, request.market)
-    panels = variants(number, df)
+    if specification is not None:
+        from core.experiments.rules import variants as generated_variants
+        panels = generated_variants(specification, df)
+    else:
+        panels = variants(number, df)
     common_warmup = max(v.warmup for v in panels)
     for panel in panels:
         variant = replace(panel, warmup=common_warmup)

@@ -1,16 +1,34 @@
 {% extends "base.html" %}
 {% block title %}Experiments — Trading Bot{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="/static/experiments.css?v=2" />
+<link rel="stylesheet" href="/static/experiments.css?v=4" />
 <section class="exp-heading">
   <div><p class="exp-eyebrow">Historical research</p><h1>Experiments</h1>
     <p class="muted">One batch, a separate result for every source folder.</p></div>
   <span id="exp-catalog-count" class="exp-badge">Loading sources…</span>
 </section>
+<section class="panel exp-import-panel" aria-labelledby="exp-import-heading">
+  <h2 id="exp-import-heading">Create an experiment from a video</h2>
+  <p class="muted">Paste a video URL to save its video, study the narration and on-screen details, and generate a thorough writeup and integration plan. Complete, supported daily rules also become runnable experiments.</p>
+  <form id="exp-import-form" class="exp-import-form">
+    <label for="exp-import-url">Video URL<input id="exp-import-url" name="url" type="url" required maxlength="2048" placeholder="https://www.facebook.com/share/r/… or a YouTube video" /></label>
+    <button class="btn primary" id="exp-import-submit" type="submit">Generate experiment</button>
+  </form>
+  <p id="exp-import-capabilities" class="muted small" role="status"></p>
+  <p id="exp-import-error" class="exp-error" role="alert" hidden></p>
+  <div id="exp-import-list" class="exp-import-list" aria-live="polite"></div>
+  <section id="exp-import-detail" hidden>
+    <div class="exp-status-line"><strong id="exp-import-status"></strong><button id="exp-import-open" class="btn" type="button" hidden>Open experiment</button></div>
+    <p id="exp-import-message" class="muted"></p>
+    <details id="exp-import-preview" hidden><summary>Preview video</summary><video id="exp-import-video" controls preload="none" hidden></video></details>
+    <details><summary>Saved source files</summary><div id="exp-import-files" class="exp-import-files"></div></details>
+  </section>
+</section>
 <form id="exp-form" class="panel exp-controls">
   <label>Market<select id="exp-market"><option value="us" {% if default_market == 'us' %}selected{% endif %}>US · USD</option><option value="ph" {% if default_market == 'ph' %}selected{% endif %}>Philippines · PHP</option></select></label>
   <label>Start date<input id="exp-start" type="date" required value="{{ start_default }}" /></label>
   <label>End date<input id="exp-end" type="date" required value="{{ end_default }}" /></label>
+  <label>Run scope<select id="exp-run-scope"><option value="all">All folders</option><option value="selected">Selected experiment</option></select></label>
   <button id="exp-run" class="btn primary" type="submit" disabled>Start all folders</button>
   <button id="exp-cancel" class="btn" type="button" disabled>Cancel batch</button>
   <details class="exp-options"><summary>Run settings</summary><div class="toolbar">
@@ -45,7 +63,7 @@
   <section class="panel exp-detail" aria-label="Selected folder">
     <div id="exp-empty" class="exp-empty"><span>↗</span><h2>Open an experiment</h2><p class="muted">Choose a source folder to see its rules, readiness and run results.</p></div>
     <div id="exp-selected" hidden>
-      <div class="exp-detail-header"><div><p id="exp-folder-id" class="exp-eyebrow"></p><h2 id="exp-title"></h2></div><span id="exp-folder-state" class="exp-badge"></span></div>
+      <div class="exp-detail-header"><div><p id="exp-folder-id" class="exp-eyebrow"></p><h2 id="exp-title"></h2></div><div class="exp-detail-actions"><button id="exp-watch" class="btn" type="button" hidden>Watch source</button><span id="exp-folder-state" class="exp-badge"></span></div></div>
       <p id="exp-scope" class="muted"></p><p id="exp-blocker" class="exp-blocker" hidden></p>
       <details id="exp-rules"><summary>Parameters, scope and assumptions</summary><pre id="exp-parameters"></pre><ul id="exp-assumptions"></ul><ul id="exp-limitations"></ul></details>
       <label id="exp-sample-label" hidden>Evaluation window<select id="exp-sample"><option value="training">Development window</option><option value="holdout">Reserved holdout</option></select></label>
@@ -58,11 +76,41 @@
         <button class="tab" data-exp-tab="performance" role="tab" aria-controls="exp-performance" aria-selected="false">Performance</button>
         <button class="tab" data-exp-tab="outcomes" role="tab" aria-controls="exp-table-wrap" aria-selected="false">Event outcomes</button>
         <button class="tab" data-exp-tab="logs" role="tab" aria-controls="exp-table-wrap" aria-selected="false">Logs</button>
-        <button class="tab" data-exp-tab="source" role="tab" aria-controls="exp-source-text" aria-selected="false">Source & plan</button>
+        <button class="tab" data-exp-tab="source" role="tab" aria-controls="exp-source-text" aria-selected="false" title="Watch the source video and read the writeup or integration plan">Source & plan</button>
       </div>
       <div id="exp-table-wrap" role="tabpanel"><p id="exp-table-note" class="muted small"></p><div class="table-wrap"><table id="exp-table"><thead></thead><tbody></tbody></table></div><button id="exp-more" class="btn" hidden>Load more rows</button></div>
       <section id="exp-performance" role="tabpanel" hidden><p class="muted small">Each variant is a separate comparison. Independent fixed-notional results do not enforce finite portfolio cash.</p><div id="exp-metrics"></div><label>Chart measure<select id="exp-chart-measure"><option value="performance">Performance</option><option value="drawdown">Drawdown (currency)</option><option value="gross_exposure">Gross exposure</option><option value="net_exposure">Net exposure</option></select></label><canvas id="exp-equity" height="260" aria-label="Equity curves for the selected experiment" role="img"></canvas><details><summary>Equity data</summary><pre id="exp-equity-data"></pre></details></section>
-      <section id="exp-source-text" role="tabpanel" hidden><details open><summary>Writeup</summary><pre id="exp-writeup"></pre></details><details><summary>33ai integration plan</summary><pre id="exp-plan"></pre></details><p id="exp-provenance" class="muted small"></p></section>
+      <section id="exp-source-text" role="tabpanel" hidden>
+        <div class="exp-source-layout">
+          <figure class="exp-video-stage">
+            <div class="exp-video-frame">
+              <video id="exp-source-video" controls playsinline preload="metadata" hidden></video>
+              <p id="exp-video-empty" class="exp-video-empty" hidden>This folder does not have a saved video.</p>
+            </div>
+            <figcaption id="exp-video-tools" class="exp-video-tools" hidden>
+              <span id="exp-video-caption" class="exp-video-caption">Source video</span>
+              <span id="exp-video-status" class="exp-video-status" aria-live="polite"></span>
+              <label>Speed<select id="exp-video-speed" aria-label="Playback speed"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
+              <button id="exp-video-restart" class="btn" type="button">Restart</button>
+              <a id="exp-video-open" class="btn" hidden target="_blank" rel="noopener">Open video</a>
+              <p class="exp-video-hint muted small">Switch to another results tab and this clip keeps playing. Choosing another folder pauses it.</p>
+            </figcaption>
+          </figure>
+          <div class="exp-doc">
+            <div class="exp-doc-bar">
+              <div class="tabs exp-doc-tabs" role="tablist" aria-label="Source documents">
+                <button id="exp-doc-writeup" class="tab active" type="button" data-exp-doc="writeup" role="tab" aria-selected="true" aria-controls="exp-writeup">Writeup</button>
+                <button id="exp-doc-plan" class="tab" type="button" data-exp-doc="plan" role="tab" aria-selected="false" aria-controls="exp-plan">Integration plan</button>
+              </div>
+              <label class="exp-doc-find">Find in this document<input id="exp-doc-find" type="search" placeholder="Phrase, setting, timestamp…" /></label>
+            </div>
+            <p id="exp-doc-count" class="muted small" aria-live="polite"></p>
+            <pre id="exp-writeup" class="exp-doc-body" role="tabpanel"></pre>
+            <pre id="exp-plan" class="exp-doc-body" role="tabpanel" hidden></pre>
+          </div>
+        </div>
+        <p id="exp-provenance" class="muted small"></p>
+      </section>
     </div>
   </section>
 </div>
@@ -72,5 +120,5 @@
 <script>window.TB_PAGE = "experiments";</script>
 <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
 <script src="/static/tv_chart.js?v=27"></script>
-<script src="/static/experiments.js?v=5"></script>
+<script src="/static/experiments.js?v=6"></script>
 {% endblock %}

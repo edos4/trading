@@ -24,7 +24,7 @@ def sources() -> tuple[dict, ...]:
     return tuple(entries)
 
 
-def catalog() -> list[dict]:
+def catalog(additional: tuple[dict, ...] = ()) -> list[dict]:
     from core.experiments.adapters import definition
 
     reviewed = json.loads(MANIFEST.with_name("reviewed_sources.json").read_text())
@@ -43,11 +43,34 @@ def catalog() -> list[dict]:
                if key not in {"writeup", "plan"}},
             **implementation,
         })
+    from core.experiments import rules
+    ids = {entry["id"] for entry in output}
+    for source in additional:
+        if source["id"] in ids:
+            raise ValueError("Duplicate generated source identity")
+        ids.add(source["id"])
+        try:
+            for name in ("writeup", "plan"):
+                if hashlib.sha256(source[name].encode()).hexdigest() != source[name + "_sha256"]:
+                    raise ValueError("Generated source document integrity check failed")
+            if source.get("rule_spec"):
+                if source.get("adapter_version") != rules.VERSION:
+                    raise ValueError("Generated rule compiler revision changed; regenerate before running")
+                implementation = rules.definition(source["rule_spec"])
+                if implementation["rule_spec_sha256"] != source.get("rule_spec_sha256"):
+                    raise ValueError("Generated rule specification changed; regenerate before running")
+            else:
+                implementation = {key:source[key] for key in ("availability", "kind", "scope", "blocker",
+                                  "parameters", "assumptions", "limitations", "adapter_version")}
+        except ValueError:
+            implementation = {"availability":"blocked", "kind":"blocked",
+                              "blocker":"Generated documents or rules failed integrity/contract checks; regenerate before running"}
+        output.append({**{k:v for k,v in source.items() if k not in {"writeup", "plan"}}, **implementation})
     return output
 
 
-def source_by_id(source_id: str) -> dict:
-    found = next((source for source in sources() if source["id"] == source_id), None)
+def source_by_id(source_id: str, additional: tuple[dict, ...] = ()) -> dict:
+    found = next((source for source in (*sources(), *additional) if source["id"] == source_id), None)
     if found is None:
         raise KeyError("Unknown experiment folder")
     return found

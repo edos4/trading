@@ -3,9 +3,10 @@
   "use strict";
   const $ = id => document.getElementById(id);
   const terminal = state => ["completed", "completed-with-blockers", "blocked", "failed", "cancelled", "interrupted"].includes(state);
-  const state = {sources: [], batch: null, selected: null, detail: null, tab: "positions", next: null,
+  const state = {sources: [], catalogSources: [], batch: null, selected: null, detail: null, tab: "positions", next: null,
     epoch: 0, tableEpoch: 0, pollBusy: false, rows: [], loadedMore: false, submitting: false,
-    pendingSubmission: null, folderSignature: null};
+    pendingSubmission: null, folderSignature: null, doc: "writeup",
+    imports: [], importSelected: null, importDetail: null, importEpoch: 0, importBusy: false, importing: false};
   const label = value => String(value || "").replaceAll("-", " ");
   const clock = () => typeof window.__experimentClock === "function" ? window.__experimentClock() : new Date();
   function zoneParts(timeZone) {
@@ -68,6 +69,8 @@
     const signed = short ? -qty : qty;
     return unrealized + signed * (price - current) - price * qty * feeRate;
   }
+  const paintedDocs = new Map();
+  const videoPositions = new Map();
   const number = (value, digits = 2) => value == null || !Number.isFinite(Number(value)) ? "—" :
     Number(value).toLocaleString(undefined, {maximumFractionDigits: digits});
   const percent = value => value == null ? "—" : number(value) + "%";
@@ -128,11 +131,12 @@
     list.scrollTop = scroll;
     $("exp-visible-count").textContent = `${visible.length} of ${state.sources.length} folders`;
     const ready = state.sources.filter(s => availability(s) === "ready").length;
-    $("exp-catalog-count").textContent = `${state.sources.length} folders · ${ready} runnable · ${state.sources.length - ready} blocked`;
+    $("exp-catalog-count").textContent = `${state.sources.length} ${state.sources.length === 1 ? "folder" : "folders"} · ${ready} runnable · ${state.sources.length - ready} blocked`;
   }
   function renderBatch() {
     if (!state.batch) return;
     const batch = state.batch, progress = batch.progress || {};
+    state.sources = batch.sources || state.catalogSources.filter(s => batch.runs.some(r => r.source === s.id));
     const total = progress.total_symbols, done = progress.completed_symbols || 0;
     $("exp-status").textContent = `${label(batch.state)}${batch.cancel && !terminal(batch.state) ? " (cancelling…)" : ""} · ${batch.request.market.toUpperCase()} · ` +
       Object.entries(batch.counts).map(([key, count]) => `${count} ${label(key)}`).join(" / ");
@@ -142,6 +146,7 @@
     $("exp-run-id").textContent = `${batch.id} · ${batch.request.start_date} → ${batch.request.end_date}`;
     $("exp-cancel").disabled = terminal(batch.state) || Boolean(batch.cancel);
     $("exp-run").disabled = !terminal(batch.state) || state.submitting;
+    renderRunScope();
     const errors = progress.data_errors || [];
     $("exp-data-errors").hidden = !errors.length;
     $("exp-data-errors").querySelector("pre").textContent = errors.map(e => `${e.symbol}: ${e.reason}`).join("\n");
@@ -184,8 +189,8 @@
     $("exp-parameters").textContent = JSON.stringify(source.parameters || {}, null, 2);
     $("exp-assumptions").replaceChildren(...(source.assumptions || []).map(text => node("li", text)));
     $("exp-limitations").replaceChildren(...(source.limitations || []).map(text => node("li", text)));
-    $("exp-writeup").textContent = source.writeup;
-    $("exp-plan").textContent = source.plan;
+    renderVideo(source);
+    renderDocuments(source);
     $("exp-provenance").textContent = `Writeup ${source.writeup_sha256} · Plan ${source.plan_sha256} · Adapter ${source.adapter_version || "blocked"}`;
     $("exp-export").hidden = !state.batch || !run || !terminal(run.state);
     $("exp-export").textContent = run?.state === "blocked" ? "Export source and blocker" :
@@ -195,6 +200,125 @@
     stats(selectedSummary());
     if(run?.state === "blocked") $("exp-coverage").textContent = "Blocked for this run; no simulated trading results were produced.";
     renderPerformance(selectedSummary());
+  }
+  function formatClock(seconds) {
+    const whole = Math.max(0, Math.round(Number(seconds) || 0));
+    const minutes = Math.floor(whole / 60);
+    const remain = whole % 60;
+    if (minutes >= 60) {
+      const hours = Math.floor(minutes / 60);
+      return `${hours}:${String(minutes % 60).padStart(2, "0")}:${String(remain).padStart(2, "0")}`;
+    }
+    return `${minutes}:${String(remain).padStart(2, "0")}`;
+  }
+  function renderVideo(source) {
+    const player = $("exp-source-video");
+    const src = source.video_url || "";
+    const changed = player.dataset.source !== src;
+    if (changed) {
+      const previous = player.dataset.folder;
+      if (previous && Number.isFinite(Number(player.currentTime)) && player.currentTime > 0.5)
+        videoPositions.set(previous, player.currentTime);
+      player.pause?.();
+      player.dataset.source = src;
+      player.dataset.folder = source.id || "";
+      if (src) player.src = src;
+      else { player.removeAttribute?.("src"); player.load?.(); }
+      $("exp-video-status").textContent = src ? "Loading video…" : "";
+    }
+    player.hidden = !src;
+    player.setAttribute("aria-label", source.title ? `Source video: ${source.title}` : "Source video");
+    $("exp-video-empty").hidden = Boolean(src);
+    $("exp-video-tools").hidden = !src;
+    $("exp-watch").hidden = !src;
+    const open = $("exp-video-open");
+    open.hidden = !src;
+    if (src) open.href = src;
+  }
+  function matchCount(text, query) {
+    const hay = String(text || "").toLowerCase();
+    const needle = query.toLowerCase();
+    let count = 0, index = 0;
+    while ((index = hay.indexOf(needle, index)) !== -1) {
+      count += 1;
+      index += needle.length;
+      if (count >= 1000) return count;
+    }
+    return count;
+  }
+  function paintDoc(el, text) {
+    const raw = text || "";
+    const query = ($("exp-doc-find").value || "").trim();
+    const token = query + "\n" + raw;
+    const slot = el.id || el;
+    if (paintedDocs.get(slot) === token) return false;
+    paintedDocs.set(slot, token);
+    if (!query) {
+      const span = node("span", raw);
+      el.replaceChildren(span);
+      return true;
+    }
+    const hay = raw.toLowerCase();
+    const needle = query.toLowerCase();
+    const nodes = [];
+    let start = 0, found = 0, index = hay.indexOf(needle);
+    while (index !== -1 && found < 300) {
+      if (index > start) nodes.push(node("span", raw.slice(start, index)));
+      nodes.push(node("mark", raw.slice(index, index + query.length)));
+      start = index + needle.length;
+      index = hay.indexOf(needle, start);
+      found += 1;
+    }
+    if (start < raw.length) nodes.push(node("span", raw.slice(start)));
+    el.replaceChildren(...nodes);
+    return true;
+  }
+  function renderDocStatus() {
+    const query = ($("exp-doc-find").value || "").trim();
+    const el = $("exp-doc-count");
+    if (!query || !state.detail) { el.textContent = ""; return; }
+    const text = state.doc === "plan" ? state.detail.source.plan : state.detail.source.writeup;
+    const count = matchCount(text, query);
+    el.textContent = count === 0 ? "No matches in this document." :
+      count >= 1000 ? "1,000+ matches. Use a longer phrase to jump more precisely." :
+      count === 1 ? "1 match" : `${count.toLocaleString()} matches`;
+  }
+  function revealDocMatch() {
+    const query = ($("exp-doc-find").value || "").trim();
+    if (!query) return;
+    const panel = state.doc === "plan" ? $("exp-plan") : $("exp-writeup");
+    panel.querySelector?.("mark")?.scrollIntoView?.({block: "nearest"});
+  }
+  function showDoc(name) {
+    state.doc = name === "plan" ? "plan" : "writeup";
+    const writeup = state.doc === "writeup";
+    $("exp-doc-writeup").classList.toggle("active", writeup);
+    $("exp-doc-writeup").setAttribute("aria-selected", String(writeup));
+    $("exp-doc-plan").classList.toggle("active", !writeup);
+    $("exp-doc-plan").setAttribute("aria-selected", String(!writeup));
+    $("exp-writeup").hidden = !writeup;
+    $("exp-plan").hidden = writeup;
+    renderDocStatus();
+  }
+  function renderDocuments(source) {
+    const writeChanged = paintDoc($("exp-writeup"), source.writeup || "");
+    const planChanged = paintDoc($("exp-plan"), source.plan || "");
+    showDoc(state.doc);
+    if ((state.doc === "plan" && planChanged) || (state.doc !== "plan" && writeChanged)) revealDocMatch();
+  }
+  function showTab(name) {
+    state.tab = name;
+    ++state.tableEpoch;
+    document.querySelectorAll("[data-exp-tab]").forEach(el => {
+      const on = el.dataset.expTab === name;
+      el.classList.toggle("active", on);
+      el.setAttribute("aria-selected", String(on));
+    });
+    $("exp-table-wrap").hidden = !columns[state.tab];
+    $("exp-performance").hidden = state.tab !== "performance";
+    $("exp-source-text").hidden = state.tab !== "source";
+    if (state.tab === "performance") drawEquity(selectedSummary().equity || {});
+    else return loadRows(false);
   }
   async function selectSource(id) {
     state.selected = id; state.detail = null; state.loadedMore = false;
@@ -373,8 +497,11 @@
     const batch = await api("/api/experiments/runs/" + encodeURIComponent(id));
     if(epoch !== state.epoch) return;
     state.batch = batch; renderBatch();
+    $("exp-run-scope").value=batch.request.source_ids?.length === 1 ? "selected" : "all";
+    renderRunScope();
     $("exp-history").value = id;
     try { localStorage.setItem("experiments-last-batch",id); } catch (_) {}
+    if (!state.sources.some(s => s.id === state.selected)) state.selected = state.sources[0]?.id || null;
     if (state.selected) await selectSource(state.selected);
   }
   async function poll() {
@@ -403,6 +530,10 @@
         txn_cost_pct:$("exp-cost").value === "" ? null : Number($("exp-cost").value)/100,
         holdout_start:$("exp-holdout").value || null, short_policy:$("exp-shorts").value || "exclude", borrow_rate:Number($("exp-borrow").value || 3)/100,
         end_policy:$("exp-end-policy").value};
+      if ($("exp-run-scope").value === "selected") {
+        if (!state.selected) throw new Error("Choose an experiment first.");
+        draft.source_ids = [state.selected];
+      }
       const signature=JSON.stringify(draft);
       if(state.pendingSubmission?.signature !== signature) {
         const key=crypto.randomUUID ? crypto.randomUUID() : Array.from(crypto.getRandomValues(new Uint8Array(16)),n=>n.toString(16).padStart(2,"0")).join("");
@@ -420,38 +551,179 @@
   });
   $("exp-search").addEventListener("input",renderFolders); $("exp-filter").addEventListener("change",renderFolders);
   $("exp-shorts").addEventListener("change",renderFolders);
+  function renderRunScope() {
+    $("exp-run").textContent = $("exp-run-scope").value === "selected" ? "Start selected experiment" : "Start all folders";
+  }
+  $("exp-run-scope").addEventListener("change",renderRunScope);
   $("exp-market").addEventListener("change", () => {
     const ph=$("exp-market").value==="ph"; $("exp-capital").value=ph?"1000000":"100000"; $("exp-notional").value=ph?"100000":"10000";
     if(!state.batch) { renderFolders(); if(state.detail) renderDetail(state.detail); }
   });
-  $("exp-history").addEventListener("change", async () => {
-    try { if($("exp-history").value) await openBatch($("exp-history").value);
-      else {
-        state.batch=null; $("exp-run").disabled=false; $("exp-cancel").disabled=true;
+  function resetDraft() {
+        ++state.epoch; ++state.tableEpoch;
+        state.batch=null; state.sources=state.catalogSources; state.folderSignature=null;
+        $("exp-run").disabled=false; $("exp-cancel").disabled=true;
         $("exp-status").textContent="Ready to configure a batch."; $("exp-progress").value=0;
         $("exp-progress-label").textContent=""; $("exp-run-id").textContent="";
         $("exp-frozen").hidden=true; $("exp-data-errors").hidden=true; message(null);
         try { localStorage.removeItem("experiments-last-batch"); } catch (_) {}
-        renderFolders(); if(state.selected) await selectSource(state.selected);
-      }
+        renderRunScope();
+  }
+  $("exp-history").addEventListener("change", async () => {
+    try { if($("exp-history").value) await openBatch($("exp-history").value);
+      else { resetDraft(); renderFolders(); if(state.selected) await selectSource(state.selected); }
     } catch(error) { message(error); }
   });
-  document.querySelectorAll("[data-exp-tab]").forEach(button => button.addEventListener("click", async () => {
-    state.tab=button.dataset.expTab; ++state.tableEpoch;
-    document.querySelectorAll("[data-exp-tab]").forEach(el => { el.classList.toggle("active",el===button); el.setAttribute("aria-selected",String(el===button)); });
-    $("exp-table-wrap").hidden=!columns[state.tab]; $("exp-performance").hidden=state.tab!=="performance"; $("exp-source-text").hidden=state.tab!=="source";
-    if(state.tab==="performance") drawEquity(selectedSummary().equity || {}); else await loadRows(false);
-  }));
+  document.querySelectorAll("[data-exp-tab]").forEach(button => button.addEventListener("click", () => showTab(button.dataset.expTab)));
+  $("exp-doc-writeup").addEventListener("click", () => { showDoc("writeup"); revealDocMatch(); });
+  $("exp-doc-plan").addEventListener("click", () => { showDoc("plan"); revealDocMatch(); });
+  $("exp-doc-find").addEventListener("input", () => { if (state.detail) renderDocuments(state.detail.source); });
+  $("exp-watch").addEventListener("click", () => {
+    showTab("source");
+    const player = $("exp-source-video");
+    player.focus?.();
+    player.play?.()?.catch?.(() => {});
+  });
+  $("exp-video-speed").addEventListener("change", () => {
+    const rate = Number($("exp-video-speed").value);
+    if (Number.isFinite(rate)) $("exp-source-video").playbackRate = rate;
+  });
+  $("exp-video-restart").addEventListener("click", () => {
+    const player = $("exp-source-video");
+    if (!player.dataset.source) return;
+    try { player.currentTime = 0; } catch (_) {}
+    videoPositions.delete(player.dataset.folder);
+    player.play?.()?.catch?.(() => {});
+  });
+  const sourcePlayer = $("exp-source-video");
+  sourcePlayer.addEventListener("loadedmetadata", () => {
+    const duration = Number(sourcePlayer.duration);
+    $("exp-video-status").textContent = Number.isFinite(duration) ? `Duration ${formatClock(duration)}` : "Ready";
+    const rate = Number($("exp-video-speed").value);
+    if (Number.isFinite(rate)) sourcePlayer.playbackRate = rate;
+    const saved = videoPositions.get(sourcePlayer.dataset.folder);
+    if (Number.isFinite(saved) && saved > 0.5 && (!Number.isFinite(duration) || saved < duration - 0.5))
+      sourcePlayer.currentTime = saved;
+  });
+  sourcePlayer.addEventListener("error", () => {
+    if (sourcePlayer.dataset.source) $("exp-video-status").textContent = "This video could not be played. Use Open video or try another browser.";
+  });
   $("exp-sample").addEventListener("change",async()=>{ if (state.detail) { renderDetail(state.detail); await loadRows(false); } });
   $("exp-chart-measure").addEventListener("change",()=>drawEquity(selectedSummary().equity || {}));
   $("exp-more").addEventListener("click",()=>loadRows(true));
   $("exp-chart-close").addEventListener("click",()=>$("exp-chart-dialog").close());
   $("exp-chart-dialog").addEventListener("close",()=>window.TVChart?.unmount());
   window.addEventListener("resize",()=>drawEquity(selectedSummary().equity || {}));
+
+  const importTerminal = value => ["completed", "blocked", "failed", "interrupted", "cancelled"].includes(value);
+  const importPath = id => "/api/experiments/imports/" + encodeURIComponent(id);
+  function importError(error) {
+    $("exp-import-error").hidden = !error;
+    $("exp-import-error").textContent = error?.message || error || "";
+  }
+  async function refreshCatalog() {
+    const result = await api("/api/experiments/catalog");
+    state.catalogSources = result.sources;
+    if (!state.batch) state.sources = state.catalogSources;
+    state.folderSignature = null;
+    renderFolders();
+  }
+  function renderImports(capabilities) {
+    if (capabilities) $("exp-import-capabilities").textContent = capabilities.message;
+    const fragment = document.createDocumentFragment();
+    state.imports.forEach(job => {
+      const row = node("div", null, "exp-import-row");
+      const choose = node("button", job.url, "exp-import-url"); choose.type = "button";
+      choose.setAttribute("aria-pressed", String(job.id === state.importSelected));
+      choose.addEventListener("click", () => selectImport(job.id).catch(importError));
+      row.append(choose, badge(job.state));
+      if (["failed", "blocked", "interrupted", "cancelled"].includes(job.state)) {
+        const retry = node("button", "Retry", "btn"); retry.type = "button";
+        retry.addEventListener("click", async () => {
+          retry.disabled = true; importError(null);
+          try { await api(importPath(job.id) + "/retry", {method:"POST"}); await loadImports(); await selectImport(job.id); }
+          catch(error) { importError(error); retry.disabled=false; }
+        }); row.append(retry);
+      } else if (!importTerminal(job.state)) {
+        const cancel = node("button", "Cancel", "btn"); cancel.type = "button";
+        cancel.addEventListener("click", async () => {
+          cancel.disabled=true;
+          try { await api(importPath(job.id) + "/cancel", {method:"POST"}); await loadImports(); await selectImport(job.id); }
+          catch(error) { importError(error); cancel.disabled=false; }
+        }); row.append(cancel);
+      }
+      fragment.append(row);
+    });
+    $("exp-import-list").replaceChildren(fragment);
+  }
+  async function selectImport(id) {
+    state.importSelected=id; const epoch=++state.importEpoch;
+    const job = await api(importPath(id));
+    if (epoch !== state.importEpoch) return;
+    state.importDetail=job;
+    $("exp-import-detail").hidden=false;
+    $("exp-import-status").textContent=job.state === job.stage ? label(job.state) : `${label(job.state)} · ${label(job.stage)}`;
+    $("exp-import-message").textContent=job.error || job.message;
+    $("exp-import-open").hidden=!job.source_id;
+    const files=(job.files || []).filter(name => name !== "progress.json");
+    const links=files.map(name => {
+      const a=node("a",name); a.href=importPath(id)+"/files/"+name.split("/").map(encodeURIComponent).join("/");
+      return a;
+    });
+    $("exp-import-files").replaceChildren(...links);
+    const video=files.find(name=>/^video\.(mp4|webm)$/.test(name));
+    const player=$("exp-import-video");
+    const src=video ? importPath(id)+"/files/"+encodeURIComponent(video) : "";
+    if (player.dataset.source !== src) {
+      player.dataset.source=src;
+      if (src) player.src=src;
+      else { player.pause?.(); player.removeAttribute?.("src"); player.load?.(); }
+    }
+    player.hidden=!video;
+    $("exp-import-preview").hidden=!video;
+    renderImports();
+  }
+  async function loadImports() {
+    const result=await api("/api/experiments/imports");
+    const previous=new Map(state.imports.map(job=>[job.id,job.state]));
+    state.imports=result.imports || [];
+    renderImports(result.capabilities);
+    if (state.imports.some(job=>job.state === "completed" && previous.get(job.id) !== "completed")) await refreshCatalog();
+    return state.imports;
+  }
+  async function pollImports() {
+    if (state.importBusy || !state.imports.some(job=>!importTerminal(job.state))) return;
+    state.importBusy=true;
+    try { await loadImports(); if (state.importSelected) await selectImport(state.importSelected); }
+    catch(error) { importError(error); } finally { state.importBusy=false; }
+  }
+  $("exp-import-form").addEventListener("submit",async event=>{
+    event.preventDefault(); if(state.importing) return;
+    const url=$("exp-import-url").value.trim();
+    if(!url) { importError("Enter a video URL."); return; }
+    state.importing=true; $("exp-import-submit").disabled=true; importError(null);
+    try {
+      const job=await api("/api/experiments/imports",{method:"POST",body:JSON.stringify({url})});
+      await loadImports(); await selectImport(job.id);
+      if(job.state === "completed" && job.source_id && !state.batch) await openImportedSource();
+    } catch(error) { importError(error); }
+    finally { state.importing=false; $("exp-import-submit").disabled=false; }
+  });
+  async function openImportedSource() {
+    const id=state.importDetail?.source_id;
+    if(!id) return;
+    await refreshCatalog();
+    $("exp-history").value="";
+    resetDraft();
+    $("exp-search").value=""; $("exp-filter").value="all";
+    state.selected=id; $("exp-run-scope").value="selected"; renderRunScope();
+    await selectSource(id);
+  }
+  $("exp-import-open").addEventListener("click",()=>openImportedSource().catch(importError));
   async function init() {
     try {
       if($("exp-market").value === "ph") { $("exp-capital").value="1000000"; $("exp-notional").value="100000"; }
-      const result = await api("/api/experiments/catalog"); state.sources=result.sources; renderFolders(); $("exp-run").disabled=false;
+      await refreshCatalog(); $("exp-run").disabled=false;
       const batches=await savedBatches(), params=new URLSearchParams(window.location.search);
       state.selected=params.get("folder");
       let saved=params.get("batch");
@@ -460,7 +732,9 @@
       if(active || (saved && batches.some(b=>b.id===saved))) await openBatch(active?.id || saved);
       else if(state.selected) await selectSource(state.selected);
       else if(state.sources.length) await selectSource(state.sources.find(s=>availability(s)==="ready")?.id || state.sources[0].id);
+      try { await loadImports(); if(state.imports.length) await selectImport(state.imports[0].id); }
+      catch(error) { importError(error); }
     } catch(error) { message(error); }
   }
-  init(); const timer=setInterval(poll,2000); window.addEventListener("pagehide",()=>clearInterval(timer));
+  init(); const timer=setInterval(()=>Promise.all([poll(),pollImports()]),2000); window.addEventListener("pagehide",()=>clearInterval(timer));
 })();

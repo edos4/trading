@@ -8,6 +8,7 @@ import threading
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from concurrent.futures.process import BrokenProcessPool
 from importlib.metadata import version
+from urllib.parse import quote
 
 import numpy as np
 from collections import defaultdict
@@ -32,11 +33,67 @@ class ExperimentService:
         self.workers = max(1, int(workers))
         self._threads: dict[str, threading.Thread] = {}
         self._lock = threading.Lock()
+        self._imports = None
+
+    @property
+    def imports(self):
+        with self._lock:
+            if self._imports is None:
+                from core.experiments.imports import SourceImportService
+                self._imports = SourceImportService(self.store)
+            return self._imports
+
+    def catalog(self) -> list[dict]:
+        return catalog(self.imports.jobs.sources())
+
+    def _source_record(self, source_id: str) -> dict:
+        from core.experiments.catalog import source_by_id
+        return source_by_id(source_id, self.imports.jobs.sources())
+
+    def source(self, source_id: str) -> dict:
+        found = self._source_record(source_id)
+        return {**found, "video_url": self.video_url(found)}
+
+    def locate_video(self, source: dict) -> Path | None:
+        """The folder clip is video.mp4 beside that folder's writeup."""
+        identity = str(source.get("id") or "")
+        if not identity or any(part in identity for part in ("/", "\\", "\x00")) or identity in {".", ".."}:
+            return None
+        roots = (
+            (Path(__file__).resolve().parents[2] / "indicator-vides").resolve(),
+            (self.store.root / "sources").resolve(),
+        )
+        for root in roots:
+            directory = (root / identity).resolve()
+            if not directory.is_dir() or not directory.is_relative_to(root):
+                continue
+            for suffix in (".mp4", ".webm", ".mkv"):
+                path = (directory / f"video{suffix}").resolve()
+                if path.is_file() and path.parent == directory and path.suffix == suffix:
+                    return path
+        return None
+
+    def video_url(self, source: dict) -> str | None:
+        if self.locate_video(source) is None:
+            return None
+        return "/api/experiments/sources/" + quote(str(source["id"]), safe="") + "/video"
+
+    def source_video(self, source_id: str) -> Path:
+        path = self.locate_video(self._source_record(source_id))
+        if path is None:
+            raise KeyError("No saved video for this folder")
+        return path
 
     def submit(self, request: BatchRequest, *, background: bool = True) -> dict:
         manifest = []
-        originals = {s["id"]: s for s in sources()}
-        for entry in catalog():
+        additional = self.imports.jobs.sources()
+        originals = {s["id"]: s for s in (*sources(), *additional)}
+        available = catalog(additional)
+        if set(request.source_ids) - {s["id"] for s in available}:
+            raise ValueError("Unknown selected experiment source")
+        for entry in available:
+            if request.source_ids and entry["id"] not in request.source_ids:
+                continue
             entry = {**originals[entry["id"]], **entry}
             if entry["availability"] == "ready" and request.market not in entry["markets"]:
                 entry = {**entry, "availability": "blocked", "blocker": "Source universe/contract is unsupported in this market"}
@@ -56,7 +113,9 @@ class ExperimentService:
         return self.snapshot(batch_id)
 
     def snapshot(self, batch_id: str) -> dict:
-        batch = self.store.batch(batch_id)
+        batch = self.store.batch(batch_id, manifest=True)
+        batch["sources"] = [{k:v for k,v in source.items() if k not in {"writeup", "plan"}}
+                            for source in batch.pop("manifest")]
         batch["runs"] = self.store.runs(batch_id)
         counts = defaultdict(int)
         for run in batch["runs"]:
@@ -70,7 +129,8 @@ class ExperimentService:
         run = next((r for r in self.store.runs(batch_id) if r["source"] == source_id), None)
         if entry is None or run is None:
             raise KeyError("Experiment folder not found in this batch")
-        return {"batch_id": batch_id, "request": batch["request"], "source": entry, "run": run,
+        return {"batch_id": batch_id, "request": batch["request"],
+                "source": {**entry, "video_url": self.video_url(entry)}, "run": run,
                 "provenance": batch["progress"]}
 
     def execute(self, batch_id: str) -> None:
@@ -214,6 +274,7 @@ class ExperimentService:
                         summary["coverage"]["outside_source_universe"] += 1
                     else:
                         result = replay(source["number"], symbol, df, request, tape=tape,
+                                        specification=source.get("rule_spec"),
                                         cancel=lambda: self.store.cancelled(batch_id))
                         self.store.save_result(batch_id, source_id, symbol, result)
                         _merge(summary, result)
@@ -235,7 +296,8 @@ class ExperimentService:
         pool_size = min(self.workers, len(symbols))
         worker_load = self.loader is raw_symbol
         log.info(f"Experiments | scanning {len(symbols)} symbols on {pool_size} workers")
-        compact = [{"id": source["id"], "number": source["number"], "symbols": source.get("symbols")}
+        compact = [{"id": source["id"], "number": source["number"], "symbols": source.get("symbols"),
+                    "rule_spec": source.get("rule_spec")}
                    for source in active]
         request_payload = request.model_dump(mode="json")
         ready: dict[int, dict] = {}

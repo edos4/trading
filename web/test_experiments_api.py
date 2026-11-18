@@ -52,6 +52,7 @@ def test_page_catalog_and_auth(app_client):
     anonymous = TestClient(app)
     for path in ("/experiments","/api/experiments/catalog","/api/experiments/runs",
                  "/api/experiments/runs/nope", "/api/experiments/sources/nope",
+                 "/api/experiments/sources/nope/video",
                  "/api/experiments/runs/nope/folders/nope/records",
                  "/api/experiments/runs/nope/folders/nope/chart?symbol=SPY",
                  "/api/experiments/runs/nope/folders/nope/export"):
@@ -144,3 +145,82 @@ def test_holdout_evidence_and_export_are_separate(app_client):
     assert rows and all(t["signal_date"] >= "2021-06-01" for t in rows)
     exported = [json.loads(line) for line in client.get(path+"/export").text.splitlines()]
     assert sum(row["kind"]=="holdout-trades" for row in exported) == len(rows)
+
+
+def test_url_generation_auth_validation_files_and_selected_source(app_client, monkeypatch):
+    from core.experiments.imports import SourceImportService
+    from core.test_experiment_imports import Generator, URL, preparer
+    import time
+
+    client, app, service = app_client
+    imports = SourceImportService(service.store, generator=Generator(), preparer=preparer)
+    service._imports = imports
+    submit = imports.submit
+    monkeypatch.setattr(imports, "submit", lambda url:submit(url, background=False))
+    anonymous = TestClient(app)
+    assert anonymous.get("/api/experiments/imports").status_code == 401
+    assert anonymous.post("/api/experiments/imports",json={"url":URL}).status_code == 401
+    for payload in ({}, [], {"url":"http://127.0.0.1/video"}, {"url":URL,"command":"anything"}):
+        assert client.post("/api/experiments/imports",json=payload).status_code == 400
+    response = client.post("/api/experiments/imports",json={"url":URL})
+    assert response.status_code == 202, response.text
+    job = response.json()
+    assert job["state"] == "completed"
+    path = f"/api/experiments/imports/{job['id']}"
+    assert client.get(path).json()["source_id"] == job["id"]
+    assert client.get("/api/experiments/imports").json()["capabilities"]["ready"]
+    assert len(client.get("/api/experiments/catalog").json()["sources"]) == 450
+    assert client.get(f"/api/experiments/sources/{job['id']}").json()["rule_spec"]
+    video_url = f"/api/experiments/sources/{job['id']}/video"
+    assert client.get(f"/api/experiments/sources/{job['id']}").json()["video_url"] == video_url
+    video = client.get(video_url)
+    assert video.status_code == 200
+    assert video.headers["content-type"].startswith("video/mp4")
+    assert "inline" in video.headers["content-disposition"]
+    partial_video = client.get(video_url, headers={"Range": "bytes=0-5"})
+    assert partial_video.status_code == 206 and len(partial_video.content) == 6
+    assert anonymous.get(video_url).status_code == 401
+    assert client.get("/api/experiments/sources/no-such-source/video").status_code == 404
+    assert client.get(path+"/files/writeup.md").status_code == 200
+    partial = client.get(path+"/files/video.mp4",headers={"Range":"bytes=0-5"})
+    assert partial.status_code == 206 and len(partial.content) == 6
+    assert anonymous.get(path+"/files/writeup.md").status_code == 401
+    assert anonymous.post(path+"/retry").status_code == 401
+    assert anonymous.post(path+"/cancel").status_code == 401
+    assert client.post(path+"/retry").status_code == 409
+    assert client.get(path+"/files/missing.txt").status_code == 404
+    assert client.get("/api/experiments/imports/no-such-job").status_code == 404
+    assert client.post(path+"/cancel").json()["state"] == "completed"
+
+    started = client.post("/api/experiments/runs",json={"start_date":"2021-06-01", "end_date":"2021-11-30",
+                          "source_ids":[job["id"]], "position_notional":1000, "idempotency_key":"url-selected"})
+    assert started.status_code == 202
+    batch = started.json()
+    assert [r["source"] for r in batch["runs"]] == [job["id"]]
+    deadline = time.monotonic() + 5
+    while batch["state"] in {"queued", "loading", "processing"} and time.monotonic() < deadline:
+        time.sleep(.01)
+        batch = client.get(f"/api/experiments/runs/{batch['id']}").json()
+    assert batch["state"] == "completed"
+    folder = client.get(f"/api/experiments/runs/{batch['id']}/folders/{job['id']}")
+    assert folder.status_code == 200
+    assert folder.json()["source"]["video_url"] == f"/api/experiments/sources/{job['id']}/video"
+
+
+def test_generation_error_is_saved_and_retry_is_explicit(app_client, monkeypatch):
+    from core.experiments.imports import SourceImportService
+    from core.test_experiment_imports import Generator, URL
+
+    client, _, service = app_client
+    def unavailable(*_):
+        raise ValueError("Public video could not be downloaded")
+    imports = SourceImportService(service.store, generator=Generator(), preparer=unavailable)
+    service._imports = imports
+    submit = imports.submit
+    monkeypatch.setattr(imports, "submit", lambda url:submit(url, background=False))
+    response = client.post("/api/experiments/imports",json={"url":URL})
+    job = response.json()
+    assert job["state"] == "blocked"
+    assert "could not be downloaded" in job["error"]
+    assert not imports.jobs.sources()
+    assert client.post("/api/experiments/imports",json={"url":URL}).json()["attempt"] == 1

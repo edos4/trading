@@ -129,6 +129,7 @@ def scan_symbol(job: dict) -> dict:
         try:
             result = replay(
                 source["number"], symbol, df, request, tape=tape,
+                specification=source.get("rule_spec"),
                 cancel=lambda: _cancelled(root, batch_id),
             )
         except Cancelled:

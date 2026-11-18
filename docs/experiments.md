@@ -1,10 +1,121 @@
 # Historical Experiments
 
+## Create an experiment from one URL
+
+On **Experiments**, paste a public video link into **Create an experiment from a
+video** and click **Generate experiment**. There is no `list.md` step. Supported
+sites are Facebook, YouTube, Vimeo, Instagram, TikTok and X; site access and
+extractor support still determine whether a particular link can be downloaded.
+
+Generation saves the video, fully decodes its audio/video and records a SHA-256,
+then prepares the complete local speech transcript, caption and timestamped
+original frames. The selected vision model reads those inputs and
+writes `writeup.md` and `33ai-integration.md`, matching the archived folder
+structure. It can request one further pass of up to twelve original frames to
+resolve a settings panel between the uniform samples. This is AI interpretation
+of sampled frames, not a claim that every frame was watched or a human review.
+
+The writeup covers what the source does, reproduction steps, settings with
+timestamps, omissions, contradictions and evaluation. The integration plan
+documents inputs, application integration, historical data, validation and
+remaining gaps. Inaccessible, silent, truncated, promotional and non-trading
+sources retain their actual limitations. No missing formula, stop, target,
+timeframe or proprietary output is invented to complete a strategy.
+
+Each URL has a persistent job and its own folder under
+`EXPERIMENTS_STORE_DIR/sources/url-<hash>/`. Progress and files survive a browser
+reload. Cancel retains evidence; Retry is explicit after failure, cancellation
+or interruption. A cross-process lock permits one media/analysis worker at a
+time, with up to eight queued/active jobs. Worker leases and attempt fencing
+prevent an expired or cancelled worker from publishing into a retry. A URL
+already in the archived catalog reuses its reviewed experiment and locally
+available source files. Tracking parameters do not create duplicate jobs.
+
+Click **Open experiment**, open **Source & plan** to watch the saved video
+beside the writeup and integration plan, select dates/market and click
+**Start selected experiment**. Generating an experiment does not start a
+historical run. **All folders** remains available for the original batch flow.
+Saved batches retain frozen source lists and documents when new URLs are added.
+
+### Automatically runnable scope
+
+Complete sources can generate `rules.json`, a validated data-only specification
+consumed by `core/experiments/rules.py`. It supports explicit daily-equity EMA,
+SMA, rolling high/low and Wilder ATR features, nonnegative lags, comparisons,
+fresh crosses, and bounded AND/OR combinations. Entries and exits must both be
+defined, with source evidence. There is no `eval`, generated Python, dynamic
+import or shell command in this contract.
+
+The execution book uses completed daily signals, next-session-open fills,
+independent fixed-notional positions, one position per symbol/variant and
+signal-condition exits. Existing fees, liquidity, PH ticks/lots, borrow policy,
+holdout and end handling apply. This declared research account does not become
+the source's portfolio sizing or a human-reviewed adapter. Brackets, intrabar
+orders, trailing stops, risk-based sizing, intraday/derivative/profile/external
+inputs, proprietary/repainting signals and discretionary patterns are outside
+this compiler. A source that requires them gets its documents and a specific
+blocker. Unsupported source filters or exits are never silently discarded.
+
+Source/plan and rule hashes are checked before new runs. The batch stores the
+full specification and its evidence alongside the original source interpretation.
+Changing a generated rule or document without matching integrity records blocks
+it, while previously saved runs retain their frozen version.
+
+### Server setup
+
+The downloader/transcriber is isolated from the main application and Laya:
+
+```bash
+python3 -m venv .venv-experiments
+.venv-experiments/bin/pip install -r requirements-experiments.txt
+.venv-experiments/bin/python scripts/experiment_media.py --check
+```
+
+`EXPERIMENTS_MEDIA_PYTHON` defaults to `.venv-experiments/bin/python`.
+`EXPERIMENTS_GENERATION_PROVIDER` defaults to `deepseek`, reusing the existing
+`DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL` and vision-capable `DEEPSEEK_MODEL` (Flash).
+[DeepSeek documents native frame/image support](https://api-docs.deepseek.com/guides/vision/)
+through its Anthropic-compatible API; Pro is rejected because it does not read
+images. Selecting `anthropic` instead uses `ANTHROPIC_API_KEY` and the existing
+Claude vision model, independently of `VISION_CONFIRMATION_ENABLED`. There is
+no silent provider fallback after an error. The optional vision-model override is
+`EXPERIMENTS_GENERATION_MODEL` (blank uses the selected provider's model);
+`EXPERIMENTS_GENERATION_TIMEOUT_SECONDS` defaults to 300 seconds per analysis
+call. Model/request identity and usage are retained in each generation record.
+No key is returned to the browser or passed to the media child process. Settings
+are exposed under **URL experiments**; changing storage requires a restart.
+
+The worker accepts recorded videos up to one hour and 512 MiB. Speech weights
+are downloaded into the experiment source cache on first use. Public HTTP(S)
+requests, extractor redirects and DNS results are checked; local/private
+addresses, credentials in URLs, custom ports, playlists and live streams are
+rejected. No browser cookies or account credentials are imported. Readable
+errors retain the evidence and identify what must be retried or supplied.
+
+All import, status, retry, cancel and file endpoints require the existing web
+login. File paths are confined to that job's directory. New URLs do not modify
+`list.md`, the archived source bundle, history, Paper books or the immutable
+pattern registry.
+
+The generation API is `POST /api/experiments/imports` with `{"url":"…"}`;
+poll `GET /api/experiments/imports/{id}`. New historical runs optionally accept
+`source_ids` to run only selected experiments; an empty selection means all.
+
+Validation:
+
+```bash
+.venv/bin/pytest -q core/test_experiment_imports.py core/test_experiments.py web/test_experiments_api.py
+node web/test_experiments.cjs
+```
+
+## Archived experiments
+
 Open **Experiments**, select US or PH, supply inclusive start/end session dates
 and click **Start all folders**. A batch creates a separate result record for
 each of the 449 archived writeups. Search or filter folders, then click one to
 view positions, closed trades, signals, performance, event outcomes, logs and
-its source/integration plan. Click a symbol to open the same chart viewer used
+**Source & plan**. That tab plays the folder's saved video, with the writeup
+and integration plan beside it. Click a symbol to open the same chart viewer used
 by Paper, using this batch's frozen data and saved record levels. Complete
 folder evidence is downloadable as JSON Lines once the folder finishes;
 failed/cancelled/interrupted folders export their explicitly labeled retained

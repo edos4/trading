@@ -29,7 +29,7 @@ Object.entries({'exp-market':'us','exp-start':'2020-01-01','exp-end':'2021-01-01
   'exp-notional':'10000','exp-slippage':'0.05','exp-cost':'','exp-symbols':'','exp-end-policy':'keep-open','exp-filter':'all'}).forEach(([k,v])=>get(k).value=v);
 const source = (id,number,extra={})=>({id,number,title:`Source ${number}`,availability:'ready',markets:['us','ph'],
   parameters:{},assumptions:[],limitations:[],kind:'trades',writeup:'source text',plan:'plan text',...extra});
-const sources = [source('406-ema',406),source('442-repaint',442,{availability:'blocked',blocker:'Repainting formula missing'}),
+const sources = [source('406-ema',406,{video_url:'/api/experiments/sources/406-ema/video'}),source('442-repaint',442,{availability:'blocked',blocker:'Repainting formula missing'}),
   source('385-candles',385,{kind:'event-study',title:'<img src=x onerror=alert(1)>'})];
 const summary = pnl => ({signal_count:2,trade_count:1,open_count:0,coverage:{evaluated_symbols:1},
   variants: pnl == null ? {} : {book:{kind:'trades',net_pnl:pnl},other:{kind:'trades',net_pnl:pnl}},equity:{}});
@@ -38,14 +38,30 @@ const batch = {id:'batch-one',state:'completed-with-blockers',request:{market:'u
   runs:[{source:'406-ema',state:'completed',summary:summary(10)},{source:'442-repaint',state:'blocked',summary:null},
     {source:'385-candles',state:'completed',summary:summary(40)}]};
 const calls = [];
+const importJobs = [];
 let deferred, poll, failPost = false, keyCounter = 0;
 const positionRows = [];
 async function api(url, options={}) {
   calls.push({url,options});
+  if(url==='/api/experiments/imports' && !options.method) return {imports:importJobs.map(j=>({...j})),capabilities:{ready:true,message:'Ready'}};
+  if(url==='/api/experiments/imports' && options.method==='POST') {
+    if(!importJobs.length) importJobs.push({id:'url-new',url:JSON.parse(options.body).url,state:'queued',stage:'queued',message:'Waiting',files:[]});
+    return {...importJobs[0]};
+  }
+  if(url.startsWith('/api/experiments/imports/')) {
+    const job=importJobs.find(j=>j.id===url.split('/')[4]);
+    if(url.endsWith('/retry')) Object.assign(job,{state:'queued',stage:'queued',error:null});
+    if(url.endsWith('/cancel')) Object.assign(job,{state:'cancelled',stage:'cancelled'});
+    return {...job};
+  }
   if(url==='/api/experiments/catalog') return {sources};
   if(url==='/api/experiments/runs' && !options.method) return {batches:[]};
   if(url==='/api/experiments/runs' && options.method==='POST') {
     if(failPost) { failPost=false; throw new Error('simulated lost response'); }
+    if(JSON.parse(options.body).source_ids) {
+      const selected=sources.find(s=>s.id===JSON.parse(options.body).source_ids[0]);
+      return {...batch,id:'selected-run',sources:[selected],runs:[{source:selected.id,state:'completed',summary:summary(5)}]};
+    }
     return batch;
   }
   if(url.startsWith('/api/experiments/sources/')) {
@@ -81,7 +97,29 @@ vm.runInNewContext(fs.readFileSync(__dirname+'/static/experiments.js','utf8'),co
   assert.match(get('exp-catalog-count').textContent,/3 folders · 2 runnable · 1 blocked/);
   assert.deepEqual(folderIds(),['406-ema','442-repaint','385-candles']);
   assert.equal(get('exp-title').textContent,'Source 406');
+  assert.equal(get('exp-source-video').hidden,false);
+  assert.equal(get('exp-source-video').src,'/api/experiments/sources/406-ema/video');
+  assert.equal(get('exp-watch').hidden,false);
+  assert.equal(get('exp-video-empty').hidden,true);
+  assert.ok(descendants(get('exp-writeup')).some(el => el.textContent === 'source text'));
   await folder('442-repaint').events.click(); await flush();
+  assert.equal(get('exp-source-video').hidden,true);
+  assert.equal(get('exp-source-video').dataset.source,'');
+  assert.equal(get('exp-watch').hidden,true);
+  assert.equal(get('exp-video-empty').hidden,false);
+  get('exp-doc-find').value = 'source';
+  await get('exp-doc-find').events.input();
+  assert.ok(descendants(get('exp-writeup')).some(el => el.tag === 'mark' && el.textContent === 'source'));
+  assert.match(get('exp-doc-count').textContent,/1 match/);
+  await get('exp-doc-plan').events.click();
+  assert.equal(get('exp-writeup').hidden,true);
+  assert.equal(get('exp-plan').hidden,false);
+  assert.match(get('exp-doc-count').textContent,/No matches/);
+  get('exp-doc-find').value = '';
+  await get('exp-doc-find').events.input();
+  assert.equal(get('exp-doc-count').textContent,'');
+  await get('exp-doc-writeup').events.click();
+  assert.equal(get('exp-writeup').hidden,false);
   assert.equal(get('exp-blocker').textContent,'Repainting formula missing');
   assert.equal(get('exp-folder-state').textContent,'blocked');
   await folder('385-candles').events.click(); await flush();
@@ -146,5 +184,38 @@ vm.runInNewContext(fs.readFileSync(__dirname+'/static/experiments.js','utf8'),co
   assert.equal(get('exp-frozen').hidden,true);
   assert.equal(get('exp-run-id').textContent,'');
   assert.equal(get('exp-export').hidden,true);
-  console.log('Experiments client: catalog, blockers, safe text, request, drilldown and stale-response checks passed');
+  // One URL schedules generation, retains errors/retry, then exposes a selected-source run.
+  const runsBefore=calls.filter(c=>c.url==='/api/experiments/runs' && c.options.method==='POST').length;
+  get('exp-import-url').value='https://youtube.com/watch?v=example';
+  await get('exp-import-form').events.submit({preventDefault(){}}); await flush();
+  assert.equal(get('exp-import-submit').disabled,false);
+  assert.match(get('exp-import-status').textContent,/queued/);
+  assert.deepEqual(JSON.parse(calls.find(c=>c.url==='/api/experiments/imports' && c.options.method==='POST').options.body),{url:'https://youtube.com/watch?v=example'});
+  assert.equal(calls.filter(c=>c.url==='/api/experiments/runs' && c.options.method==='POST').length,runsBefore);
+  Object.assign(importJobs[0],{state:'blocked',stage:'failed',error:'Source not accessible'});
+  await poll(); await flush();
+  assert.equal(get('exp-import-message').textContent,'Source not accessible');
+  const retry=descendants(get('exp-import-list')).find(el=>el.tag==='button' && el.textContent==='Retry');
+  assert.ok(retry); await retry.events.click(); await flush();
+  assert.ok(calls.some(c=>c.url.endsWith('/imports/url-new/retry')));
+  sources.push(source('url-new',0,{title:'<svg onload=alert(1)>',rule_spec:{version:1},
+    video_url:'/api/experiments/sources/url-new/video'}));
+  Object.assign(importJobs[0],{state:'completed',stage:'completed',error:null,source_id:'url-new',
+    files:['writeup.md','33ai-integration.md','video.mp4'],message:'Generated'});
+  await poll(); await flush();
+  assert.equal(get('exp-import-open').hidden,false);
+  assert.equal(get('exp-import-video').hidden,false);
+  assert.equal(get('exp-import-files').children[0].href,'/api/experiments/imports/url-new/files/writeup.md');
+  await get('exp-import-open').events.click(); await flush();
+  assert.equal(get('exp-title').textContent,'<svg onload=alert(1)>');
+  assert.equal(get('exp-source-video').hidden,false);
+  assert.equal(get('exp-source-video').src,'/api/experiments/sources/url-new/video');
+  assert.equal(get('exp-run-scope').value,'selected');
+  assert.equal(get('exp-run').textContent,'Start selected experiment');
+  assert.ok(!descendants(get('exp-selected')).some(el=>el.tag==='svg'));
+  await get('exp-form').events.submit({preventDefault(){}}); await flush();
+  const selectedPost=calls.filter(c=>c.url==='/api/experiments/runs' && c.options.method==='POST').at(-1);
+  assert.deepEqual(JSON.parse(selectedPost.options.body).source_ids,['url-new']);
+  assert.deepEqual(folderIds(),['url-new']);
+  console.log('Experiments client: archive, URL generation/retry, selected replay, safe text and stale-response checks passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});
