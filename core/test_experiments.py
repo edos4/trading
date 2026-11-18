@@ -281,6 +281,26 @@ def test_complete_batch_runs_every_folder_and_keeps_blockers(tmp_path):
     assert len(store.listing()) == 1
 
 
+def test_empty_and_out_of_range_history_have_their_own_coverage_buckets(tmp_path):
+    def loader(symbol, *_):
+        if symbol == "EMPTY":
+            return []
+        if symbol == "OLD":
+            return bars(30)
+        return bars(1200)
+    service = ExperimentService(ExperimentStore(tmp_path),
+                                enumerate_symbols=lambda *_: ["SPY", "EMPTY", "OLD"], loader=loader)
+    result = service.submit(request(start_date="2022-10-01", end_date="2023-04-14"), background=False)
+    folder = next(s["id"] for s in catalog() if s["number"] == 115)
+    coverage = next(run["summary"]["coverage"] for run in result["runs"] if run["source"] == folder)
+    assert coverage == {"evaluated_symbols": 1, "history_failed": 0, "insufficient_history": 0,
+                        "outside_source_universe": 0, "no_history": 1, "no_in_range_bars": 1}
+    for run in result["runs"]:
+        counted = run["summary"].get("coverage")
+        if counted:
+            assert sum(counted.values()) == 3
+
+
 def test_partial_symbol_history_failure_keeps_the_evaluated_folders(tmp_path):
     def loader(symbol, *_):
         if symbol == "BAD":
