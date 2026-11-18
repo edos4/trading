@@ -27,6 +27,8 @@
   function runFor(id) { return state.batch?.runs.find(run => run.source === id); }
   function availability(source) {
     const market = state.batch?.request.market || $("exp-market").value;
+    const borrow = state.batch?.request.short_policy || $("exp-shorts").value || "exclude";
+    if (source.requires_borrow && borrow === "exclude") return "blocked";
     return source.availability === "ready" && source.markets.includes(market) ? "ready" : "blocked";
   }
   function badge(status) {
@@ -88,7 +90,7 @@
     renderFolders();
   }
   function stats(summary) {
-    const values = [["Observations / signals", summary.signal_count], ["Closed trades", summary.trade_count],
+    const values = [[state.batch?.progress.tape_version ? "Entry triggers" : "Saved signal records", summary.signal_count], ["Closed trades", summary.trade_count],
       ["Open positions", summary.open_count], ["Evaluated symbols", summary.coverage?.evaluated_symbols]];
     $("exp-stats").replaceChildren(...values.map(([title, value]) => {
       const el = node("div", null, "exp-stat"); el.append(node("span", title), node("strong", value == null ? "—" : number(value, 0))); return el;
@@ -207,6 +209,8 @@
         const dl = node("dl");
         [["Account", metrics.account_model],["Currency",summary.currency],["Net P&L",number(metrics.net_pnl)],
           ["Realized",number(metrics.realized_pnl)],["Unrealized",number(metrics.unrealized_pnl)],
+          ["Eligible symbol-days",number(metrics.eligible_symbol_days,0)],["Variant symbols",number(metrics.evaluated_symbols,0)],
+          ...Object.entries(metrics.funnel || {}).map(([k,v])=>[label(k.replaceAll("_","-")),number(v,0)]),
           ["Trades",metrics.trade_count],["Win rate",percent(metrics.win_rate == null ? null : metrics.win_rate * 100)],
           ["Profit factor",metrics.profit_factor == null ? (metrics.profit_factor_status || "—") : number(metrics.profit_factor)],["Max drawdown (currency)",number(metrics.max_drawdown_cash)],
           ...(metrics.account_model === "finite-cash" ? [["Max NAV drawdown",percent(metrics.max_drawdown_pct)]] : []),
@@ -324,6 +328,7 @@
     try { state.batch = await api("/api/experiments/runs/"+encodeURIComponent(state.batch.id)+"/cancel",{method:"POST"}); renderBatch(); } catch(error) { message(error); }
   });
   $("exp-search").addEventListener("input",renderFolders); $("exp-filter").addEventListener("change",renderFolders);
+  $("exp-shorts").addEventListener("change",renderFolders);
   $("exp-market").addEventListener("change", () => {
     const ph=$("exp-market").value==="ph"; $("exp-capital").value=ph?"1000000":"100000"; $("exp-notional").value=ph?"100000":"10000";
     if(!state.batch) { renderFolders(); if(state.detail) renderDetail(state.detail); }

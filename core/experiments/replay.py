@@ -8,6 +8,7 @@ hold. PH stays long-only.
 from __future__ import annotations
 
 import math
+from collections import Counter
 from datetime import date, timedelta
 from typing import Callable
 
@@ -116,6 +117,9 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
     def supported(index: int, qty: int) -> bool:
         # Ex-post impossibility check only. Never tune the quantity to today's volume.
         return qty > 0 and qty + executed.get(index, 0) <= volume[index]
+
+    first_signal = len(output["signals"])
+    first_log = len(output["logs"])
 
     def event(index: int, status: str, direction: int = 1, **extra) -> dict:
         return {"symbol": symbol, "variant": variant.name, "date": str(df.date.iloc[index]),
@@ -277,6 +281,11 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                     output["logs"].append(event(i, "filled", direction, entry_price=price, qty=qty,
                                                  signal_date=str(df.date.iloc[signal_index])))
         if variant.kind == "trades":
+            entry_side = int(variant.entry[i])
+            if entry_side and volume[i] <= 0:
+                output["signals"].append(event(i, "ineligible", entry_side, reason="No reported signal-day trades",
+                                               evidence=variant.evidence(i)))
+                entry_side = 0
             exit_signal = bool(variant.exit[i])
             exit_reason = "signal-next-open"
             if position is not None and hold and shift_session(market, dates[i], 1) >= date.fromisoformat(position["scheduled_exit"]):
@@ -294,7 +303,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                 atr = float(variant.policy["atr"][i])
                 if math.isfinite(atr):
                     position["stop_loss"] = max(stop, position["high_close"] - variant.policy["trail_atr"] * atr)
-            if position is not None and int(variant.entry[i]):
+            if position is not None and entry_side:
                 output["signals"].append(event(i, "suppressed", int(variant.entry[i]), reason="Position held",
                                                evidence=variant.evidence(i)))
             if position is not None and exit_signal and pending is None:
@@ -305,14 +314,14 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                 closing = -1 if position["action"] == "BUY" else 1
                 output["signals"].append(event(i, "exit-queued", closing,
                                                reason=exit_reason, evidence=position.get("exit_trigger") or variant.evidence(i)))
-            elif position is None and int(variant.entry[i]) != 0:
-                direction = int(variant.entry[i])
+            elif position is None and entry_side:
+                direction = entry_side
                 stats["signal_count"] += 1
                 evidence = variant.evidence(i)
                 if direction < 0 and (long_only or request.short_policy == "exclude"):
                     reason = "PH book is long-only" if long_only else "Borrow inventory unavailable"
                     output["signals"].append(event(i, "ineligible", direction, reason=reason, evidence=evidence))
-                    output["logs"].append(event(i, "rejected", direction, reason=reason))
+                    output["logs"].append(event(i, "ineligible", direction, reason=reason))
                 else:
                     pending_qty = decision_quantity(i, direction)
                     output["signals"].append(event(i, "entry-queued", direction, evidence=evidence,
@@ -359,7 +368,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
         indices = {day: index for index, day in enumerate(dates)}
         for i in range(variant.warmup, len(df)):
             side = int(variant.entry[i])
-            if not side or str(dates[i]) < start or (side < 0 and (long_only or request.short_policy == "exclude")):
+            if not side or volume[i] <= 0 or str(dates[i]) < start or (side < 0 and (long_only or request.short_policy == "exclude")):
                 continue
             if i % 128 == 0 and cancel():
                 raise Cancelled()
@@ -422,4 +431,17 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
     else:
         for key in ("realized_pnl", "unrealized_pnl", "gross_profit", "gross_loss", "fees", "turnover"):
             stats[key] = None
+    signals = Counter(row["status"] for row in output["signals"][first_signal:])
+    logs = Counter(row["status"] for row in output["logs"][first_log:])
+    end_unfilled = sum(row.get("pending") == "entry" for row in output["logs"][first_log:])
+    queued = signals["entry-queued"]
+    stats["signal_count"] = queued + signals["ineligible"] + signals["suppressed"] + signals["observed"]
+    stats["funnel"] = {"raw": stats["signal_count"], "suppressed": signals["suppressed"],
+                       "ineligible": signals["ineligible"], "eligible": queued + signals["observed"],
+                       "queued": queued, "filled": logs["filled"], "rejected": logs["rejected"],
+                       "expired": logs["expired"] + end_unfilled, "exit_signals": signals["exit-queued"],
+                       "open": int(position is not None), "closed": stats["trade_count"]}
+    stats["evaluated_symbols"] = 1
+    stats["eligible_symbol_days"] = sum(1 for i in range(variant.warmup,len(dates))
+                                        if str(dates[i]) >= start and volume[i] > 0)
     output["variants"][variant.name] = stats

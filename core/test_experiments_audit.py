@@ -233,3 +233,20 @@ def test_distribution_and_no_loss_profit_factor():
     assert stats["profit_factor_status"] == "profits without losses"
     assert list(stats["best_symbols"]) == ["C","B","A"]
     assert abs(stats["realized_without_best_three"]) < .000001
+
+
+def test_entry_funnel_reconciles():
+    from core.experiments.history import frame
+    from core.experiments.replay import replay
+    from core.test_experiments import bars, request
+    from core.experiments.adapters import SPECS
+
+    req = request()
+    r = replay(120,"TEST",frame(bars()),req)
+    m = r["variants"]["component-measurements"]
+    f = m["funnel"]
+    assert f["raw"] == f["suppressed"] + f["ineligible"] + f["eligible"]
+    assert f["filled"] == f["open"] + f["closed"]
+    assert f["queued"] == f["filled"] + f["expired"] + f["rejected"]
+    assert f["ineligible"] > 0 and f["exit_signals"] > 0
+    assert "ph" not in SPECS[431]["markets"]

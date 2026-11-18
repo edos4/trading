@@ -179,6 +179,7 @@ for numbers, family, trigger in RESEARCH_FAMILIES:
                     tested_label=f"{trigger} · 20-session research trade")
         spec["parameters"].update(hold_bars=RESEARCH_HOLD_BARS, trigger=trigger)
         spec["limitations"].append(RESEARCH_NOTE)
+SPECS[431].update(markets=["us"], requires_borrow=True)
 for number, family in ((40, "spy-breakout"), (406, "ema-panels")):
     SPECS[number].update(family_id=family, policy_id=family + "-v3",
                          tested_label=SPECS[number]["scope"], source_strategy_implemented=True)

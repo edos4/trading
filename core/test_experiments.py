@@ -264,7 +264,7 @@ def test_cancellation_is_checked_inside_replay():
 def test_complete_batch_runs_every_folder_and_keeps_blockers(tmp_path):
     store = ExperimentStore(tmp_path)
     service = ExperimentService(store,enumerate_symbols=lambda *_:["SPY"],loader=lambda *_:bars(1200))
-    req=request(start_date="2023-06-01",end_date="2024-04-14")
+    req=request(start_date="2023-06-01",end_date="2024-04-14",short_policy="assume-borrow")
     result = service.submit(req,background=False)
     assert len(result["runs"]) == 449
     assert result["state"] == "completed-with-blockers"
@@ -288,7 +288,7 @@ def test_partial_symbol_history_failure_keeps_the_evaluated_folders(tmp_path):
         return bars(1200)
     service = ExperimentService(ExperimentStore(tmp_path),
                                 enumerate_symbols=lambda *_: ["SPY", "BAD"], loader=loader)
-    result = service.submit(request(start_date="2023-06-01", end_date="2024-04-14"), background=False)
+    result = service.submit(request(start_date="2023-06-01", end_date="2024-04-14",short_policy="assume-borrow"), background=False)
     assert result["state"] == "completed-with-blockers"
     assert result["counts"].get("failed", 0) == 0
     ready = [run for run in result["runs"] if run["state"] == "completed"]
@@ -300,7 +300,7 @@ def test_partial_symbol_history_failure_keeps_the_evaluated_folders(tmp_path):
 def test_data_failure_is_not_a_successful_zero_trade_batch(tmp_path):
     def fail(*_): raise HistoryUnavailable("transport")
     service = ExperimentService(ExperimentStore(tmp_path),enumerate_symbols=lambda *_:["SPY"],loader=fail)
-    result = service.submit(request(),background=False)
+    result = service.submit(request(short_policy="assume-borrow"),background=False)
     assert result["state"] == "failed"
     assert result["counts"]["failed"] == len(SPECS)
     assert result["progress"]["completed_symbols"] == 1
@@ -344,7 +344,7 @@ def test_cancelled_batch_preserves_completed_and_blocked_records(tmp_path):
         store.cancel(batch["id"])
         return bars()
     service=ExperimentService(store,enumerate_symbols=lambda *_:["SPY"],loader=loader)
-    result=service.submit(request(),background=False)
+    result=service.submit(request(short_policy="assume-borrow"),background=False)
     assert result["state"] == "cancelled"
     assert result["counts"]["cancelled"] == len(SPECS) and result["counts"]["blocked"] == 449-len(SPECS)
     with pytest.raises(KeyError):

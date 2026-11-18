@@ -32,6 +32,8 @@ class ExperimentService:
             entry = {**originals[entry["id"]], **entry}
             if entry["availability"] == "ready" and request.market not in entry["markets"]:
                 entry = {**entry, "availability": "blocked", "blocker": "Source universe/contract is unsupported in this market"}
+            if entry.get("requires_borrow") and request.market == "us" and request.short_policy == "exclude":
+                entry = {**entry, "availability": "blocked", "blocker": "Short-only study requires the assumed-borrow research setting"}
             manifest.append(entry)
         batch_id, created = self.store.create(request.model_dump(mode="json"), manifest)
         if created:
@@ -240,21 +242,20 @@ def _merge(summary: dict, result: dict) -> None:
     else:
         bucket = "insufficient_history"
     summary["coverage"][bucket] += 1
-    summary["signal_count"] += len(result["signals"])
+    summary["signal_count"] += sum(v.get("funnel", {}).get("raw", 0) for v in result["variants"].values())
     summary["trade_count"] += len(result["trades"])
     summary["open_count"] += len(result["positions"])
     for name, values in result["variants"].items():
         if values["status"] != "completed":
             continue
-        total = summary["variants"].setdefault(name, {**values, **{key: 0 for key in (
-            "signal_count", "trade_count", "stale_exposure", "long_pnl", "short_pnl", "borrow_fees", "wins", "gross_profit", "gross_loss", "fees", "turnover",
-            "realized_pnl", "unrealized_pnl", "r_total", "r_count", "loss_r_0_to_1", "loss_r_1_to_2", "loss_r_over_2")}})
-        for key in ("signal_count", "trade_count", "stale_exposure", "long_pnl", "short_pnl", "borrow_fees", "wins", "gross_profit", "gross_loss", "fees", "turnover",
-                    "realized_pnl", "unrealized_pnl", "r_total", "r_count", "loss_r_0_to_1", "loss_r_1_to_2", "loss_r_over_2"):
-            if values[key] is None:
-                total[key] = None
-            else:
-                total[key] += values[key]
+        total = summary["variants"].setdefault(name, {"status": "completed", "kind": values["kind"],
+                                                     "account_model": values["account_model"], "funnel": {}})
+        for key, value in values.items():
+            if key in {"status", "kind", "account_model", "funnel"}:
+                continue
+            total[key] = total.get(key, 0) + value if value is not None else None
+        for key, count in values["funnel"].items():
+            total["funnel"][key] = total["funnel"].get(key, 0) + count
     samples = summary.setdefault("_samples", {})
     for trade in result["trades"]:
         samples.setdefault(trade["variant"], []).append(trade["pnl"])
