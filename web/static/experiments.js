@@ -218,8 +218,15 @@
             sample.complete + " measured / " + sample.censored + " unavailable · mean gross move " +
             percent(sample.mean_return_pct), "muted small"));
         }
+        if (metrics.benchmark) {
+          const b = metrics.benchmark;
+          section.append(node("p", b.name + (b.filled ? " · gross " + number(b.gross_pnl) + " · net " + number(b.net_pnl) +
+            " · strategy minus benchmark " + number(b.net_difference) + " · drawdown " + number(b.max_drawdown_cash) +
+            " · peak entry cost " + number(b.peak_committed_basis) + " · fees " + number(b.fees) +
+            " · slippage " + number(b.execution_shortfall) : " · unavailable (no supported fill)")));
+        }
         const dl = node("dl");
-        [["Account", metrics.account_model],["Currency",summary.currency],["Net P&L",number(metrics.net_pnl)],
+        [["Account", metrics.account_model],["Currency",summary.currency],["Gross P&L",number(metrics.gross_pnl)],["Net P&L",number(metrics.net_pnl)],["Execution shortfall",number(metrics.execution_shortfall)],
           ["Realized",number(metrics.realized_pnl)],["Unrealized",number(metrics.unrealized_pnl)],
           ["Eligible symbol-days",number(metrics.eligible_symbol_days,0)],["Variant symbols",number(metrics.evaluated_symbols,0)],
           ...Object.entries(metrics.funnel || {}).map(([k,v])=>[label(k.replaceAll("_","-")),number(v,0)]),

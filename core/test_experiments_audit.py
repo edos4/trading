@@ -277,3 +277,20 @@ def test_cross_symbol_chronology_survives_page_boundary(tmp_path):
     rows = one["rows"] + two["rows"]
     assert [r["date"] for r in rows] == sorted(r["date"] for r in rows)
     assert len({r["cursor"] for r in rows}) == one["total"] == 4
+
+
+def test_matched_control_and_finite_buy_hold_use_same_execution():
+    from core.experiments.history import frame
+    from core.experiments.replay import replay
+    from core.test_experiments import bars, request
+    rows = bars(65, flat=True)
+    rows[25].update(low=102, open=103, high=104, close=103)
+    req = request(start_date=rows[25]["date"], end_date=rows[-1]["date"], participation=1)
+    result = replay(48,"X",frame(rows),req)
+    t = result["trades"][0]
+    control = result["control"]["trades"][0]
+    assert t["action"] == control["action"]
+    assert control["entry_date"] == rows[31]["date"] and control["elapsed_sessions"] == 20
+    spy = replay(40,"SPY",frame(rows),req)["control"]
+    assert len(spy["positions"]) == 1 and not spy["trades"]
+    assert spy["positions"][0]["entry_date"] == rows[26]["date"]

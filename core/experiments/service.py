@@ -12,7 +12,7 @@ from pathlib import Path
 from core.experiments.catalog import catalog, sources
 from core.experiments.contracts import BatchRequest
 from core.experiments.history import available_symbols, frame, normalize_bars, raw_symbol
-from core.experiments.replay import Cancelled, replay
+from core.experiments.replay import Cancelled, DailyTape, replay
 from core.experiments.store import ExperimentStore
 from core.market import get_market
 from utils.logger import log
@@ -128,6 +128,7 @@ class ExperimentService:
                     digest = self.store.dataset(batch_id, symbol, rows)
                     dataset_hash.update(f"{symbol}:{digest}\n".encode())
                     df = frame(rows)
+                    tape = DailyTape.prepare(df, request.market)
                 except Cancelled:
                     raise
                 except Exception as exc:
@@ -154,7 +155,7 @@ class ExperimentService:
                         if only and symbol not in only:
                             summary["coverage"]["outside_source_universe"] += 1
                         else:
-                            result = replay(source["number"], symbol, df, request,
+                            result = replay(source["number"], symbol, df, request, tape=tape,
                                             cancel=lambda: self.store.cancelled(batch_id))
                             self.store.save_result(batch_id, source_id, symbol, result)
                             _merge(summary, result)
@@ -183,7 +184,7 @@ class ExperimentService:
                     required = source.get("symbols") or []
                     if required:
                         state, error = "blocked", (
-                            "Required symbols are not in the current history universe: "
+                            "Strategy and benchmark unavailable for required symbols: "
                             + ", ".join(required))
                     else:
                         state, error = "blocked", "No eligible symbol has sufficient in-range history and warm-up for this source"
@@ -237,6 +238,10 @@ def _empty_summary(source: dict) -> dict:
 
 
 def _merge(summary: dict, result: dict) -> None:
+    if result.get("control"):
+        if "_control" not in summary:
+            summary["_control"] = _empty_summary({"kind":"trades"})
+        _merge(summary["_control"], result["control"])
     evaluated = any(v.get("status") == "completed" for v in result["variants"].values())
     reason = result["coverage"].get("reason")
     if reason == "No history":
@@ -349,13 +354,23 @@ def _present(summary: dict, request: BatchRequest, *, final: bool = False) -> di
             points.append({"date": day, "equity": equity if finite else None, "pnl": pnl,
                            "drawdown": drawdown, "gross_exposure": gross, "net_exposure": net})
         view["equity"][name] = points
-        values.update(net_pnl=values["realized_pnl"] + values["unrealized_pnl"],
+        values.update(gross_pnl=values["realized_pnl"]+values["unrealized_pnl"]+values["fees"]+values["borrow_fees"]+values["execution_shortfall"],
+                      net_pnl=values["realized_pnl"] + values["unrealized_pnl"],
                       win_rate=values["wins"] / values["trade_count"] if values["trade_count"] else None,
                       profit_factor=values["gross_profit"] / values["gross_loss"] if values["gross_loss"] else None,
                       expectancy=values["realized_pnl"] / values["trade_count"] if values["trade_count"] else None,
                       average_r=values["r_total"] / values["r_count"] if values["r_count"] else None,
                       max_drawdown_pct=max_dd if finite else None, max_drawdown_cash=max_dollars,
                       peak_committed_basis=peak_basis, gross_exposure=gross, net_exposure=net)
+    if "_control" in summary:
+        controls = _present(summary["_control"], request, final=final)
+        for name, control in controls["variants"].items():
+            main = view["variants"][name]
+            main["benchmark"] = {k:control.get(k) for k in ("trade_count","net_pnl","gross_pnl",
+                "max_drawdown_cash","gross_exposure","peak_committed_basis","fees","borrow_fees","execution_shortfall")}
+            main["benchmark"]["name"] = "Buy and hold SPY" if main["account_model"] == "finite-cash" else "Same triggers delayed five sessions"
+            main["benchmark"]["filled"] = control["funnel"]["filled"]
+            main["benchmark"]["net_difference"] = main["net_pnl"] - control["net_pnl"] if control["funnel"]["filled"] else None
     return view
 
 

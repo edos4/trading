@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import math
 from collections import Counter
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import Callable
 
+import numpy as np
 import pandas as pd
 
 from core.experiments.adapters import Variant, variants
@@ -37,11 +39,41 @@ class Cancelled(RuntimeError):
     pass
 
 
+@dataclass
+class DailyTape:
+    dates: list[date]
+    indices: dict[date, int]
+    calendar: dict[date, int]
+    volume: np.ndarray
+    trailing_shares: np.ndarray
+    trailing_value: np.ndarray
+
+    @classmethod
+    def prepare(cls, df: pd.DataFrame, market: str) -> DailyTape:
+        dates = [date.fromisoformat(str(day)) for day in df.date]
+        calendar = {}
+        serial = 0
+        if dates:
+            day = dates[0]
+            while day <= dates[-1]:
+                serial += is_session(market, day)
+                calendar[day] = serial
+                day += timedelta(days=1)
+        shares = df.volume.rolling(20, min_periods=1).mean().shift(1).fillna(0)
+        traded = (df.volume * df.close).rolling(20, min_periods=1).mean().shift(1).fillna(0)
+        return cls(dates, {d:i for i,d in enumerate(dates)}, calendar, df.volume.to_numpy(dtype=float),
+                   shares.to_numpy(), traded.to_numpy())
+
+
+def _output(symbol: str, length: int) -> dict:
+    return {"symbol": symbol, "signals": [], "trades": [], "positions": [], "outcomes": [], "logs": [],
+            "equity": {}, "exposure": {}, "variants": {}, "coverage": {"bars": length}}
+
+
 def replay(number: int, symbol: str, df: pd.DataFrame, request: BatchRequest,
-           *, cancel: Callable[[], bool] = lambda: False) -> dict:
+           *, cancel: Callable[[], bool] = lambda: False, tape: DailyTape | None = None) -> dict:
     df = df.loc[df.date <= request.end_date.isoformat()].reset_index(drop=True)
-    output = {"symbol": symbol, "signals": [], "trades": [], "positions": [], "outcomes": [], "logs": [],
-              "equity": {}, "exposure": {}, "variants": {}, "coverage": {"bars": len(df)}}
+    output = _output(symbol, len(df))
     if df.empty:
         output["coverage"]["reason"] = "No history"
         output["logs"].append({"symbol":symbol,"date":request.start_date.isoformat(),
@@ -62,7 +94,11 @@ def replay(number: int, symbol: str, df: pd.DataFrame, request: BatchRequest,
     # The history adapter already trims to end_date; keep replay safe for
     # direct callers and future bar-loader implementations as well.
     df = df.iloc[:in_range[-1] + 1].copy()
-    for variant in variants(number, df):
+    tape = tape or DailyTape.prepare(df, request.market)
+    panels = variants(number, df)
+    common_warmup = max(v.warmup for v in panels)
+    for panel in panels:
+        variant = replace(panel, warmup=common_warmup)
         if cancel():
             raise Cancelled()
         if len(df) <= variant.warmup or in_range[-1] < variant.warmup:
@@ -70,14 +106,34 @@ def replay(number: int, symbol: str, df: pd.DataFrame, request: BatchRequest,
             output["logs"].append({"symbol":symbol,"variant":variant.name,"date":first,
                                    "status":"not-ready","reason":f"Requires {variant.warmup + 1} completed bars including warm-up; available {len(df)}"})
             continue
-        _variant(symbol, df, request, variant, output, cancel)
+        _variant(symbol, df, request, variant, output, cancel, tape)
+        if variant.policy.get("research_execution") or number == 40:
+            benchmark = output.setdefault("control", _output(symbol, len(df)))
+            entries = np.zeros(len(df), dtype=int)
+            if number == 40:
+                entries[max(common_warmup,in_range[0])] = 1
+                policy = {"cash_account": True, "control": True}
+            else:
+                # One predeclared timing control. Move the same signed triggers five
+                # exchange sessions later without introducing pre-window signals.
+                for i in np.flatnonzero(variant.entry):
+                    if i < max(common_warmup,in_range[0]) or tape.volume[i] <= 0:
+                        continue
+                    j = tape.indices.get(shift_session(request.market, tape.dates[i], 5))
+                    if j is not None:
+                        entries[j] = variant.entry[i]
+                policy = {**variant.policy, "control": True}
+            comparator = replace(variant, entry=entries, exit=np.zeros(len(df),dtype=bool),
+                                 evidence=lambda i: {}, policy=policy)
+            _variant(symbol, df, request, comparator, benchmark, cancel, tape)
     return output
 
 
 def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Variant,
-             output: dict, cancel: Callable[[], bool]) -> None:
+             output: dict, cancel: Callable[[], bool], tape: DailyTape) -> None:
     slip, notional = request.slippage_pct, request.position_notional
-    finite = bool(variant.policy.get("finite_account"))
+    atr_sized = bool(variant.policy.get("finite_account"))
+    finite = atr_sized or bool(variant.policy.get("cash_account"))
     position, pending = None, None
     pending_qty = 0
     realized = 0.0
@@ -86,25 +142,15 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
     stats = {"status": "completed", "kind": variant.kind, "signal_count": 0,
              "trade_count": 0, "wins": 0, "gross_profit": 0.0, "gross_loss": 0.0,
              "fees": 0.0, "turnover": 0.0, "realized_pnl": 0.0, "unrealized_pnl": 0.0,
-             "stale_exposure": 0.0, "long_pnl": 0.0, "short_pnl": 0.0, "borrow_fees": 0.0, "r_total": 0.0, "r_count": 0,
+             "execution_shortfall": 0.0, "stale_exposure": 0.0, "long_pnl": 0.0, "short_pnl": 0.0, "borrow_fees": 0.0, "r_total": 0.0, "r_count": 0,
              "loss_r_0_to_1": 0, "loss_r_1_to_2": 0, "loss_r_over_2": 0,
              "account_model": "finite-cash" if finite else "independent-fixed-notional"}
 
     # Daily proxy. Forecast capacity from previously completed sessions only.
-    volume = df.volume.to_numpy(dtype=float)
-    trailing_shares = df.volume.rolling(20, min_periods=1).mean().shift(1).fillna(0).to_numpy()
-    trailing_value = (df.volume * df.close).rolling(20, min_periods=1).mean().shift(1).fillna(0).to_numpy()
+    volume, trailing_shares, trailing_value = tape.volume, tape.trailing_shares, tape.trailing_value
     executed = {}
     market = request.market
-    dates = [date.fromisoformat(str(day)) for day in df.date]
-    calendar = {}
-    serial = 0
-    if dates:
-        day = dates[0]
-        while day <= dates[-1]:
-            serial += is_session(market, day)
-            calendar[day] = serial
-            day += timedelta(days=1)
+    dates, calendar = tape.dates, tape.calendar
     hold = int(variant.policy.get("hold_bars") or 0)
 
     def capacity(index: int) -> int:
@@ -135,7 +181,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                 return 0
         cost = fee_rate(request, shift_session(market, dates[i], 1), buy=buy)
         shares = max(0, math.floor(budget / (estimate * (1 + cost))))
-        if finite:
+        if atr_sized:
             distance = variant.policy["trail_atr"] * float(variant.policy["atr"][i])
             if not math.isfinite(distance) or distance <= 0:
                 return 0
@@ -177,6 +223,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
         stats["wins"] += int(net > 0)
         stats["gross_profit"] += max(net, 0)
         stats["gross_loss"] += max(-net, 0)
+        stats["execution_shortfall"] += abs(raw_price-price)*qty
         stats["fees"] += fees
         stats["turnover"] += price * position["qty"]
         if position.get("planned_risk",0) > 0:
@@ -241,7 +288,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                 if short and finite:
                     output["logs"].append(event(i, "rejected", direction, reason="Short risk model is not defined"))
                     continue
-                if finite:
+                if atr_sized:
                     atr = float(variant.policy["atr"][signal_index])
                     distance = variant.policy["trail_atr"] * atr
                     capital = request.initial_capital + realized
@@ -262,7 +309,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                     output["logs"].append(event(i, "rejected", direction, reason="Insufficient liquidity or permitted lot", requested_qty=requested_qty, filled_qty=0, reference_price=o))
                 else:
                     executed[i] = executed.get(i, 0) + qty
-                    if finite:
+                    if atr_sized:
                         planned_risk = qty * distance
                     fee = price * qty * cost
                     position = {"symbol": symbol, "variant": variant.name,
@@ -274,8 +321,9 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                                 "entry_reference_price": o, "entry_shortfall": abs(price-o)*qty,
                                 "entry_fee": fee, "entry_fee_rate": cost, "stop_loss": stop, "take_profit": None,
                                 "planned_risk": planned_risk, "high_close": price}
-                    if finite:
+                    if atr_sized:
                         position.update(initial_stop=stop, initial_risk=planned_risk, trail_history=[])
+                    stats["execution_shortfall"] += abs(o-price)*qty
                     stats["fees"] += fee
                     stats["turnover"] += price * qty
                     output["logs"].append(event(i, "filled", direction, entry_price=price, qty=qty,
@@ -292,7 +340,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                 exit_signal = True
                 if not bool(variant.exit[i]):
                     exit_reason = f"hold-{hold}"
-            if position is not None and finite and position["action"] == "BUY":
+            if position is not None and atr_sized and position["action"] == "BUY":
                 stop = position["stop_loss"]
                 trail_breach = c <= stop
                 if exit_signal or trail_breach:
@@ -307,7 +355,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                 output["signals"].append(event(i, "suppressed", int(variant.entry[i]), reason="Position held",
                                                evidence=variant.evidence(i)))
             if position is not None and exit_signal and pending is None:
-                if finite:
+                if atr_sized:
                     position["exit_trigger"] = {"date": day, "close": c, "active_stop": stop,
                                                 "reason": exit_reason, **variant.evidence(i)}
                 pending = ("exit", i, exit_reason)
@@ -363,9 +411,9 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
             net = -gross if position and position["action"] == "SELL" else gross
             basis = position["qty"] * position["entry_price"] + position["entry_fee"] if position else 0.0
             exposure[day] = (gross, net, basis)
-    if hold:
+    if hold and not variant.policy.get("control"):
         # Separate diagnostic. Forward prices are read only after order replay.
-        indices = {day: index for index, day in enumerate(dates)}
+        indices = tape.indices
         for i in range(variant.warmup, len(df)):
             side = int(variant.entry[i])
             if not side or volume[i] <= 0 or str(dates[i]) < start or (side < 0 and (long_only or request.short_policy == "exclude")):
