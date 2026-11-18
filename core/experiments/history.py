@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import math
 from functools import lru_cache
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -51,6 +51,16 @@ def _valid_ohlcv(bar: dict) -> bool:
 def is_session(market: str, day: date) -> bool:
     holiday = is_ph_holiday if market == "ph" else is_us_holiday
     return day.weekday() < 5 and not holiday(day)
+
+
+@lru_cache(maxsize=131072)
+def shift_session(market: str, day: date, steps: int) -> date:
+    direction = 1 if steps > 0 else -1
+    for _ in range(abs(steps)):
+        day += timedelta(days=direction)
+        while not is_session(market, day):
+            day += timedelta(days=direction)
+    return day
 
 
 def normalize_bars(rows: list[dict], market: str, end_date: date,

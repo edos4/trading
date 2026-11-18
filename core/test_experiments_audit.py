@@ -75,3 +75,20 @@ def test_research_identity_and_candle_transitions():
     assert "retest" not in SPECS[414]["tested_label"].lower()
     assert not SPECS[414]["source_strategy_implemented"]
     assert candle_turns(np.ones(6), np.array([1, 2, 1, 2, 0, 2])).tolist() == [0, 0, 0, 0, -1, 1]
+
+
+def test_session_hold_and_missing_next_open():
+    from core.experiments.history import frame
+    from core.experiments.replay import replay
+    from core.test_experiments import bars, request
+
+    rows = bars(45, flat=True)
+    rows[4].update(low=102, open=103, high=104, close=103)
+    req = request(start_date=rows[4]["date"], end_date=rows[-1]["date"], txn_cost_pct=0, slippage_pct=0)
+    trade = replay(48, "X", frame(rows[:12]+rows[15:]), req)["trades"][0]
+    assert trade["exit_date"] == trade["scheduled_exit"] == rows[25]["date"]
+    assert (trade["elapsed_sessions"], trade["bars"]) == (20,17)
+    missing = replay(48, "X", frame(rows[:5]+rows[6:]), req)
+    assert any(x["status"]=="expired" and x["signal_date"]==rows[4]["date"] for x in missing["logs"])
+    assert not any(t["signal_date"]==rows[4]["date"] for t in missing["trades"])
+    assert any(o["date"] == rows[4]["date"] and not o["complete"] for o in missing["outcomes"])

@@ -141,9 +141,9 @@
     } catch (error) { if (epoch === state.epoch) message(error); }
   }
   const columns = {
-    positions: [["Symbol","symbol"],["Variant","variant"],["Side","action"],["Qty","qty"],["Entry","entry_price"],["Current","current"],["Unrl %","unrealized_pct"],["MTM","unrealized_pnl"],["Bars","bars"],["Value","value"],["Stop","stop_loss"],["Target","take_profit"]],
-    trades: [["Symbol","symbol"],["Variant","variant"],["Side","action"],["Entry date","entry_date"],["Exit date","exit_date"],["Qty","qty"],["Entry","entry_price"],["Exit","exit_price"],["P&L","pnl"],["P&L %","pnl_pct"],["R","r"],["Bars","bars"],["Fees","fees"],["Reason","exit_reason"]],
-    signals: [["Date","date"],["Symbol","symbol"],["Variant","variant"],["Action","action"],["Status","status"],["Evidence","evidence"]],
+    positions: [["Symbol","symbol"],["Variant","variant"],["Side","action"],["Qty","qty"],["Entry","entry_price"],["Current","current"],["Unrl %","unrealized_pct"],["MTM","unrealized_pnl"],["Observed bars","bars"],["Exchange sessions","elapsed_sessions"],["Value","value"],["Stop","stop_loss"],["Target","take_profit"]],
+    trades: [["Symbol","symbol"],["Variant","variant"],["Side","action"],["Entry date","entry_date"],["Exit date","exit_date"],["Qty","qty"],["Entry","entry_price"],["Exit","exit_price"],["P&L","pnl"],["P&L %","pnl_pct"],["R","r"],["Observed bars","bars"],["Exchange sessions","elapsed_sessions"],["Fees","fees"],["Reason","exit_reason"]],
+    signals: [["Date","date"],["Symbol","symbol"],["Variant","variant"],["Action","action"],["Status","status"],["Reason","reason"],["Evidence","evidence"]],
     outcomes: [["Date","date"],["Symbol","symbol"],["Variant","variant"],["Horizon","horizon"],["Complete","complete"],["Return %","return_pct"],["MAE %","mae_pct"],["MFE %","mfe_pct"]],
     logs: [["Date","date"],["Symbol","symbol"],["Variant","variant"],["Status","status"],["Reason","reason"]],
   };
@@ -199,6 +199,11 @@
         }
       }
       else {
+        for (const [horizon, sample] of Object.entries(metrics.outcomes || {})) {
+          section.append(node("p", "All eligible triggers · " + horizon + " sessions open to open · " +
+            sample.complete + " measured / " + sample.censored + " unavailable · mean gross move " +
+            percent(sample.mean_return_pct), "muted small"));
+        }
         const dl = node("dl");
         [["Account", metrics.account_model],["Currency",summary.currency],["Net P&L",number(metrics.net_pnl)],
           ["Realized",number(metrics.realized_pnl)],["Unrealized",number(metrics.unrealized_pnl)],

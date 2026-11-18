@@ -8,13 +8,14 @@ hold. PH stays long-only.
 from __future__ import annotations
 
 import math
-from datetime import date
+from datetime import date, timedelta
 from typing import Callable
 
 import pandas as pd
 
 from core.experiments.adapters import Variant, variants
 from core.experiments.contracts import BatchRequest
+from core.experiments.history import is_session, shift_session
 from core.market import get_market, round_qty_to_lot
 
 
@@ -81,6 +82,17 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
     trailing_shares = df.volume.rolling(20, min_periods=1).mean().shift(1).fillna(0).to_numpy()
     trailing_value = (df.volume * df.close).rolling(20, min_periods=1).mean().shift(1).fillna(0).to_numpy()
     executed = {}
+    market = request.market
+    dates = [date.fromisoformat(str(day)) for day in df.date]
+    calendar = {}
+    serial = 0
+    if dates:
+        day = dates[0]
+        while day <= dates[-1]:
+            serial += is_session(market, day)
+            calendar[day] = serial
+            day += timedelta(days=1)
+    hold = int(variant.policy.get("hold_bars") or 0)
 
     def capacity(index: int) -> int:
         if index == 0:
@@ -127,6 +139,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
             "exit_requested_qty": qty, "exit_filled_qty": qty, "exit_shortfall": abs(price-raw_price)*qty, "fees": position["entry_fee"] + fees,
             "pnl": net, "pnl_pct": 100 * net / (position["entry_price"] * position["qty"]),
             "bars": index - position["entry_index"],
+            "elapsed_sessions": calendar[dates[index]] - calendar[dates[position["entry_index"]]],
             "r": net / position["planned_risk"] if position.get("planned_risk", 0) > 0 else None,
         })
         position = None
@@ -147,10 +160,15 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
         if day < start or day > end:
             continue
         o, c = float(df.open.iloc[i]), float(df.close.iloc[i])
+        if position and hold and pending is None and dates[i] >= date.fromisoformat(position["scheduled_exit"]):
+            pending = ("exit", position["entry_index"], f"hold-{hold}")
         if pending is not None:
             action, signal_index, detail = pending
             pending = None
-            if action == "exit" and position is not None:
+            if action == "entry" and dates[i] != shift_session(market, dates[signal_index], 1):
+                output["logs"].append(event(i, "expired", int(detail), reason="Missing next exchange session",
+                                            signal_date=str(dates[signal_index])))
+            elif action == "exit" and position is not None:
                 if not close(i, o, detail):
                     pending = ("exit", signal_index, detail)
             elif action == "entry" and position is None:
@@ -191,6 +209,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                     position = {"symbol": symbol, "variant": variant.name,
                                 "action": "SELL" if short else "BUY",
                                 "signal_date": str(df.date.iloc[signal_index]), "entry_date": day,
+                                "scheduled_exit": shift_session(market, dates[i], hold).isoformat() if hold else None,
                                 "entry_index": i, "entry_price": price, "qty": qty,
                                 "entry_requested_qty": requested_qty, "entry_filled_qty": qty,
                                 "entry_reference_price": o, "entry_shortfall": abs(price-o)*qty,
@@ -203,8 +222,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
         if variant.kind == "trades":
             exit_signal = bool(variant.exit[i])
             exit_reason = "signal-next-open"
-            hold = int(variant.policy.get("hold_bars") or 0)
-            if position is not None and hold and i >= position["entry_index"] + hold - 1:
+            if position is not None and hold and shift_session(market, dates[i], 1) >= date.fromisoformat(position["scheduled_exit"]):
                 exit_signal = True
                 if not bool(variant.exit[i]):
                     exit_reason = f"hold-{hold}"
@@ -215,6 +233,9 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                 atr = float(variant.policy["atr"][i])
                 if math.isfinite(atr):
                     position["stop_loss"] = max(stop, position["high_close"] - variant.policy["trail_atr"] * atr)
+            if position is not None and int(variant.entry[i]):
+                output["signals"].append(event(i, "suppressed", int(variant.entry[i]), reason="Position held",
+                                               evidence=variant.evidence(i)))
             if position is not None and exit_signal and pending is None:
                 pending = ("exit", i, exit_reason)
                 closing = -1 if position["action"] == "BUY" else 1
@@ -261,6 +282,30 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
             net = -gross if position and position["action"] == "SELL" else gross
             basis = position["qty"] * position["entry_price"] + position["entry_fee"] if position else 0.0
             exposure[day] = (gross, net, basis)
+    if hold:
+        # Separate diagnostic. Forward prices are read only after order replay.
+        indices = {day: index for index, day in enumerate(dates)}
+        for i in range(variant.warmup, len(df)):
+            side = int(variant.entry[i])
+            if not side or str(dates[i]) < start or (side < 0 and long_only):
+                continue
+            if i % 128 == 0 and cancel():
+                raise Cancelled()
+            entry_day = shift_session(market, dates[i], 1)
+            exit_day = shift_session(market, entry_day, hold)
+            entry_i, exit_i = indices.get(entry_day), indices.get(exit_day)
+            complete = entry_i is not None and exit_i is not None and volume[entry_i] > 0 and volume[exit_i] > 0
+            outcome = event(i, "all-trigger-study", side, horizon=hold, complete=bool(complete),
+                            entry_date=str(entry_day), outcome_date=str(exit_day), return_pct=None,
+                            mae_pct=None, mfe_pct=None)
+            if complete:
+                entry = float(df.open.iloc[entry_i])
+                exit_open = float(df.open.iloc[exit_i])
+                extremes = [entry, exit_open, df.low.iloc[entry_i:exit_i].min(), df.high.iloc[entry_i:exit_i].max()]
+                excursions = [100 * side * (px/entry - 1) for px in extremes]
+                outcome.update(return_pct=100 * side * (exit_open/entry-1),
+                               mae_pct=min(excursions), mfe_pct=max(excursions))
+            output["outcomes"].append(outcome)
     if variant.kind == "trades":
         last = len(df) - 1
         if position is not None and request.end_policy == "force-close":
@@ -274,6 +319,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                                          "unrealized_pnl": unrealized,
                                          "unrealized_pct": 100 * unrealized / (position["entry_price"] * position["qty"]),
                                          "bars": last - position["entry_index"],
+                                         "elapsed_sessions": calendar[dates[last]] - calendar[dates[position["entry_index"]]],
                                          "value": current * position["qty"]})
             stats["unrealized_pnl"] = unrealized
         if pending:

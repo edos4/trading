@@ -285,12 +285,13 @@ def _present(summary: dict, request: BatchRequest) -> dict:
     view["currency"] = get_market(request.market).currency
     exposure = view.pop("exposure", {})
     for name, values in view["variants"].items():
-        if values["kind"] != "trades":
+        if values.get("outcomes"):
             for outcomes in values.get("outcomes",{}).values():
                 count = outcomes["complete"]
                 for key in ("return_pct","mae_pct","mfe_pct"):
                     outcomes["mean_"+key] = outcomes["sum_"+key]/count if count else None
                 outcomes["positive_fraction"] = outcomes["positive"]/count if count else None
+        if values["kind"] != "trades":
             continue
         finite = values["account_model"] == "finite-cash"
         base = request.initial_capital if finite else 0.0
