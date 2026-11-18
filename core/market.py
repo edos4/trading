@@ -316,6 +316,23 @@ def pse_board_lot(price: float, *, as_of: date | None = None) -> int:
     return _pse_band(price)[1]
 
 
+def pse_execution_price(price: float, *, buy: bool) -> float | None:
+    """Price on the adverse side of the estimate, including the spaces between bands."""
+    from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
+
+    px = Decimal(str(round(price, 12)))
+    for lo, hi, tick, _ in (_PSE_BANDS if buy else reversed(_PSE_BANDS)):
+        lower = Decimal(str(lo))
+        upper = Decimal(str(hi)) if hi is not None else Decimal("Infinity")
+        if (buy and px > upper) or (not buy and px < lower):
+            continue
+        step = Decimal(str(tick))
+        candidate = min(upper, max(lower, px))
+        units = (candidate / step).to_integral_value(rounding=ROUND_CEILING if buy else ROUND_FLOOR)
+        return float(units * step)
+    return None
+
+
 def round_price_to_tick(price: float) -> float:
     tick = pse_tick_size(price)
     if tick <= 0:

@@ -140,3 +140,6 @@ node web/test_experiments.cjs
 ### Daily execution capacity
 
 The research proxy caps entries at 1% of the mean of up to 20 prior daily volumes and the corresponding mean traded value divided by prior close, using the tighter limit. A smaller entry cancels its remainder. Exits require sufficient capacity for the remaining position and retry at subsequent opens. The recorded full-day volume can invalidate an impossible fill after the fact, but never determines order size. The model has no auction depth or bid/ask history. Fees and slippage are explicit assumptions.
+
+
+PH execution rounds buys up and sells down to a valid price tick before applying the dated board lot. The default broker scenario uses 0.3006% per leg before seller tax (0.25% commission plus VAT and exchange, regulatory and clearing charges). Seller tax is 0.5% before 2018, 0.6% through June 2025 and 0.1% thereafter. An explicit per-side override replaces this schedule. [PSE example](https://www.pse.com.ph/investing-at-pse/) · [2018 tax regulation](https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/10/89788) · [2025 PSE circular](https://documents.pse.com.ph/CircularOPSPDF/CN-2025-0026.pdf)

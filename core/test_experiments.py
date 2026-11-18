@@ -180,7 +180,7 @@ def test_last_bar_signal_cannot_fill_after_end_date():
 
 
 def test_ph_uses_historical_lots_and_its_own_costs():
-    from core.market import PH, pse_board_lot
+    from core.market import pse_board_lot
 
     result=replay(406,"BDO.PS",frame(bars()),request(market="ph",position_notional=100000))
     assert result["trades"]
@@ -188,7 +188,7 @@ def test_ph_uses_historical_lots_and_its_own_costs():
         lot=pse_board_lot(trade["entry_price"],as_of=date.fromisoformat(trade["entry_date"]))
         assert trade["qty"] % lot == 0
         assert trade["action"] == "BUY"
-        expected=(trade["entry_price"]+trade["exit_price"])*trade["qty"]*PH.txn_cost_pct
+        expected=(trade["entry_price"]*.003006+trade["exit_price"]*.009006)*trade["qty"]
         assert trade["fees"] == pytest.approx(expected)
 
 

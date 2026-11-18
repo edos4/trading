@@ -16,7 +16,20 @@ import pandas as pd
 from core.experiments.adapters import Variant, variants
 from core.experiments.contracts import BatchRequest
 from core.experiments.history import is_session, shift_session
-from core.market import get_market, round_qty_to_lot
+from core.market import get_market, pse_execution_price, round_qty_to_lot
+
+
+def fee_rate(request: BatchRequest, day: date, *, buy: bool) -> float:
+    if request.txn_cost_pct is not None:
+        return request.txn_cost_pct
+    if request.market != "ph":
+        return get_market(request.market).txn_cost_pct
+    # PSE illustrative broker + VAT, SRC, exchange + VAT, and clearing.
+    base = 0.003006
+    if buy:
+        return base
+    tax = 0.001 if day >= date(2025, 7, 1) else 0.006 if day >= date(2018, 1, 1) else 0.005
+    return base + tax
 
 
 class Cancelled(RuntimeError):
@@ -62,9 +75,6 @@ def replay(number: int, symbol: str, df: pd.DataFrame, request: BatchRequest,
 
 def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Variant,
              output: dict, cancel: Callable[[], bool]) -> None:
-    cost = request.txn_cost_pct
-    if cost is None:
-        cost = get_market(request.market).txn_cost_pct
     slip, notional = request.slippage_pct, request.position_notional
     finite = bool(variant.policy.get("finite_account"))
     position, pending = None, None
@@ -113,6 +123,12 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
     def decision_quantity(i: int, direction: int) -> int:
         estimate = float(df.close.iloc[i]) * (1 + slip * direction)
         budget = request.initial_capital + realized if finite else notional
+        buy = direction > 0
+        if market == "ph":
+            estimate = pse_execution_price(estimate, buy=buy)
+            if estimate is None:
+                return 0
+        cost = fee_rate(request, shift_session(market, dates[i], 1), buy=buy)
         shares = max(0, math.floor(budget / (estimate * (1 + cost))))
         if finite:
             distance = variant.policy["trail_atr"] * float(variant.policy["atr"][i])
@@ -132,12 +148,19 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
         short = position["action"] == "SELL"
         direction = 1 if short else -1
         qty = position["qty"]
+        price = raw_price * (1 + slip) if short else raw_price * (1 - slip)
+        if market == "ph":
+            price = pse_execution_price(price, buy=short)
+            if price is None or round_qty_to_lot(qty, price, as_of=dates[index]) != qty:
+                output["logs"].append(event(index, "unfilled", direction, reason="No regular-lot exit at this tick",
+                                            requested_qty=qty, filled_qty=0, reference_price=raw_price))
+                return False
         if qty > capacity(index) or not supported(index, qty):
             output["logs"].append(event(index, "unfilled", direction, reason="Insufficient exit liquidity",
                                         requested_qty=qty, filled_qty=0, reference_price=raw_price))
             return False
         executed[index] = executed.get(index, 0) + qty
-        price = raw_price * (1 + slip) if short else raw_price * (1 - slip)
+        cost = fee_rate(request, dates[index], buy=short)
         fees = price * position["qty"] * cost
         change = (position["entry_price"] - price) if short else (price - position["entry_price"])
         borrow = borrow_charge(index)
@@ -156,7 +179,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
             stats["r_count"] += 1
         output["trades"].append({
             **event(index, "closed"), **position, "exit_date": str(df.date.iloc[index]),
-            "exit_price": price, "exit_reason": reason, "exit_reference_price": raw_price,
+            "exit_price": price, "exit_fee_rate": cost, "exit_reason": reason, "exit_reference_price": raw_price,
             "exit_requested_qty": qty, "exit_filled_qty": qty, "exit_shortfall": abs(price-raw_price)*qty, "fees": position["entry_fee"] + fees,
             "borrow_fee": borrow, "pnl": net, "pnl_pct": 100 * net / (position["entry_price"] * position["qty"]),
             "bars": index - position["entry_index"],
@@ -196,6 +219,9 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                 direction = int(detail)
                 short = direction < 0
                 price = o * (1 - slip) if short else o * (1 + slip)
+                if market == "ph":
+                    price = pse_execution_price(price, buy=not short)
+                cost = fee_rate(request, dates[i], buy=not short)
                 budget = request.initial_capital + realized if finite else notional
                 qty = min(pending_qty, math.floor(budget / (price * (1 + cost))))
                 planned_risk, stop = 0.0, None
@@ -233,7 +259,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                                 "entry_index": i, "entry_price": price, "qty": qty,
                                 "entry_requested_qty": requested_qty, "entry_filled_qty": qty,
                                 "entry_reference_price": o, "entry_shortfall": abs(price-o)*qty,
-                                "entry_fee": fee, "stop_loss": stop, "take_profit": None,
+                                "entry_fee": fee, "entry_fee_rate": cost, "stop_loss": stop, "take_profit": None,
                                 "planned_risk": planned_risk, "high_close": price}
                     stats["fees"] += fee
                     stats["turnover"] += price * qty

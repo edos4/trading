@@ -95,7 +95,8 @@ class ExperimentService:
             progress.update(total_symbols=len(symbols), symbols=symbols,
                             history_market=request.market,
                             currency=get_market(request.market).currency,
-                            txn_cost_pct=request.txn_cost_pct if request.txn_cost_pct is not None else get_market(request.market).txn_cost_pct)
+                            fee_model="ph-broker-0.25pct-vat-and-dated-stt-v1" if request.market == "ph" and request.txn_cost_pct is None else "fixed-per-side",
+                            txn_cost_pct=get_market("us").txn_cost_pct if request.market == "us" and request.txn_cost_pct is None else request.txn_cost_pct)
             summaries = {s["id"]: _empty_summary(s) for s in active}
             failures = set()
             dataset_hash = hashlib.sha256()

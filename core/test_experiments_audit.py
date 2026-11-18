@@ -126,3 +126,26 @@ def test_borrow_assumption_and_daily_accrual():
     days = (date.fromisoformat(t["exit_date"]) - date.fromisoformat(t["entry_date"])).days
     assert t["borrow_fee"] == pytest.approx(.001 * days * t["qty"] * t["entry_price"])
     assert t["pnl"] == pytest.approx((t["entry_price"]-t["exit_price"])*t["qty"] - t["borrow_fee"])
+
+
+def test_ph_band_boundaries_and_dated_seller_tax():
+    import pytest
+    from core.market import pse_execution_price
+    from core.experiments.history import frame
+    from core.experiments.replay import fee_rate, replay
+    from core.test_experiments import bars, request
+
+    assert pse_execution_price(9.994995, buy=True) == 10
+    assert pse_execution_price(9.994995, buy=False) == 9.99
+    assert pse_execution_price(.00995, buy=False) == .0099
+    req = request(market="ph", initial_capital=1000000, position_notional=100000,
+                  start_date="2019-06-03", end_date="2019-06-07", participation=1)
+    rows = bars(5, flat=True)
+    for row in rows:
+        row.update(open=9.99, high=10, low=9.98, close=10, volume=1000000)
+    rows[0].update(close=9.98)
+    pos = replay(385, "TEST.PS", frame(rows), req)["positions"][0]
+    assert pos["entry_price"] == 10 and pos["qty"] % 100 == 0
+    assert pos["qty"] * pos["entry_price"] + pos["entry_fee"] <= req.position_notional
+    for day, tax in ((date(2017,12,29),.005), (date(2025,6,30),.006), (date(2025,7,1),.001)):
+        assert fee_rate(req,day,buy=False) - fee_rate(req,day,buy=True) == pytest.approx(tax)
