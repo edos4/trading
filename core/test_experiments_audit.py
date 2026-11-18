@@ -250,3 +250,18 @@ def test_entry_funnel_reconciles():
     assert f["queued"] == f["filled"] + f["expired"] + f["rejected"]
     assert f["ineligible"] > 0 and f["exit_signals"] > 0
     assert "ph" not in SPECS[431]["markets"]
+
+
+def test_indicator_evidence_identifies_the_firing_branch():
+    from core.experiments.adapters import variants, SPECS
+    from core.experiments.history import frame
+    from core.test_experiments import bars
+
+    df = frame(bars(700))
+    panel = variants(406, df)[-1]
+    for i in range(panel.warmup, len(df)):
+        evidence = panel.evidence(i)
+        assert bool(panel.entry[i]) == (evidence["crossed_up"] or evidence["price_above_100"])
+    for v in variants(56, df):
+        assert v.evidence(100)["branch"] == v.name
+    assert SPECS[56]["parameters"]["outcome_horizons"] == [20]

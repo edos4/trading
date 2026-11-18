@@ -177,7 +177,8 @@ for numbers, family, trigger in RESEARCH_FAMILIES:
         spec.update(kind="trades", family_id=family, measurement_id=family,
                     policy_id="research-hold20-v3", source_strategy_implemented=False,
                     tested_label=f"{trigger} · 20-session research trade")
-        spec["parameters"].update(hold_bars=RESEARCH_HOLD_BARS, trigger=trigger)
+        spec["parameters"].update(hold_bars=RESEARCH_HOLD_BARS, trigger=trigger,
+                                  outcome_horizons=[RESEARCH_HOLD_BARS], outcome_basis="all eligible triggers, gross open-to-open")
         spec["limitations"].append(RESEARCH_NOTE)
 SPECS[431].update(markets=["us"], requires_borrow=True)
 for number, family in ((40, "spy-breakout"), (406, "ema-panels")):
@@ -323,9 +324,10 @@ def variants(number: int, df: pd.DataFrame) -> list[Variant]:
         for fast, slow, or_panel in [(10, 50, False), (8, 21, False), (20, 50, False), (10, 50, True)]:
             a, b = ema(close, fast), ema(close, slow)
             c = ema(close, 100)
-            entries = cross_above(a, b) | ((close > c) if or_panel else empty)
-            def evidence(i, a=a, b=b, c=c, fast=fast, slow=slow, or_panel=or_panel):
-                values = {f"ema{fast}": float(a[i]), f"ema{slow}": float(b[i])}
+            crossed = cross_above(a, b)
+            entries = crossed | ((close > c) if or_panel else empty)
+            def evidence(i, a=a, b=b, c=c, fast=fast, slow=slow, or_panel=or_panel, crossed=crossed):
+                values = {f"ema{fast}": float(a[i]), f"ema{slow}": float(b[i]), "crossed_up": bool(crossed[i])}
                 if or_panel:
                     values.update(ema100=float(c[i]), operator="OR", price_above_100=bool(close[i] > c[i]))
                 return values
@@ -353,10 +355,11 @@ def variants(number: int, df: pd.DataFrame) -> list[Variant]:
         z = ((df.close - mean) / dev).ewm(span=3, adjust=False).mean().where(dev.notna()).to_numpy()
         extreme = np.where(fresh(z < -2), 1, np.where(fresh(z > 2), -1, 0))
         trend = np.where(fresh(z > 1), 1, 0)
-        def z_evidence(i, z=z):
+        def z_evidence(i, branch):
             value = float(z[i])
-            return {"z": value if np.isfinite(value) else None, "calibrated_probability": False}
-        return [book(name, 55, side, z_evidence)
+            return {"z": value if np.isfinite(value) else None, "branch": branch,
+                    "prior_z": float(z[i-1]) if i and np.isfinite(z[i-1]) else None, "calibrated_probability": False}
+        return [book(name, 55, side, lambda i, branch=name: z_evidence(i, branch))
                 for name, side in (("z-extremes", extreme), ("z-trend-context", trend))]
     if number == 353:
         a, b, c = (ema(close, n) for n in (20, 50, 100))

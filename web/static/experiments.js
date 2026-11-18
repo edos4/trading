@@ -173,6 +173,8 @@
     const scope = state.detail?.source.kind;
     $("exp-table-note").textContent = `${state.rows.length} of ${total || 0} rows` +
       (state.detail?.run?.state === "blocked" ? " · Blocked: see the requirements above." :
+        state.tab === "outcomes" && scope === "trades" && !state.detail?.source.parameters?.outcome_basis ? " · This saved policy has no all-trigger outcome study." :
+        state.tab === "outcomes" && scope === "trades" ? " · Gross open-to-open moves for all eligible triggers, including overlaps." :
         scope === "event-study" ? " · Event study: observations and outcomes only; no trading P&L." : " · Click a symbol for the frozen daily chart.");
     $("exp-more").hidden = state.next == null;
   }
