@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 import hashlib
+import multiprocessing
+import os
 import threading
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from concurrent.futures.process import BrokenProcessPool
 from importlib.metadata import version
 
 import numpy as np
@@ -14,16 +18,18 @@ from core.experiments.catalog import catalog, sources
 from core.experiments.contracts import BatchRequest
 from core.experiments.history import available_symbols, frame, is_session, normalize_bars, raw_symbol
 from core.experiments.replay import Cancelled, DailyTape, replay
+from core.experiments.scan_worker import prepare_history, scan_symbol
 from core.experiments.store import ExperimentStore
 from core.market import get_market
 from utils.logger import log
 
 
 class ExperimentService:
-    def __init__(self, store: ExperimentStore, *, enumerate_symbols=None, loader=None):
+    def __init__(self, store: ExperimentStore, *, enumerate_symbols=None, loader=None, workers: int = 1):
         self.store = store
         self.enumerate_symbols = enumerate_symbols or available_symbols
         self.loader = loader or raw_symbol
+        self.workers = max(1, int(workers))
         self._threads: dict[str, threading.Thread] = {}
         self._lock = threading.Lock()
 
@@ -114,67 +120,13 @@ class ExperimentService:
             summaries = {s["id"]: _empty_summary(s) for s in active}
             failures = set()
             dataset_hash = hashlib.sha256()
-            for index, symbol in enumerate(symbols):
-                if self.store.cancelled(batch_id):
-                    raise Cancelled()
-                progress.update(stage="loading", current_symbol=symbol)
-                self.store.heartbeat(batch_id, "loading", dict(progress))
-                try:
-                    raw = self.loader(symbol, request.market, request.end_date)
-                    issues = []
-                    try:
-                        rows = normalize_bars(raw, request.market, request.end_date, issues=issues)
-                    finally:
-                        if issues:
-                            self.store.save_quarantine(batch_id, symbol, issues)
-                            progress["quarantined_rows"] += len(issues)
-                    if self.store.cancelled(batch_id):
-                        raise Cancelled()
-                    digest = self.store.dataset(batch_id, symbol, rows)
-                    dataset_hash.update(f"{symbol}:{digest}\n".encode())
-                    df = frame(rows)
-                    tape = DailyTape.prepare(df, request.market)
-                except Cancelled:
-                    raise
-                except Exception as exc:
-                    log.warning(f"Experiments | history failed for {symbol}: {type(exc).__name__}")
-                    progress["data_errors"].append({"symbol": symbol, "reason": _data_error(exc)})
-                    progress["completed_symbols"] = index + 1
-                    for source in active:
-                        summary = summaries[source["id"]]
-                        summary["coverage"]["history_failed"] += 1
-                        self.store.update_run(batch_id, source["id"], "processing", index + 1,
-                                              _present(summary, request))
-                    self.store.heartbeat(batch_id, "loading", dict(progress))
-                    continue
-                progress["stage"] = "processing"
-                for source in active:
-                    source_id = source["id"]
-                    if source_id in failures:
-                        continue
-                    summary = summaries[source_id]
-                    try:
-                        if self.store.cancelled(batch_id):
-                            raise Cancelled()
-                        only = source.get("symbols")
-                        if only and symbol not in only:
-                            summary["coverage"]["outside_source_universe"] += 1
-                        else:
-                            result = replay(source["number"], symbol, df, request, tape=tape,
-                                            cancel=lambda: self.store.cancelled(batch_id))
-                            self.store.save_result(batch_id, source_id, symbol, result)
-                            _merge(summary, result)
-                        self.store.update_run(batch_id, source_id, "processing", index + 1, _present(summary, request))
-                    except Cancelled:
-                        raise
-                    except Exception:
-                        log.exception(f"Experiments | adapter failed: {source_id}")
-                        failures.add(source_id)
-                        self.store.update_run(batch_id, source_id, "failed", index + 1,
-                                              _present(summary, request), "Adapter failed; see server logs")
-                progress.update(completed_symbols=index + 1, dataset_sha256=dataset_hash.hexdigest())
-                if not self.store.heartbeat(batch_id, "processing", dict(progress)):
-                    raise Cancelled()
+            # One symbol stays on this thread. Two or more share a process pool;
+            # results are still merged in symbol order.
+            progress["scan_workers"] = min(self.workers, len(symbols)) if self.workers > 1 and len(symbols) > 1 else 1
+            if progress["scan_workers"] > 1:
+                self._scan_parallel(batch_id, request, active, symbols, summaries, failures, dataset_hash, progress)
+            else:
+                self._scan_sequential(batch_id, request, active, symbols, summaries, failures, dataset_hash, progress)
             for source in active:
                 source_id = source["id"]
                 if source_id in failures:
@@ -212,6 +164,281 @@ class ExperimentService:
             stop.set()
             with self._lock:
                 self._threads.pop(batch_id, None)
+
+    def _scan_sequential(self, batch_id: str, request: BatchRequest, active: list[dict], symbols: list[str],
+                         summaries: dict, failures: set[str], dataset_hash, progress: dict) -> None:
+        for index, symbol in enumerate(symbols):
+            if self.store.cancelled(batch_id):
+                raise Cancelled()
+            progress.update(stage="loading", current_symbol=symbol)
+            self.store.heartbeat(batch_id, "loading", dict(progress))
+            try:
+                raw = self.loader(symbol, request.market, request.end_date)
+                issues = []
+                try:
+                    rows = normalize_bars(raw, request.market, request.end_date, issues=issues)
+                finally:
+                    if issues:
+                        self.store.save_quarantine(batch_id, symbol, issues)
+                        progress["quarantined_rows"] += len(issues)
+                if self.store.cancelled(batch_id):
+                    raise Cancelled()
+                digest = self.store.dataset(batch_id, symbol, rows)
+                dataset_hash.update(f"{symbol}:{digest}\n".encode())
+                df = frame(rows)
+                tape = DailyTape.prepare(df, request.market)
+            except Cancelled:
+                raise
+            except Exception as exc:
+                log.warning(f"Experiments | history failed for {symbol}: {type(exc).__name__}")
+                progress["data_errors"].append({"symbol": symbol, "reason": _data_error(exc)})
+                progress["completed_symbols"] = index + 1
+                for source in active:
+                    summary = summaries[source["id"]]
+                    summary["coverage"]["history_failed"] += 1
+                    self.store.update_run(batch_id, source["id"], "processing", index + 1,
+                                          _present(summary, request))
+                self.store.heartbeat(batch_id, "loading", dict(progress))
+                continue
+            progress["stage"] = "processing"
+            for source in active:
+                source_id = source["id"]
+                if source_id in failures:
+                    continue
+                summary = summaries[source_id]
+                try:
+                    if self.store.cancelled(batch_id):
+                        raise Cancelled()
+                    only = source.get("symbols")
+                    if only and symbol not in only:
+                        summary["coverage"]["outside_source_universe"] += 1
+                    else:
+                        result = replay(source["number"], symbol, df, request, tape=tape,
+                                        cancel=lambda: self.store.cancelled(batch_id))
+                        self.store.save_result(batch_id, source_id, symbol, result)
+                        _merge(summary, result)
+                    self.store.update_run(batch_id, source_id, "processing", index + 1, _present(summary, request))
+                except Cancelled:
+                    raise
+                except Exception:
+                    log.exception(f"Experiments | adapter failed: {source_id}")
+                    failures.add(source_id)
+                    self.store.update_run(batch_id, source_id, "failed", index + 1,
+                                          _present(summary, request), "Adapter failed; see server logs")
+            progress.update(completed_symbols=index + 1, dataset_sha256=dataset_hash.hexdigest())
+            if not self.store.heartbeat(batch_id, "processing", dict(progress)):
+                raise Cancelled()
+
+    def _scan_parallel(self, batch_id: str, request: BatchRequest, active: list[dict], symbols: list[str],
+                       summaries: dict, failures: set[str], dataset_hash, progress: dict) -> None:
+        """Replay symbols on a process pool and merge them in list order."""
+        pool_size = min(self.workers, len(symbols))
+        worker_load = self.loader is raw_symbol
+        log.info(f"Experiments | scanning {len(symbols)} symbols on {pool_size} workers")
+        compact = [{"id": source["id"], "number": source["number"], "symbols": source.get("symbols")}
+                   for source in active]
+        request_payload = request.model_dump(mode="json")
+        ready: dict[int, dict] = {}
+        inflight: dict = {}
+        cursor = 0
+        next_commit = 0
+        stop = False
+        announced = False
+        pool: ProcessPoolExecutor | None = None
+        saved_blas = _blas_single_thread()
+
+        def submit(job: dict, spec: dict) -> None:
+            nonlocal pool
+            if pool is None:
+                pool = ProcessPoolExecutor(max_workers=pool_size, mp_context=multiprocessing.get_context("spawn"))
+            inflight[pool.submit(scan_symbol, job)] = spec
+
+        try:
+            while next_commit < len(symbols):
+                while not stop and cursor < len(symbols) and len(inflight) < pool_size:
+                    if self.store.cancelled(batch_id):
+                        stop = True
+                        break
+                    index = cursor
+                    symbol = symbols[cursor]
+                    cursor += 1
+                    progress.update(stage="loading", current_symbol=symbol, inflight=len(inflight) + 1)
+                    job = {"symbol": symbol, "request": request_payload, "sources": compact,
+                           "store_root": str(self.store.root), "batch_id": batch_id, "load": worker_load}
+                    if worker_load:
+                        submit(job, {"index": index, "symbol": symbol})
+                        continue
+                    prepared = prepare_history(self.loader, symbol, request.market, request.end_date)
+                    if prepared["error"] is not None or self.store.cancelled(batch_id):
+                        ready[index] = {"symbol": symbol, "parent_rows": prepared["rows"], "outcome": {
+                            "issues": prepared["issues"], "error": prepared["error"],
+                            "cancelled": prepared["error"] is None and self.store.cancelled(batch_id),
+                            "results": []}}
+                        if self.store.cancelled(batch_id):
+                            stop = True
+                            break
+                        continue
+                    job["load"] = False
+                    job["rows"] = prepared["rows"]
+                    job["issues"] = prepared["issues"]
+                    submit(job, {"index": index, "symbol": symbol, "parent_rows": prepared["rows"]})
+                progress["current_symbol"] = symbols[next_commit]
+                progress["inflight"] = len(inflight)
+                if not announced and len(inflight) > 1:
+                    self.store.heartbeat(batch_id, "processing", dict(progress))
+                    announced = True
+                if next_commit in ready:
+                    self._record_parallel_symbol(
+                        batch_id, request, active, summaries, failures, dataset_hash, progress,
+                        index=next_commit, symbol=symbols[next_commit], record=ready.pop(next_commit))
+                    next_commit += 1
+                    if self.store.cancelled(batch_id):
+                        self._stop_parallel(batch_id, progress)
+                        raise Cancelled()
+                    continue
+                if not inflight:
+                    if self.store.cancelled(batch_id) or stop:
+                        self._stop_parallel(batch_id, progress)
+                        raise Cancelled()
+                    raise RuntimeError("Experiment scan stopped before every symbol was recorded")
+                done, _ = wait(set(inflight), return_when=FIRST_COMPLETED)
+                for future in done:
+                    spec = inflight.pop(future)
+                    try:
+                        outcome = future.result()
+                    except Cancelled:
+                        outcome = {"issues": [], "error": None, "cancelled": True, "results": []}
+                    except BrokenProcessPool:
+                        raise
+                    except Exception as exc:
+                        log.exception(f"Experiments | symbol scan failed: {spec['symbol']}")
+                        outcome = {"issues": [], "error": exc, "cancelled": False, "results": []}
+                    record = {"symbol": spec["symbol"], "outcome": outcome}
+                    if "parent_rows" in spec:
+                        record["parent_rows"] = spec["parent_rows"]
+                    ready[spec["index"]] = record
+        finally:
+            if pool is not None:
+                pool.shutdown(wait=True, cancel_futures=True)
+            _restore_blas(saved_blas)
+
+    def _stop_parallel(self, batch_id: str, progress: dict) -> None:
+        progress["inflight"] = 0
+        self.store.heartbeat(batch_id, "processing", dict(progress))
+
+    def _record_parallel_symbol(self, batch_id: str, request: BatchRequest, active: list[dict], summaries: dict,
+                                failures: set[str], dataset_hash, progress: dict, *, index: int, symbol: str,
+                                record: dict) -> None:
+        outcome = record["outcome"]
+        issues = outcome.get("issues") or []
+        error = outcome.get("error")
+        if error is None and outcome.get("error_type"):
+            error = _history_exception(outcome["error_type"], outcome.get("error_text") or "")
+        cancelled = bool(outcome.get("cancelled"))
+        results = outcome.get("results") or []
+        rows = record["parent_rows"] if "parent_rows" in record else outcome.get("rows")
+        if issues:
+            self.store.save_quarantine(batch_id, symbol, issues)
+            progress["quarantined_rows"] += len(issues)
+        if error is not None:
+            log.warning(f"Experiments | history failed for {symbol}: {type(error).__name__}")
+            progress["data_errors"].append({"symbol": symbol, "reason": _data_error(error)})
+            progress["completed_symbols"] = index + 1
+            for source in active:
+                summary = summaries[source["id"]]
+                summary["coverage"]["history_failed"] += 1
+                self.store.update_run(batch_id, source["id"], "processing", index + 1, _present(summary, request))
+            self.store.heartbeat(batch_id, "loading", dict(progress))
+            return
+        if cancelled and not results:
+            self._stop_parallel(batch_id, progress)
+            raise Cancelled()
+        if rows is None:
+            raise ValueError(f"Experiment scan returned no history for {symbol}")
+        digest = self.store.dataset(batch_id, symbol, rows)
+        dataset_hash.update(f"{symbol}:{digest}\n".encode())
+        progress["stage"] = "processing"
+        by_id = {item["id"]: item for item in results}
+        for source in active:
+            source_id = source["id"]
+            if source_id in failures:
+                continue
+            summary = summaries[source_id]
+            item = by_id.get(source_id)
+            try:
+                if item is None:
+                    if cancelled or self.store.cancelled(batch_id):
+                        self._stop_parallel(batch_id, progress)
+                        raise Cancelled()
+                    raise RuntimeError("missing scan result")
+                if item.get("skip"):
+                    summary["coverage"]["outside_source_universe"] += 1
+                elif item.get("fail"):
+                    log.error(f"Experiments | adapter failed: {source_id}\n{item.get('trace') or ''}")
+                    failures.add(source_id)
+                    self.store.update_run(batch_id, source_id, "failed", index + 1, _present(summary, request),
+                                          "Adapter failed; see server logs")
+                    continue
+                else:
+                    result = item["result"]
+                    self.store.save_result(batch_id, source_id, symbol, result)
+                    _merge(summary, result)
+                self.store.update_run(batch_id, source_id, "processing", index + 1, _present(summary, request))
+            except Cancelled:
+                raise
+            except Exception:
+                log.exception(f"Experiments | adapter failed: {source_id}")
+                failures.add(source_id)
+                self.store.update_run(batch_id, source_id, "failed", index + 1, _present(summary, request),
+                                      "Adapter failed; see server logs")
+        progress.update(completed_symbols=index + 1, dataset_sha256=dataset_hash.hexdigest())
+        if cancelled or not self.store.heartbeat(batch_id, "processing", dict(progress)):
+            self._stop_parallel(batch_id, progress)
+            raise Cancelled()
+
+
+_BLAS = (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+)
+
+
+def _blas_single_thread() -> dict[str, str | None]:
+    """Spawned children read this before they import numpy. Restore it after the pool stops."""
+    previous = {key: os.environ.get(key) for key in _BLAS}
+    for key in _BLAS:
+        os.environ[key] = "1"
+    return previous
+
+
+def _restore_blas(previous: dict[str, str | None]) -> None:
+    for key, value in previous.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+
+
+def _auto_scan_workers() -> int:
+    """Cap below the machine size. Past this, SQLite writes the results slower than replay."""
+    return max(1, min(16, os.cpu_count() or 1))
+
+
+def _history_exception(name: str, text: str) -> Exception:
+    from core.experiments.history import HistoryUnavailable
+
+    if name == "HistoryUnavailable":
+        return HistoryUnavailable(text)
+    if name == "ValueError":
+        return ValueError(text)
+    if name == "KeyError":
+        return KeyError(text)
+    if name == "TypeError":
+        return TypeError(text)
+    return RuntimeError(text)
 
 
 def _engine_hash() -> str:
@@ -424,5 +651,5 @@ def get_service() -> ExperimentService:
             directory = Path(settings.experiments_store_dir)
             if not directory.is_absolute():
                 directory = Path(__file__).resolve().parents[2] / directory
-            _service = ExperimentService(ExperimentStore(directory))
+            _service = ExperimentService(ExperimentStore(directory), workers=_auto_scan_workers())
         return _service

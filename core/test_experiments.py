@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -369,3 +370,95 @@ def test_cancelled_batch_preserves_completed_and_blocked_records(tmp_path):
     assert result["counts"]["cancelled"] == len(SPECS) and result["counts"]["blocked"] == 449-len(SPECS)
     with pytest.raises(KeyError):
         store.chart(result["id"],"SPY")
+
+
+def _batch_fingerprint(batch: dict) -> dict:
+    runs = [(run["source"], run["state"], run["error"], run["summary"], run["progress"]) for run in batch["runs"]]
+    progress = batch["progress"]
+    return {"state": batch["state"], "counts": batch["counts"], "runs": runs,
+            "completed_symbols": progress.get("completed_symbols"),
+            "dataset_sha256": progress.get("dataset_sha256"),
+            "quarantined_rows": progress.get("quarantined_rows"),
+            "data_errors": progress.get("data_errors")}
+
+
+def _saved_evidence(store: ExperimentStore, batch_id: str) -> list:
+    found = []
+    for run in store.runs(batch_id):
+        kinds = ["signals", "trades", "positions", "outcomes", "logs"]
+        if run["summary"].get("holdout"):
+            kinds += [f"holdout-{kind}" for kind in kinds[:]]
+        for kind in kinds:
+            after = 0
+            rows = []
+            while True:
+                page = store.evidence(batch_id, run["source"], kind, after=after, limit=500)
+                rows.extend({key: value for key, value in row.items() if key != "cursor"} for row in page["rows"])
+                if page["next"] is None:
+                    break
+                after = page["next"]
+            if rows:
+                found.append((run["source"], kind, rows))
+    return found
+
+
+def test_parallel_scan_matches_sequential_results(tmp_path):
+    symbols = ["SPY", "BAD", "QQQ"]
+
+    def loader(symbol, *_):
+        if symbol == "BAD":
+            raise ValueError("Invalid OHLCV on 2020-01-01")
+        return bars(220)
+
+    def run(path, workers, key, *, background=False):
+        service = ExperimentService(ExperimentStore(path), enumerate_symbols=lambda *_: symbols,
+                                    loader=loader, workers=workers)
+        rows = bars(220)
+        batch = service.submit(request(start_date=rows[20]["date"], end_date=rows[-1]["date"],
+                                       holdout_start=rows[120]["date"], short_policy="assume-borrow",
+                                       idempotency_key=key), background=background)
+        if background:
+            deadline = time.time() + 90
+            while batch["state"] in {"queued", "loading", "processing"}:
+                assert time.time() < deadline, batch.get("error") or batch["state"]
+                time.sleep(0.05)
+                batch = service.snapshot(batch["id"])
+        return service, batch
+
+    sequential, seq = run(tmp_path / "seq", 1, "seq")
+    parallel, par = run(tmp_path / "par", 2, "par", background=True)
+    assert _batch_fingerprint(seq) == _batch_fingerprint(par)
+    assert _saved_evidence(sequential.store, seq["id"]) == _saved_evidence(parallel.store, par["id"])
+    assert sequential.store.chart(seq["id"], "SPY") == parallel.store.chart(par["id"], "SPY")
+    assert sequential.store.chart(seq["id"], "QQQ") == parallel.store.chart(par["id"], "QQQ")
+    with pytest.raises(KeyError):
+        sequential.store.chart(seq["id"], "BAD")
+    assert seq["progress"]["scan_workers"] == 1
+    assert par["progress"]["scan_workers"] == 2
+    assert par["progress"]["inflight"] == 0
+
+
+def test_parallel_cancel_during_load_discards_the_symbol(tmp_path):
+    store = ExperimentStore(tmp_path)
+
+    def loader(*_):
+        store.cancel(store.listing()[0]["id"])
+        return bars(40)
+
+    service = ExperimentService(store, enumerate_symbols=lambda *_: ["SPY", "QQQ"], loader=loader, workers=2)
+    result = service.submit(request(short_policy="assume-borrow", idempotency_key="cancel-parallel"), background=False)
+    assert result["state"] == "cancelled"
+    assert result["counts"]["cancelled"] == len(SPECS) and result["counts"]["blocked"] == 449 - len(SPECS)
+    with pytest.raises(KeyError):
+        store.chart(result["id"], "SPY")
+
+
+def test_worker_loads_and_replays_one_symbol(monkeypatch):
+    monkeypatch.setattr("core.experiments.history.raw_symbol", lambda *_: bars(80))
+    from core.experiments.scan_worker import scan_symbol
+
+    out = scan_symbol({"symbol": "SPY", "load": True, "store_root": "", "batch_id": "",
+                       "request": request(short_policy="assume-borrow").model_dump(mode="json"),
+                       "sources": [{"id": "candle", "number": 115, "symbols": None}]})
+    assert out["error_type"] is None and out["rows"]
+    assert out["results"][0]["result"]["symbol"] == "SPY"

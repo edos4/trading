@@ -137,7 +137,8 @@
     $("exp-status").textContent = `${label(batch.state)}${batch.cancel && !terminal(batch.state) ? " (cancelling…)" : ""} · ${batch.request.market.toUpperCase()} · ` +
       Object.entries(batch.counts).map(([key, count]) => `${count} ${label(key)}`).join(" / ");
     $("exp-progress").value = terminal(batch.state) && !["failed","cancelled","interrupted"].includes(batch.state) ? 100 : total ? 100 * done / total : 0;
-    $("exp-progress-label").textContent = total ? `${done} / ${total} symbols${progress.current_symbol ? " · " + progress.current_symbol : ""}` : label(progress.stage);
+    const pace = progress.inflight > 1 ? ` · ${progress.inflight} scanning at once` : "";
+    $("exp-progress-label").textContent = total ? `${done} / ${total} symbols${progress.current_symbol ? " · " + progress.current_symbol : ""}${pace}` : label(progress.stage);
     $("exp-run-id").textContent = `${batch.id} · ${batch.request.start_date} → ${batch.request.end_date}`;
     $("exp-cancel").disabled = terminal(batch.state) || Boolean(batch.cancel);
     $("exp-run").disabled = !terminal(batch.state) || state.submitting;
