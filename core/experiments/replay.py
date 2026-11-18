@@ -86,6 +86,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
              "trade_count": 0, "wins": 0, "gross_profit": 0.0, "gross_loss": 0.0,
              "fees": 0.0, "turnover": 0.0, "realized_pnl": 0.0, "unrealized_pnl": 0.0,
              "long_pnl": 0.0, "short_pnl": 0.0, "borrow_fees": 0.0, "r_total": 0.0, "r_count": 0,
+             "loss_r_0_to_1": 0, "loss_r_1_to_2": 0, "loss_r_over_2": 0,
              "account_model": "finite-cash" if finite else "independent-fixed-notional"}
 
     # Daily proxy. Forecast capacity from previously completed sessions only.
@@ -175,7 +176,11 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
         stats["fees"] += fees
         stats["turnover"] += price * position["qty"]
         if position.get("planned_risk",0) > 0:
-            stats["r_total"] += net / position["planned_risk"]
+            realized_r = net / position["planned_risk"]
+            if realized_r < 0:
+                bucket = "loss_r_over_2" if realized_r < -2 else "loss_r_1_to_2" if realized_r < -1 else "loss_r_0_to_1"
+                stats[bucket] += 1
+            stats["r_total"] += realized_r
             stats["r_count"] += 1
         output["trades"].append({
             **event(index, "closed"), **position, "exit_date": str(df.date.iloc[index]),
@@ -261,6 +266,8 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                                 "entry_reference_price": o, "entry_shortfall": abs(price-o)*qty,
                                 "entry_fee": fee, "entry_fee_rate": cost, "stop_loss": stop, "take_profit": None,
                                 "planned_risk": planned_risk, "high_close": price}
+                    if finite:
+                        position.update(initial_stop=stop, initial_risk=planned_risk, trail_history=[])
                     stats["fees"] += fee
                     stats["turnover"] += price * qty
                     output["logs"].append(event(i, "filled", direction, entry_price=price, qty=qty,
@@ -274,7 +281,11 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                     exit_reason = f"hold-{hold}"
             if position is not None and finite and position["action"] == "BUY":
                 stop = position["stop_loss"]
-                exit_signal = exit_signal or (stop is not None and c <= stop)
+                trail_breach = c <= stop
+                if exit_signal or trail_breach:
+                    exit_reason = "prior-low-and-trail" if exit_signal and trail_breach else "prior-low" if exit_signal else "atr-trail"
+                exit_signal = exit_signal or trail_breach
+                position["trail_history"].append({"date": day, "active_stop": stop})
                 position["high_close"] = max(position["high_close"], c)
                 atr = float(variant.policy["atr"][i])
                 if math.isfinite(atr):
@@ -283,10 +294,13 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                 output["signals"].append(event(i, "suppressed", int(variant.entry[i]), reason="Position held",
                                                evidence=variant.evidence(i)))
             if position is not None and exit_signal and pending is None:
+                if finite:
+                    position["exit_trigger"] = {"date": day, "close": c, "active_stop": stop,
+                                                "reason": exit_reason, **variant.evidence(i)}
                 pending = ("exit", i, exit_reason)
                 closing = -1 if position["action"] == "BUY" else 1
                 output["signals"].append(event(i, "exit-queued", closing,
-                                               evidence=variant.evidence(i)))
+                                               reason=exit_reason, evidence=position.get("exit_trigger") or variant.evidence(i)))
             elif position is None and int(variant.entry[i]) != 0:
                 direction = int(variant.entry[i])
                 stats["signal_count"] += 1

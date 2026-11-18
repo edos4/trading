@@ -213,6 +213,8 @@
           ["Gross exposure",number(metrics.gross_exposure)],["Net exposure",number(metrics.net_exposure)],
           ["Peak concurrent entry cost (close)",number(metrics.peak_committed_basis)],
           ["Expectancy",number(metrics.expectancy)],["Average R",number(metrics.average_r)],
+          ...(metrics.r_count ? [["Losing trades (≤1R / >1–2R / >2R)",
+            [metrics.loss_r_0_to_1, metrics.loss_r_1_to_2, metrics.loss_r_over_2].join(" / ")]] : []),
           ["Long P&L",number(metrics.long_pnl)],["Short P&L",number(metrics.short_pnl)],["Borrow cost",number(metrics.borrow_fees)],["Fees",number(metrics.fees)],["Turnover",number(metrics.turnover)]].forEach(([key,value]) => {
           const pair = node("div"); pair.append(node("dt",key),node("dd",value)); dl.append(pair);
         }); section.append(dl);

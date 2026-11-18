@@ -149,3 +149,33 @@ def test_ph_band_boundaries_and_dated_seller_tax():
     assert pos["qty"] * pos["entry_price"] + pos["entry_fee"] <= req.position_notional
     for day, tax in ((date(2017,12,29),.005), (date(2025,6,30),.006), (date(2025,7,1),.001)):
         assert fee_rate(req,day,buy=False) - fee_rate(req,day,buy=True) == pytest.approx(tax)
+
+
+def test_spy_prior_trail_close_and_gap_evidence():
+    import numpy as np
+    from unittest.mock import patch
+    from core.experiments.adapters import Variant
+    from core.experiments.history import frame
+    from core.experiments.replay import replay
+    from core.test_experiments import bars, request
+
+    rows = bars(10, flat=True)
+    for row in rows:
+        row.update(open=100, high=102, low=99, close=100)
+    rows[3].update(close=110, high=110)
+    rows[4].update(low=100, close=106, high=110)
+    rows[5].update(close=104, high=106)
+    rows[6].update(open=80, low=78)
+    entries = np.zeros(10, dtype=int)
+    entries[1] = 1
+    v = Variant("spy-breakout", 1, entries, np.zeros(10, dtype=bool), lambda i: {"atr14":2},
+                kind="trades", policy={"finite_account":True,"risk_fraction":.005,"trail_atr":2.5,
+                                       "atr":np.full(10,2)})
+    req = request(start_date=rows[1]["date"], end_date=rows[-1]["date"], txn_cost_pct=0, slippage_pct=0, participation=.1)
+    with patch("core.experiments.replay.variants", return_value=[v]):
+        r = replay(40,"SPY",frame(rows),req)
+    t = r["trades"][0]
+    assert t["initial_stop"] == 95 and t["exit_trigger"]["active_stop"] == 105
+    assert t["exit_trigger"]["date"] == rows[5]["date"] and t["exit_trigger"]["close"] == 104
+    assert t["exit_price"] == 80 and t["exit_reason"] == "atr-trail" and t["r"] == -4
+    assert r["variants"]["spy-breakout"]["loss_r_over_2"] == 1
