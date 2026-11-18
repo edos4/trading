@@ -67,7 +67,10 @@ class ExperimentService:
         progress = {"stage": "loading", "completed_symbols": 0, "total_symbols": None,
                     "tape_version": 2, "quarantined_rows": 0, "data_errors": [], "engine_sha256": _engine_hash(),
                     "universe_membership": "current snapshot; historical membership/delistings unverified",
-                    "corporate_actions": "provider adjustments unverified"}
+                    "corporate_actions": "provider adjustments unverified",
+                    "price_basis": "provider OHLC for signals and fills; adjustment status unknown",
+                    "security_type": "unverified", "delistings": "no delisting or recovery feed",
+                    "distributions": "no dividend or split entitlement ledger"}
 
         def beat() -> None:
             while not stop.wait(15):
@@ -242,9 +245,9 @@ def _merge(summary: dict, result: dict) -> None:
         if values["status"] != "completed":
             continue
         total = summary["variants"].setdefault(name, {**values, **{key: 0 for key in (
-            "signal_count", "trade_count", "long_pnl", "short_pnl", "borrow_fees", "wins", "gross_profit", "gross_loss", "fees", "turnover",
+            "signal_count", "trade_count", "stale_exposure", "long_pnl", "short_pnl", "borrow_fees", "wins", "gross_profit", "gross_loss", "fees", "turnover",
             "realized_pnl", "unrealized_pnl", "r_total", "r_count", "loss_r_0_to_1", "loss_r_1_to_2", "loss_r_over_2")}})
-        for key in ("signal_count", "trade_count", "long_pnl", "short_pnl", "borrow_fees", "wins", "gross_profit", "gross_loss", "fees", "turnover",
+        for key in ("signal_count", "trade_count", "stale_exposure", "long_pnl", "short_pnl", "borrow_fees", "wins", "gross_profit", "gross_loss", "fees", "turnover",
                     "realized_pnl", "unrealized_pnl", "r_total", "r_count", "loss_r_0_to_1", "loss_r_1_to_2", "loss_r_over_2"):
             if values[key] is None:
                 total[key] = None

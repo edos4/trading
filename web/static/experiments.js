@@ -141,7 +141,7 @@
     } catch (error) { if (epoch === state.epoch) message(error); }
   }
   const columns = {
-    positions: [["Symbol","symbol"],["Variant","variant"],["Side","action"],["Qty","qty"],["Entry","entry_price"],["Current","current"],["Unrl %","unrealized_pct"],["MTM","unrealized_pnl"],["Observed bars","bars"],["Exchange sessions","elapsed_sessions"],["Value","value"],["Stop","stop_loss"],["Target","take_profit"]],
+    positions: [["Symbol","symbol"],["Variant","variant"],["Side","action"],["Qty","qty"],["Entry","entry_price"],["Mark","current"],["Mark date","mark_date"],["Age (days)","mark_age_days"],["Valuation","valuation"],["Unrl %","unrealized_pct"],["MTM","unrealized_pnl"],["Observed bars","bars"],["Exchange sessions","elapsed_sessions"],["Value","value"],["Stop","stop_loss"],["Target","take_profit"]],
     trades: [["Symbol","symbol"],["Variant","variant"],["Side","action"],["Entry date","entry_date"],["Exit date","exit_date"],["Qty","qty"],["Entry","entry_price"],["Exit","exit_price"],["P&L","pnl"],["P&L %","pnl_pct"],["R","r"],["Observed bars","bars"],["Exchange sessions","elapsed_sessions"],["Fees","fees"],["Reason","exit_reason"]],
     signals: [["Date","date"],["Symbol","symbol"],["Variant","variant"],["Action","action"],["Status","status"],["Reason","reason"],["Evidence","evidence"]],
     outcomes: [["Date","date"],["Symbol","symbol"],["Variant","variant"],["Horizon","horizon"],["Complete","complete"],["Return %","return_pct"],["MAE %","mae_pct"],["MFE %","mfe_pct"]],
@@ -210,7 +210,7 @@
           ["Trades",metrics.trade_count],["Win rate",percent(metrics.win_rate == null ? null : metrics.win_rate * 100)],
           ["Profit factor",number(metrics.profit_factor)],["Max drawdown (currency)",number(metrics.max_drawdown_cash)],
           ...(metrics.account_model === "finite-cash" ? [["Max NAV drawdown",percent(metrics.max_drawdown_pct)]] : []),
-          ["Gross exposure",number(metrics.gross_exposure)],["Net exposure",number(metrics.net_exposure)],
+          ["Stale gross exposure",number(metrics.stale_exposure)],["Gross exposure",number(metrics.gross_exposure)],["Net exposure",number(metrics.net_exposure)],
           ["Peak concurrent entry cost (close)",number(metrics.peak_committed_basis)],
           ["Expectancy",number(metrics.expectancy)],["Average R",number(metrics.average_r)],
           ...(metrics.r_count ? [["Losing trades (≤1R / >1–2R / >2R)",

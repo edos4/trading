@@ -179,3 +179,20 @@ def test_spy_prior_trail_close_and_gap_evidence():
     assert t["exit_trigger"]["date"] == rows[5]["date"] and t["exit_trigger"]["close"] == 104
     assert t["exit_price"] == 80 and t["exit_reason"] == "atr-trail" and t["r"] == -4
     assert r["variants"]["spy-breakout"]["loss_r_over_2"] == 1
+
+
+def test_missing_final_session_keeps_last_traded_mark():
+    from core.experiments.history import frame
+    from core.experiments.replay import replay
+    from core.test_experiments import bars, request
+
+    rows = bars(10, flat=True)
+    rows[4].update(low=102, open=103, high=104, close=103)
+    rows[7].update(high=501, close=500, volume=0)
+    req = request(start_date=rows[4]["date"], end_date=rows[9]["date"], end_policy="force-close")
+    result = replay(48, "X", frame(rows[:8]), req)
+    pos = result["positions"][0]
+    assert not result["trades"] and pos["current"] == rows[6]["close"]
+    assert pos["mark_date"] == rows[6]["date"] and pos["mark_age_days"] > 0
+    assert result["variants"]["fvg-geometry"]["stale_exposure"] == pos["value"]
+    assert any("final-session" in row.get("reason", "") for row in result["logs"])

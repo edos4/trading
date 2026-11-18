@@ -85,7 +85,7 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
     stats = {"status": "completed", "kind": variant.kind, "signal_count": 0,
              "trade_count": 0, "wins": 0, "gross_profit": 0.0, "gross_loss": 0.0,
              "fees": 0.0, "turnover": 0.0, "realized_pnl": 0.0, "unrealized_pnl": 0.0,
-             "long_pnl": 0.0, "short_pnl": 0.0, "borrow_fees": 0.0, "r_total": 0.0, "r_count": 0,
+             "stale_exposure": 0.0, "long_pnl": 0.0, "short_pnl": 0.0, "borrow_fees": 0.0, "r_total": 0.0, "r_count": 0,
              "loss_r_0_to_1": 0, "loss_r_1_to_2": 0, "loss_r_over_2": 0,
              "account_model": "finite-cash" if finite else "independent-fixed-notional"}
 
@@ -200,6 +200,10 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
         change = (position["entry_price"] - mark_price) if position["action"] == "SELL" else (mark_price - position["entry_price"])
         return change * position["qty"] - position["entry_fee"] - borrow_charge(index)
 
+    mark_index = None
+    final_session = request.end_date
+    if not is_session(market, final_session):
+        final_session = shift_session(market, final_session, -1)
     long_only = get_market(request.market).long_only
     start, end = request.start_date.isoformat(), request.end_date.isoformat()
     for i in range(variant.warmup, len(df)):
@@ -342,8 +346,11 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
                                    entry_date=str(df.date.iloc[i + 1]), outcome_date=str(df.date.iloc[endpoint]))
                 output["outcomes"].append(outcome)
         if variant.kind == "trades":
-            days[day] = realized + open_pnl(c, i)
-            gross = position["qty"] * c if position else 0.0
+            if volume[i] > 0:
+                mark_index = i
+            mark = float(df.close.iloc[mark_index]) if mark_index is not None else c
+            days[day] = realized + open_pnl(mark, i)
+            gross = position["qty"] * mark if position else 0.0
             net = -gross if position and position["action"] == "SELL" else gross
             basis = position["qty"] * position["entry_price"] + position["entry_fee"] if position else 0.0
             exposure[day] = (gross, net, basis)
@@ -373,19 +380,26 @@ def _variant(symbol: str, df: pd.DataFrame, request: BatchRequest, variant: Vari
             output["outcomes"].append(outcome)
     if variant.kind == "trades":
         last = len(df) - 1
-        if position is not None and request.end_policy == "force-close":
+        if position is not None and request.end_policy == "force-close" and dates[last] == final_session:
             if close(last, float(df.close.iloc[last]), "end-date-liquidation"):
                 days[str(df.date.iloc[last])] = realized
                 exposure[str(df.date.iloc[last])] = (0.0, 0.0, 0.0)
         if position is not None:
-            current = float(df.close.iloc[last])
+            current = float(df.close.iloc[mark_index])
+            mark_date = dates[mark_index]
+            stale = mark_date < final_session
+            if stale and request.end_policy == "force-close":
+                output["logs"].append(event(last, "unfilled", reason="No executable final-session close"))
             unrealized = open_pnl(current, last)
             output["positions"].append({**position, "date": str(df.date.iloc[last]), "current": current,
+                                         "mark_date": str(mark_date), "mark_age_days": (request.end_date-mark_date).days,
+                                         "valuation": "stale; security status unresolved" if stale else "last traded close",
                                          "unrealized_pnl": unrealized,
                                          "unrealized_pct": 100 * unrealized / (position["entry_price"] * position["qty"]),
                                          "bars": last - position["entry_index"],
                                          "elapsed_sessions": calendar[dates[last]] - calendar[dates[position["entry_index"]]],
                                          "value": current * position["qty"]})
+            stats["stale_exposure"] = current * position["qty"] if stale else 0.0
             stats["unrealized_pnl"] = unrealized
             stats["borrow_fees"] += borrow_charge(last)
             stats["short_pnl" if position["action"] == "SELL" else "long_pnl"] += unrealized
