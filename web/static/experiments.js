@@ -53,6 +53,8 @@
       button.setAttribute("aria-pressed", String(source.id === state.selected));
       button.append(node("strong", source.title), badge(runFor(source.id)?.state || availability(source)),
         node("small", source.id));
+      const tested = state.batch ? runFor(source.id)?.summary?.tested_label : source.tested_label;
+      if (tested) button.append(node("small", tested));
       const count = variantCount(source.id);
       if (count) button.append(node("small", count + (count === 1 ? " variant" : " variants")));
       button.addEventListener("click", () => selectSource(source.id));
@@ -99,7 +101,7 @@
     $("exp-empty").hidden = true; $("exp-selected").hidden = false;
     $("exp-title").textContent = source.title;
     $("exp-folder-id").textContent = source.id;
-    $("exp-scope").textContent = source.scope || source.overview;
+    $("exp-scope").textContent = source.tested_label || source.scope || source.overview;
     $("exp-folder-state").textContent = label(run?.state || availability(source));
     $("exp-folder-state").dataset.state = run?.state || availability(source);
     const blocker = run?.error || source.blocker || (availability(source) === "blocked" ? "Source universe is unsupported in this market." : "");

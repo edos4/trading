@@ -65,3 +65,13 @@ def test_independent_books_aggregate_concurrent_capital_without_reference_nav():
     assert m["max_drawdown_pct"] is None and m["max_drawdown_cash"] > 0
     assert m["peak_committed_basis"] > req.initial_capital
     assert all(point["equity"] is None for point in small["equity"]["fvg-geometry"])
+
+
+def test_research_identity_and_candle_transitions():
+    import numpy as np
+    from core.experiments.adapters import SPECS, candle_turns
+
+    assert len({SPECS[n]["family_id"] for n in (115, 385, 433)}) == 1
+    assert "retest" not in SPECS[414]["tested_label"].lower()
+    assert not SPECS[414]["source_strategy_implemented"]
+    assert candle_turns(np.ones(6), np.array([1, 2, 1, 2, 0, 2])).tolist() == [0, 0, 0, 0, -1, 1]

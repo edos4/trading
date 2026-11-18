@@ -16,7 +16,7 @@ import pandas as pd
 
 from indicators._math import dema, ema, wilder_atr
 
-VERSION = "experiments-v2"
+VERSION = "experiments-v3"
 RESEARCH_HOLD_BARS = 20
 RESEARCH_NOTE = (
     "Research trade book: one fixed-notional position, next-open fill, exit after 20 sessions. "
@@ -154,11 +154,34 @@ for _number, _scope, _parameters, _limitations in (
         "limitations":_limitations,
     }
 
-for _spec in SPECS.values():
-    if _spec.get("kind") == "event-study":
-        _spec["kind"] = "trades"
-        _spec.setdefault("parameters", {})["hold_bars"] = RESEARCH_HOLD_BARS
-        _spec.setdefault("limitations", []).append(RESEARCH_NOTE)
+# Source folders may share exactly the same tested formula and execution policy.
+RESEARCH_FAMILIES = (
+    ((4,), "ema34-slope", "Fresh positive or negative EMA34 close slope"),
+    ((25,), "ema9-20", "EMA9 crosses EMA20 in either direction"),
+    ((48, 184), "outer-wick-gap", "Three-bar outer-wick gap, in the gap direction"),
+    ((56, 145), "smoothed-z", "Smoothed Z enters ±2 (fade) or exceeds +1 (long trend)"),
+    ((110,), "prior-range", "Fresh close above prior high or below prior low"),
+    ((115, 385, 433), "candle-color", "Direction changes between successive non-doji candles"),
+    ((120, 167), "stochastic-cross", "Stochastic 5/3/3 K crosses D"),
+    ((258, 311), "dema200-cross", "Close crosses DEMA200"),
+    ((353,), "ema-alignment", "Fresh bullish EMA20 > EMA50 > EMA100 alignment"),
+    ((368,), "sma-and-donchian", "SMA50/200 crosses or prior-20 range breaks in separate books"),
+    ((394,), "macd-cross", "MACD12/26 crosses its EMA9 signal"),
+    ((400,), "sma9-cross", "Close crosses SMA9"),
+    ((414,), "ema9-21-up", "Buy on EMA9 crossing above EMA21"),
+    ((431,), "ema50-200-down", "Short on EMA50 crossing below EMA200"),
+)
+for numbers, family, trigger in RESEARCH_FAMILIES:
+    for number in numbers:
+        spec = SPECS[number]
+        spec.update(kind="trades", family_id=family, measurement_id=family,
+                    policy_id="research-hold20-v3", source_strategy_implemented=False,
+                    tested_label=f"{trigger} · 20-session research trade")
+        spec["parameters"].update(hold_bars=RESEARCH_HOLD_BARS, trigger=trigger)
+        spec["limitations"].append(RESEARCH_NOTE)
+for number, family in ((40, "spy-breakout"), (406, "ema-panels")):
+    SPECS[number].update(family_id=family, policy_id=family + "-v3",
+                         tested_label=SPECS[number]["scope"], source_strategy_implemented=True)
 
 
 def definition(number: int) -> dict:
@@ -203,12 +226,14 @@ def signed_cross(up: np.ndarray, down: np.ndarray) -> np.ndarray:
 
 def candle_turns(open_: np.ndarray, close: np.ndarray) -> np.ndarray:
     color = np.where(close > open_, 1, np.where(close < open_, -1, 0)).astype(int)
-    changed = np.zeros(len(color), dtype=bool)
-    if len(color):
-        changed[0] = color[0] != 0
-    if len(color) > 1:
-        changed[1:] = (color[1:] != 0) & (color[1:] != color[:-1])
-    return np.where(changed, color, 0)
+    turns = np.zeros(len(color), dtype=int)
+    prior = 0
+    for i, side in enumerate(color):
+        if side:
+            if prior and side != prior:
+                turns[i] = side
+            prior = side
+    return turns
 
 
 def variants(number: int, df: pd.DataFrame) -> list[Variant]:

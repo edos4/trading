@@ -250,6 +250,7 @@ def test_research_hold_realizes_pnl_and_ph_skips_shorts():
     assert not any(row["action"] == "SELL" for row in ph["trades"])
     assert any(row.get("reason") == "PH book is long-only" for row in ph["logs"])
 
+    rows[9].update(open=100.3, high=101, close=100)  # First real color change.
     anatomy = replay(385, "AAPL", frame(rows), req)
     assert anatomy["trades"] and anatomy["trades"][0]["pnl"] is not None
     assert anatomy["variants"]["candle-anatomy"]["kind"] == "trades"

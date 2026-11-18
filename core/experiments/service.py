@@ -216,7 +216,8 @@ def _data_error(exc: Exception) -> str:
 
 
 def _empty_summary(source: dict) -> dict:
-    return {"kind": source["kind"], "coverage": {"evaluated_symbols": 0, "history_failed": 0,
+    return {"kind": source["kind"], "tested_label": source.get("tested_label"),
+            "family_id": source.get("family_id"), "coverage": {"evaluated_symbols": 0, "history_failed": 0,
             "insufficient_history": 0, "outside_source_universe": 0, "no_history":0,"no_in_range_bars":0},
             "variants": {}, "equity": {}, "exposure": {}, "signal_count": 0, "trade_count": 0, "open_count": 0}
 
