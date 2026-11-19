@@ -10,9 +10,6 @@ alias for its versioned experiment directory. `arrow.json` records its name and
 version, tied to the locked selection hash. Naming does not alter either
 checkpoint or its original training/evaluation provenance.
 
-The `/kronos` page also uses Arrow in [Experiment 4](arrow-experiment4.md),
-with frozen forecasts and automatic collection of the two target closes.
-
 ## Predict a direction
 
 From the repository root:
@@ -53,10 +50,9 @@ Adjusted probabilities are normalized decision scores, not calibrated chances
 of success. Selection and the calibration report are hash-locked together.
 
 The original version remains loadable with
-`--model-dir runs/kronos-direction-2026-11-12`. Experiment 4 retains that version's
-frozen predictions and results, including its pending +3D forecast. The revision
-applies to future Arrow calls and new experiment starts; it does not rescore a
-past forecast as though it had predicted Flat originally.
+`--model-dir runs/kronos-direction-2026-11-12`. The revision applies to future
+Arrow calls; it does not rescore a past forecast as though it had predicted Flat
+originally.
 
 To use a local CSV instead of PostgreSQL:
 

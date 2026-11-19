@@ -257,7 +257,6 @@
     }
   }
 
-  // Experiment 3 reuses the same chart renderer with its own saved data.
   window.KronosCharts = { drawChart, makePanel, saveChart };
 
   if (form) form.addEventListener("submit", submit);

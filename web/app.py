@@ -519,54 +519,6 @@ def create_app() -> FastAPI:
         return render(request, "kronos.html", active="kronos",
                       kronos_available=kronos.available())
 
-    # Experiment 3: saved forecasts only; collection runs in its dedicated cron.
-    @app.get("/api/kronos/experiment3")
-    async def api_kronos_experiment3(_user: str = Depends(require_login)):
-        from core.kronos_experiment3 import read_experiment
-
-        try:
-            return await asyncio.to_thread(read_experiment)
-        except Exception:
-            log.exception("Web Kronos | Experiment 3 database read failed")
-            return JSONResponse({"detail": "Experiment 3 database is unavailable."}, status_code=503)
-
-    @app.get("/api/kronos/experiment3/report")
-    async def api_kronos_experiment3_report(_user: str = Depends(require_login)):
-        from core.kronos_experiment3 import read_experiment, render_direction_report
-
-        try:
-            saved = await asyncio.to_thread(read_experiment)
-            return Response(render_direction_report(saved), media_type="text/markdown",
-                            headers={"Content-Disposition": 'attachment; filename="kronos_experiment3_direction_report.md"',
-                                     "Cache-Control": "no-store"})
-        except Exception:
-            log.exception("Web Kronos | Experiment 3 report failed")
-            return JSONResponse({"detail": "Experiment 3 report is unavailable."}, status_code=503)
-
-    # Experiment 4: saved forecasts only; collection runs in its dedicated cron.
-    @app.get("/api/kronos/experiment4")
-    async def api_kronos_experiment4(_user: str = Depends(require_login)):
-        from core.arrow_experiment4 import read_experiment
-
-        try:
-            return await asyncio.to_thread(read_experiment)
-        except Exception:
-            log.exception("Web Kronos | Experiment 4 database read failed")
-            return JSONResponse({"detail": "Experiment 4 database is unavailable."}, status_code=503)
-
-    @app.get("/api/kronos/experiment4/report")
-    async def api_kronos_experiment4_report(_user: str = Depends(require_login)):
-        from core.arrow_experiment4 import read_experiment, render_direction_report
-
-        try:
-            saved = await asyncio.to_thread(read_experiment)
-            return Response(render_direction_report(saved), media_type="text/markdown",
-                            headers={"Content-Disposition": 'attachment; filename="kronos_experiment4_direction_report.md"',
-                                     "Cache-Control": "no-store"})
-        except Exception:
-            log.exception("Web Kronos | Experiment 4 report failed")
-            return JSONResponse({"detail": "Experiment 4 report is unavailable."}, status_code=503)
-
     @app.post("/api/kronos/predict")
     async def api_kronos_predict(request: Request, _user: str = Depends(require_login)):
         # Legacy single-symbol endpoint: the web Kronos tab's "Predict" button
