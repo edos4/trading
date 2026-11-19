@@ -114,12 +114,15 @@ Open **Experiments**, select US or PH, supply inclusive start/end session dates
 and click **Start all folders**. A batch creates a separate result record for
 each of the 449 archived writeups. Search or filter folders, then click one to
 view positions, closed trades, signals, performance, event outcomes, logs and
-**Source & plan**. That tab plays the folder's saved video, with the writeup
-and integration plan beside it. Click a symbol to open the same chart viewer used
-by Paper, using this batch's frozen data and saved record levels. Complete
-folder evidence is downloadable as JSON Lines once the folder finishes;
-failed/cancelled/interrupted folders export their explicitly labeled retained
-partial results.
+**Source & plan**. Completed folders show their variant's **Net P&L** in the
+sidebar and are sorted by it, highest first; folders with multiple variants
+report their best variant and name it. Unrun, blocked and event-study folders
+keep catalog order below them. That tab plays the folder's saved video, with
+the writeup and integration plan beside it. Click a symbol to open the same
+chart viewer used by Paper, using this batch's frozen data and saved record
+levels. Complete folder evidence is downloadable as JSON Lines once the folder
+finishes; failed/cancelled/interrupted folders export their explicitly labeled
+retained partial results.
 
 ## Source fidelity and current coverage
 

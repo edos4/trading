@@ -101,11 +101,28 @@
   function variantCount(id) {
     return Object.keys(runFor(id)?.summary?.variants || {}).length;
   }
+  function netPnl(id) {
+    const variants = Object.entries(runFor(id)?.summary?.variants || {});
+    let best = null;
+    for (const [name, variant] of variants) {
+      if (!Number.isFinite(variant.net_pnl)) continue;
+      if (!best || variant.net_pnl > best.value) best = {name, value: variant.net_pnl};
+    }
+    return best;
+  }
+  function pnlText(id) {
+    const best = netPnl(id);
+    if (!best) return null;
+    const currency = runFor(id)?.summary?.currency;
+    const multiple = variantCount(id) > 1;
+    return "Net P&L " + number(best.value) + (currency ? " " + currency : "") +
+      (multiple ? " · best of " + variantCount(id) + ": " + best.name : "");
+  }
   function renderFolders() {
     const search = $("exp-search").value.toLowerCase();
     const filter = $("exp-filter").value;
     const signature = JSON.stringify([search,filter,state.selected,$("exp-market").value,
-      state.batch?.request.market,state.sources.map(s=>[s.id,runFor(s.id)?.state || availability(s),variantCount(s.id)])]);
+      state.batch?.request.market,state.sources.map(s=>[s.id,runFor(s.id)?.state || availability(s),variantCount(s.id),netPnl(s.id)])]);
     if(signature === state.folderSignature) return;
     state.folderSignature = signature;
     const visible = state.sources.filter(source => {
@@ -113,12 +130,21 @@
       return (source.id + " " + source.title).toLowerCase().includes(search) &&
         (filter === "all" || (filter === "ready" ? availability(source) === "ready" : status === filter));
     });
+    const catalogOrder = new Map(state.sources.map((source, index) => [source.id, index]));
+    visible.sort((left, right) => {
+      const a = netPnl(left.id), b = netPnl(right.id);
+      if (a && b) return b.value - a.value || catalogOrder.get(left.id) - catalogOrder.get(right.id);
+      if (a || b) return a ? -1 : 1;
+      return catalogOrder.get(left.id) - catalogOrder.get(right.id);
+    });
     const fragment = document.createDocumentFragment();
     visible.forEach(source => {
       const button = node("button", null, "exp-folder"); button.type = "button";
       button.setAttribute("aria-pressed", String(source.id === state.selected));
       button.append(node("strong", source.title), badge(runFor(source.id)?.state || availability(source)),
         node("small", source.id));
+      const pnl = pnlText(source.id);
+      if (pnl) button.append(node("small", pnl, "exp-pnl"));
       const tested = state.batch ? runFor(source.id)?.summary?.tested_label : source.tested_label;
       if (tested) button.append(node("small", tested));
       const count = variantCount(source.id);
